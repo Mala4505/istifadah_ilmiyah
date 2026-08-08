@@ -13,8 +13,8 @@ import { EntriesTable } from './entries-table'
 import { BulkStatusDialog } from './bulk-status-dialog'
 import { exportEntriesToCsv } from './csv-export'
 import { fetchEntriesPage } from './query'
-import { ALL_COLUMNS, DEFAULT_FILTERS, PAGE_SIZE } from './types'
-import type { ColumnKey, EntriesFilters, EntryEnriched, FilterOptions, LookupOption } from './types'
+import { ALL_COLUMNS, PAGE_SIZE } from './types'
+import type { ColumnKey, EntriesFilters, EntryEnriched, FilterOptions } from './types'
 
 const EMPTY_OPTIONS: FilterOptions = {
   departments: [],

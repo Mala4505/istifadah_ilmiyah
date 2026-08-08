@@ -1,6 +1,15 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { EntriesFilters, EntryEnriched } from './types'
 
+// The exact builder type returned by `supabase.from('v_entry_enriched').select(...)`
+// (and still returned after `.order()`/`.limit()`, since both are typed to return
+// `this`). Deriving it from the client rather than hand-rolling a duck-typed
+// interface keeps every filter method's real signature (and return-type-is-`this`
+// chaining) intact for both callers — the paged fetch below and the CSV export's
+// batch loop, which both continue chaining (e.g. `.lt('id', cursor)`) on the
+// result of this function.
+type EntriesQueryBuilder = ReturnType<ReturnType<SupabaseClient['from']>['select']>
+
 /**
  * Shared filter application over `v_entry_enriched` (MASTER-PLAN §10.2) —
  * used by both the paged fetch (entries-explorer.tsx) and the "fetch
@@ -11,11 +20,8 @@ import type { EntriesFilters, EntryEnriched } from './types'
  * direct query — a viewer scoped to one department gets zero rows back for
  * every other department, with no filter-bar logic required to enforce it.
  */
-export function applyEntriesFilters<T extends { eq: any; ilike: any; gte: any; lte: any; is: any; neq: any; gt: any; or: any }>(
-  query: T,
-  filters: EntriesFilters
-): T {
-  let q: any = query
+export function applyEntriesFilters<T extends EntriesQueryBuilder>(query: T, filters: EntriesFilters): T {
+  let q = query
 
   if (filters.department) q = q.eq('department_id', filters.department)
   if (filters.budgetHead) q = q.eq('budget_head_id', filters.budgetHead)
