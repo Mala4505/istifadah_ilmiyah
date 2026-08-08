@@ -33,7 +33,8 @@
  */
 
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
-import { publicEnv, serverEnv } from '@/lib/env'
+import { publicEnv } from '@/lib/env'
+import { serverEnv } from '@/lib/env.server'
 
 export type JobType = 'extract_document' | 'poll_batch' | 'generate_export' | 'rasterize_retry'
 export type JobStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'dead'

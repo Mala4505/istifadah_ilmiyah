@@ -11,7 +11,8 @@
 // that looks like a code bug.
 import { NextResponse, type NextRequest } from 'next/server'
 import { createServerClient, type CookieOptions } from '@supabase/ssr'
-import { publicEnv, serverEnv } from '@/lib/env'
+import { publicEnv } from '@/lib/env'
+import { serverEnv } from '@/lib/env.server'
 
 export async function middleware(request: NextRequest) {
   const nonce = Buffer.from(crypto.randomUUID()).toString('base64')

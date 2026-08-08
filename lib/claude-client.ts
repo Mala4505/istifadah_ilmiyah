@@ -9,7 +9,7 @@
  */
 
 import Anthropic from '@anthropic-ai/sdk'
-import { hasAnthropicKey, serverEnv } from '@/lib/env'
+import { hasAnthropicKey, serverEnv } from '@/lib/env.server'
 import {
   buildExtractionTool,
   EXTRACTION_TOOL_NAME,

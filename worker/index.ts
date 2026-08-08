@@ -18,7 +18,7 @@
  * Run in production (post-cutover) as the Windows Service `istifada-hub-worker`.
  */
 
-import { serverEnv } from '@/lib/env'
+import { serverEnv } from '@/lib/env.server'
 import { claimNextJob } from '@/lib/jobs/queue'
 
 // ---------------------------------------------------------------------------

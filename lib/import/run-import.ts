@@ -44,7 +44,7 @@
 
 import { Pool, types, type PoolClient } from 'pg'
 import * as XLSX from 'xlsx'
-import { serverEnv } from '@/lib/env'
+import { serverEnv } from '@/lib/env.server'
 import { normalizeVendorName } from '@/lib/normalize'
 import {
   INITIAL_DEPARTMENTAL_CONTEXT,

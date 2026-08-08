@@ -1,5 +1,6 @@
 import { createClient as createSupabaseClient } from '@supabase/supabase-js'
-import { publicEnv, serverEnv } from '@/lib/env'
+import { publicEnv } from '@/lib/env'
+import { serverEnv } from '@/lib/env.server'
 
 /**
  * Service-role Supabase client — server-only, bypasses Row Level Security

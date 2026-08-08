@@ -36,7 +36,7 @@ const hostCouplingGuard = {
 }
 
 const eslintConfig = [
-  { ignores: ['.next/**', 'node_modules/**', 'worker/dist/**'] },
+  { ignores: ['.next/**', 'node_modules/**', 'worker/dist/**', '.claude/worktrees/**'] },
   ...compat.extends('next/core-web-vitals', 'next/typescript'),
   hostCouplingGuard,
 ]
