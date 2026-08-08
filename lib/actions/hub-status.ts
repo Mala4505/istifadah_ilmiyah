@@ -3,37 +3,64 @@
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 
+export interface SetHubStatusInput {
+  entryIds: number[]
+  hubStatusCode: string
+  note: string
+}
+
+export interface SetHubStatusResult {
+  success: boolean
+  updatedCount: number
+  requestedCount: number
+  error?: string
+}
+
 /**
- * Sets the Hub-owned status (§3.3, §3.7) on one or more entries. Shared by
- * the entries list bulk action and the entry detail single-entry control —
- * one code path so both stay consistent with the same rules:
+ * Single source of truth for changing `entries.hub_status_id` (MASTER-PLAN
+ * §3.3, §3.7, §4.4c). Shared by the entries-list bulk action
+ * (components/entries/bulk-status-dialog.tsx) AND the entry-detail
+ * single-entry control (components/entries/detail/hub-status-section.tsx) —
+ * one code path, so a status-change rule only ever needs to change in one
+ * place. Call with a one-element `entryIds` array for a single entry.
  *
  * - A note is required. "Resolved with no reason is not an audit trail"
  *   (§5) applies just as much to a status change as to an exception.
+ * - Runs on the session-bound client (`lib/supabase/server.ts`), so RLS
+ *   (`entries_update`: role in ('admin','reviewer'), department-scoped) is
+ *   the actual gate — not this function. A `viewer`, or a reviewer outside
+ *   the entry's department, simply updates 0 rows: Postgres RLS silently
+ *   excludes rows that fail the policy's USING clause rather than raising
+ *   an error. This function turns that silent exclusion into an explicit
+ *   `error` string for the caller to toast, and reports partial success
+ *   (`updatedCount < requestedCount`) via `error` even when `success` is
+ *   true, so a bulk change across departments doesn't read as a silent
+ *   full success.
  * - `hub_status_exported_at` resets to null on every status change, so a
  *   re-changed entry re-enters the export queue automatically (§3.7 —
  *   "re-export is explicit, the reset that puts it back in the queue is
  *   not").
- * - RLS (entries_update, §4.2) already restricts this to admin/reviewer
- *   roles and the caller's department; this action does not duplicate that
- *   check, it relies on the database to enforce it and surfaces the error
- *   if RLS rejects the write.
  * - `entries_before_update` (§3.9) stamps hub_status_changed_at/_by and
  *   writes entry_change_log automatically — this action never sets those
  *   columns directly.
  */
-export async function setHubStatus(input: {
-  entryIds: number[]
-  hubStatusCode: string
-  note: string
-}): Promise<{ ok: true; updated: number } | { ok: false; error: string }> {
-  const { entryIds, hubStatusCode, note } = input
+export async function setHubStatus({
+  entryIds,
+  hubStatusCode,
+  note,
+}: SetHubStatusInput): Promise<SetHubStatusResult> {
+  const cleanIds = Array.from(new Set(entryIds)).filter((id) => Number.isInteger(id) && id > 0)
+  const cleanNote = note.trim()
+  const requestedCount = cleanIds.length
 
-  if (entryIds.length === 0) {
-    return { ok: false, error: 'No entries selected.' }
+  if (requestedCount === 0) {
+    return { success: false, updatedCount: 0, requestedCount, error: 'No entries selected.' }
   }
-  if (note.trim() === '') {
-    return { ok: false, error: 'A note is required when changing Hub status.' }
+  if (!hubStatusCode) {
+    return { success: false, updatedCount: 0, requestedCount, error: 'A Hub status must be selected.' }
+  }
+  if (!cleanNote) {
+    return { success: false, updatedCount: 0, requestedCount, error: 'A note is required to change Hub status.' }
   }
 
   const supabase = await createClient()
@@ -42,31 +69,65 @@ export async function setHubStatus(input: {
     .from('hub_status')
     .select('id')
     .eq('code', hubStatusCode)
-    .single()
+    .maybeSingle()
 
-  if (statusError || !statusRow) {
-    return { ok: false, error: `Unknown Hub status code: ${hubStatusCode}` }
+  if (statusError) {
+    return {
+      success: false,
+      updatedCount: 0,
+      requestedCount,
+      error: `Could not resolve Hub status: ${statusError.message}`,
+    }
+  }
+  if (!statusRow) {
+    return {
+      success: false,
+      updatedCount: 0,
+      requestedCount,
+      error: `Unknown Hub status code "${hubStatusCode}".`,
+    }
   }
 
   const { data, error } = await supabase
     .from('entries')
     .update({
       hub_status_id: statusRow.id,
-      hub_status_note: note.trim(),
+      hub_status_note: cleanNote,
       hub_status_exported_at: null,
     })
-    .in('id', entryIds)
+    .in('id', cleanIds)
     .select('id')
 
   if (error) {
-    return { ok: false, error: error.message }
+    return { success: false, updatedCount: 0, requestedCount, error: error.message }
   }
 
-  revalidatePath('/entries')
-  revalidatePath('/export')
-  for (const id of entryIds) {
+  const updatedCount = data?.length ?? 0
+
+  if (updatedCount === 0) {
+    return {
+      success: false,
+      updatedCount: 0,
+      requestedCount,
+      error:
+        'No entries were updated. This usually means a viewer role (reviewer/admin required to set Hub status), or the entry is outside your assigned department.',
+    }
+  }
+
+  for (const id of cleanIds) {
     revalidatePath(`/entries/${id}`)
   }
+  revalidatePath('/entries')
+  revalidatePath('/export')
 
-  return { ok: true, updated: data?.length ?? 0 }
+  if (updatedCount < requestedCount) {
+    return {
+      success: true,
+      updatedCount,
+      requestedCount,
+      error: `${requestedCount - updatedCount} of ${requestedCount} selected entries could not be updated (permission or department scope).`,
+    }
+  }
+
+  return { success: true, updatedCount, requestedCount }
 }
