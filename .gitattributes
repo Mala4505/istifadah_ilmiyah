@@ -1,0 +1,27 @@
+# MASTER-PLAN §13: CRLF conversion silently breaks file_hash_sha256 checks on
+# anything that gets hashed (imports, uploaded documents, fixtures). Force LF
+# on everything git treats as text; never let git touch binaries.
+
+* text=auto eol=lf
+
+*.ts   text eol=lf
+*.tsx  text eol=lf
+*.js   text eol=lf
+*.mjs  text eol=lf
+*.cjs  text eol=lf
+*.json text eol=lf
+*.sql  text eol=lf
+*.md   text eol=lf
+*.css  text eol=lf
+*.yml  text eol=lf
+*.yaml text eol=lf
+
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.pdf  binary
+*.xlsx binary
+*.xls  binary
+*.ico  binary
+*.woff binary
+*.woff2 binary

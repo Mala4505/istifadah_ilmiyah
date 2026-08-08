@@ -1,0 +1,51 @@
+# dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# testing
+coverage/
+
+# next.js
+.next/
+out/
+build/
+next-env.d.ts
+
+# production
+dist/
+
+# env — real secrets live only in .env / .env.local, never committed
+.env
+.env.local
+.env.*.local
+
+# supabase
+supabase/.branches
+supabase/.temp
+
+# vercel
+.vercel
+
+# typescript
+*.tsbuildinfo
+
+# logs
+*.log
+npm-debug.log*
+
+# editor / OS
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/*
+!.vscode/extensions.json
+
+# local AI-assistant tooling — machine-local, not application code
+.claude/
+.agents/
+skill-observations/
+skills-lock.json
+
+# scratch data that shouldn't be versioned
+/Invoices/*.pdf

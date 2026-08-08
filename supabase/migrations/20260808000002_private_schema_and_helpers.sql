@@ -1,0 +1,21 @@
+-- The `private` schema holds SECURITY DEFINER helper functions and internal trigger
+-- functions that must never be reachable directly over the Data API (PostgREST only
+-- exposes schemas explicitly listed in `pgrst.db_schemas`; `private` is deliberately
+-- never added to that list, so it is only reachable from other SQL running inside
+-- Postgres -- triggers, other SECURITY DEFINER functions, RLS policies).
+create schema if not exists private;
+
+-- JUDGEMENT CALL, noted per the task instructions: this file is named
+-- "..._and_helpers.sql" per §10's file list, but the actual §4.1 helper functions
+-- (private.is_staff, private.is_admin, private.can_see_department) all query
+-- public.staff_profile, which does not exist until 20260808000003_staff_profile_and_
+-- auth_trigger.sql. A `language sql` function body is parsed and its object references
+-- resolved at CREATE FUNCTION time, so defining them here -- before staff_profile
+-- exists -- would fail with "relation public.staff_profile does not exist".
+--
+-- The task brief explicitly routes the §4.1 helpers into
+-- 20260808000026_rls_policies.sql ("should contain the RLS helpers (§4.1) AND table
+-- policies (§4.2)"), which is also where they are actually used. This file therefore
+-- only establishes the `private` schema container itself, so every later migration
+-- (including 20260808000003's private.handle_new_user trigger function) can rely on
+-- it already existing.
