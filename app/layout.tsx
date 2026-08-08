@@ -1,4 +1,5 @@
 import type { Metadata } from 'next'
+import { Toaster } from 'sonner'
 import './globals.css'
 
 export const metadata: Metadata = {
@@ -13,7 +14,12 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className="antialiased">{children}</body>
+      <body className="antialiased">
+        {children}
+        {/* Mounted once, app-wide — every screen calls `toast()` from 'sonner'
+            directly rather than each owning its own <Toaster/>. */}
+        <Toaster richColors closeButton position="top-right" />
+      </body>
     </html>
   )
 }

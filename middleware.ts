@@ -10,9 +10,10 @@
 // apply the intersection of duplicate CSP headers, which produces breakage
 // that looks like a code bug.
 import { NextResponse, type NextRequest } from 'next/server'
+import { createServerClient, type CookieOptions } from '@supabase/ssr'
 import { publicEnv, serverEnv } from '@/lib/env'
 
-export function middleware(request: NextRequest) {
+export async function middleware(request: NextRequest) {
   const nonce = Buffer.from(crypto.randomUUID()).toString('base64')
   const isDev = process.env.NODE_ENV === 'development'
   const supabase = publicEnv.NEXT_PUBLIC_SUPABASE_URL // https://<ref>.supabase.co
@@ -44,14 +45,56 @@ export function middleware(request: NextRequest) {
   requestHeaders.set('x-nonce', nonce)
   requestHeaders.set('Content-Security-Policy', csp) // Next reads the nonce from here
 
-  const res = NextResponse.next({ request: { headers: requestHeaders } })
-  res.headers.set(header, csp)
-  res.headers.set('Strict-Transport-Security', 'max-age=63072000; includeSubDomains; preload')
-  res.headers.set('X-Content-Type-Options', 'nosniff')
-  res.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin')
+  // `@supabase/ssr` session refresh — the piece this middleware was missing.
+  // Without calling `getUser()` on every request, the access token in the
+  // session cookie is never refreshed, so a session silently goes stale in
+  // Server Components (they can only read cookies, never write them — see
+  // the comment in lib/supabase/server.ts). This is the standard
+  // `@supabase/ssr` middleware recipe: a mutable `response` that gets
+  // rebuilt every time Supabase's cookie adapter calls `setAll`, so the
+  // refreshed cookies ride out on the response that's ultimately returned.
+  //
+  // `response` starts as the CSP-header-bearing NextResponse built above the
+  // supabase client, and is intentionally re-pointed (not mutated in place)
+  // inside `setAll`, per the recipe — each `NextResponse.next({ request })`
+  // carries the request's headers (including the nonce/CSP set above)
+  // forward, so rebuilding it here does not lose them.
+  let response = NextResponse.next({ request: { headers: requestHeaders } })
+
+  const supabaseClient = createServerClient(
+    publicEnv.NEXT_PUBLIC_SUPABASE_URL,
+    publicEnv.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY,
+    {
+      cookies: {
+        getAll() {
+          return request.cookies.getAll()
+        },
+        setAll(cookiesToSet: { name: string; value: string; options: CookieOptions }[]) {
+          for (const { name, value } of cookiesToSet) {
+            request.cookies.set(name, value)
+          }
+          response = NextResponse.next({ request: { headers: requestHeaders } })
+          for (const { name, value, options } of cookiesToSet) {
+            response.cookies.set(name, value, options)
+          }
+        },
+      },
+    }
+  )
+
+  // Do not remove: this is the call that actually refreshes the token.
+  // Reading it via `getUser()` (not `getSession()`) also validates the JWT
+  // against the Supabase Auth server rather than trusting an unverified
+  // cookie value.
+  await supabaseClient.auth.getUser()
+
+  response.headers.set(header, csp)
+  response.headers.set('Strict-Transport-Security', 'max-age=63072000; includeSubDomains; preload')
+  response.headers.set('X-Content-Type-Options', 'nosniff')
+  response.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin')
   // camera=(self) is deliberate — on-site staff photograph bills from their phones (§5).
-  res.headers.set('Permissions-Policy', 'camera=(self), microphone=(), geolocation=()')
-  return res
+  response.headers.set('Permissions-Policy', 'camera=(self), microphone=(), geolocation=()')
+  return response
 }
 
 export const config = {
