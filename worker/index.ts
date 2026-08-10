@@ -18,8 +18,20 @@
  * Run in production (post-cutover) as the Windows Service `istefadah-ilmiyah-worker`.
  */
 
+import * as Sentry from '@sentry/nextjs'
 import { serverEnv } from '@/lib/env.server'
+import { publicEnv } from '@/lib/env'
 import { claimNextJob } from '@/lib/jobs/queue'
+
+// This is a standalone Node process (not booted through Next.js), so it
+// doesn't go through instrumentation.ts — it needs its own Sentry.init(),
+// same DSN source and empty-DSN guard as sentry.server.config.ts (§2,
+// §11.1 Day 7: "day-7 failures are invisible" without this).
+Sentry.init({
+  dsn: publicEnv.NEXT_PUBLIC_SENTRY_DSN || undefined,
+  enabled: publicEnv.NEXT_PUBLIC_SENTRY_DSN !== '',
+  tracesSampleRate: 0.1,
+})
 
 // ---------------------------------------------------------------------------
 // Shape of a row in public.job_queue (MASTER-PLAN §3.11). Defined locally
@@ -120,8 +132,14 @@ async function loopOnce(): Promise<'claimed' | 'empty'> {
   } catch (err) {
     // Handlers are expected to record their own failure state against the
     // job row (see JobHandler contract above); this catch exists so a bug
-    // in a handler can't take the whole worker process down.
+    // in a handler can't take the whole worker process down. Reported to
+    // Sentry with job type/id as context — this is exactly the "day-7
+    // failures are invisible" scenario §2 calls out.
     console.error(`[worker] job ${job.id} threw unhandled error:`, err)
+    Sentry.captureException(err, {
+      tags: { job_type: job.job_type, job_id: String(job.id) },
+      extra: { attempts: job.attempts, payload: job.payload },
+    })
   }
   return 'claimed'
 }
@@ -135,6 +153,7 @@ async function main(): Promise<void> {
       outcome = await loopOnce()
     } catch (err) {
       console.error('[worker] error claiming next job:', err)
+      Sentry.captureException(err, { tags: { job_type: 'claim_next_job' } })
       await sleep(ERROR_BACKOFF_MS)
       continue
     }
@@ -156,7 +175,9 @@ function requestShutdown(signal: string): void {
 process.on('SIGINT', () => requestShutdown('SIGINT'))
 process.on('SIGTERM', () => requestShutdown('SIGTERM'))
 
-main().catch((err) => {
+main().catch(async (err) => {
   console.error('[worker] fatal error:', err)
+  Sentry.captureException(err, { tags: { job_type: 'worker_fatal' } })
+  await Sentry.flush(2000)
   process.exit(1)
 })
