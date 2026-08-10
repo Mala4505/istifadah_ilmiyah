@@ -37,11 +37,65 @@ export interface DocumentImageInput {
   mediaType: SupportedImageMediaType
 }
 
+/**
+ * A whole PDF, sent as a single `document` content block.
+ *
+ * This is the server-side ingestion path (see lib/pdf.ts). Claude renders each
+ * page itself and also reads the embedded text layer, so per-page
+ * classification (§8 point 3) still works — the `pages[]` array in the tool
+ * schema is unchanged. Preferred over `documentImages` on the server because
+ * nothing in Node can rasterise a PDF here: pdfjs-dist needs a canvas backend
+ * and every one tried crashes natively on `page.render` (see the note in
+ * lib/pdf.ts).
+ */
+export interface DocumentPdfInput {
+  /** Base64-encoded PDF bytes (no data: URI prefix, no newlines). */
+  data: string
+}
+
+/**
+ * Raised when the model ran out of output budget mid-tool-call.
+ *
+ * `strict: true` guarantees the tool input *validates* — it cannot guarantee
+ * the model gets to finish writing it. When `max_tokens` is hit partway
+ * through, the partial JSON arrives with required fields simply missing, which
+ * otherwise surfaces as a baffling Zod "line_items: Required" error a long way
+ * from the actual cause. The pipeline catches this and retries with a larger
+ * budget (lib/extraction.ts).
+ */
+export class ExtractionTruncatedError extends Error {
+  constructor(
+    readonly model: ModelId,
+    readonly maxTokens: number
+  ) {
+    super(
+      `extractDocument: ${model} hit max_tokens (${maxTokens}) before finishing the tool call — ` +
+        'the extraction was truncated, not invalid.'
+    )
+    this.name = 'ExtractionTruncatedError'
+  }
+}
+
 export interface ExtractDocumentParams {
-  /** All pages of one document, in page order — sent in a single request per §8 point 3. */
-  documentImages: DocumentImageInput[]
+  /**
+   * All pages of one document, in page order — sent in a single request per
+   * §8 point 3. Used by the client-side pdf.js path (Day 3/4 review UI).
+   * Mutually exclusive with `documentPdf`.
+   */
+  documentImages?: DocumentImageInput[]
+  /**
+   * The whole PDF as one block — the server-side path used by
+   * lib/jobs/handlers/extract.ts. Mutually exclusive with `documentImages`.
+   */
+  documentPdf?: DocumentPdfInput
   /** Defaults to Haiku (§8 point 3); pass MODELS.sonnet for the manual re-escalation path (§8 point 7). */
   model?: ModelId
+  /**
+   * Output budget. Defaults to §8's 2,000-token cap, which covers the great
+   * majority of these invoices; the pipeline retries with a larger budget when
+   * a long line-item table overruns it.
+   */
+  maxTokens?: number
 }
 
 export interface ExtractDocumentResult {
@@ -62,8 +116,8 @@ const SYSTEM_PROMPT =
   'be financial documents at all (e.g. a bank cheque, a passbook page, or an unrelated scan caught in ' +
   'the same batch) — classify every page first via the tool schema before extracting anything from it. ' +
   'Read every page as part of one document: a line-item table may continue across a page break. Never ' +
-  'fabricate a value — use null for anything illegible or genuinely absent, and reflect uncertainty via ' +
-  'the confidence fields rather than guessing.'
+  'fabricate a value — for anything illegible or genuinely absent use an empty string in a text field ' +
+  'and null in a numeric field, and reflect uncertainty via the confidence fields rather than guessing.'
 
 // TODO Phase 1B: Batch API path — this file intentionally implements only the
 // single-request `extractDocument` call for today (MASTER-PLAN §8 points 3-4).
@@ -72,30 +126,65 @@ const SYSTEM_PROMPT =
 // function exists.
 
 /**
- * Runs one Claude extraction call for one document, all pages as image
- * blocks in a single message (§8 point 3). Throws a clear error instead of
- * attempting the call when no real API key is configured.
+ * The wire shape of a base64 PDF `document` content block.
+ *
+ * Hand-written rather than imported: @anthropic-ai/sdk is pinned at 0.32.1
+ * here, which predates PDF support being GA, so `ContentBlockParam` has no
+ * `document` member to import. The block below is the documented GA wire
+ * format and needs no beta header — the SDK serialises `content` straight to
+ * JSON, so the cast at the call site is a typing gap, not a protocol one.
+ * Delete this and import the SDK's own type whenever the pin moves.
+ */
+interface PdfDocumentBlockParam {
+  type: 'document'
+  source: { type: 'base64'; media_type: 'application/pdf'; data: string }
+}
+
+/** What this SDK version accepts inside a user turn's `content` array. */
+type UserContentBlockParam = Anthropic.ImageBlockParam | Anthropic.TextBlockParam
+
+function buildPdfBlock(data: string): UserContentBlockParam {
+  const block: PdfDocumentBlockParam = {
+    type: 'document',
+    source: { type: 'base64', media_type: 'application/pdf', data },
+  }
+  return block as unknown as UserContentBlockParam
+}
+
+/**
+ * Runs one Claude extraction call for one document — every page in a single
+ * message, either as image blocks or as one PDF block (§8 point 3). Throws a
+ * clear error instead of attempting the call when no real API key is
+ * configured.
  */
 export async function extractDocument(params: ExtractDocumentParams): Promise<ExtractDocumentResult> {
   if (!hasAnthropicKey) {
     throw new Error('ANTHROPIC_API_KEY not set — see MASTER-PLAN §6.4')
   }
-  if (params.documentImages.length === 0) {
-    throw new TypeError('extractDocument: documentImages must contain at least one page')
+
+  const hasImages = (params.documentImages?.length ?? 0) > 0
+  const hasPdf = Boolean(params.documentPdf)
+  if (hasImages && hasPdf) {
+    throw new TypeError('extractDocument: pass documentImages or documentPdf, not both')
+  }
+  if (!hasImages && !hasPdf) {
+    throw new TypeError('extractDocument: documentImages must contain at least one page, or documentPdf must be set')
   }
 
   const model = params.model ?? MODELS.haiku
   const client = new Anthropic({ apiKey: serverEnv.ANTHROPIC_API_KEY })
   const tool = buildExtractionTool()
 
-  const imageBlocks: Anthropic.ImageBlockParam[] = params.documentImages.map((image) => ({
-    type: 'image',
-    source: {
-      type: 'base64',
-      media_type: image.mediaType,
-      data: image.data,
-    },
-  }))
+  const sourceBlocks: UserContentBlockParam[] = hasPdf
+    ? [buildPdfBlock(params.documentPdf!.data)]
+    : (params.documentImages ?? []).map((image) => ({
+        type: 'image',
+        source: {
+          type: 'base64',
+          media_type: image.mediaType,
+          data: image.data,
+        },
+      }))
 
   const textBlock: Anthropic.TextBlockParam = {
     type: 'text',
@@ -104,19 +193,27 @@ export async function extractDocument(params: ExtractDocumentParams): Promise<Ex
       'in order) using the record_document_extraction tool.',
   }
 
+  const maxTokens = params.maxTokens ?? EXTRACTION_MAX_TOKENS
+
   const response = await client.messages.create({
     model,
-    max_tokens: EXTRACTION_MAX_TOKENS,
+    max_tokens: maxTokens,
     system: SYSTEM_PROMPT,
     tools: [tool],
     tool_choice: { type: 'tool', name: EXTRACTION_TOOL_NAME },
     messages: [
       {
         role: 'user',
-        content: [...imageBlocks, textBlock],
+        content: [...sourceBlocks, textBlock],
       },
     ],
   })
+
+  // Check truncation before parsing: a cut-off tool call fails Zod with a
+  // missing-field error that says nothing about the real cause.
+  if (response.stop_reason === 'max_tokens') {
+    throw new ExtractionTruncatedError(model, maxTokens)
+  }
 
   const toolUseBlock = response.content.find(
     (block): block is Anthropic.ToolUseBlock => block.type === 'tool_use'

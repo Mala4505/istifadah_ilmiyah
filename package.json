@@ -14,8 +14,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:rls": "vitest run --config vitest.integration.config.ts",
-    "score": "tsx test/score.ts",
-    "worker": "tsx watch worker/index.ts",
+    "score": "tsx --conditions=react-server test/score.ts",
+    "worker": "tsx watch --conditions=react-server worker/index.ts",
     "db:push": "supabase db push",
     "db:diff": "supabase db diff",
     "db:reset": "supabase db reset"
