@@ -88,21 +88,62 @@ interface ExtractionResult {
 }
 
 // ---------------------------------------------------------------------------
-// The stub — replace the body once the real pipeline exists.
+// The real pipeline (Phase 1B day 2).
 // ---------------------------------------------------------------------------
 
 /**
- * STUB. Not wired yet — Phase 1A day 2.
+ * Loads the production pipeline lazily.
  *
- * Once lib/claude-client.ts and lib/jobs/handlers/extract.ts exist, this
- * should call the same extraction path production uses (load the PDF,
- * rasterize, call Claude with extraction-schema.ts's tool schema, return
- * the parsed result) so the harness measures the real pipeline, not a
- * simulation of it.
+ * Dynamic rather than a top-level import for two reasons: `lib/extraction.ts`
+ * transitively reads `serverEnv` at module-evaluation time, and `tsx` (unlike
+ * `next`) does not populate process.env from .env on its own — so the env file
+ * has to be loaded *before* the module graph is pulled in, which a hoisted
+ * static import would make impossible. Keeping it in here also means the stub
+ * is the only thing in this file that changed.
+ */
+async function loadPipeline() {
+  try {
+    // Node >= 20.12. No-op if the vars are already in the ambient environment.
+    process.loadEnvFile(path.resolve(process.cwd(), '.env'))
+  } catch {
+    // No .env on disk (CI, or vars exported by the shell) — carry on.
+  }
+  return import('@/lib/extraction')
+}
+
+/**
+ * Runs one sample PDF through the exact path production uses: the same
+ * `runExtractionPipeline` that lib/jobs/handlers/extract.ts calls, which means
+ * the same tool schema, the same Haiku-first call, the same hard filter on
+ * non-financial pages, and the same §8 escalation to Sonnet. Nothing here
+ * simulates any part of it.
+ *
+ * Note there is no rasterisation step: the PDF goes to Claude as a single
+ * `document` block (see lib/pdf.ts for why nothing rasterises server-side).
  */
 async function runExtraction(pdfPath: string): Promise<ExtractionResult> {
-  void pdfPath
-  throw new Error('OCR pipeline not wired yet — Phase 1A day 2')
+  const { runExtractionPipeline } = await loadPipeline()
+  const pdfBytes = new Uint8Array(readFileSync(pdfPath))
+  const result = await runExtractionPipeline(pdfBytes)
+  const extraction = result.final.extraction
+
+  return {
+    vendor_name: extraction.vendor_name,
+    invoice_number: extraction.invoice_number,
+    invoice_date: extraction.invoice_date,
+    subtotal: extraction.subtotal,
+    tax_amount: extraction.tax_amount,
+    total_amount: extraction.total_amount,
+    line_items: extraction.line_items.map((item) => ({
+      description: item.description ?? '',
+      amount: item.line_amount ?? 0,
+    })),
+    pages: extraction.pages.map((page) => ({
+      page_number: page.page_number,
+      is_financial_document: page.is_financial_document,
+    })),
+    model_used: result.final.model === 'claude-sonnet-5' ? 'sonnet' : 'haiku',
+  }
 }
 
 // ---------------------------------------------------------------------------
