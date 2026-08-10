@@ -3,6 +3,15 @@ import { Fraunces, Public_Sans, IBM_Plex_Mono } from 'next/font/google'
 import './globals.css'
 import { Toaster } from '@/components/ui/sonner'
 
+// Nonce-based CSP (middleware.ts, MASTER-PLAN §4.4b) requires every page to render
+// dynamically, per request -- a statically-optimized page is prerendered at build time
+// with no per-request nonce, so its script tags never get one and every script on the
+// page is silently blocked once CSP is enforced (verified: /login was being statically
+// optimized and shipped zero nonces anywhere in its HTML, which breaks the login form's
+// hydration entirely under CSP_REPORT_ONLY=false). Forcing it here, once, at the root
+// layout, is simpler and safer than remembering it per-page as new routes are added.
+export const dynamic = 'force-dynamic'
+
 // Header face — h1-h6 pick this up via the base rule in globals.css.
 const fraunces = Fraunces({
   subsets: ['latin'],
