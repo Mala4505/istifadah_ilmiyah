@@ -126,7 +126,7 @@ export interface RunImportParams {
   filename: string
   fileHashSha256: string
   mode: 'dry_run' | 'commit'
-  sourceSystem: 'departmental' | 'main'
+  sourceSystem: 'departmental' | 'audit'
   /** staff_profile.id of the admin running the import, or null (e.g. CLI/manual verification). */
   importedBy: string | null
 }
@@ -321,7 +321,7 @@ async function resolveStatus(
   client: PoolClient,
   caches: ResolverCaches,
   rawText: string,
-  sourceSystem: 'departmental' | 'main',
+  sourceSystem: 'departmental' | 'audit',
   batchId: number,
   exceptionsOut: ImportExceptionSummary[]
 ): Promise<number> {
@@ -364,11 +364,11 @@ async function resolveStatus(
 
 export async function runImport(params: RunImportParams): Promise<ImportResult> {
   if (params.sourceSystem !== 'departmental') {
-    // Main-side import mapping is cut from Phase 1A (MASTER-PLAN §12) — the
-    // param exists for the day a populated Main export arrives, but nothing
+    // Audit-side import mapping is cut from Phase 1A (MASTER-PLAN §12) — the
+    // param exists for the day a populated Audit export arrives, but nothing
     // parses it yet.
     throw new Error(
-      `runImport: source_system "${params.sourceSystem}" is not implemented (MASTER-PLAN §12 — Main-side import wiring lands the day a populated Main export exists).`
+      `runImport: source_system "${params.sourceSystem}" is not implemented (MASTER-PLAN §12 — Audit-side import wiring lands the day a populated Audit export exists).`
     )
   }
 
@@ -478,24 +478,24 @@ export async function runImport(params: RunImportParams): Promise<ImportResult> 
             vendorCreated = resolved.created
           }
 
-          let tenantStatusId: number | null = null
-          if (entry.tenantStatusRaw) {
-            tenantStatusId = await resolveStatus(
+          let statusId: number | null = null
+          if (entry.statusRaw) {
+            statusId = await resolveStatus(
               client,
               caches,
-              entry.tenantStatusRaw,
+              entry.statusRaw,
               'departmental',
               batchId,
               exceptions
             )
           }
-          let mainStatusId: number | null = null
-          if (entry.mainStatusRaw) {
-            mainStatusId = await resolveStatus(
+          let auditStatusId: number | null = null
+          if (entry.auditStatusRaw) {
+            auditStatusId = await resolveStatus(
               client,
               caches,
-              entry.mainStatusRaw,
-              'main',
+              entry.auditStatusRaw,
+              'audit',
               batchId,
               exceptions
             )
@@ -505,8 +505,8 @@ export async function runImport(params: RunImportParams): Promise<ImportResult> 
 
           const before = await client.query<Record<string, unknown>>(
             `select main_number, department_id, budget_head_id, invoice_number, vendor_id, vendor_raw,
-                    date, tenant_amount, main_amount, variance_reason, tenant_status_id, main_status_id,
-                    tenant_status_raw, main_status_raw, budget_head_raw, type
+                    date, amount, variance_reason, status_id, audit_status_id,
+                    status_raw, audit_status_raw, budget_head_raw, type
              from public.entries where ubbl_number = $1`,
             [entry.ubblNumber]
           )
@@ -515,11 +515,11 @@ export async function runImport(params: RunImportParams): Promise<ImportResult> 
           const upserted = await client.query<{ id: number }>(
             `insert into public.entries (
                type, ubbl_number, main_number, department_id, budget_head_id, invoice_number,
-               vendor_id, vendor_raw, date, tenant_amount, main_amount, variance_reason,
-               tenant_status_id, main_status_id, tenant_status_raw, main_status_raw,
+               vendor_id, vendor_raw, date, amount, variance_reason,
+               status_id, audit_status_id, status_raw, audit_status_raw,
                budget_head_raw, source, import_batch_id, updated_at
              ) values (
-               $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, 'import', $18, now()
+               $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, 'import', $17, now()
              )
              on conflict (ubbl_number) do update set
                main_number       = coalesce(excluded.main_number, entries.main_number),
@@ -529,13 +529,12 @@ export async function runImport(params: RunImportParams): Promise<ImportResult> 
                vendor_id         = excluded.vendor_id,
                vendor_raw        = excluded.vendor_raw,
                date              = excluded.date,
-               tenant_amount     = excluded.tenant_amount,
-               main_amount       = coalesce(excluded.main_amount, entries.main_amount),
+               amount            = excluded.amount,
                variance_reason   = coalesce(excluded.variance_reason, entries.variance_reason),
-               tenant_status_id  = excluded.tenant_status_id,
-               main_status_id    = coalesce(excluded.main_status_id, entries.main_status_id),
-               tenant_status_raw = excluded.tenant_status_raw,
-               main_status_raw   = coalesce(excluded.main_status_raw, entries.main_status_raw),
+               status_id         = excluded.status_id,
+               audit_status_id   = coalesce(excluded.audit_status_id, entries.audit_status_id),
+               status_raw        = excluded.status_raw,
+               audit_status_raw  = coalesce(excluded.audit_status_raw, entries.audit_status_raw),
                budget_head_raw   = excluded.budget_head_raw,
                import_batch_id   = excluded.import_batch_id,
                updated_at        = now()
@@ -551,12 +550,11 @@ export async function runImport(params: RunImportParams): Promise<ImportResult> 
               entry.vendorRaw,
               invoiceDate,
               entry.invoiceAmount,
-              null, // main_amount: not present in the Departmental export; Main import populates it later
               null, // variance_reason: not present in the Departmental export
-              tenantStatusId,
-              mainStatusId,
-              entry.tenantStatusRaw,
-              entry.mainStatusRaw,
+              statusId,
+              auditStatusId,
+              entry.statusRaw,
+              entry.auditStatusRaw,
               row.budgetHead,
               batchId,
             ]
@@ -574,11 +572,11 @@ export async function runImport(params: RunImportParams): Promise<ImportResult> 
               vendor_id: vendorId,
               vendor_raw: entry.vendorRaw,
               date: invoiceDate,
-              tenant_amount: entry.invoiceAmount,
-              tenant_status_id: tenantStatusId,
-              main_status_id: mainStatusId ?? existing.main_status_id,
-              tenant_status_raw: entry.tenantStatusRaw,
-              main_status_raw: entry.mainStatusRaw ?? existing.main_status_raw,
+              amount: entry.invoiceAmount,
+              status_id: statusId,
+              audit_status_id: auditStatusId ?? existing.audit_status_id,
+              status_raw: entry.statusRaw,
+              audit_status_raw: entry.auditStatusRaw ?? existing.audit_status_raw,
               budget_head_raw: row.budgetHead,
               type: entry.type,
             }
@@ -624,15 +622,15 @@ export async function runImport(params: RunImportParams): Promise<ImportResult> 
     // ---- post-batch assertions (§3.6 point 8, §3.4) ----
 
     // Allocation-sum mismatch: compare against the FULL current sum of
-    // entries.tenant_amount for each head touched this batch (not just this
+    // entries.amount for each head touched this batch (not just this
     // batch's rows) — entries upsert on ubbl_number, so a head's true
     // position is whatever is currently in the table, which is exactly what
-    // "sum(entry tenant_amount) == allocation.utilised_amount" means once
+    // "sum(entry amount) == allocation.utilised_amount" means once
     // re-imports are in play.
     const headIds = [...headsSeenThisBatch.keys()]
     if (headIds.length > 0) {
       const sums = await client.query<{ budget_head_id: number; total: string }>(
-        `select budget_head_id, coalesce(sum(tenant_amount), 0) as total
+        `select budget_head_id, coalesce(sum(amount), 0) as total
            from public.entries
           where budget_head_id = any($1::bigint[])
           group by budget_head_id`,
@@ -648,7 +646,7 @@ export async function runImport(params: RunImportParams): Promise<ImportResult> 
         dbSums
       )
       for (const m of mismatches) {
-        const description = `Budget head "${m.budgetHeadLabel}" (id ${m.budgetHeadId}): sum(entries.tenant_amount) = ${m.actualEntrySum}, allocation.utilised_amount = ${m.expectedUtilised} (diff ${m.diff}).`
+        const description = `Budget head "${m.budgetHeadLabel}" (id ${m.budgetHeadId}): sum(entries.amount) = ${m.actualEntrySum}, allocation.utilised_amount = ${m.expectedUtilised} (diff ${m.diff}).`
         await client.query(
           `insert into public.reconciliation_exception
              (import_batch_id, exception_type, severity, amount_at_risk, description, dedup_key)

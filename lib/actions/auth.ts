@@ -1,0 +1,140 @@
+'use server'
+
+import { headers } from 'next/headers'
+import { redirect } from 'next/navigation'
+import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/admin'
+import { itsNumberSchema, itsNumberToLoginEmail } from '@/lib/auth/its'
+
+export type LoginResult = { ok: true } | { ok: false; error: string }
+
+const GENERIC_INVALID_CREDENTIALS = 'Incorrect ITS number or password.'
+const RATE_LIMITED_MESSAGE = 'Too many failed attempts. Try again in a few minutes.'
+
+async function requestIp(): Promise<string | null> {
+  const headerList = await headers()
+  // Windows Server deployment sits behind IIS as a reverse proxy (§4.4b);
+  // Vercel sets the same header. Only the first hop is trusted (§13.2 — the
+  // deploy target is never branched on beyond this kind of header lookup).
+  const forwardedFor = headerList.get('x-forwarded-for')
+  if (forwardedFor) return forwardedFor.split(',')[0]!.trim()
+  return headerList.get('x-real-ip')
+}
+
+/** Fire-and-forget audit row — a logging failure must never block login. */
+async function recordAttempt(itsNumber: string, ip: string | null, success: boolean) {
+  try {
+    const admin = createAdminClient()
+    await admin.from('auth_login_attempt').insert({ its_number: itsNumber, ip, success })
+  } catch {
+    // Best-effort only.
+  }
+}
+
+const RATE_LIMIT_WINDOW_MINUTES = 15
+const MAX_FAILED_ATTEMPTS_PER_ITS = 5
+const MAX_FAILED_ATTEMPTS_PER_IP = 20
+
+/**
+ * Two plain counts rather than a database function: `private` (where the
+ * app's other SECURITY DEFINER helpers live) is deliberately never exposed
+ * to PostgREST (20260808000002), so nothing there is reachable via
+ * supabase-js's `.rpc()`. Locked out when EITHER window trips — the IP
+ * check catches one source sweeping many ITS numbers. Time-based, not
+ * attempt-based, so a lockout can't be raced by succeeding once elsewhere.
+ */
+async function isRateLimited(itsNumber: string, ip: string | null): Promise<boolean> {
+  const admin = createAdminClient()
+  const since = new Date(Date.now() - RATE_LIMIT_WINDOW_MINUTES * 60_000).toISOString()
+
+  const { count: itsFailures } = await admin
+    .from('auth_login_attempt')
+    .select('id', { count: 'exact', head: true })
+    .eq('its_number', itsNumber)
+    .eq('success', false)
+    .gt('created_at', since)
+  if ((itsFailures ?? 0) >= MAX_FAILED_ATTEMPTS_PER_ITS) return true
+
+  if (ip) {
+    const { count: ipFailures } = await admin
+      .from('auth_login_attempt')
+      .select('id', { count: 'exact', head: true })
+      .eq('ip', ip)
+      .eq('success', false)
+      .gt('created_at', since)
+    if ((ipFailures ?? 0) >= MAX_FAILED_ATTEMPTS_PER_IP) return true
+  }
+
+  return false
+}
+
+/**
+ * ITS-number login. The client never sees the synthetic email this maps
+ * to — this server action resolves it, then hands off to Supabase Auth's
+ * normal signInWithPassword, which is what actually issues/refreshes the
+ * session's JWT access + refresh tokens (unchanged from before this
+ * feature; see lib/supabase/server.ts and middleware.ts). Rate limiting is
+ * app-owned defense-in-depth on top of that, checked BEFORE Supabase Auth
+ * is ever called, so a lockout costs nothing extra against the hosted
+ * project's own limits.
+ */
+export async function loginWithIts(itsNumber: string, password: string): Promise<LoginResult> {
+  const parsedIts = itsNumberSchema.safeParse(itsNumber)
+  if (!parsedIts.success) {
+    return { ok: false, error: parsedIts.error.issues[0]!.message }
+  }
+  if (!password) {
+    return { ok: false, error: 'Password is required.' }
+  }
+  const normalizedIts = parsedIts.data
+  const ip = await requestIp()
+
+  // Fails open on an infra error checking the limiter (isRateLimited throws
+  // -> caught here) — a broken rate-limit check must not itself become the
+  // outage. Supabase Auth's own built-in protection still applies underneath
+  // regardless.
+  try {
+    if (await isRateLimited(normalizedIts, ip)) {
+      return { ok: false, error: RATE_LIMITED_MESSAGE }
+    }
+  } catch {
+    // Proceed to the real sign-in attempt below.
+  }
+
+  const supabase = await createClient()
+  const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+    email: itsNumberToLoginEmail(normalizedIts),
+    password,
+  })
+
+  if (signInError || !signInData.user) {
+    await recordAttempt(normalizedIts, ip, false)
+    return { ok: false, error: GENERIC_INVALID_CREDENTIALS }
+  }
+
+  const { data: profile, error: profileError } = await supabase
+    .from('staff_profile')
+    .select('is_active')
+    .eq('id', signInData.user.id)
+    .maybeSingle()
+
+  if (profileError) {
+    console.warn('[login] staff_profile check failed:', profileError.message)
+  } else if (profile && profile.is_active === false) {
+    await supabase.auth.signOut()
+    await recordAttempt(normalizedIts, ip, false)
+    return { ok: false, error: 'Your account is pending activation. Ask an administrator to activate it.' }
+  }
+
+  await recordAttempt(normalizedIts, ip, true)
+  return { ok: true }
+}
+
+/** Bound directly to the nav rail's sign-out `<form action>` — no client
+ * round-trip needed, the redirect happens server-side once the session
+ * cookie is cleared. */
+export async function signOut(): Promise<void> {
+  const supabase = await createClient()
+  await supabase.auth.signOut()
+  redirect('/login')
+}

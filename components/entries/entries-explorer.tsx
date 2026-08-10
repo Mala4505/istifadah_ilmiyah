@@ -19,10 +19,11 @@ import type { ColumnKey, EntriesFilters, EntryEnriched, FilterOptions } from './
 const EMPTY_OPTIONS: FilterOptions = {
   departments: [],
   budgetHeads: [],
-  heads: [],
+  adminHeads: [],
   zones: [],
-  tenantStatuses: [],
-  mainStatuses: [],
+  budgetCategories: [],
+  statuses: [],
+  auditStatuses: [],
   hubStatuses: [],
 }
 
@@ -30,10 +31,11 @@ function filtersToSearchParams(filters: EntriesFilters): URLSearchParams {
   const sp = new URLSearchParams()
   if (filters.department) sp.set('dept', filters.department)
   if (filters.budgetHead) sp.set('bh', filters.budgetHead)
-  if (filters.head) sp.set('head', filters.head)
+  if (filters.adminHead) sp.set('ahead', filters.adminHead)
   if (filters.zone) sp.set('zone', filters.zone)
-  if (filters.tenantStatus) sp.set('ts', filters.tenantStatus)
-  if (filters.mainStatus) sp.set('ms', filters.mainStatus)
+  if (filters.budgetCategory) sp.set('bcat', filters.budgetCategory)
+  if (filters.status) sp.set('st', filters.status)
+  if (filters.auditStatus) sp.set('ast', filters.auditStatus)
   if (filters.hubStatus) sp.set('hs', filters.hubStatus)
   if (filters.exportPending) sp.set('exp', '1')
   if (filters.dateFrom) sp.set('from', filters.dateFrom)
@@ -48,10 +50,11 @@ function searchParamsToFilters(sp: URLSearchParams): EntriesFilters {
   return {
     department: sp.get('dept') ?? '',
     budgetHead: sp.get('bh') ?? '',
-    head: sp.get('head') ?? '',
+    adminHead: sp.get('ahead') ?? '',
     zone: sp.get('zone') ?? '',
-    tenantStatus: sp.get('ts') ?? '',
-    mainStatus: sp.get('ms') ?? '',
+    budgetCategory: sp.get('bcat') ?? '',
+    status: sp.get('st') ?? '',
+    auditStatus: sp.get('ast') ?? '',
     hubStatus: sp.get('hs') ?? '',
     exportPending: sp.get('exp') === '1',
     dateFrom: sp.get('from') ?? '',
@@ -93,11 +96,12 @@ export function EntriesExplorer() {
   useEffect(() => {
     let cancelled = false
     async function loadOptions() {
-      const [dept, bh, head, zone, status, hub, userRes] = await Promise.all([
+      const [dept, bh, adminHead, zone, budgetCategory, status, hub, userRes] = await Promise.all([
         supabase.from('department').select('id,name').eq('is_active', true).order('name'),
         supabase.from('budget_head').select('id,raw_label,short_label,department_id').order('raw_label'),
-        supabase.from('head').select('id,name,head_number,department_id').eq('is_active', true).order('head_number'),
+        supabase.from('admin_head').select('id,name,head_number,department_id').eq('is_active', true).order('head_number'),
         supabase.from('zone').select('id,name,zone_number,department_id').eq('is_active', true).order('zone_number'),
+        supabase.from('budget_category').select('id,name').order('name'),
         supabase.from('entry_status').select('id,code,label,source_system').order('sort_order'),
         supabase.from('hub_status').select('id,code,label').order('sort_order'),
         supabase.auth.getUser(),
@@ -111,13 +115,14 @@ export function EntriesExplorer() {
           label: b.short_label ?? b.raw_label,
           department_id: b.department_id,
         })),
-        heads: (head.data ?? []).map((h) => ({ id: h.id, label: `${h.head_number}. ${h.name}`, department_id: h.department_id })),
+        adminHeads: (adminHead.data ?? []).map((h) => ({ id: h.id, label: `${h.head_number}. ${h.name}`, department_id: h.department_id })),
         zones: (zone.data ?? []).map((z) => ({ id: z.id, label: `${z.zone_number}. ${z.name}`, department_id: z.department_id })),
-        tenantStatuses: (status.data ?? [])
+        budgetCategories: (budgetCategory.data ?? []).map((c) => ({ id: c.id, label: c.name })),
+        statuses: (status.data ?? [])
           .filter((s) => s.source_system === 'departmental')
           .map((s) => ({ id: s.id, label: s.label, code: s.code })),
-        mainStatuses: (status.data ?? [])
-          .filter((s) => s.source_system === 'main')
+        auditStatuses: (status.data ?? [])
+          .filter((s) => s.source_system === 'audit')
           .map((s) => ({ id: s.id, label: s.label, code: s.code })),
         hubStatuses: (hub.data ?? []).map((h) => ({ id: h.id, label: h.label, code: h.code })),
       }

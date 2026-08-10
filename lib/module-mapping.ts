@@ -102,8 +102,8 @@ export interface ParsedEntryRow {
   invoiceAmount: number | null
   invoiceDate: string | null
   userName: string | null
-  tenantStatusRaw: string | null
-  mainStatusRaw: string | null
+  statusRaw: string | null
+  auditStatusRaw: string | null
 }
 
 export type DepartmentalRowType = 'allocation' | 'entry' | 'both' | 'skip'
@@ -224,8 +224,8 @@ export function parseDepartmentalRow(
       invoiceAmount: toNumberOrNull(rawRow['Invoice Amount']),
       invoiceDate: toTrimmedStringOrNull(rawRow['Invoice Date']),
       userName: toTrimmedStringOrNull(rawRow['User name']),
-      tenantStatusRaw: toTrimmedStringOrNull(rawRow['Status']),
-      mainStatusRaw: toTrimmedStringOrNull(rawRow['Main Status']),
+      statusRaw: toTrimmedStringOrNull(rawRow['Status']),
+      auditStatusRaw: toTrimmedStringOrNull(rawRow['Main Status']),
     }
   }
 

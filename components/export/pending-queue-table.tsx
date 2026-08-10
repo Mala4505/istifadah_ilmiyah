@@ -64,7 +64,7 @@ export function PendingQueueTable({ entries }: { entries: PendingExportEntry[] }
               <TableCell className="max-w-[16rem] truncate text-xs text-muted-foreground" title={entry.hub_status_note ?? undefined}>
                 {entry.hub_status_note ?? '—'}
               </TableCell>
-              <TableCell className="text-right tabular-nums">{formatINR(entry.tenant_amount)}</TableCell>
+              <TableCell className="text-right tabular-nums">{formatINR(entry.amount)}</TableCell>
             </TableRow>
           ))}
         </TableBody>

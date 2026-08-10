@@ -31,6 +31,12 @@ const serverSchema = z.object({
     .default('true')
     .transform((v) => v === 'true'),
   WORKER_ID: z.string().min(1).default('local-dev'),
+  // Never resolvable on the public internet by design — ITS-number login
+  // (lib/auth/its.ts) maps each 8-digit ITS number to
+  // `<its_number>@ITS_LOGIN_EMAIL_DOMAIN` and stores that as auth.users.email,
+  // Supabase Auth's login handle only. It is never sent anywhere as a real
+  // address, so the domain does not need to exist or accept mail.
+  ITS_LOGIN_EMAIL_DOMAIN: z.string().min(1).default('members.istefadah.internal'),
 })
 
 function readServerEnv() {
@@ -47,6 +53,7 @@ function readServerEnv() {
     DEPLOY_TARGET: process.env.DEPLOY_TARGET,
     CSP_REPORT_ONLY: process.env.CSP_REPORT_ONLY,
     WORKER_ID: process.env.WORKER_ID,
+    ITS_LOGIN_EMAIL_DOMAIN: process.env.ITS_LOGIN_EMAIL_DOMAIN,
   })
   if (!parsed.success) {
     throw new Error(

@@ -24,7 +24,7 @@ export interface PendingExportEntry {
   hub_status_label: string | null
   hub_status_changed_at: string | null
   hub_status_note: string | null
-  tenant_amount: number | null
+  amount: number | null
 }
 
 /**
@@ -38,7 +38,7 @@ export async function getPendingExportQueue(): Promise<PendingExportEntry[]> {
   const { data, error } = await supabase
     .from('v_entry_enriched')
     .select(
-      'id, ubbl_number, main_number, department_name, hub_status_code, hub_status_label, hub_status_changed_at, hub_status_note, tenant_amount, hub_status_id, hub_status_exported_at, is_void'
+      'id, ubbl_number, main_number, department_name, hub_status_code, hub_status_label, hub_status_changed_at, hub_status_note, amount, hub_status_id, hub_status_exported_at, is_void'
     )
     .is('hub_status_exported_at', null)
     .neq('hub_status_id', 1)

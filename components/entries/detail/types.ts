@@ -22,24 +22,24 @@ export interface EntryEnriched {
   vendor_display_name: string | null
   vendor_raw: string | null
   date: string | null
-  tenant_amount: number | null
-  main_amount: number | null
-  amount_variance: number | null
+  amount: number | null
   variance_reason: string | null
-  tenant_status_id: number | null
-  tenant_status_code: string | null
-  tenant_status_label: string | null
-  main_status_id: number | null
-  main_status_code: string | null
-  main_status_label: string | null
-  tenant_status_raw: string | null
-  main_status_raw: string | null
-  head_id: number | null
-  head_name: string | null
+  status_id: number | null
+  status_code: string | null
+  status_label: string | null
+  audit_status_id: number | null
+  audit_status_code: string | null
+  audit_status_label: string | null
+  status_raw: string | null
+  audit_status_raw: string | null
+  admin_head_id: number | null
+  admin_head_name: string | null
   zone_id: number | null
   zone_name: string | null
-  hub_reference: string | null
-  enrichment_note: string | null
+  budget_category_id: number | null
+  budget_category_name: string | null
+  remark: string | null
+  // hub_status_* columns unchanged/deferred, see supabase/migrations/20260811000003
   hub_status_id: number
   hub_status_code: string
   hub_status_label: string
@@ -47,9 +47,10 @@ export interface EntryEnriched {
   hub_status_changed_by: string | null
   hub_status_note: string | null
   hub_status_exported_at: string | null
+  audit_status_changed_at: string | null
+  audit_status_changed_by: string | null
   settles_entry_id: number | null
   is_void: boolean
-  void_reason: string | null
   source: EntrySource
   import_batch_id: number | null
   created_at: string
@@ -57,9 +58,14 @@ export interface EntryEnriched {
   document_count: number
 }
 
-export interface HeadOption {
+export interface AdminHeadOption {
   id: number
   head_number: number
+  name: string
+}
+
+export interface BudgetCategoryOption {
+  id: number
   name: string
 }
 
@@ -91,6 +97,6 @@ export interface AdvanceEntrySummary {
   ubbl_number: string
   vendor_display_name: string | null
   vendor_raw: string | null
-  tenant_amount: number | null
+  amount: number | null
   date: string | null
 }

@@ -1,6 +1,7 @@
 'use client'
 
 import Link from 'next/link'
+import Image from 'next/image'
 import { usePathname } from 'next/navigation'
 import {
   LayoutDashboard,
@@ -12,8 +13,12 @@ import {
   FileBarChart,
   Download,
   Settings,
+  LogOut,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { ThemeToggle } from '@/components/app-shell/theme-toggle'
+import { Button } from '@/components/ui/button'
+import { signOut } from '@/lib/actions/auth'
 
 // Persistent left rail (MASTER-PLAN §5 "Navigation"). Export and Admin are
 // admin-only per §4.4c's role table. Role-based hiding is not wired up yet
@@ -32,16 +37,33 @@ const NAV_ITEMS = [
   { label: 'Admin', href: '/admin', icon: Settings, adminOnly: true },
 ] as const
 
-export function NavRail() {
+function initialsFor(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean)
+  if (parts.length === 0) return '?'
+  if (parts.length === 1) return parts[0]!.slice(0, 2).toUpperCase()
+  return (parts[0]![0]! + parts[parts.length - 1]![0]!).toUpperCase()
+}
+
+export function NavRail({
+  user,
+}: {
+  user: { displayName: string; role: string | null; itsNumber: string | null }
+}) {
   const pathname = usePathname()
 
   return (
-    <nav className="flex w-56 shrink-0 flex-col border-r border-border bg-card">
-      <div className="border-b border-border px-4 py-4">
-        <p className="text-sm font-semibold leading-tight tracking-tight">Istifada Ilmiyah</p>
-        <p className="text-xs text-muted-foreground">Financial Hub</p>
+    <nav className="sticky top-0 flex h-screen w-56 shrink-0 flex-col border-r border-border bg-card">
+      <div className="flex items-center justify-center border-b border-border px-4 py-4">
+        <Image
+          src="/istefadah_logo_1_alpha.png"
+          alt="Istefadah Ilmiyah"
+          width={505}
+          height={502}
+          priority
+          className="h-auto w-20"
+        />
       </div>
-      <ul className="flex-1 space-y-0.5 overflow-y-auto p-2">
+      <ul className="flex-1 space-y-0.5 p-2">
         {NAV_ITEMS.map((item) => {
           const isActive = item.href === '/' ? pathname === '/' : pathname.startsWith(item.href)
           const Icon = item.icon
@@ -52,7 +74,7 @@ export function NavRail() {
                 className={cn(
                   'flex items-center gap-2.5 rounded-md px-3 py-2 text-sm transition-colors',
                   isActive
-                    ? 'bg-secondary font-medium text-secondary-foreground'
+                    ? 'bg-accent font-medium text-accent-foreground shadow-[inset_2px_0_0_hsl(var(--primary))]'
                     : 'text-muted-foreground hover:bg-secondary/60 hover:text-foreground'
                 )}
               >
@@ -68,11 +90,43 @@ export function NavRail() {
           )
         })}
       </ul>
-      <div className="flex items-center gap-1.5 border-t border-border p-3 text-xs text-muted-foreground">
-        <kbd className="rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[10px]">
-          Ctrl K
-        </kbd>
-        <span>jump to entry</span>
+      <div className="border-t border-border p-3">
+        <div className="flex items-center gap-2.5">
+          <div
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-secondary font-mono text-xs font-semibold text-secondary-foreground"
+            aria-hidden="true"
+          >
+            {initialsFor(user.displayName)}
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-sm font-medium leading-tight text-foreground">{user.displayName}</p>
+            {user.role && (
+              <p className="truncate text-[11px] font-medium uppercase leading-tight tracking-wide text-muted-foreground">
+                {user.role}
+              </p>
+            )}
+          </div>
+          <form action={signOut}>
+            <Button
+              type="submit"
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 text-muted-foreground hover:text-destructive"
+              aria-label="Sign out"
+            >
+              <LogOut className="h-4 w-4" strokeWidth={1.75} />
+            </Button>
+          </form>
+        </div>
+        <div className="mt-2.5 flex items-center justify-between gap-1.5 text-xs text-muted-foreground">
+          <div className="flex items-center gap-1.5">
+            <kbd className="rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[10px]">
+              Ctrl K
+            </kbd>
+            <span>jump to entry</span>
+          </div>
+          <ThemeToggle />
+        </div>
       </div>
     </nav>
   )

@@ -14,7 +14,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 /**
  * Import fields, read-only (task point 1). Everything here comes from
- * Departmental/Main via `import-excel` (§3.6) and is never editable on this
+ * Departmental/Audit via `import-excel` (§3.6) and is never editable on this
  * screen — the section-level "From import" badge marks that once, rather
  * than repeating a badge on every one of ~18 fields.
  */
@@ -27,8 +27,6 @@ export function ImportFieldsPanel({
   vendorConfirmed: boolean | null
   budgetHeadRaw: string | null
 }) {
-  const hasVariance = entry.amount_variance !== null && entry.amount_variance !== 0
-
   return (
     <Card>
       <CardHeader className="flex flex-row items-center justify-between gap-3 space-y-0">
@@ -62,33 +60,21 @@ export function ImportFieldsPanel({
         </Field>
         <Field label="Date">{formatDate(entry.date)}</Field>
 
-        <Field label="Tenant amount">{formatMoney(entry.tenant_amount)}</Field>
-        <Field label="Main amount">{formatMoney(entry.main_amount)}</Field>
-        <Field label="Variance">
-          <span className={hasVariance ? 'font-semibold text-destructive' : undefined}>
-            {formatMoney(entry.amount_variance)}
-          </span>
-          {hasVariance && (
-            <Badge variant="destructive" className="ml-2">
-              Non-zero
-            </Badge>
-          )}
-        </Field>
-
+        <Field label="Amount">{formatMoney(entry.amount)}</Field>
         <Field label="Variance reason">{entry.variance_reason ?? '—'}</Field>
-        <Field label="Tenant status">
-          {entry.tenant_status_label ?? '—'}
-          {entry.tenant_status_raw && (
+        <Field label="Status">
+          {entry.status_label ?? '—'}
+          {entry.status_raw && (
             <span className="ml-1.5 text-xs text-muted-foreground">
-              (raw: {entry.tenant_status_raw})
+              (raw: {entry.status_raw})
             </span>
           )}
         </Field>
-        <Field label="Main status">
-          {entry.main_status_label ?? '—'}
-          {entry.main_status_raw && (
+        <Field label="Audit status">
+          {entry.audit_status_label ?? '—'}
+          {entry.audit_status_raw && (
             <span className="ml-1.5 text-xs text-muted-foreground">
-              (raw: {entry.main_status_raw})
+              (raw: {entry.audit_status_raw})
             </span>
           )}
         </Field>

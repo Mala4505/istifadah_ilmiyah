@@ -16,9 +16,21 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     redirect('/login')
   }
 
+  const { data: profile } = await supabase
+    .from('staff_profile')
+    .select('display_name, role, its_number')
+    .eq('id', user.id)
+    .maybeSingle()
+
   return (
     <div className="flex min-h-screen bg-background">
-      <NavRail />
+      <NavRail
+        user={{
+          displayName: profile?.display_name ?? user.email ?? 'Staff',
+          role: profile?.role ?? null,
+          itsNumber: profile?.its_number ?? null,
+        }}
+      />
       <main className="min-w-0 flex-1 p-6">{children}</main>
       <CommandPalette />
     </div>

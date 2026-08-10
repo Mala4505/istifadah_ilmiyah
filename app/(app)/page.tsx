@@ -78,7 +78,7 @@ export default async function DashboardPage() {
         Review queue depth, open exceptions by ₹ at risk, budget burn, and today&apos;s imports.
       </p>
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 xl:grid-cols-4">
         <StatTile
           label="Review queue depth"
           value={formatNumber(data.reviewQueueDepth)}

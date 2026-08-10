@@ -22,9 +22,9 @@ export function FilterBar({
   options: FilterOptions
   onChange: (next: Partial<EntriesFilters>) => void
 }) {
-  const headOptions = filters.department
-    ? options.heads.filter((h) => h.department_id == null || String(h.department_id) === filters.department)
-    : options.heads
+  const adminHeadOptions = filters.department
+    ? options.adminHeads.filter((h) => h.department_id == null || String(h.department_id) === filters.department)
+    : options.adminHeads
   const zoneOptions = filters.department
     ? options.zones.filter((z) => z.department_id == null || String(z.department_id) === filters.department)
     : options.zones
@@ -40,7 +40,7 @@ export function FilterBar({
         <Field label="Department">
           <SelectNative
             value={filters.department}
-            onChange={(e) => onChange({ department: e.target.value, head: '', zone: '' })}
+            onChange={(e) => onChange({ department: e.target.value, adminHead: '', zone: '' })}
           >
             <option value="">All departments</option>
             {options.departments.map((d) => (
@@ -62,10 +62,10 @@ export function FilterBar({
           </SelectNative>
         </Field>
 
-        <Field label="Head">
-          <SelectNative value={filters.head} onChange={(e) => onChange({ head: e.target.value })}>
-            <option value="">All heads</option>
-            {headOptions.map((h) => (
+        <Field label="Admin head">
+          <SelectNative value={filters.adminHead} onChange={(e) => onChange({ adminHead: e.target.value })}>
+            <option value="">All admin heads</option>
+            {adminHeadOptions.map((h) => (
               <option key={h.id} value={h.id}>
                 {h.label}
               </option>
@@ -84,10 +84,21 @@ export function FilterBar({
           </SelectNative>
         </Field>
 
-        <Field label="Tenant status">
-          <SelectNative value={filters.tenantStatus} onChange={(e) => onChange({ tenantStatus: e.target.value })}>
-            <option value="">Any tenant status</option>
-            {options.tenantStatuses.map((s) => (
+        <Field label="Budget category">
+          <SelectNative value={filters.budgetCategory} onChange={(e) => onChange({ budgetCategory: e.target.value })}>
+            <option value="">All budget categories</option>
+            {options.budgetCategories.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.label}
+              </option>
+            ))}
+          </SelectNative>
+        </Field>
+
+        <Field label="Status">
+          <SelectNative value={filters.status} onChange={(e) => onChange({ status: e.target.value })}>
+            <option value="">Any status</option>
+            {options.statuses.map((s) => (
               <option key={s.id} value={s.id}>
                 {s.label}
               </option>
@@ -95,10 +106,10 @@ export function FilterBar({
           </SelectNative>
         </Field>
 
-        <Field label="Main status">
-          <SelectNative value={filters.mainStatus} onChange={(e) => onChange({ mainStatus: e.target.value })}>
-            <option value="">Any main status</option>
-            {options.mainStatuses.map((s) => (
+        <Field label="Audit status">
+          <SelectNative value={filters.auditStatus} onChange={(e) => onChange({ auditStatus: e.target.value })}>
+            <option value="">Any audit status</option>
+            {options.auditStatuses.map((s) => (
               <option key={s.id} value={s.id}>
                 {s.label}
               </option>
@@ -140,7 +151,11 @@ export function FilterBar({
           checked={filters.exportPending}
           onCheckedChange={(v) => onChange({ exportPending: v })}
         />
-        <ToggleField label="Has variance" checked={filters.hasVariance} onCheckedChange={(v) => onChange({ hasVariance: v })} />
+        <ToggleField
+          label="Missing Main #"
+          checked={filters.hasVariance}
+          onCheckedChange={(v) => onChange({ hasVariance: v })}
+        />
         <ToggleField
           label="Has document"
           checked={filters.hasDocument}

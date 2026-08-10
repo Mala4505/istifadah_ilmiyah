@@ -25,10 +25,11 @@ export function applyEntriesFilters<T extends EntriesQueryBuilder>(query: T, fil
 
   if (filters.department) q = q.eq('department_id', filters.department)
   if (filters.budgetHead) q = q.eq('budget_head_id', filters.budgetHead)
-  if (filters.head) q = q.eq('head_id', filters.head)
+  if (filters.adminHead) q = q.eq('admin_head_id', filters.adminHead)
   if (filters.zone) q = q.eq('zone_id', filters.zone)
-  if (filters.tenantStatus) q = q.eq('tenant_status_id', filters.tenantStatus)
-  if (filters.mainStatus) q = q.eq('main_status_id', filters.mainStatus)
+  if (filters.budgetCategory) q = q.eq('budget_category_id', filters.budgetCategory)
+  if (filters.status) q = q.eq('status_id', filters.status)
+  if (filters.auditStatus) q = q.eq('audit_status_id', filters.auditStatus)
   if (filters.hubStatus) q = q.eq('hub_status_id', filters.hubStatus)
   if (filters.dateFrom) q = q.gte('date', filters.dateFrom)
   if (filters.dateTo) q = q.lte('date', filters.dateTo)
@@ -40,11 +41,13 @@ export function applyEntriesFilters<T extends EntriesQueryBuilder>(query: T, fil
   if (filters.exportPending) {
     q = q.is('hub_status_exported_at', null).neq('hub_status_code', 'not_set')
   }
-  // has-variance: amount_variance <> 0. Postgres's `<>` against NULL is UNKNOWN, not
-  // TRUE, so this naturally excludes entries missing one side of the amount too —
-  // exactly the "both amounts present and they differ" semantic §5 asks for.
+  // has-variance: REPURPOSED 2026-08-11 -- amount_variance no longer exists (§3.4,
+  // there is no genuinely separate second amount to diff). Now means "missing a
+  // Main/Audit-side match" (main_number is null), matching v_department_audit_variance
+  // (20260811000004). The richer "does a bill's consolidated entries sum to its export
+  // total" check needs a defined bill-grouping key that hasn't been specified yet.
   if (filters.hasVariance) {
-    q = q.neq('amount_variance', 0)
+    q = q.is('main_number', null)
   }
   if (filters.hasDocument) {
     q = q.gt('document_count', 0)

@@ -1,9 +1,87 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
+import { z } from 'zod'
 import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/admin'
+import { requireAdmin } from '@/lib/export/auth'
+import { itsNumberSchema, itsNumberToLoginEmail } from '@/lib/auth/its'
 
 type ActionResult = { ok: true } | { ok: false; error: string }
+
+const createStaffUserSchema = z.object({
+  itsNumber: itsNumberSchema,
+  displayName: z.string().trim().min(1, 'Name is required.'),
+  contactEmail: z.union([z.string().trim().email('Enter a valid email address.'), z.literal('')]),
+  role: z.enum(['admin', 'reviewer', 'viewer']),
+  departmentId: z.number().int().nullable(),
+  password: z.string().min(10, 'Password must be at least 10 characters.'),
+})
+
+/**
+ * Admin-provisioned account creation — the only way a staff account is
+ * created now (§4.4c: nobody self-serves into access). Writes through the
+ * service-role admin client, which bypasses RLS entirely, so the admin gate
+ * here is the only thing standing in front of it — checked with the
+ * session-bound client FIRST, same pattern as app/api/import/route.ts.
+ * ITS number becomes Supabase Auth's internal login identifier
+ * (lib/auth/its.ts); the account lands active immediately, since an admin
+ * explicitly provisioning it is a stronger signal than the self-signup
+ * trigger's inactive-by-default fallback (20260810000001).
+ */
+export async function createStaffUser(input: {
+  itsNumber: string
+  displayName: string
+  contactEmail: string
+  role: 'admin' | 'reviewer' | 'viewer'
+  departmentId: number | null
+  password: string
+}): Promise<ActionResult> {
+  const gate = await requireAdmin()
+  if (!gate.ok) {
+    return { ok: false, error: 'Creating staff accounts is an admin-only action.' }
+  }
+
+  const parsed = createStaffUserSchema.safeParse(input)
+  if (!parsed.success) {
+    return { ok: false, error: parsed.error.issues[0]!.message }
+  }
+  const { itsNumber, displayName, contactEmail, role, departmentId, password } = parsed.data
+
+  const admin = createAdminClient()
+
+  const { data: existing } = await admin
+    .from('staff_profile')
+    .select('id')
+    .eq('its_number', itsNumber)
+    .maybeSingle()
+  if (existing) {
+    return { ok: false, error: `ITS number ${itsNumber} is already registered.` }
+  }
+
+  const { error: createError } = await admin.auth.admin.createUser({
+    email: itsNumberToLoginEmail(itsNumber),
+    password,
+    email_confirm: true,
+    user_metadata: {
+      its_number: itsNumber,
+      full_name: displayName,
+      role,
+      department_id: departmentId === null ? '' : String(departmentId),
+      is_active: true,
+      contact_email: contactEmail || null,
+    },
+  })
+
+  // The its_number unique index (20260810000001) is the backstop against a
+  // race with the pre-check above: a losing concurrent insert fails the
+  // handle_new_user trigger with a unique_violation, which createUser
+  // surfaces as an error here rather than silently landing a duplicate.
+  if (createError) return { ok: false, error: createError.message }
+
+  revalidatePath('/admin')
+  return { ok: true }
+}
 
 /**
  * Updates a staff member's role, department, or active flag (§4.4c —

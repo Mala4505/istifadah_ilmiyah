@@ -12,7 +12,8 @@ import { updateStaffProfile } from '@/lib/actions/admin'
 export type StaffRow = {
   id: string
   displayName: string
-  email: string | null
+  itsNumber: string | null
+  contactEmail: string | null
   role: 'admin' | 'reviewer' | 'viewer'
   departmentId: number | null
   isActive: boolean
@@ -42,7 +43,8 @@ export function UsersTable({
       <TableHeader>
         <TableRow>
           <TableHead>Name</TableHead>
-          <TableHead>Email</TableHead>
+          <TableHead>ITS Number</TableHead>
+          <TableHead>Contact email</TableHead>
           <TableHead>Department</TableHead>
           <TableHead>Role</TableHead>
           <TableHead>Active</TableHead>
@@ -99,7 +101,8 @@ function UserRow({
           {!isActive && <Badge variant="warning">Pending activation</Badge>}
         </div>
       </TableCell>
-      <TableCell>{row.email ?? '—'}</TableCell>
+      <TableCell className="font-mono text-sm">{row.itsNumber ?? '—'}</TableCell>
+      <TableCell>{row.contactEmail ?? '—'}</TableCell>
       <TableCell>
         <Select value={departmentIdToValue(departmentId)} onValueChange={(value) => setDepartmentId(valueToDepartmentId(value))}>
           <SelectTrigger className="w-[180px]">

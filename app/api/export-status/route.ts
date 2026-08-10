@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAdmin, getStaffContext } from '@/lib/export/auth'
+import { withApiLogging } from '@/lib/api-log'
 import {
   generateStatusExportBatch,
   updateExportBatchStatus,
@@ -26,9 +27,9 @@ import { getExportBatchRows } from '@/lib/export/queries'
  * touches anything else.
  */
 
-const VALID_TARGET_SYSTEMS: ExportTargetSystem[] = ['departmental', 'main', 'both']
+const VALID_TARGET_SYSTEMS: ExportTargetSystem[] = ['departmental', 'audit', 'both']
 
-export async function POST(request: NextRequest) {
+async function handlePOST(request: NextRequest) {
   const gate = await requireAdmin()
   if (!gate.ok) {
     return NextResponse.json({ error: adminGateMessage(gate.reason) }, { status: gate.reason === 'signed_out' ? 401 : 403 })
@@ -63,7 +64,7 @@ export async function POST(request: NextRequest) {
   return NextResponse.json({ ok: true, batch: result.batch })
 }
 
-export async function PATCH(request: NextRequest) {
+async function handlePATCH(request: NextRequest) {
   const gate = await requireAdmin()
   if (!gate.ok) {
     return NextResponse.json({ error: adminGateMessage(gate.reason) }, { status: gate.reason === 'signed_out' ? 401 : 403 })
@@ -96,7 +97,7 @@ export async function PATCH(request: NextRequest) {
   return NextResponse.json({ ok: true })
 }
 
-export async function GET(request: NextRequest) {
+async function handleGET(request: NextRequest) {
   const staff = await getStaffContext()
   if (!staff || !staff.isActive) {
     return NextResponse.json({ error: 'Sign in as an active staff member to view export detail.' }, { status: 401 })
@@ -126,6 +127,10 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 })
   }
 }
+
+export const POST = withApiLogging('/api/export-status', handlePOST)
+export const PATCH = withApiLogging('/api/export-status', handlePATCH)
+export const GET = withApiLogging('/api/export-status', handleGET)
 
 function adminGateMessage(reason: 'signed_out' | 'inactive' | 'not_admin'): string {
   switch (reason) {

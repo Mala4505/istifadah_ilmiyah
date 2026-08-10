@@ -16,24 +16,24 @@ export type EntryEnriched = {
   vendor_display_name: string | null
   vendor_raw: string | null
   date: string | null
-  tenant_amount: number | null
-  main_amount: number | null
-  amount_variance: number | null
+  amount: number | null
   variance_reason: string | null
-  tenant_status_id: number | null
-  tenant_status_code: string | null
-  tenant_status_label: string | null
-  main_status_id: number | null
-  main_status_code: string | null
-  main_status_label: string | null
-  tenant_status_raw: string | null
-  main_status_raw: string | null
-  head_id: number | null
-  head_name: string | null
+  status_id: number | null
+  status_code: string | null
+  status_label: string | null
+  audit_status_id: number | null
+  audit_status_code: string | null
+  audit_status_label: string | null
+  status_raw: string | null
+  audit_status_raw: string | null
+  admin_head_id: number | null
+  admin_head_name: string | null
   zone_id: number | null
   zone_name: string | null
-  hub_reference: string | null
-  enrichment_note: string | null
+  budget_category_id: number | null
+  budget_category_name: string | null
+  remark: string | null
+  // hub_status_* columns unchanged/deferred, see supabase/migrations/20260811000003
   hub_status_id: number
   hub_status_code: string
   hub_status_label: string
@@ -41,9 +41,10 @@ export type EntryEnriched = {
   hub_status_changed_by: string | null
   hub_status_note: string | null
   hub_status_exported_at: string | null
+  audit_status_changed_at: string | null
+  audit_status_changed_by: string | null
   settles_entry_id: number | null
   is_void: boolean
-  void_reason: string | null
   source: 'import' | 'manual' | 'api'
   import_batch_id: number | null
   created_at: string
@@ -56,10 +57,11 @@ export type LookupOption = { id: number; label: string; department_id?: number |
 export type FilterOptions = {
   departments: LookupOption[]
   budgetHeads: LookupOption[]
-  heads: LookupOption[]
+  adminHeads: LookupOption[]
   zones: LookupOption[]
-  tenantStatuses: LookupOption[]
-  mainStatuses: LookupOption[]
+  budgetCategories: LookupOption[]
+  statuses: LookupOption[]
+  auditStatuses: LookupOption[]
   hubStatuses: LookupOption[]
 }
 
@@ -68,10 +70,11 @@ export type FilterOptions = {
 export type EntriesFilters = {
   department: string
   budgetHead: string
-  head: string
+  adminHead: string
   zone: string
-  tenantStatus: string
-  mainStatus: string
+  budgetCategory: string
+  status: string
+  auditStatus: string
   hubStatus: string
   exportPending: boolean
   dateFrom: string
@@ -84,10 +87,11 @@ export type EntriesFilters = {
 export const DEFAULT_FILTERS: EntriesFilters = {
   department: '',
   budgetHead: '',
-  head: '',
+  adminHead: '',
   zone: '',
-  tenantStatus: '',
-  mainStatus: '',
+  budgetCategory: '',
+  status: '',
+  auditStatus: '',
   hubStatus: '',
   exportPending: false,
   dateFrom: '',
@@ -104,16 +108,15 @@ export type ColumnKey =
   | 'main_number'
   | 'department_name'
   | 'budget_head_short_label'
-  | 'head_name'
+  | 'admin_head_name'
   | 'zone_name'
+  | 'budget_category_name'
   | 'vendor_display_name'
   | 'invoice_number'
   | 'date'
-  | 'tenant_amount'
-  | 'main_amount'
-  | 'amount_variance'
-  | 'tenant_status_label'
-  | 'main_status_label'
+  | 'amount'
+  | 'status_label'
+  | 'audit_status_label'
   | 'hub_status_label'
   | 'export_pending'
   | 'document_count'
@@ -132,14 +135,13 @@ export const ALL_COLUMNS: ColumnDef[] = [
   { key: 'vendor_display_name', label: 'Vendor', defaultVisible: true },
   { key: 'department_name', label: 'Department', defaultVisible: false },
   { key: 'budget_head_short_label', label: 'Budget head', defaultVisible: true },
-  { key: 'head_name', label: 'Head', defaultVisible: false },
+  { key: 'admin_head_name', label: 'Admin head', defaultVisible: false },
   { key: 'zone_name', label: 'Zone', defaultVisible: false },
+  { key: 'budget_category_name', label: 'Budget category', defaultVisible: false },
   { key: 'invoice_number', label: 'Invoice #', defaultVisible: false },
-  { key: 'tenant_amount', label: 'Tenant amt', defaultVisible: true, align: 'right' },
-  { key: 'main_amount', label: 'Main amt', defaultVisible: true, align: 'right' },
-  { key: 'amount_variance', label: 'Variance', defaultVisible: true, align: 'right' },
-  { key: 'tenant_status_label', label: 'Tenant status', defaultVisible: true },
-  { key: 'main_status_label', label: 'Main status', defaultVisible: false },
+  { key: 'amount', label: 'Amount', defaultVisible: true, align: 'right' },
+  { key: 'status_label', label: 'Status', defaultVisible: true },
+  { key: 'audit_status_label', label: 'Audit status', defaultVisible: false },
   { key: 'hub_status_label', label: 'Hub status', defaultVisible: true },
   { key: 'export_pending', label: 'Export', defaultVisible: false },
   { key: 'document_count', label: 'Docs', defaultVisible: true, align: 'right' },

@@ -68,7 +68,7 @@ export function AdvanceSettlementPicker({
         ubbl_number: row.ubbl_number,
         vendor_display_name: row.vendor_display_name,
         vendor_raw: row.vendor_raw,
-        tenant_amount: row.tenant_amount,
+        amount: row.amount,
         date: row.date,
       })
       toast.success('Advance linked.')
@@ -102,7 +102,7 @@ export function AdvanceSettlementPicker({
               <p className="font-medium">{linked.ubbl_number}</p>
               <p className="text-xs text-muted-foreground">
                 {linked.vendor_display_name ?? linked.vendor_raw ?? 'Unknown vendor'} ·{' '}
-                {formatMoney(linked.tenant_amount)} · {formatDate(linked.date)}
+                {formatMoney(linked.amount)} · {formatDate(linked.date)}
               </p>
             </div>
             <Button variant="ghost" size="sm" onClick={clearLink} disabled={isPending}>
@@ -148,7 +148,7 @@ export function AdvanceSettlementPicker({
                       <span className="font-medium">{row.ubbl_number}</span>
                       <span className="text-xs text-muted-foreground">
                         {row.vendor_display_name ?? row.vendor_raw ?? 'Unknown vendor'} ·{' '}
-                        {formatMoney(row.tenant_amount)} · {formatDate(row.date)}
+                        {formatMoney(row.amount)} · {formatDate(row.date)}
                       </span>
                     </button>
                   ))}

@@ -5,10 +5,10 @@ import { createClient } from '@/lib/supabase/server'
 
 export interface SaveEntryEnrichmentInput {
   entryId: number
-  headId: number | null
+  adminHeadId: number | null
   zoneId: number | null
-  hubReference: string | null
-  enrichmentNote: string | null
+  budgetCategoryId: number | null
+  remark: string | null
 }
 
 export interface EntryActionResult {
@@ -18,9 +18,9 @@ export interface EntryActionResult {
 
 /**
  * Saves the Hub-owned enrichment fields on `entries` (MASTER-PLAN §3.4,
- * screen inventory row 4 in §5): `head_id`, `zone_id`, `hub_reference`,
- * `enrichment_note`. Never touched by import (§3.6's upsert excludes these
- * columns by construction) — this is the only writer.
+ * screen inventory row 4 in §5): `admin_head_id`, `zone_id`,
+ * `budget_category_id`, `remark`. Never touched by import (§3.6's upsert
+ * excludes these columns by construction) — this is the only writer.
  *
  * Uses the session-bound client (`lib/supabase/server.ts`), so
  * `entries_update` RLS (role in ('admin','reviewer'), department-scoped,
@@ -43,10 +43,10 @@ export async function saveEntryEnrichment(
   const { data, error } = await supabase
     .from('entries')
     .update({
-      head_id: input.headId,
+      admin_head_id: input.adminHeadId,
       zone_id: input.zoneId,
-      hub_reference: input.hubReference?.trim() || null,
-      enrichment_note: input.enrichmentNote?.trim() || null,
+      budget_category_id: input.budgetCategoryId,
+      remark: input.remark?.trim() || null,
     })
     .eq('id', entryId)
     .select('id')
@@ -119,7 +119,7 @@ export interface AdvancePaymentSearchResult {
   main_number: string | null
   vendor_display_name: string | null
   vendor_raw: string | null
-  tenant_amount: number | null
+  amount: number | null
   date: string | null
 }
 
@@ -138,7 +138,7 @@ export async function searchAdvancePaymentEntries(
 
   let request = supabase
     .from('v_entry_enriched')
-    .select('id, ubbl_number, main_number, vendor_display_name, vendor_raw, tenant_amount, date')
+    .select('id, ubbl_number, main_number, vendor_display_name, vendor_raw, amount, date')
     .eq('type', 'advance_payment')
     .eq('is_void', false)
     .order('date', { ascending: false })

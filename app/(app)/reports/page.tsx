@@ -4,6 +4,7 @@ import { ReportSection } from '@/components/reports/report-section'
 import { DataTable, type DataTableColumn } from '@/components/reports/data-table'
 import { BarList, type BarListItem } from '@/components/reports/bar-list'
 import { ExportCsvButton } from '@/components/reports/export-csv-button'
+import { toCsv } from '@/lib/reports/csv'
 import { SeverityBadge, AgeBucketBadge } from '@/components/reports/severity-badge'
 import { EmptyState } from '@/components/reports/empty-state'
 import {
@@ -43,8 +44,7 @@ type VendorSpendRow = {
   vendor_id: number
   display_name: string
   entry_count: number
-  total_tenant_amount: number | null
-  total_main_amount: number | null
+  total_amount: number | null
   first_entry_date: string | null
   last_entry_date: string | null
   entries_with_documents: number
@@ -57,8 +57,7 @@ type ZoneSpendRow = {
   zone_number: number | null
   department_id: number | null
   entry_count: number
-  total_tenant_amount: number | null
-  total_main_amount: number | null
+  total_amount: number | null
 }
 
 type HubAgeingRow = {
@@ -98,15 +97,15 @@ async function loadReportsData() {
     supabase
       .from('v_vendor_spend')
       .select(
-        'vendor_id, display_name, entry_count, total_tenant_amount, total_main_amount, first_entry_date, last_entry_date, entries_with_documents, document_coverage_pct'
+        'vendor_id, display_name, entry_count, total_amount, first_entry_date, last_entry_date, entries_with_documents, document_coverage_pct'
       )
-      .order('total_tenant_amount', { ascending: false, nullsFirst: false })
+      .order('total_amount', { ascending: false, nullsFirst: false })
       .limit(ROW_CAP)
       .returns<VendorSpendRow[]>(),
     supabase
       .from('v_zone_spend')
-      .select('zone_id, zone_name, zone_number, department_id, entry_count, total_tenant_amount, total_main_amount')
-      .order('total_tenant_amount', { ascending: false, nullsFirst: false })
+      .select('zone_id, zone_name, zone_number, department_id, entry_count, total_amount')
+      .order('total_amount', { ascending: false, nullsFirst: false })
       .returns<ZoneSpendRow[]>(),
     supabase
       .from('v_hub_status_ageing')
@@ -171,22 +170,22 @@ export default async function ReportsPage() {
   const vendorBarItems: BarListItem[] = data.vendorRows.slice(0, 12).map((r) => ({
     key: r.vendor_id,
     label: r.display_name,
-    value: r.total_tenant_amount ?? 0,
+    value: r.total_amount ?? 0,
   }))
 
   const zoneBarItems: BarListItem[] = data.zoneRows
-    .filter((r) => (r.total_tenant_amount ?? 0) > 0)
+    .filter((r) => (r.total_amount ?? 0) > 0)
     .map((r) => ({
       key: r.zone_id ?? 'unassigned',
       label: r.zone_name,
-      value: r.total_tenant_amount ?? 0,
+      value: r.total_amount ?? 0,
     }))
 
   const budgetColumns: DataTableColumn<BudgetVsActualRow>[] = [
     { key: 'head', header: 'Budget Head', render: (r) => r.short_label ?? r.raw_label },
     { key: 'approved', header: 'Approved', align: 'right', render: (r) => formatINR(r.approved_amount) },
     { key: 'utilised', header: 'Utilised (source)', align: 'right', render: (r) => formatINR(r.utilised_amount) },
-    { key: 'actual', header: 'Actual (sum tenant)', align: 'right', render: (r) => formatINR(r.actual_amount) },
+    { key: 'actual', header: 'Actual (sum of amounts)', align: 'right', render: (r) => formatINR(r.actual_amount) },
     { key: 'balance', header: 'Balance', align: 'right', render: (r) => formatINR(r.balance_amount) },
     {
       key: 'pct',
@@ -213,8 +212,7 @@ export default async function ReportsPage() {
       ),
     },
     { key: 'entries', header: 'Entries', align: 'right', render: (r) => formatNumber(r.entry_count) },
-    { key: 'tenant', header: 'Total Tenant Amount', align: 'right', render: (r) => formatINR(r.total_tenant_amount) },
-    { key: 'main', header: 'Total Main Amount', align: 'right', render: (r) => formatINR(r.total_main_amount) },
+    { key: 'total', header: 'Total Amount', align: 'right', render: (r) => formatINR(r.total_amount) },
     { key: 'first', header: 'First Entry', render: (r) => formatDate(r.first_entry_date) },
     { key: 'last', header: 'Last Entry', render: (r) => formatDate(r.last_entry_date) },
     { key: 'coverage', header: 'Doc Coverage', align: 'right', render: (r) => formatPercent(r.document_coverage_pct) },
@@ -234,8 +232,7 @@ export default async function ReportsPage() {
       ),
     },
     { key: 'entries', header: 'Entries', align: 'right', render: (r) => formatNumber(r.entry_count) },
-    { key: 'tenant', header: 'Total Tenant Amount', align: 'right', render: (r) => formatINR(r.total_tenant_amount) },
-    { key: 'main', header: 'Total Main Amount', align: 'right', render: (r) => formatINR(r.total_main_amount) },
+    { key: 'total', header: 'Total Amount', align: 'right', render: (r) => formatINR(r.total_amount) },
   ]
 
   const ageingColumns: DataTableColumn<HubAgeingRow>[] = [
@@ -302,22 +299,22 @@ export default async function ReportsPage() {
         description={
           data.budgetRows.some((r) => r.budget_status_note)
             ? 'Heads with no approved budget show "no approved budget" instead of a −100% figure (§3.5).'
-            : 'Latest allocation snapshot against the sum of tenant amounts per head.'
+            : 'Latest allocation snapshot against the sum of amounts per head.'
         }
         action={
           <ExportCsvButton
             filename="budget-vs-actual.csv"
-            data={data.budgetRows}
-            columns={[
+            rowCount={data.budgetRows.length}
+            csv={toCsv(data.budgetRows, [
               { header: 'Budget Head', value: (r) => r.short_label ?? r.raw_label },
               { header: 'Approved Amount', value: (r) => r.approved_amount },
               { header: 'Utilised Amount (source)', value: (r) => r.utilised_amount },
-              { header: 'Actual (sum tenant)', value: (r) => r.actual_amount },
+              { header: 'Actual (sum of amounts)', value: (r) => r.actual_amount },
               { header: 'Balance', value: (r) => r.balance_amount },
               { header: '% of Approved', value: (r) => r.pct_of_approved },
               { header: 'Note', value: (r) => r.budget_status_note },
               { header: 'Entries', value: (r) => r.entry_count },
-            ]}
+            ])}
           />
         }
       >
@@ -340,16 +337,15 @@ export default async function ReportsPage() {
         action={
           <ExportCsvButton
             filename="vendor-spend.csv"
-            data={data.vendorRows}
-            columns={[
+            rowCount={data.vendorRows.length}
+            csv={toCsv(data.vendorRows, [
               { header: 'Vendor', value: (r) => r.display_name },
               { header: 'Entries', value: (r) => r.entry_count },
-              { header: 'Total Tenant Amount', value: (r) => r.total_tenant_amount },
-              { header: 'Total Main Amount', value: (r) => r.total_main_amount },
+              { header: 'Total Amount', value: (r) => r.total_amount },
               { header: 'First Entry Date', value: (r) => r.first_entry_date },
               { header: 'Last Entry Date', value: (r) => r.last_entry_date },
               { header: 'Document Coverage %', value: (r) => r.document_coverage_pct },
-            ]}
+            ])}
           />
         }
       >
@@ -372,13 +368,12 @@ export default async function ReportsPage() {
         action={
           <ExportCsvButton
             filename="zone-spend.csv"
-            data={data.zoneRows}
-            columns={[
+            rowCount={data.zoneRows.length}
+            csv={toCsv(data.zoneRows, [
               { header: 'Zone', value: (r) => r.zone_name },
               { header: 'Entries', value: (r) => r.entry_count },
-              { header: 'Total Tenant Amount', value: (r) => r.total_tenant_amount },
-              { header: 'Total Main Amount', value: (r) => r.total_main_amount },
-            ]}
+              { header: 'Total Amount', value: (r) => r.total_amount },
+            ])}
           />
         }
       >
@@ -401,14 +396,14 @@ export default async function ReportsPage() {
         action={
           <ExportCsvButton
             filename="hub-status-ageing.csv"
-            data={data.ageingRows}
-            columns={[
+            rowCount={data.ageingRows.length}
+            csv={toCsv(data.ageingRows, [
               { header: 'UBBL Number', value: (r) => r.ubbl_number },
               { header: 'Hub Status', value: (r) => r.hub_status_label },
               { header: 'Days in Status', value: (r) => r.days_in_status },
               { header: 'Age Bucket', value: (r) => r.age_bucket },
               { header: 'Changed At', value: (r) => r.hub_status_changed_at },
-            ]}
+            ])}
           />
         }
       >
@@ -443,8 +438,8 @@ export default async function ReportsPage() {
         action={
           <ExportCsvButton
             filename="open-issues.csv"
-            data={data.issueRows}
-            columns={[
+            rowCount={data.issueRows.length}
+            csv={toCsv(data.issueRows, [
               { header: 'Source', value: (r) => (r.source_table === 'flags' ? 'Flag' : 'Exception') },
               { header: 'Type', value: (r) => r.issue_type },
               { header: 'Severity', value: (r) => r.severity },
@@ -452,7 +447,7 @@ export default async function ReportsPage() {
               { header: 'Entry', value: (r) => r.entry_id },
               { header: 'Description', value: (r) => r.description },
               { header: 'Raised', value: (r) => r.created_at },
-            ]}
+            ])}
           />
         }
       >

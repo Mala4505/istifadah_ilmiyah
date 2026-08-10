@@ -51,26 +51,39 @@ const FIELD_LABELS: Record<string, string> = {
   vendor_id: 'Vendor',
   vendor_raw: 'Vendor (raw)',
   date: 'Date',
-  tenant_amount: 'Tenant amount',
-  main_amount: 'Main amount',
+  amount: 'Amount',
   variance_reason: 'Variance reason',
-  tenant_status_id: 'Tenant status',
-  main_status_id: 'Main status',
-  tenant_status_raw: 'Tenant status (raw)',
-  main_status_raw: 'Main status (raw)',
-  head_id: 'Head',
+  status_id: 'Status',
+  audit_status_id: 'Audit status',
+  status_raw: 'Status (raw)',
+  audit_status_raw: 'Audit status (raw)',
+  admin_head_id: 'Admin head',
   zone_id: 'Zone',
-  hub_reference: 'Hub reference',
-  enrichment_note: 'Enrichment note',
+  budget_category_id: 'Budget category',
+  remark: 'Remark',
   hub_status_id: 'Hub status',
   hub_status_note: 'Hub status note',
   hub_status_exported_at: 'Exported at',
   hub_status_export_batch_id: 'Export batch',
+  audit_status_changed_at: 'Audit status changed at',
   settles_entry_id: 'Settles advance',
   is_void: 'Void',
-  void_reason: 'Void reason',
   source: 'Source',
   import_batch_id: 'Import batch',
+  // Pre-2026-08-11 field names, kept so change-log rows written before the
+  // entries restructuring (supabase/migrations/20260811000001-3) still render
+  // with a readable label instead of falling through to a raw snake_case guess.
+  tenant_amount: 'Amount (pre-rename)',
+  main_amount: 'Main amount (pre-rename, dropped)',
+  amount_variance: 'Variance (pre-rename, dropped)',
+  tenant_status_id: 'Status (pre-rename)',
+  main_status_id: 'Audit status (pre-rename)',
+  tenant_status_raw: 'Status (raw, pre-rename)',
+  main_status_raw: 'Audit status (raw, pre-rename)',
+  head_id: 'Admin head (pre-rename)',
+  hub_reference: 'Hub reference (dropped 2026-08-11)',
+  enrichment_note: 'Remark (pre-rename)',
+  void_reason: 'Void reason (dropped 2026-08-11)',
 }
 
 export function humanizeFieldName(field: string): string {
@@ -81,7 +94,7 @@ export function humanizeFieldName(field: string): string {
     .join(' ')
 }
 
-const MONEY_FIELDS = new Set(['tenant_amount', 'main_amount', 'amount_variance'])
+const MONEY_FIELDS = new Set(['amount', 'tenant_amount', 'main_amount', 'amount_variance'])
 const DATE_ONLY_FIELDS = new Set(['date'])
 const DATETIME_FIELDS = new Set([
   'hub_status_changed_at',
@@ -95,7 +108,7 @@ const BOOLEAN_FIELDS = new Set(['is_void'])
 /**
  * Best-effort human-readable rendering of a raw from/to value out of
  * `entry_change_log.changes` (§3.9). `resolveLookup` lets a caller resolve a
- * foreign-key id (head_id, zone_id, hub_status_id) to a name/label using
+ * foreign-key id (admin_head_id, zone_id, budget_category_id, hub_status_id) to a name/label using
  * option lists already fetched for the page — everything else renders as
  * its raw value, which is honest rather than guessing at a join that isn't
  * available client-side.

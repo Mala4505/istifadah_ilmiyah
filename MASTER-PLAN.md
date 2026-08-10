@@ -1,4 +1,4 @@
-# Istifada Ilmiyah Financial Hub — Master Plan v2
+# Istefadah Ilmiyah — Master Plan v2
 
 **Supersedes:** `~/.claude/plans/twinkling-juggling-hartmanis.md`
 **Date:** 2026-08-08
@@ -10,10 +10,12 @@
 
 | Question | Decision |
 |---|---|
-| Budget heads | **Two separate dimensions, not merged.** `head` = the 42 from `master.xlsx` (Hub-internal). `budget_head` = whatever the source system sends (`Venue setup (AVIT)`). A nullable `budget_head.head_id` is built now so merging later is filling in ~10 values in one screen, not a migration. |
-| Hub scope | **Read, verify, report — plus two Hub-owned statuses.** No approval workflow, no payment recording: those stay in Departmental/Main and are imported as fact. But **`awaiting verification` and `awaiting validation` are set in the Hub portal and exported back to the modules.** These two are the only fields that flow outward. Everything else is one-way in, via import/API. |
+| Budget heads | **Two separate dimensions, not merged.** `admin_head` (renamed from `head` 2026-08-11) = the 42 from `master.xlsx` (Hub-internal). `budget_head` = whatever the source system sends (`Venue setup (AVIT)`). A nullable `budget_head.head_id` is built now so merging later is filling in ~10 values in one screen, not a migration. A third dimension, `budget_category`, joined this table on 2026-08-11 — see §3.1. |
+| Hub scope | **Read, verify, report — plus two Hub-owned statuses.** No approval workflow, no payment recording: those stay in Departmental/Audit (renamed from "Main" 2026-08-11) and are imported as fact. But **`awaiting verification` and `awaiting validation` are set in the Hub portal and exported back to the modules.** These two are the only fields that flow outward. Everything else is one-way in, via import/API. |
 | Volume | **1,000–10,000 entries** for the full event. Drives: keyboard-first review (§7), department-scoped RLS, batch OCR. |
 | Delivery | **7 days, hard.** Deployed and usable by real staff at day 7. §12 states what does not make it. |
+
+**2026-08-11 addendum, read this before trusting the table below at face value:** the "Main" module is really called **Audit** (renamed everywhere except the literal `main_number` column, which matches the source file's own header and stays as-is), there is no genuinely separate second amount (`entries` carries one `amount`, not `tenant_amount`/`main_amount`, §3.4), and the Hub's own status folds into the same `status_id` as the imported status rather than staying a separate `hub_status_id`. The row below documents what v1 vs v2 reasoned at the time — kept as historical record, not updated in place. §3.1 and §3.4 are the current, correct shape.
 
 ---
 
@@ -73,10 +75,22 @@ create table public.department (
   is_active boolean not null default true,
   created_at timestamptz not null default now()
 );
--- seed: id=1 'Venue Setup'. More arrive via import with zero schema change.
+-- seed: id=1 'Venue Setup'. Confirmed 2026-08-11: at least 13 more departments are
+-- real and known now -- Dummas, Medical, Daerat ul Aqeeq, I T S, Elaam, Madaris
+-- Imaniyah, Al Vazarat us Saifiyah office, Helpline & Support, Taharat, Scanning,
+-- Afternoon Sessions, Flow Management/Safety & Security, Footwear Storage Solutions
+-- & Sadaqa Management -- read off Departmental/budget heads.1.xlsx's pre-bracket
+-- names. More arrive via import with zero schema change, exactly as originally
+-- designed; this was always supported, it just only had one department's worth of
+-- data until now.
 
--- The 42 granular heads from master.xlsx. Hub-internal. NOT the source system's heads.
-create table public.head (
+-- Renamed from `head` (confirmed 2026-08-11) purely to stop colliding with "budget
+-- head" in conversation. UNCHANGED in content: still exactly the 42 granular
+-- Venue-Setup expense items from master.xlsx, still Hub-internal, still NOT the
+-- source system's own heads, still assigned by hand after import/OCR. Confirmed
+-- explicitly NOT the same table as budget_category below, despite both being
+-- manually-assigned enrichment fields -- see the note after budget_category.
+create table public.admin_head (
   id bigint generated always as identity primary key,
   department_id bigint not null references public.department(id),
   head_number int not null,              -- 1..42, staff refer to these by number
@@ -87,7 +101,8 @@ create table public.head (
 );
 -- seed: 42 rows under department_id=1, head_number/name exactly as in master.xlsx
 
--- ZONE, not venue. Scoped to the department, because master.xlsx scopes it to Venue Setup.
+-- ZONE, not venue. Scoped to the department, because master.xlsx scopes it to Venue
+-- Setup. Unchanged -- staff add/maintain these themselves, same as admin_head.
 create table public.zone (
   id bigint generated always as identity primary key,
   department_id bigint not null references public.department(id),
@@ -98,21 +113,53 @@ create table public.zone (
 );
 -- seed: 13 rows under department_id=1. Note zone 13 = 'OFFICE EXPENSE' — a bucket, not a place.
 
--- The source system's OWN budget-head dimension. Auto-created on import.
--- head_id stays null until you decide to merge the two dimensions.
+-- The source system's OWN budget-head dimension. Auto-created on import. UNCHANGED
+-- by any of today's renames -- still exactly as before, still untouched by the admin
+-- portal. head_id stays null until you decide to merge the two dimensions.
 create table public.budget_head (
   id bigint generated always as identity primary key,
   department_id bigint references public.department(id),
   raw_label text not null unique,        -- 'Venue setup (AVIT)' exactly as exported
   short_label text,                      -- 'AVIT' — parsed from the parentheses
-  head_id bigint references public.head(id),   -- the future merge point; null for now
+  head_id bigint references public.admin_head(id),   -- the future merge point; null for now
   first_seen_batch_id bigint,
   created_at timestamptz not null default now()
 );
 create index budget_head_head_idx on public.budget_head (head_id);
 ```
 
-**Why this shape:** the merge you deferred becomes an admin screen listing ~10 `budget_head` rows with a dropdown of 42 heads. No migration, no reprocessing, no data loss. If you decide never to merge, nothing breaks — the two dimensions just report separately.
+**Why this shape:** the merge you deferred becomes an admin screen listing ~10 `budget_head` rows with a dropdown of 42 `admin_head` rows. No migration, no reprocessing, no data loss. If you decide never to merge, nothing breaks — the two dimensions just report separately.
+
+**`budget_category` is a fourth, unrelated dimension — renamed 2026-08-11 from the earlier `budget_head_master` sketch, and simplified.**
+It is not the `head_id` merge target above, and it is not `admin_head` under a new name — those two share a
+*role* (both are hand-assigned enrichment, unlike the auto-imported `budget_head`) but hold completely different
+data: `admin_head` is Venue Setup's 42 physical/expense items from `master.xlsx`; `budget_category` is the
+bracket half of labels like `"Dummas (AVIT)"` from `Departmental/budget heads.1.xlsx`, spanning every
+department. Confirmed explicitly 2026-08-11 after this got conflated mid-conversation: **keep them as two
+separate tables and two separate columns on `entries`.** `budget_head` (import-derived raw labels, above) and
+`budget_category` (below) have **no FK relationship to each other, ever**.
+
+```sql
+-- A flat, curated, cross-department category list -- not scoped to a department,
+-- because the same category (e.g. "AVIT") repeats across several (Dummas AVIT, ITS
+-- AVIT are the same concept). "Not every department has every category" (the matrix
+-- you described) is handled by entries carrying department_id and budget_category_id
+-- independently, not by a join/allow-list table -- there was no request for the
+-- second one to gate the first.
+create table public.budget_category (
+  id bigint generated always as identity primary key,
+  name text not null,                    -- 'AVIT', 'Accommodation', 'Mawaid / Snacks', ...
+  cluster_group_id bigint references public.budget_category(id),  -- self-ref merge,
+                                          -- same pattern as vendor.cluster_group_id --
+                                          -- for near-duplicate spellings, null = independent
+  is_confirmed boolean not null default false,
+  created_at timestamptz not null default now()
+);
+```
+
+`entries.budget_category_id` (§3.4) is how a reviewer records this — manually, per entry, the same way
+`admin_head_id`/`zone_id` are set today. Nothing about import, `budget_head`, or the deferred `head_id` merge
+touches this column, in either direction.
 
 ### 3.2 Vendor identity
 
@@ -156,17 +203,20 @@ create table public.entry_status (
   id bigint generated always as identity primary key,
   code text not null unique,
   label text not null,
-  source_system text not null check (source_system in ('departmental','main')),
+  source_system text not null check (source_system in ('departmental','audit')),
   sort_order int not null,
   is_terminal boolean not null default false
 );
 ```
 
-**Do not seed this from guesswork.** v1 seeded `subject_to_approval / awaiting_for_approval / received / paid`; the actual file contains `pending`, `sent_main` (Departmental) and `approved` (Main). None of v1's four appear. Seed from observed values, and have the importer **auto-insert any unseen status code** with `sort_order = 999` and raise a low-severity exception, so an unknown status surfaces instead of silently mapping to null. The raw text is preserved on the entry regardless.
+**Do not seed this from guesswork.** v1 seeded `subject_to_approval / awaiting_for_approval / received / paid`; the actual file contains `pending`, `sent_main` (Departmental) and `approved` (Audit — that column was literally headed "Main Status" in the source file; the *status code itself*, `sent_main`, is real observed data and is not renamed, only the module name is). None of v1's four appear. Seed from observed values, and have the importer **auto-insert any unseen status code** with `sort_order = 999` and raise a low-severity exception, so an unknown status surfaces instead of silently mapping to null. The raw text is preserved on the entry regardless.
 
-**The Hub-owned status is a separate dimension.** `awaiting verification` and `awaiting validation` are set by staff in this portal and pushed back out to the modules. They must never share a table or a column with the imported statuses, or an import will overwrite a decision a human made.
+**REVERSED 2026-08-11 — read this before the box below.** This subsection originally said the Hub-owned status "must never share a table or a column with the imported statuses." You've since confirmed the opposite: `entries.status_id` (§3.4) is now **one** merged lifecycle — the imported statuses (`pending`, `sent_main`, ...) and the Hub's own later stages (`awaiting_verification`, `awaiting_validation`, ...) are the same column, referencing the same `entry_status` lookup table. The standalone `hub_status` table sketched below is being retired into `entry_status` rather than staying separate. **What's still open, not yet decided:** the exact seed rows for the Hub-added stages once they live in `entry_status` (their `source_system` value, since that column currently only allows `'departmental'`/`'audit'` — a Hub-added stage is neither), the full ordered sequence, and whether/how `audit_status_id` reaching some value auto-advances `status_id` — you described that mechanism but the message describing exactly how the switch is triggered (import vs. manual vs. API) cut off before finishing; §17 still needs that answer before this becomes buildable. The sketch below is kept as a record of the pre-merge shape, not a live design.
 
 ```sql
+-- PRE-MERGE SKETCH, superseded 2026-08-11 (see the note above) -- kept for the
+-- historical record of what "Hub-owned status" meant before entries.status_id
+-- absorbed it. Do not build against this table.
 create table public.hub_status (
   id bigint generated always as identity primary key,
   code text not null unique,
@@ -182,11 +232,15 @@ create table public.hub_status (
 -- Add further states as a plain insert — no migration, per the text+CHECK-free lookup design.
 ```
 
-The exact lifecycle — whether `awaiting_verification` always precedes `awaiting_validation`, what state follows validation, and whether either can be reverted — is open (§13). The table is ordered by `sort_order` and the UI enforces whatever transition rules you confirm; nothing in the schema hard-codes a sequence, so confirming it later is a config change.
+The exact lifecycle — whether `awaiting_verification` always precedes `awaiting_validation`, what state follows validation, and whether either can be reverted — is open (§17). The table is ordered by `sort_order` and the UI enforces whatever transition rules you confirm; nothing in the schema hard-codes a sequence, so confirming it later is a config change.
 
 ### 3.4 `entries` — the unified record
 
 ```sql
+-- REVISED 2026-08-11 -- see the inline notes below for what changed and why. The
+-- money and status shape here supersedes §1's "what changed from v1" table and
+-- §0's Decisions-locked row on the same subject; those are left as historical
+-- record of what v1/v2 originally reasoned, not corrected in place.
 create table public.entries (
   id bigint generated always as identity primary key,
 
@@ -194,7 +248,11 @@ create table public.entries (
   type text not null default 'invoice'
     check (type in ('invoice','reimbursement','advance_payment')),
   ubbl_number text not null unique,      -- normalized to text on import; see note below
-  main_number text unique,               -- unique enforced: duplicates are a real integrity signal
+  main_number text unique,               -- literal column name from the source file (Main
+                                          -- Entry Number / Main Number) -- confirmed
+                                          -- 2026-08-11: keep this one as "main", do not
+                                          -- rename to "audit" like everything else below.
+                                          -- unique enforced: duplicates are a real integrity signal
 
   -- classification (import-owned)
   department_id bigint references public.department(id),
@@ -204,41 +262,57 @@ create table public.entries (
   vendor_raw text,                       -- exactly as exported, always preserved
   date date,
 
-  -- money: BOTH sides, per the Main Reconciliation contract
-  tenant_amount numeric(14,2),
-  main_amount numeric(14,2),
-  amount_variance numeric(14,2) generated always as (
-    case when tenant_amount is not null and main_amount is not null
-         then tenant_amount - main_amount end
-  ) stored,
-  variance_reason text,                  -- the export's 'Reason' column
+  -- money. Confirmed 2026-08-11: there is no genuinely separate second figure --
+  -- the real export's "Tenant Amount"/"Main Amount" columns always carry the same
+  -- value, because Audit doesn't re-enter its own number, it audits this one. One
+  -- column, not two, and no stored variance column either: whether a bill's
+  -- split-across-heads entries sum back to its original export total is a computed
+  -- check (§3.6 point 8), run when needed, never persisted here.
+  amount numeric(14,2),
+  variance_reason text,                  -- the export's 'Reason' column, kept for
+                                          -- whatever mismatch note the source itself carries
 
-  -- status (import-owned, raw always kept)
-  tenant_status_id bigint references public.entry_status(id),
-  main_status_id bigint references public.entry_status(id),
-  tenant_status_raw text,
-  main_status_raw text,
+  -- status (import-owned, raw always kept). "Main" renamed to "Audit" everywhere
+  -- except main_number above (confirmed 2026-08-11: that one matches the source
+  -- file's own column name, so it stays). status_id also absorbs what used to be
+  -- the separate hub_status_id below -- the Hub's own awaiting-verification /
+  -- awaiting-validation steps are later stages of this SAME lifecycle now, not a
+  -- second column. audit_status_id remains genuinely separate, per your instruction
+  -- that audit stays its own track. The exact sequence (which status precedes which,
+  -- what audit_status triggers) is still open -- see §17.
+  status_id bigint references public.entry_status(id),
+  audit_status_id bigint references public.entry_status(id),
+  status_raw text,
+  audit_status_raw text,
 
   -- Hub enrichment (never touched by import)
-  head_id bigint references public.head(id),
+  admin_head_id bigint references public.admin_head(id),   -- renamed from head_id with the table
   zone_id bigint references public.zone(id),
-  hub_reference text,                    -- the 'new' column, until you define it
-  enrichment_note text,
+  budget_category_id bigint references public.budget_category(id),  -- see §3.1: unrelated
+                                          -- to budget_head_id above and to admin_head_id — a
+                                          -- reviewer sets this by hand, same as the other two
+  remark text,                           -- renamed from enrichment_note — a plain note
 
-  -- Hub-OWNED status: set here, exported outward. Never written by import.
-  hub_status_id bigint not null default 1 references public.hub_status(id),
-  hub_status_changed_at timestamptz,
-  hub_status_changed_by uuid references auth.users(id),
-  hub_status_note text,
-  hub_status_exported_at timestamptz,    -- null = pending export
-  hub_status_export_batch_id bigint references public.status_export_batch(id),
+  -- status change tracking. One pair per status column now that audit_status has
+  -- its own (added 2026-08-11, you asked for audit to have the same when/who
+  -- tracking as the general status already had).
+  status_changed_at timestamptz,
+  status_changed_by uuid references auth.users(id),
+  status_note text,                      -- why status changed, distinct from remark above
+  status_exported_at timestamptz,        -- null = pending export
+  status_export_batch_id bigint references public.status_export_batch(id),  -- which
+                                          -- export batch/run sent this status out —
+                                          -- traces the row to a delivered batch
+  audit_status_changed_at timestamptz,
+  audit_status_changed_by uuid references auth.users(id),
 
-  -- advance settlement
-  settles_entry_id bigint references public.entries(id),   -- this invoice settles that advance
+  -- advance settlement — kept as an unused placeholder (confirmed 2026-08-11) until
+  -- the actual settlement workflow is designed; see §17 item 10
+  settles_entry_id bigint references public.entries(id),
 
   -- lifecycle
-  is_void boolean not null default false, -- soft delete only; financial rows are never hard-deleted
-  void_reason text,
+  is_void boolean not null default false, -- soft delete only; financial rows are never hard-deleted.
+                                          -- void_reason dropped 2026-08-11 — not required
 
   -- provenance
   source text not null default 'import' check (source in ('import','manual','api')),
@@ -252,20 +326,22 @@ create table public.entries (
 
 create index entries_date_idx on public.entries (date);
 create index entries_dept_bh_idx on public.entries (department_id, budget_head_id);
-create index entries_head_idx on public.entries (head_id) where head_id is not null;
+create index entries_admin_head_idx on public.entries (admin_head_id) where admin_head_id is not null;
 create index entries_zone_idx on public.entries (zone_id) where zone_id is not null;
+create index entries_budget_category_idx on public.entries (budget_category_id)
+  where budget_category_id is not null;
 create index entries_vendor_idx on public.entries (vendor_id);
-create index entries_tenant_status_idx on public.entries (tenant_status_id, date);
+create index entries_status_idx on public.entries (status_id, date);
 create index entries_main_number_idx on public.entries (main_number) where main_number is not null;
 create index entries_invoice_number_idx on public.entries (invoice_number);
 create index entries_batch_idx on public.entries (import_batch_id);
-create index entries_variance_idx on public.entries (amount_variance)
-  where amount_variance is not null and amount_variance <> 0;
 create index entries_settles_idx on public.entries (settles_entry_id) where settles_entry_id is not null;
-create index entries_hub_status_idx on public.entries (hub_status_id);
--- the export queue: everything set in the Hub that hasn't been pushed out yet
-create index entries_pending_export_idx on public.entries (hub_status_changed_at)
-  where hub_status_exported_at is null and hub_status_id <> 1;
+-- the export queue: everything set in the Hub that hasn't been pushed out yet.
+-- Condition TBD (was `hub_status_id <> 1`, i.e. "not the default not-set state") --
+-- needs to be re-expressed once the merged status_id's full sequence (§17) is
+-- confirmed, since "not set" may not stay a single well-known id the same way.
+create index entries_pending_export_idx on public.entries (status_changed_at)
+  where status_exported_at is null;
 ```
 
 **`ubbl_number` normalization is mandatory, not cosmetic.** The export mixes integers (`202608051`) and strings (`ADP_202608054`). SheetJS/openpyxl return a JS number or Python int for the former; naive `String(v)` on a float yields `"202608051"` on one runtime and `"202608051.0"` on another, which breaks the unique key and duplicates every advance on the second import. The importer runs a single `normalizeId()` — reject non-finite, reject decimals, `String(Math.trunc(n))` for numbers, `.trim()` for strings — and unit-tests it against both shapes before anything else runs.
@@ -299,7 +375,7 @@ Append-only snapshots. Current position = latest row per head. Burn-over-time co
 ```sql
 create table public.import_batch (
   id bigint generated always as identity primary key,
-  source_system text not null check (source_system in ('departmental','main')),
+  source_system text not null check (source_system in ('departmental','audit')),
   source_filename text not null,
   file_hash_sha256 text not null,
   sheet_name text,
@@ -339,17 +415,17 @@ create index import_row_log_entry_idx on public.import_row_log (entry_id);
 3. A row is an **entry row** when `UBBL Number` is non-empty. No UBBL → not an entry.
 4. Skip the `Grand Total` row — detected by `Department == 'Grand Total'` in **column C**, not column A.
 5. Trim `Invoice Number`; null out `NA` and blanks. Note `' quotation'` is a real value — an advance against a quotation, not an invoice number.
-6. `type`: `ADP_` prefix → `advance_payment`, else `invoice`. **Refine from Sheet 2's `Type` column** once you send a populated Main export; the prefix heuristic is a placeholder, and the code isolates it in one function.
-7. Map `Status` / `Main Status` to `entry_status`; auto-insert unknown codes with an exception; always keep the raw text.
-8. Assert `sum(entry tenant_amount) == allocation.utilised_amount` per head. This holds exactly in the sample (Other setup expenses 2,216,011; Dome Tents 14,200,000; Labour 430,850). A mismatch is a `high` exception — it means the export is inconsistent and nothing downstream should be trusted.
+6. `type`: `ADP_` prefix → `advance_payment`, else `invoice`. **Deprioritized 2026-08-11 per you** — the prefix heuristic isn't reliable and you're supplying the actual invoice/advance-payment/reimbursement rule directly instead (reimbursement itself is post-event, not active yet). The code still isolates this in one function so swapping the rule is a config change, not a rewrite.
+7. Map `Status` / `Main Status` to `entry_status` (`status_id` / `audit_status_id` — "Main" renamed to "Audit" 2026-08-11, see §3.4); auto-insert unknown codes with an exception; always keep the raw text.
+8. Assert `sum(entry amount) == allocation.utilised_amount` per head. This holds exactly in the sample (Other setup expenses 2,216,011; Dome Tents 14,200,000; Labour 430,850). A mismatch is a `high` exception — it means the export is inconsistent and nothing downstream should be trusted.
 
 **Upsert — Hub-owned columns excluded by construction:**
 
 ```sql
 insert into public.entries (
   type, ubbl_number, main_number, department_id, budget_head_id, invoice_number,
-  vendor_id, vendor_raw, date, tenant_amount, main_amount, variance_reason,
-  tenant_status_id, main_status_id, tenant_status_raw, main_status_raw,
+  vendor_id, vendor_raw, date, amount, variance_reason,
+  status_id, audit_status_id, status_raw, audit_status_raw,
   budget_head_raw, source, import_batch_id, updated_at
 ) values (...)
 on conflict (ubbl_number) do update set
@@ -360,35 +436,38 @@ on conflict (ubbl_number) do update set
   vendor_id         = excluded.vendor_id,
   vendor_raw        = excluded.vendor_raw,
   date              = excluded.date,
-  tenant_amount     = excluded.tenant_amount,
-  main_amount       = coalesce(excluded.main_amount, entries.main_amount),
+  amount            = excluded.amount,
   variance_reason   = coalesce(excluded.variance_reason, entries.variance_reason),
-  tenant_status_id  = excluded.tenant_status_id,
-  main_status_id    = coalesce(excluded.main_status_id, entries.main_status_id),
-  tenant_status_raw = excluded.tenant_status_raw,
-  main_status_raw   = coalesce(excluded.main_status_raw, entries.main_status_raw),
+  status_id         = excluded.status_id,
+  audit_status_id   = coalesce(excluded.audit_status_id, entries.audit_status_id),
+  status_raw        = excluded.status_raw,
+  audit_status_raw  = coalesce(excluded.audit_status_raw, entries.audit_status_raw),
   budget_head_raw   = excluded.budget_head_raw,
   import_batch_id   = excluded.import_batch_id,
   updated_at        = now();
--- head_id, zone_id, hub_reference, enrichment_note, settles_entry_id, is_void,
--- hub_status_id, hub_status_changed_at/by, hub_status_note, hub_status_exported_at
--- are deliberately absent. Postgres leaves them untouched. This is the guarantee.
+-- admin_head_id, zone_id, budget_category_id, remark, settles_entry_id, is_void,
+-- status_changed_at/by, status_note, status_exported_at, status_export_batch_id,
+-- audit_status_changed_at/by are deliberately absent. Postgres leaves them
+-- untouched. This is the guarantee. Note status_id itself IS in the insert/update
+-- list above (the import's own status feed) — only the Hub-added *tracking* columns
+-- around it are excluded, same as before; re-read the note on status_id in §3.4 if
+-- this looks like a contradiction of "hub-owned columns excluded."
 ```
 
-The `coalesce` on Main-side columns matters: a Departmental import must never blank a Main value the Main import already supplied.
+The `coalesce` on Audit-side columns matters: a Departmental import must never blank an Audit value the Audit-side import already supplied.
 
-**The `hub_status_*` exclusion is the most consequential line in that statement.** Those columns hold a decision a human made in this portal, which the modules do not know about until the Hub exports it. If a re-import ever wrote them, a staff member's verification decision would silently revert to the module's stale view. The idempotency test on day 6 asserts this explicitly.
+**The status-tracking-column exclusion is the most consequential part of that statement.** Those columns hold a decision a human made in this portal, which the modules do not know about until the Hub exports it. If a re-import ever wrote them, a staff member's verification decision would silently revert to the module's stale view. The idempotency test on day 6 asserts this explicitly.
 
-**Both sources, one module.** `import-excel` is parameterized by `source_system`. Departmental's shape is known now; Main's is defined by Sheet 2's header row. The Main mapping is written on day 2 against that contract and wired the day a populated file arrives — a config change, not new architecture.
+**Both sources, one module.** `import-excel` is parameterized by `source_system`. Departmental's shape is known now; Audit's is defined by Sheet 2's header row. The Audit mapping is written on day 2 against that contract and wired the day a populated file arrives — a config change, not new architecture.
 
 ### 3.7 Status export — the outward path
 
-The two Hub-owned statuses are set here and pushed back to Departmental/Main. This is the one place data flows outward, and it is the reason "push back" is no longer a future-tense pillar.
+The two Hub-owned statuses are set here and pushed back to Departmental/Audit. This is the one place data flows outward, and it is the reason "push back" is no longer a future-tense pillar.
 
 ```sql
 create table public.status_export_batch (
   id bigint generated always as identity primary key,
-  target_system text not null check (target_system in ('departmental','main','both')),
+  target_system text not null check (target_system in ('departmental','audit','both')),
   format text not null default 'xlsx' check (format in ('xlsx','csv','api')),
   row_count int not null,
   storage_path text,                     -- the generated file, if format <> 'api'
@@ -409,8 +488,8 @@ create table public.status_export_row (
   entry_id bigint not null references public.entries(id),
   ubbl_number text not null,             -- snapshotted: the export must not depend on a later edit
   main_number text,
-  hub_status_code text not null,
-  hub_status_note text,
+  status_code text not null,             -- renamed from hub_status_code 2026-08-11
+  status_note text,
   changed_at timestamptz not null,
   changed_by uuid references auth.users(id),
   created_at timestamptz not null default now(),
@@ -419,9 +498,9 @@ create table public.status_export_row (
 create index status_export_row_entry_idx on public.status_export_row (entry_id);
 ```
 
-**Flow.** An admin opens `/export`, sees every entry whose `hub_status_exported_at is null` and whose status is not `not_set`, reviews the list, and generates a batch. The generator, in one transaction: writes `status_export_batch`, snapshots one `status_export_row` per entry, sets `entries.hub_status_exported_at = now()` and `hub_status_export_batch_id`, and produces an `.xlsx` keyed on **both** `UBBL Number` and `Main Entry Number` — because those two namespaces overlap (§3.4) and the receiving module must be able to match on the one it owns.
+**Flow.** An admin opens `/export`, sees every entry whose `status_exported_at is null` and whose status is past the not-yet-enriched state, reviews the list, and generates a batch. The generator, in one transaction: writes `status_export_batch`, snapshots one `status_export_row` per entry, sets `entries.status_exported_at = now()` and `status_export_batch_id`, and produces an `.xlsx` keyed on **both** `UBBL Number` and `Main Entry Number` — because those two namespaces overlap (§3.4) and the receiving module must be able to match on the one it owns.
 
-**Re-export is explicit, not automatic.** If someone changes a status again after export, `hub_status_exported_at` resets to null and the entry re-enters the queue. The previous `status_export_row` stays as a permanent record of what was sent and when — a delivered export is never rewritten.
+**Re-export is explicit, not automatic.** If someone changes a status again after export, `status_exported_at` resets to null and the entry re-enters the queue. The previous `status_export_row` stays as a permanent record of what was sent and when — a delivered export is never rewritten.
 
 **Acknowledgement is tracked but not required.** `status` moves `generated → delivered → acknowledged` manually in week 1, because delivery is a person sending a file. When the API replaces the file (week 2+), the same three states are set programmatically and nothing else changes — which is precisely why the state machine exists now rather than later.
 
@@ -578,7 +657,7 @@ create index entry_change_log_entry_idx on public.entry_change_log (entry_id, ch
 
 Written by a `before update` trigger that also forces `updated_at = now()` and `updated_by = auth.uid()` server-side. The same trigger pattern covers `document_extraction` and `document_extraction_line_item`. Client-supplied audit values are never trusted.
 
-**Hub status changes get the same treatment, and matter most.** A change to `hub_status_id` is the one edit in this system that leaves the building. The trigger records the from/to codes, the acting user, and the note; the entry detail screen surfaces the status history as its own timeline, separate from the general field-change list. When a module later asks "who marked this awaiting validation, and when," the answer is one query.
+**Status changes get the same treatment, and matter most.** A change to `status_id` is the one edit in this system that leaves the building. The trigger records the from/to codes, the acting user, and the note; the entry detail screen surfaces the status history as its own timeline, separate from the general field-change list. When a module later asks "who marked this awaiting validation, and when," the answer is one query.
 
 ### 3.10 Exceptions, rate reference, flags
 
@@ -589,7 +668,7 @@ create table public.reconciliation_exception (
   document_extraction_id bigint references public.document_extraction(id) on delete cascade,
   import_batch_id bigint references public.import_batch(id) on delete cascade,
   exception_type text not null check (exception_type in (
-    'line_item_tally_mismatch','ocr_total_vs_tenant_amount','tenant_vs_main_variance',
+    'line_item_tally_mismatch','ocr_total_vs_amount','department_vs_audit_variance',
     'allocation_sum_mismatch','unknown_status_code','id_namespace_collision',
     'duplicate_document_hash','missing_documentation','new_budget_head','new_vendor','other')),
   severity text not null default 'medium' check (severity in ('low','medium','high')),
@@ -867,7 +946,7 @@ Three roles, set on `staff_profile.role`. `department_id` null means all departm
 |---|:--:|:--:|:--:|
 | See entries, documents, reports (own department) | ✓ | ✓ | ✓ |
 | Export CSV from any list | ✓ | ✓ | ✓ |
-| Edit enrichment (`head_id`, `zone_id`, `hub_reference`) | — | ✓ | ✓ |
+| Edit enrichment (`admin_head_id`, `zone_id`, `budget_category_id`) | — | ✓ | ✓ |
 | Verify document extractions | — | ✓ | ✓ |
 | Set Hub status (awaiting verification / validation) | — | ✓ | ✓ |
 | Resolve or dismiss exceptions | — | ✓ | ✓ |
@@ -935,15 +1014,15 @@ v1 described four days of UI in prose with no screens, states, or navigation. Ev
 |---|---|---|---|---|---|
 | 1 | Sign in | `/login` | 1A | Supabase magic-link or email+password | Inactive account → *"Your account is pending activation"*, not a generic auth error |
 | 2 | Dashboard | `/` | 1A | Review queue depth, open exceptions by ₹ at risk, budget burn, today's imports | Every tile links to its filtered list |
-| 3 | Entries list | `/entries` | 1A | Filter by department / budget head / head / zone / imported status / **Hub status** / export-pending / date range / vendor / has-variance / has-document; keyset paginated | **Bulk Hub-status change with a required note** — the primary way staff set awaiting verification/validation at volume. Column chooser, CSV export, saved filters in URL |
-| 4 | Entry detail | `/entries/[id]` | 1A | Import fields read-only with a source badge; enrichment fields editable; **Hub status control with its own history timeline**; linked documents; change history tab | Advance-settlement picker lives here. Status control shows "exported 2026-08-09" or "pending export" |
+| 3 | Entries list | `/entries` | 1A | Filter by department / budget head / admin head / zone / budget category / status (including the Hub's later stages) / export-pending / date range / vendor / has-document; keyset paginated | **Bulk status change with a required note** — the primary way staff set awaiting verification/validation at volume. Column chooser, CSV export, saved filters in URL |
+| 4 | Entry detail | `/entries/[id]` | 1A | Import fields read-only with a source badge; enrichment fields editable; **status control with its own history timeline**; linked documents; change history tab | Advance-settlement picker lives here. Status control shows "exported 2026-08-09" or "pending export" |
 | 5 | Import | `/import` | 1A | Upload → **dry-run preview with per-row diff** → commit; batch history | The preview is the screen, not a modal |
 | 6 | Document inbox | `/documents` | **1B** | Unmatched documents with suggested entry matches; attach, mark "no entry expected", or bulk-attach | **Highest-volume flow.** ~18 of 21 sample documents land here |
 | 7 | Review queue | `/review` | **1B** | The throughput screen. Keyboard-first split pane | §7 |
 | 8 | Exceptions | `/exceptions` | 1A | Sorted by severity then ₹ at risk; resolve with a note; filter by type | Resolution note is required — "resolved" with no reason is not an audit trail |
-| 9 | Reconciliation | `/reconciliation` | 1A | Tenant vs Main variance, unmatched-on-either-side, allocation-sum mismatches | The report the org currently produces by hand |
+| 9 | Reconciliation | `/reconciliation` | 1A | Department vs Audit variance, unmatched-on-either-side, allocation-sum mismatches | The report the org currently produces by hand |
 | 10 | Reports | `/reports` | 1A | Budget vs actual by head; vendor spend; spend by zone; open-issues digest | CSV export on every one |
-| 11 | Export | `/export` | 1A | Queue of entries with a Hub status not yet pushed out; review, generate `.xlsx`, download, mark delivered/acknowledged; batch history with per-row detail | The outward path. Admin-only. Re-exports are explicit, prior batches immutable |
+| 11 | Export | `/export` | 1A | Queue of entries with a status not yet pushed out; review, generate `.xlsx`, download, mark delivered/acknowledged; batch history with per-row detail | The outward path. Admin-only. Re-exports are explicit, prior batches immutable |
 | 13 | Accuracy | `/accuracy` | **1B** | Per-field agreement rate (7/30/all days), trend, top correction patterns grouped by normalised diff; CSV export | Admin-only. §9.2. The export is what gets sent for a tuning pass |
 | 12 | Admin | `/admin` | 1A | Users and roles; department assignment; budget-head → head mapping; vendor merge; zone/head master; Hub-status lifecycle rules | The merge screen you deferred lives here |
 
@@ -1021,7 +1100,7 @@ Per-run cost is written to `ocr_extraction_run.cost_usd`, so spend is a SQL quer
 1. Go to **console.anthropic.com** and create an organisation account (separate from any Claude.ai subscription — a Claude Pro/Max plan does **not** include API credit; they are billed separately).
 2. **Settings → Billing → Add credit.** Start with **$25**. Credits are prepaid; there is no monthly commitment and nothing to cancel. Add $25 increments as you monitor Phase 1B escalation rates.
 3. **Settings → Billing → Spend limits → Set limit → $50.** Do this before writing any code. You can raise it later if needed, but start conservative.
-4. **Settings → API Keys → Create Key.** Name it `istifada-hub`. Copy it once — it is never shown again.
+4. **Settings → API Keys → Create Key.** Name it `istefadah-ilmiyah`. Copy it once — it is never shown again.
 5. Store the key **only** in Supabase secrets (`supabase secrets set ANTHROPIC_API_KEY=...`). Never in the repo, never in a `NEXT_PUBLIC_*` variable, never in the browser. Single key is fine; you're using one Supabase project for dev + prod.
 
 **Rate limits are not a constraint at this volume.** New organisations start on the **Start** tier: 1,000 requests/minute and 2,000,000 input tokens/minute on Haiku 4.5, with a $500 monthly spend cap. Processing all 10,000 pages at once would take roughly ten minutes of wall-clock at that ceiling. A brand-new organisation may begin on a lower **Evaluation** tier while account history builds — that resolves automatically, and the Batch API is unaffected by it either way (its own limit is 200,000 queued requests on Start tier).
@@ -1083,7 +1162,7 @@ Tolerance: ±₹1 or 0.05%, whichever is larger. Rounding adjustments are real �
 2. **`documents-ingest`.** Creates `source_document`, computes `file_hash_sha256`, writes one `document_page` per PNG. A hash collision raises a `duplicate_document_hash` exception — a soft warning, not a hard block; the same bill legitimately gets re-scanned.
 3. **`documents-extract`.** **One `claude-haiku-4-5` call per document, not per page** — all pages as image blocks in a single request. This pays the ~800-token prompt once instead of once per page, and it lets a line-item table that spans a page break extract correctly, which per-page calls cannot do. Single shared tool schema with **`strict: true`**, so the response is guaranteed to validate rather than merely usually validating. Returns a per-page `pages[]` array (`page_number`, `is_financial_document`, `skip_reason`, `classification_confidence`) plus document-level `legibility`, `extraction_confidence`, header fields (including **GSTIN, phone, address** — the fields clustering will need), and `line_items[]` each tagged with its source page. Line items from pages marked `is_financial_document = false` are **hard-filtered in code** before any write, so classification-before-extraction is a real gate rather than a prompt instruction. Cap `max_tokens` at 2,000.
 4. **Write** the extraction into `document_extraction` / `_line_item` as `_ocr` columns. `_verified` starts null. Do not automatically re-escalate.
-5. **Tally check** immediately on write: line-item sum vs `total_amount_ocr` (epsilon tolerance), and vs `entries.tenant_amount` when the document is matched. Mismatches write `reconciliation_exception` rows. Also flag if legibility is `partial`/`poor` or Gujarati/Devanagari Unicode present (alerting staff to potential re-run).
+5. **Tally check** immediately on write: line-item sum vs `total_amount_ocr` (epsilon tolerance), and vs `entries.amount` when the document is matched. Mismatches write `reconciliation_exception` rows. Also flag if legibility is `partial`/`poor` or Gujarati/Devanagari Unicode present (alerting staff to potential re-run).
 6. **Staff review** — the review screen shows Haiku's output. Staff accept, correct, or manually override (especially for Gujarati text, quality issues). Minor mismatches and low-confidence fields are corrected by hand, not re-escalated.
 7. **`documents-reescalate`** — the manual "re-run with Sonnet" button. Staff clicks when Haiku clearly struggled. Always creates a new run with `run_reason = 'manual_reescalation'`. Sonnet uses higher-resolution rasterisation (2,576 px vs 1,568 px long edge). Prior runs never deleted.
 8. **Batch backlog.** Both Haiku and escalated Sonnet runs go through the Batch API; `api_request_id` holds the `custom_id`. **Results arrive in any order — the poller keys by `custom_id`, never by position.**
@@ -1206,12 +1285,12 @@ The accuracy harness covers OCR. These cover the parts where a silent bug is wor
 - The five zero-spend heads (AVIT, Security, Tazyeen, Power, Office setup) **are** kept as allocations — the v1 bug that would have dropped ₹2.5 crore
 - `Grand Total` skipped by column C, not column A
 - Forward-fill puts rows 4–5 under `Dome Tents`
-- Per head, `sum(entry tenant_amount) == allocation.utilised_amount`
+- Per head, `sum(entry amount) == allocation.utilised_amount`
 - No value appears in both the UBBL and Main-number namespaces
 
 **Integration — against a throwaway Supabase branch:**
 
-- **Idempotency:** import → set `zone_id`, `hub_reference`, `hub_status_id`, and a `_verified` value → import again → assert *only* `updated_at` changed. This is the single most important test in the suite.
+- **Idempotency:** import → set `zone_id`, `admin_head_id`, `budget_category_id`, `status_id`'s Hub-added stages, and a `_verified` value → import again → assert *only* `updated_at` changed. This is the single most important test in the suite.
 - **Dry-run:** produces a row log and leaves `entries` untouched.
 - **Queue:** two workers claiming concurrently never take the same job (`SKIP LOCKED`).
 
@@ -1234,9 +1313,12 @@ supabase/
     20260808000002_private_schema_and_helpers.sql
     20260808000003_staff_profile_and_auth_trigger.sql
     20260808000004_department.sql
-    20260808000005_head.sql
+    2026????????_admin_head.sql               -- renamed from head.sql 2026-08-11, content unchanged
     20260808000006_zone.sql
     20260808000007_budget_head.sql
+    2026????????_budget_category.sql          -- renamed 2026-08-11 from the earlier budget_head_master
+                                                -- placeholder; unrelated to budget_head above, see §3.1
+                                                -- -- no FK either direction
     20260808000008_vendor_and_alias.sql
     20260808000009_entry_status.sql
     20260808000010_hub_status.sql
@@ -1258,7 +1340,7 @@ supabase/
     20260808000026_rls_policies.sql
     20260808000027_storage_policies.sql
     20260808000028_reporting_views.sql
-  seed.sql                        -- department, 42 heads, 13 zones, entry_status, hub_status
+  seed.sql                        -- department, 42 admin_head rows, 13 zones, entry_status
 app/                              -- Next.js 15 App Router; screens per §5
   api/                            -- Route Handlers. Plain Node. Move to any host unchanged.
     import/route.ts               -- parameterized by source_system; dry_run | commit
@@ -1278,7 +1360,7 @@ lib/                              -- ZERO framework or host coupling. Pure TypeS
     handlers/batch-poll.ts        -- matches Batch API results by custom_id
 worker/
   index.ts                        -- standalone Node process: loop { claim job; run handler }
-                                  -- unused on Vercel; becomes Windows Service `istifada-hub-worker`
+                                  -- unused on Vercel; becomes Windows Service `istefadah-ilmiyah-worker`
 .gitattributes                    -- see §13: CRLF conversion silently breaks file hashes
 test/
   gold.json                       -- hand-labelled ground truth for the 21 invoices
@@ -1295,10 +1377,10 @@ All eight are created `with (security_invoker = true)` (§4.4) in `2026080800002
 | View | Feeds | Shape |
 |---|---|---|
 | `v_entry_enriched` | Everything below, plus the entries list | `entries` + department, budget head, head, zone, vendor, both statuses, hub status, document count. The one join every other view builds on. |
-| `v_budget_vs_actual` | Reports, dashboard | Per budget head: latest allocation vs `sum(tenant_amount)`. **Returns `'no approved budget'` rather than −100% when `approved_amount = 0`** (§3.5). |
+| `v_budget_vs_actual` | Reports, dashboard | Per budget head: latest allocation vs `sum(amount)`. **Returns `'no approved budget'` rather than −100% when `approved_amount = 0`** (§3.5). |
 | `v_vendor_spend` | Reports | Per vendor: entry count, total, first/last date, document coverage % |
 | `v_zone_spend` | Reports | Per zone: total and entry count. Null zone reported as *"unassigned"* so gaps in enrichment are visible rather than invisible. |
-| `v_tenant_main_variance` | Reconciliation screen | Entries where `amount_variance <> 0`, or present on one side only, with `variance_reason` |
+| `v_department_audit_variance` | Reconciliation screen | Renamed from `v_tenant_main_variance` 2026-08-11. Confirmed: there is no separate second amount to diff (§3.4) — this view now surfaces the completeness check instead: per bill, do its consolidated entries sum back to the export's own total, with `variance_reason` shown when the source explains a gap |
 | `v_hub_status_ageing` | Dashboard, reports | Days each entry has sat in `awaiting verification` / `awaiting validation`, bucketed 0–2 / 3–7 / 8+. Answers "what are the modules waiting on?" |
 | `v_open_issues` | Exceptions screen, digest | `reconciliation_exception` ∪ `flags`, ordered by severity then ₹ at risk |
 | `v_review_queue` | Review screen | Unverified extractions ordered by exception severity ↓, confidence ↑, amount ↓ (§7) |
@@ -1325,7 +1407,7 @@ Item 6 gates 1A day 4; item 7 gates 1A day 6. Everything else can proceed under 
 
 Each day has an exit criterion that is a command you can run or a row you can see, not a feeling.
 
-**Day 1 — Foundations.** Supabase projects (`dev`, `prod`, Pro on prod), every migration in §10, seed (1 department, 42 heads, 13 zones, observed `entry_status`, 3 `hub_status`). The portability kit up front: `lib/env.ts`, the ESLint host-coupling guard, `output: 'standalone'`, `.gitattributes`. Repo connected to Vercel.
+**Day 1 — Foundations.** Supabase projects (`dev`, `prod`, Pro on prod), every migration in §10, seed (1 department, 42 `admin_head` rows, 13 zones, observed `entry_status`). The portability kit up front: `lib/env.ts`, the ESLint host-coupling guard, `output: 'standalone'`, `.gitattributes`. Repo connected to Vercel.
 **Exit:** `supabase db push` runs clean on both projects, all seed rows present, and `npm run build` **fails** if someone adds `import { put } from '@vercel/blob'`.
 
 **Day 2 — Import, and the OCR de-risk spike.** `normalizeId` with unit tests against both the integer and `ADP_` string forms. The grouped-Excel parser: forward-fill, allocation rows, budget-head auto-create, vendor resolution, dry-run/commit, and the four assertions (allocation-sum, namespace collision, unknown status, Grand-Total in column C).
@@ -1335,13 +1417,13 @@ Each day has an exit criterion that is a command you can run or a row you can se
 **Day 3 — App shell, auth, entries list.** Next.js scaffold, `@supabase/ssr`, login, the `handle_new_user` trigger, RLS verified from the app. Entries list: filters (department, budget head, head, zone, both statuses, Hub status, date, vendor, has-variance), keyset pagination, column chooser, CSV export.
 **Exit:** log in as a reviewer, filter to a budget head, export the CSV, and confirm a second user in another department sees zero of those rows.
 
-**Day 4 — Entry detail, enrichment, Hub status.** Detail screen with import fields read-only and source-badged; `head_id` / `zone_id` / `hub_reference` editable; Hub-status control with its own history timeline; bulk status change with required note on the list; change-history tab.
+**Day 4 — Entry detail, enrichment, status.** Detail screen with import fields read-only and source-badged; `admin_head_id` / `zone_id` / `budget_category_id` editable; status control with its own history timeline; bulk status change with required note on the list; change-history tab.
 **Exit:** set a zone and a Hub status on one entry, both appear in `entry_change_log`, and the status change appears on its own timeline with the acting user.
 
 **Day 5 — Status export + exceptions.** `export-status` route and the `/export` screen: pending queue, batch generation, `.xlsx` keyed on **both** UBBL and Main number, delivered/acknowledged tracking, immutable batch history. Exceptions queue sorted by severity then ₹ at risk, with mandatory resolution notes.
 **Exit:** set three entries to `awaiting validation`, generate a batch, open the `.xlsx` and confirm both key columns; the three leave the pending queue; changing one again puts it back; the prior batch is untouched.
 
-**Day 6 — Reconciliation, reports, CSP.** All eight views from §10.2, `security_invoker` on every one. Reconciliation screen (tenant vs main variance, unmatched either side, allocation mismatches). Reports: budget vs actual (handling `approved_amount = 0`), vendor spend, zone spend, Hub-status ageing, open issues — CSV on each. CSP shipped **report-only**.
+**Day 6 — Reconciliation, reports, CSP.** All eight views from §10.2, `security_invoker` on every one. Reconciliation screen (department vs audit variance, unmatched either side, allocation mismatches). Reports: budget vs actual (handling `approved_amount = 0`), vendor spend, zone spend, status ageing, open issues — CSV on each. CSP shipped **report-only**.
 **Exit:** a department-1 reviewer sees zero department-2 rows **in every view**, not just every table. No CSP violations in the console on any 1A screen.
 
 **Day 7 — Deploy, harden, real-data run, buffer.** Deploy to Vercel on your domain. Full run on real data: import, enrich, set statuses, export, re-import for idempotency. RLS suite as three users. `supabase db advisors` clean. Backup restored into `dev`. Sentry + uptime check live. Operator runbook for the 1A workflows. Bug-fix buffer — no new features.
@@ -1379,8 +1461,8 @@ Seven days is a hard constraint, so this is what does not make it into the porta
 | Vendor **clustering detection** engine | Needs history plus confirmed vendor identities. The identity model — the expensive part to retrofit — ships day 2. | Week 2 |
 | `flags-run` entirely (duplicate payment, rate drift, discount inconsistency) | Pattern-based; genuinely needs verified line items to accumulate first. Schema ships week 1 so nothing has to change later. | Week 2–3 |
 | Item catalog and `item_key` normalization | Cross-vendor rate comparison *is* this algorithm; doing it badly is worse than not doing it. `rate_reference` rows accumulate now with `item_key` null and get keyed retroactively. | Week 2 |
-| Main-side import wiring | The mapping is written on day 2 against Sheet 2's contract; it cannot be tested until a populated Main export exists. | The day you send the file |
-| Budget-head → head **merge** | Your explicit decision to keep them separate. The nullable FK and the admin screen exist; the mapping is empty. | When you confirm |
+| Audit-side import wiring | The mapping is written on day 2 against Sheet 2's contract; it cannot be tested until a populated Audit export exists. | The day you send the file |
+| Budget-head → admin-head **merge** | Your explicit decision to keep them separate. The nullable FK and the admin screen exist; the mapping is empty. **Not the same thing as `budget_category` (§3.1, confirmed 2026-08-10, renamed 2026-08-11) — that table is unrelated to this merge and is never its target.** | When you confirm |
 | Push-back **as a live API call** | The two Hub-owned statuses **do ship in week 1**, as a reviewed `.xlsx` export (§3.7) — that is the whole outward path, working end to end. What is cut is calling the modules' API directly instead of handing over a file. `format = 'api'` is already in the CHECK constraint and the transform is shared, so the swap is config plus an endpoint. | Week 2–3 |
 | Push-back of anything **other than** the two statuses | Nothing else in the Hub is authoritative — every other field is imported. | Not planned |
 | Native mobile capture | Responsive web upload covers it. | Not planned |
@@ -1457,8 +1539,8 @@ Run this the day the server is provisioned, **not** on a deadline. Get a hello-w
 3. **Reverse proxy.** IIS with **URL Rewrite + Application Request Routing**, forwarding `https://hub.<yourdomain>` → `http://localhost:3000`. *(Do not use `iisnode` — unmaintained.)* **If IIS is not mandated by policy, use Caddy** — it is a single binary with a 5-line config and automatic HTTPS, and will save you most of steps 3 and 4.
 4. **Certificate.** The host is publicly reachable on its own domain, so `win-acme` gets you a free Let's Encrypt certificate with a scheduled renewal task. Bind it in IIS. Set a calendar reminder anyway — an expired certificate is the single most common self-hosting outage. *(Caddy does all of this by itself.)*
 5. **Services.** Register both processes with **NSSM** (or `node-windows`) so they start on boot and restart on crash:
-   - `istifada-hub-web` → `node .next/standalone/server.js`
-   - `istifada-hub-worker` → `node worker/index.js`
+   - `istefadah-ilmiyah-web` → `node .next/standalone/server.js`
+   - `istefadah-ilmiyah-worker` → `node worker/index.js`
 6. **Environment variables.** Set at machine level or in the NSSM service definition — **not** in a `.env` file inside the web root, where a proxy misconfiguration could serve it.
 7. **Firewall.** Inbound: 443 only. Outbound: 443 to `api.anthropic.com` and `*.supabase.co`.
 8. **Deploy script.** A short PowerShell script — `git pull` → `npm ci` → `npm run build` → `Restart-Service` on both. Committed to the repo, so deployment is one command and not a memory.
@@ -1547,7 +1629,7 @@ export default { output: 'standalone', poweredByHeader: false, reactStrictMode: 
 
 **4. `lib/storage.ts` — one narrow interface.** Every upload, download, and signed URL goes through `put` / `get` / `signUrl` / `remove`. Supabase Storage stays the implementation on both hosts, so this is insurance rather than a planned swap — but it is four functions, and it means "move files to a UNC share" is one file rather than a search across the codebase.
 
-**5. `deploy.ps1` — committed, not remembered.** `git pull` → `npm ci` → `npm run build` → `Restart-Service istifada-hub-web, istifada-hub-worker`. Written on day 1 even though nothing runs it until cutover, so the deploy procedure exists in the repo rather than in someone's head.
+**5. `deploy.ps1` — committed, not remembered.** `git pull` → `npm ci` → `npm run build` → `Restart-Service istefadah-ilmiyah-web, istefadah-ilmiyah-worker`. Written on day 1 even though nothing runs it until cutover, so the deploy procedure exists in the repo rather than in someone's head.
 
 **Cutover checklist — the actual day:**
 
@@ -1574,7 +1656,7 @@ Step 8 is the one people forget: auth silently breaks on the new domain if the r
 | **1A** | **The portal** (§11.1) | **7 days** | Phase 0 done | **Hard** |
 | **1B** | **Verification & review** (§11.2) | ~5 days | 1A shipped | No |
 | **2** | **Analytics engine** | ~5 days | ~200 verified documents exist | No |
-| **3** | **Two-way integration** | ~4 days | A populated Main export exists | No |
+| **3** | **Two-way integration** | ~4 days | A populated Audit export exists | No |
 | **4** | **Windows Server cutover** (§13.3, §13.7) | ~1 day | Server provisioned | No — independent of 1B, 2, 3 |
 | **5** | **Event operations** | Ongoing | Event begins | Continuous |
 
@@ -1611,11 +1693,11 @@ The pattern-based work that genuinely needs history to exist first. Cut from Pha
 
 ### Phase 3 — Two-way integration (~4 days)
 
-1. **Main-side import** — the mapping is written in Phase 1 against Sheet 2's contract; this wires and tests it against a real file, and populates `main_amount`, closing the variance report.
+1. **Audit-side import** — the mapping is written in Phase 1 against Sheet 2's contract; this wires and tests it against a real file, and populates `audit_status_id`, closing the variance report.
 2. **API push-back** — replaces the reviewed `.xlsx` with a direct call. `format = 'api'` is already in the constraint; the transform is already shared. Config plus an endpoint.
 3. **Advance settlement workflow** — the UI around `settles_entry_id`, so advances net against final invoices instead of double-counting utilisation.
 
-**Prerequisite:** a populated Main export, and answers on how advances are settled today (§17).
+**Prerequisite:** a populated Audit export, and answers on how advances are settled today (§17).
 
 ### Phase 4 — Windows Server cutover (~1 day)
 
@@ -1635,15 +1717,15 @@ Binary checks on the production URL with real data. Not "mostly", not "with a kn
 
 **Data**
 - [ ] The real Departmental file imports to 16 entries + 10 allocations; a second import reports 16 unchanged
-- [ ] `zone_id`, `hub_reference`, and `hub_status_id` survive a re-import untouched
-- [ ] All 42 heads, 13 zones, and both status dimensions seeded
+- [ ] `zone_id`, `admin_head_id`, and `budget_category_id` survive a re-import untouched
+- [ ] All 42 `admin_head` rows, 13 zones, and both status dimensions (`status_id`, `audit_status_id`) seeded
 - [ ] Every unmatched budget head and unknown status raises an exception instead of a null
-- [ ] `sum(entry tenant_amount) == allocation.utilised_amount` holds per head, or raises
+- [ ] `sum(entry amount) == allocation.utilised_amount` holds per head, or raises
 
 **Workflow**
 - [ ] An admin can dry-run an import, read the diff, and commit it
-- [ ] A reviewer can set zone, head, and Hub reference on an entry
-- [ ] Setting a Hub status queues it for export; a batch produces an `.xlsx` keyed on both UBBL and Main number
+- [ ] A reviewer can set zone, admin head, and budget category on an entry
+- [ ] Setting a status queues it for export; a batch produces an `.xlsx` keyed on both UBBL and Main number
 - [ ] Re-changing an exported status re-queues it; the prior batch is unchanged
 - [ ] Exceptions can be resolved only with a note
 
@@ -1695,12 +1777,12 @@ None of these block the seven days. Each one improves something specific.
 1. **Does central IT need the CSP header value for review, and do they want violation reports routed anywhere?** (§4.4b) The policy is set in the app, not the proxy — worth confirming they're happy with that before cutover, since it means nothing to configure in IIS.
 2. **Reverse proxy: IIS or Caddy?** Check with IT before the server is provisioned. Caddy removes the certificate-renewal task entirely and saves about half a day; IIS is the safe default if policy requires it. (§13.3)
 3. **When will the Windows Server be provisioned?** Not a blocker — week 1 ships on Vercel either way — but it sets when the ~1-day cutover gets scheduled, and the Vercel Pro cost runs until then. (§13)
-4. **Hub-status lifecycle.** Does `awaiting verification` always precede `awaiting validation`? What state follows validation — does the Hub set it, or does the module report back? Can either be reverted, and by whom? The schema hard-codes no sequence, so this is a config answer, but the UI needs it to know which transitions to offer.
+4. **Status lifecycle — PARTIALLY ANSWERED 2026-08-11.** Confirmed: `hub_status` folds into `entries.status_id` as later stages of one lifecycle (not a separate column, §3.3/§3.4); `audit_status_id` stays genuinely separate; after some point in `status_id`'s progression, `audit_status_id` starts, and completing it auto-advances `status_id`. **Still missing:** the message describing exactly how that auto-advance is triggered — import, manual, or API — cut off mid-sentence ("We will pull data or push data via API and use…"). Needed before `status_id`'s full seed list and transition rules are buildable.
 5. **Who receives the export, in what form?** A file handed to a person, a shared folder, or an endpoint? And does either module acknowledge that it applied the change — or is delivery assumed?
 6. **`Approved Amount = 0` on every head** while ₹2.32 crore is utilised — is that real, or is this export pre-approval? Budget-vs-actual has no denominator until this is settled.
-7. **The `hub_reference` column** (v1's `new`) — one real example value and I will model it properly instead of leaving it free text.
+7. **RESOLVED 2026-08-11 — the `hub_reference` column is dropped.** Confirmed: not needed, removed from `entries` (§3.4).
 8. **`APS`** — still undefined, still blocking one KPI.
-9. **Sheet 2's `Type` column** — what are the permitted values? Currently guessing `invoice` / `reimbursement` / `advance_payment` from an `ADP_` prefix.
+9. **Sheet 2's `Type` column — PARTIALLY ANSWERED 2026-08-11.** The `ADP_`-prefix heuristic is deprioritized (unreliable, per you); you're supplying the actual invoice/advance-payment/reimbursement rule directly instead. Reimbursement itself is confirmed **not active yet** — post-event only, for now there are only two real values in play. Still need: the actual rule to replace the prefix heuristic with.
 10. **Advance settlement** — how does an `ADP_` advance get netted against the final invoice today? `settles_entry_id` exists; the workflow around it does not.
 11. **UBBL ↔ Main Entry Number** — guaranteed 1:1, or can one UBBL split into several Main entries?
 12. **Vendor master** — do you have GSTIN / phone / bank details anywhere, or is the invoice the only source?

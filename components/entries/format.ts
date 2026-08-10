@@ -38,7 +38,7 @@ export function hubStatusBadgeVariant(code: string | null): BadgeProps['variant'
   }
 }
 
-/** Tenant/main statuses are import-observed and open-ended (§3.3) — badge
+/** Status/audit status are import-observed and open-ended (§3.3) — badge
  * color is a best-effort read on the label text rather than a hard-coded
  * code list, since new codes can appear on any import. */
 export function statusBadgeVariant(label: string | null): BadgeProps['variant'] {
@@ -47,9 +47,4 @@ export function statusBadgeVariant(label: string | null): BadgeProps['variant'] 
   if (l.includes('pending')) return 'outline'
   if (l.includes('sent')) return 'warning'
   return 'secondary'
-}
-
-export function varianceBadgeVariant(variance: number | null): BadgeProps['variant'] {
-  if (variance === null || variance === undefined || variance === 0) return 'outline'
-  return variance > 0 ? 'warning' : 'destructive'
 }

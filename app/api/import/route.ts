@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto'
 import * as XLSX from 'xlsx'
 import { createClient } from '@/lib/supabase/server'
 import { runImport } from '@/lib/import/run-import'
+import { withApiLogging } from '@/lib/api-log'
 
 export const runtime = 'nodejs'
 
@@ -26,7 +27,7 @@ export const runtime = 'nodejs'
  * connection (see the transaction-control comment at the top of
  * lib/import/run-import.ts) rather than the session client.
  */
-export async function POST(request: NextRequest) {
+async function handlePOST(request: NextRequest) {
   const supabase = await createClient()
   const {
     data: { user },
@@ -69,12 +70,12 @@ export async function POST(request: NextRequest) {
   if (mode !== 'dry_run' && mode !== 'commit') {
     return NextResponse.json({ error: '"mode" must be "dry_run" or "commit".' }, { status: 400 })
   }
-  // Param exists per MASTER-PLAN §3.6 for the day Main-side import is wired;
-  // hardcoded to 'departmental' today — Main parsing is cut (§12).
-  const sourceSystem = sourceSystemField === 'main' ? 'main' : 'departmental'
+  // Param exists per MASTER-PLAN §3.6 for the day Audit-side import is wired;
+  // hardcoded to 'departmental' today — Audit parsing is cut (§12).
+  const sourceSystem = sourceSystemField === 'audit' ? 'audit' : 'departmental'
   if (sourceSystem !== 'departmental') {
     return NextResponse.json(
-      { error: 'Main-side import is not implemented yet (MASTER-PLAN §12).' },
+      { error: 'Audit-side import is not implemented yet (MASTER-PLAN §12).' },
       { status: 400 }
     )
   }
@@ -116,7 +117,7 @@ export async function POST(request: NextRequest) {
  * import_batch/import_row_log's staff-wide RLS select policies rather than
  * reaching for the admin client at all.
  */
-export async function GET(request: NextRequest) {
+async function handleGET(request: NextRequest) {
   const supabase = await createClient()
   const {
     data: { user },
@@ -165,3 +166,6 @@ export async function GET(request: NextRequest) {
 
   return NextResponse.json({ batches: batches ?? [] })
 }
+
+export const POST = withApiLogging('/api/import', handlePOST)
+export const GET = withApiLogging('/api/import', handleGET)

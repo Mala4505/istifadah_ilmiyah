@@ -1,8 +1,8 @@
 /** Human-readable labels for reconciliation_exception.exception_type (MASTER-PLAN §3.10). */
 export const EXCEPTION_TYPE_LABELS: Record<string, string> = {
   line_item_tally_mismatch: 'Line-item tally mismatch',
-  ocr_total_vs_tenant_amount: 'OCR total vs tenant amount',
-  tenant_vs_main_variance: 'Tenant vs Main variance',
+  ocr_total_vs_amount: 'OCR total vs amount',
+  department_vs_audit_variance: 'Department vs Audit variance',
   allocation_sum_mismatch: 'Allocation sum mismatch',
   unknown_status_code: 'Unknown status code',
   id_namespace_collision: 'ID namespace collision',

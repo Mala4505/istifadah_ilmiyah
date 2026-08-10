@@ -5,6 +5,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { UsersTable, type StaffRow } from '@/components/admin/users-table'
+import { CreateUserDialog } from '@/components/admin/create-user-dialog'
 import { BudgetHeadTable, type BudgetHeadRow, type HeadOption } from '@/components/admin/budget-head-table'
 import { VendorMergePanel, type VendorRow } from '@/components/admin/vendor-merge-panel'
 
@@ -77,13 +78,17 @@ export default async function AdminPage() {
     supabase.from('department').select('id, name').order('name'),
     supabase
       .from('staff_profile')
-      .select('id, display_name, role, department_id, is_active')
+      .select('id, display_name, role, department_id, is_active, its_number, contact_email')
       .order('display_name'),
     supabase
       .from('budget_head')
       .select('id, raw_label, short_label, department_id, head_id, department:department_id(name)')
       .order('raw_label'),
-    supabase.from('head').select('id, department_id, head_number, name').order('department_id').order('head_number'),
+    supabase
+      .from('admin_head')
+      .select('id, department_id, head_number, name')
+      .order('department_id')
+      .order('head_number'),
     supabase.from('zone').select('id, department_id, zone_number, name').order('department_id').order('zone_number'),
     supabase
       .from('vendor')
@@ -95,31 +100,6 @@ export default async function AdminPage() {
       .order('sort_order'),
   ])
 
-  // Emails live in auth.users, not exposed to the RLS-scoped client. Fetch
-  // them with the service-role admin client, but only after the gate above
-  // has already confirmed the caller is an active admin. This must degrade
-  // gracefully — there is no .env.local with SUPABASE_SECRET_KEY in every
-  // environment this runs in, and lib/env.ts validates env eagerly at module
-  // load, so even the import itself can throw. A dynamic import inside the
-  // try/catch keeps a missing secret key from crashing page rendering.
-  const emailById = new Map<string, string>()
-  try {
-    const { createAdminClient } = await import('@/lib/supabase/admin')
-    const adminClient = createAdminClient()
-    const { data: usersPage, error: listUsersError } = await adminClient.auth.admin.listUsers({
-      page: 1,
-      perPage: 1000,
-    })
-    if (!listUsersError && usersPage) {
-      for (const authUser of usersPage.users) {
-        if (authUser.email) emailById.set(authUser.id, authUser.email)
-      }
-    }
-  } catch {
-    // SUPABASE_SECRET_KEY not configured (or the module failed to load for
-    // any other reason) — fall back to null emails and keep rendering.
-  }
-
   const departments = (departmentsData ?? []).map((department) => ({
     id: department.id as number,
     name: department.name as string,
@@ -128,7 +108,8 @@ export default async function AdminPage() {
   const staff: StaffRow[] = (staffData ?? []).map((row) => ({
     id: row.id as string,
     displayName: row.display_name as string,
-    email: emailById.get(row.id as string) ?? null,
+    itsNumber: row.its_number as string | null,
+    contactEmail: row.contact_email as string | null,
     role: row.role as StaffRow['role'],
     departmentId: row.department_id as number | null,
     isActive: row.is_active as boolean,
@@ -197,14 +178,16 @@ export default async function AdminPage() {
 
         <TabsContent value="users">
           <Card>
-            <CardHeader>
-              <CardTitle>Users &amp; roles</CardTitle>
-              <CardDescription>
-                Nobody self-serves into access here: a new sign-in lands with role viewer and no
-                department, inactive by default, and stays that way until an admin reviews it and
-                turns it on. Role, department assignment, and activation are deliberately gated
-                behind this screen rather than granted automatically.
-              </CardDescription>
+            <CardHeader className="flex flex-row items-start justify-between gap-4">
+              <div>
+                <CardTitle>Users &amp; roles</CardTitle>
+                <CardDescription>
+                  Staff log in with an ITS number and password. Nobody self-serves into access —
+                  accounts only exist once an admin creates one here, active immediately with the
+                  role and department set below.
+                </CardDescription>
+              </div>
+              <CreateUserDialog departments={departments} />
             </CardHeader>
             <CardContent>
               {staff.length === 0 ? (
@@ -222,7 +205,7 @@ export default async function AdminPage() {
               <CardTitle>Budget heads</CardTitle>
               <CardDescription>
                 Budget heads are auto-created on import, straight from the source system&apos;s own
-                labels. Mapping one onto a Hub head is optional and fully reversible — an unmapped
+                labels. Mapping one onto an admin head is optional and fully reversible — an unmapped
                 budget head still imports and reconciles fine, the mapping only adds the Hub&apos;s
                 own head grouping on top.
               </CardDescription>
@@ -299,7 +282,7 @@ export default async function AdminPage() {
 
           <Card>
             <CardHeader>
-              <CardTitle>Zone / head master</CardTitle>
+              <CardTitle>Zone / admin head master</CardTitle>
               <CardDescription>
                 Reference dimensions seeded from master data, shown here read-only by design —
                 editing them is a migration, not an admin action. There is deliberately no write
@@ -319,7 +302,7 @@ export default async function AdminPage() {
                       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                         <div className="flex flex-col gap-1">
                           <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                            Heads
+                            Admin heads
                           </p>
                           {departmentHeads.length === 0 ? (
                             <p className="text-sm text-muted-foreground">None.</p>

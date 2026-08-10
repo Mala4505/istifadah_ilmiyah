@@ -9,9 +9,9 @@ import { Label } from '@/components/ui/label'
 import type { ExportTargetSystem } from '@/lib/export/generate-status-batch'
 
 const TARGET_SYSTEM_OPTIONS: { value: ExportTargetSystem; label: string }[] = [
-  { value: 'both', label: 'Both (Departmental + Main)' },
+  { value: 'both', label: 'Both (Departmental + Audit)' },
   { value: 'departmental', label: 'Departmental' },
-  { value: 'main', label: 'Main' },
+  { value: 'audit', label: 'Audit' },
 ]
 
 /**

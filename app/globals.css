@@ -3,49 +3,59 @@
 @tailwind utilities;
 
 @layer base {
+  /* Maroon & Gold — light mode. Primary is pulled from the event logo's own
+     calligraphy ink (hsl(346 54% 31%), ~#7a2438) — the one color consistent
+     across both event-logo variants, so it's the real "brand red," not an
+     invented one. Secondary stays the department logo's gold
+     (hsl(43 70% 47%), ~#d4a017) as the bridge between the two marks.
+     Neutrals lean warm to match both logos' ink. */
   :root {
-    --background: 0 0% 100%;
-    --foreground: 222 47% 11%;
+    --background: 32 28% 95%;
+    --foreground: 20 8% 13%;
     --card: 0 0% 100%;
-    --card-foreground: 222 47% 11%;
+    --card-foreground: 20 8% 13%;
     --popover: 0 0% 100%;
-    --popover-foreground: 222 47% 11%;
-    --primary: 222 47% 11%;
-    --primary-foreground: 210 40% 98%;
-    --secondary: 210 40% 96%;
-    --secondary-foreground: 222 47% 11%;
-    --muted: 210 40% 96%;
-    --muted-foreground: 215 16% 47%;
-    --accent: 210 40% 96%;
-    --accent-foreground: 222 47% 11%;
+    --popover-foreground: 20 8% 13%;
+    --primary: 346 54% 31%;
+    --primary-foreground: 40 30% 97%;
+    --secondary: 43 70% 47%;
+    --secondary-foreground: 32 55% 12%;
+    --muted: 30 10% 93%;
+    --muted-foreground: 30 7% 42%;
+    --accent: 43 45% 93%;
+    --accent-foreground: 35 55% 24%;
     --destructive: 0 72% 51%;
     --destructive-foreground: 210 40% 98%;
-    --border: 214 32% 91%;
-    --input: 214 32% 91%;
-    --ring: 222 47% 11%;
+    --border: 30 14% 88%;
+    --input: 30 14% 88%;
+    --ring: 346 54% 31%;
     --radius: 0.5rem;
   }
 
+  /* Maroon & Gold — dark mode. Ground deepens into the same warm ink family
+     as primary rather than a cool navy near-black; primary lightens to a
+     rose so it still reads as a button against that ground. Gold stays
+     vivid — it's meant to pop on dark. */
   .dark {
-    --background: 222 47% 7%;
-    --foreground: 210 40% 98%;
-    --card: 222 47% 9%;
-    --card-foreground: 210 40% 98%;
-    --popover: 222 47% 9%;
-    --popover-foreground: 210 40% 98%;
-    --primary: 210 40% 98%;
-    --primary-foreground: 222 47% 11%;
-    --secondary: 217 33% 17%;
-    --secondary-foreground: 210 40% 98%;
-    --muted: 217 33% 17%;
-    --muted-foreground: 215 20% 65%;
-    --accent: 217 33% 17%;
-    --accent-foreground: 210 40% 98%;
+    --background: 350 12% 8%;
+    --foreground: 40 22% 90%;
+    --card: 350 10% 11%;
+    --card-foreground: 40 22% 90%;
+    --popover: 350 10% 11%;
+    --popover-foreground: 40 22% 90%;
+    --primary: 346 58% 56%;
+    --primary-foreground: 350 20% 10%;
+    --secondary: 43 72% 55%;
+    --secondary-foreground: 32 50% 10%;
+    --muted: 350 8% 16%;
+    --muted-foreground: 30 8% 65%;
+    --accent: 350 14% 16%;
+    --accent-foreground: 40 22% 88%;
     --destructive: 0 63% 31%;
     --destructive-foreground: 210 40% 98%;
-    --border: 217 33% 20%;
-    --input: 217 33% 20%;
-    --ring: 213 27% 84%;
+    --border: 350 8% 20%;
+    --input: 350 8% 20%;
+    --ring: 346 58% 56%;
   }
 }
 
@@ -55,5 +65,13 @@
   }
   body {
     @apply bg-background text-foreground;
+  }
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    @apply font-display;
   }
 }

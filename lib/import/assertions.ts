@@ -32,7 +32,7 @@ export interface AllocationSumMismatch {
 }
 
 /**
- * §3.6 point 8 / §3.4: sum(entry.tenant_amount) must equal
+ * §3.6 point 8 / §3.4: sum(entry.amount) must equal
  * allocation.utilised_amount, per head, within the standard tally tolerance
  * (MASTER-PLAN §7 / normalize.ts tallyWithinTolerance). Pure over plain
  * maps so it can be tested without a database.

@@ -25,7 +25,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { putDocument, getSignedUrl } from '@/lib/storage'
 import { hubStatusToExportRow, type HubStatusEntry } from '@/lib/module-mapping'
 
-export type ExportTargetSystem = 'departmental' | 'main' | 'both'
+export type ExportTargetSystem = 'departmental' | 'audit' | 'both'
 export type ExportBatchStatus = 'generated' | 'delivered' | 'acknowledged' | 'failed'
 
 const EXPORT_STORAGE_PREFIX = 'status-exports'

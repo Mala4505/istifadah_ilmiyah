@@ -20,12 +20,8 @@ function cellValue(row: EntryEnriched, key: ColumnKey): string {
   switch (key) {
     case 'date':
       return formatDate(row.date)
-    case 'tenant_amount':
-      return row.tenant_amount == null ? '' : String(row.tenant_amount)
-    case 'main_amount':
-      return row.main_amount == null ? '' : String(row.main_amount)
-    case 'amount_variance':
-      return row.amount_variance == null ? '' : String(row.amount_variance)
+    case 'amount':
+      return row.amount == null ? '' : String(row.amount)
     case 'export_pending':
       return row.hub_status_exported_at === null && row.hub_status_code !== 'not_set' ? 'yes' : 'no'
     default:

@@ -8,7 +8,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { cn } from '@/lib/utils'
 import type { ColumnKey, EntryEnriched } from './types'
 import { ALL_COLUMNS } from './types'
-import { formatDate, formatMoney, hubStatusBadgeVariant, statusBadgeVariant, varianceBadgeVariant } from './format'
+import { formatDate, formatMoney, hubStatusBadgeVariant, statusBadgeVariant } from './format'
 
 export function EntriesTable({
   rows,
@@ -110,35 +110,29 @@ function renderCell(row: EntryEnriched, key: ColumnKey) {
       return row.department_name ?? '—'
     case 'budget_head_short_label':
       return row.budget_head_short_label ?? row.budget_head_raw_label ?? '—'
-    case 'head_name':
-      return row.head_name ?? <span className="text-muted-foreground">unassigned</span>
+    case 'admin_head_name':
+      return row.admin_head_name ?? <span className="text-muted-foreground">unassigned</span>
     case 'zone_name':
       return row.zone_name ?? <span className="text-muted-foreground">unassigned</span>
+    case 'budget_category_name':
+      return row.budget_category_name ?? <span className="text-muted-foreground">unassigned</span>
     case 'vendor_display_name':
       return row.vendor_display_name ?? row.vendor_raw ?? '—'
     case 'invoice_number':
       return row.invoice_number ?? '—'
     case 'date':
       return formatDate(row.date)
-    case 'tenant_amount':
-      return formatMoney(row.tenant_amount)
-    case 'main_amount':
-      return formatMoney(row.main_amount)
-    case 'amount_variance':
-      return row.amount_variance ? (
-        <Badge variant={varianceBadgeVariant(row.amount_variance)}>{formatMoney(row.amount_variance)}</Badge>
-      ) : (
-        <span className="text-muted-foreground">—</span>
-      )
-    case 'tenant_status_label':
-      return row.tenant_status_label ? (
-        <Badge variant={statusBadgeVariant(row.tenant_status_label)}>{row.tenant_status_label}</Badge>
+    case 'amount':
+      return formatMoney(row.amount)
+    case 'status_label':
+      return row.status_label ? (
+        <Badge variant={statusBadgeVariant(row.status_label)}>{row.status_label}</Badge>
       ) : (
         '—'
       )
-    case 'main_status_label':
-      return row.main_status_label ? (
-        <Badge variant={statusBadgeVariant(row.main_status_label)}>{row.main_status_label}</Badge>
+    case 'audit_status_label':
+      return row.audit_status_label ? (
+        <Badge variant={statusBadgeVariant(row.audit_status_label)}>{row.audit_status_label}</Badge>
       ) : (
         '—'
       )
