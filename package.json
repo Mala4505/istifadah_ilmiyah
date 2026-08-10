@@ -13,6 +13,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:rls": "vitest run --config vitest.integration.config.ts",
     "score": "tsx test/score.ts",
     "worker": "tsx watch worker/index.ts",
     "db:push": "supabase db push",
