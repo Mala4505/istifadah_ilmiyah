@@ -1,6 +1,6 @@
 # Hub Operator Runbook
 
-For staff running the Istefadah Ilmiyah reconciliation Hub day-to-day. No technical background assumed — this covers the screens that exist today only.
+For staff running the Istifadah Ilmiyah reconciliation Hub day-to-day. No technical background assumed — this covers the screens that exist today only.
 
 **Your role decides what you can do.** Every account is one of three roles, set by an admin when your account was created:
 

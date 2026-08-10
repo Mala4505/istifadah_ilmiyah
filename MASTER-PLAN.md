@@ -1,4 +1,4 @@
-# Istefadah Ilmiyah — Master Plan v2
+# Istifadah Ilmiyah — Master Plan v2
 
 **Supersedes:** `~/.claude/plans/twinkling-juggling-hartmanis.md`
 **Date:** 2026-08-08
@@ -1100,7 +1100,7 @@ Per-run cost is written to `ocr_extraction_run.cost_usd`, so spend is a SQL quer
 1. Go to **console.anthropic.com** and create an organisation account (separate from any Claude.ai subscription — a Claude Pro/Max plan does **not** include API credit; they are billed separately).
 2. **Settings → Billing → Add credit.** Start with **$25**. Credits are prepaid; there is no monthly commitment and nothing to cancel. Add $25 increments as you monitor Phase 1B escalation rates.
 3. **Settings → Billing → Spend limits → Set limit → $50.** Do this before writing any code. You can raise it later if needed, but start conservative.
-4. **Settings → API Keys → Create Key.** Name it `istefadah-ilmiyah`. Copy it once — it is never shown again.
+4. **Settings → API Keys → Create Key.** Name it `istifadah-ilmiyah`. Copy it once — it is never shown again.
 5. Store the key **only** in Supabase secrets (`supabase secrets set ANTHROPIC_API_KEY=...`). Never in the repo, never in a `NEXT_PUBLIC_*` variable, never in the browser. Single key is fine; you're using one Supabase project for dev + prod.
 
 **Rate limits are not a constraint at this volume.** New organisations start on the **Start** tier: 1,000 requests/minute and 2,000,000 input tokens/minute on Haiku 4.5, with a $500 monthly spend cap. Processing all 10,000 pages at once would take roughly ten minutes of wall-clock at that ceiling. A brand-new organisation may begin on a lower **Evaluation** tier while account history builds — that resolves automatically, and the Batch API is unaffected by it either way (its own limit is 200,000 queued requests on Start tier).
@@ -1360,7 +1360,7 @@ lib/                              -- ZERO framework or host coupling. Pure TypeS
     handlers/batch-poll.ts        -- matches Batch API results by custom_id
 worker/
   index.ts                        -- standalone Node process: loop { claim job; run handler }
-                                  -- unused on Vercel; becomes Windows Service `istefadah-ilmiyah-worker`
+                                  -- unused on Vercel; becomes Windows Service `istifadah-ilmiyah-worker`
 .gitattributes                    -- see §13: CRLF conversion silently breaks file hashes
 test/
   gold.json                       -- hand-labelled ground truth for the 21 invoices
@@ -1539,8 +1539,8 @@ Run this the day the server is provisioned, **not** on a deadline. Get a hello-w
 3. **Reverse proxy.** IIS with **URL Rewrite + Application Request Routing**, forwarding `https://hub.<yourdomain>` → `http://localhost:3000`. *(Do not use `iisnode` — unmaintained.)* **If IIS is not mandated by policy, use Caddy** — it is a single binary with a 5-line config and automatic HTTPS, and will save you most of steps 3 and 4.
 4. **Certificate.** The host is publicly reachable on its own domain, so `win-acme` gets you a free Let's Encrypt certificate with a scheduled renewal task. Bind it in IIS. Set a calendar reminder anyway — an expired certificate is the single most common self-hosting outage. *(Caddy does all of this by itself.)*
 5. **Services.** Register both processes with **NSSM** (or `node-windows`) so they start on boot and restart on crash:
-   - `istefadah-ilmiyah-web` → `node .next/standalone/server.js`
-   - `istefadah-ilmiyah-worker` → `node worker/index.js`
+   - `istifadah-ilmiyah-web` → `node .next/standalone/server.js`
+   - `istifadah-ilmiyah-worker` → `node worker/index.js`
 6. **Environment variables.** Set at machine level or in the NSSM service definition — **not** in a `.env` file inside the web root, where a proxy misconfiguration could serve it.
 7. **Firewall.** Inbound: 443 only. Outbound: 443 to `api.anthropic.com` and `*.supabase.co`.
 8. **Deploy script.** A short PowerShell script — `git pull` → `npm ci` → `npm run build` → `Restart-Service` on both. Committed to the repo, so deployment is one command and not a memory.
@@ -1629,7 +1629,7 @@ export default { output: 'standalone', poweredByHeader: false, reactStrictMode: 
 
 **4. `lib/storage.ts` — one narrow interface.** Every upload, download, and signed URL goes through `put` / `get` / `signUrl` / `remove`. Supabase Storage stays the implementation on both hosts, so this is insurance rather than a planned swap — but it is four functions, and it means "move files to a UNC share" is one file rather than a search across the codebase.
 
-**5. `deploy.ps1` — committed, not remembered.** `git pull` → `npm ci` → `npm run build` → `Restart-Service istefadah-ilmiyah-web, istefadah-ilmiyah-worker`. Written on day 1 even though nothing runs it until cutover, so the deploy procedure exists in the repo rather than in someone's head.
+**5. `deploy.ps1` — committed, not remembered.** `git pull` → `npm ci` → `npm run build` → `Restart-Service istifadah-ilmiyah-web, istifadah-ilmiyah-worker`. Written on day 1 even though nothing runs it until cutover, so the deploy procedure exists in the repo rather than in someone's head.
 
 **Cutover checklist — the actual day:**
 

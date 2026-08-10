@@ -36,7 +36,7 @@ const serverSchema = z.object({
   // `<its_number>@ITS_LOGIN_EMAIL_DOMAIN` and stores that as auth.users.email,
   // Supabase Auth's login handle only. It is never sent anywhere as a real
   // address, so the domain does not need to exist or accept mail.
-  ITS_LOGIN_EMAIL_DOMAIN: z.string().min(1).default('members.istefadah.internal'),
+  ITS_LOGIN_EMAIL_DOMAIN: z.string().min(1).default('members.istifadah.internal'),
 })
 
 function readServerEnv() {

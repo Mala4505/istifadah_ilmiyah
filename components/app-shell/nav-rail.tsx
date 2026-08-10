@@ -55,8 +55,8 @@ export function NavRail({
     <nav className="sticky top-0 flex h-screen w-56 shrink-0 flex-col border-r border-border bg-card">
       <div className="flex items-center justify-center border-b border-border px-4 py-4">
         <Image
-          src="/istefadah_logo_1_alpha.png"
-          alt="Istefadah Ilmiyah"
+          src="/istifadah_logo_1_alpha.png"
+          alt="Istifadah Ilmiyah"
           width={505}
           height={502}
           priority

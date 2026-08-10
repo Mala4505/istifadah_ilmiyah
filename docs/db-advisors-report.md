@@ -1,7 +1,7 @@
 # Supabase DB Advisors Report
 
 Ran `npx supabase db advisors --linked --type all --level info` against the linked
-production project (`lkxdlnqviftoicjcbswz`, Istefadah_Ilmiyah) on 2026-08-10. Read-only
+production project (`lkxdlnqviftoicjcbswz`, Istifadah_Ilmiyah) on 2026-08-10. Read-only
 check — no `db push`, `db reset`, or migrations were run. Findings below are cross-checked
 against `supabase/migrations/*.sql` (34 files, latest `20260811000004`).
 

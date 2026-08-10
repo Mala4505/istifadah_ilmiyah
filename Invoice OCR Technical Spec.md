@@ -1,6 +1,6 @@
 # Invoice OCR & Verification System — Technical Specification
 
-**Prepared for:** Istefadah Ilmiyah event finance/budgeting team
+**Prepared for:** Istifadah Ilmiyah event finance/budgeting team
 **Purpose:** Hand-off spec for a developer to build an invoice upload → OCR → database → staff-verification web app
 
 ---

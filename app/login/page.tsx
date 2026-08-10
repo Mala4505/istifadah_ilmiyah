@@ -40,14 +40,14 @@ export default function LoginPage() {
       <Card className="w-full max-w-sm">
         <CardHeader className="items-center text-center">
           <Image
-            src="/istefadah_logo_1_alpha.png"
-            alt="Istefadah Ilmiyah"
+            src="/istifadah_logo_1_alpha.png"
+            alt="Istifadah Ilmiyah"
             width={505}
             height={502}
             priority
             className="mb-2 h-auto w-40"
           />
-          <CardTitle className="text-xl tracking-tight">Istefadah Ilmiyah 1448H</CardTitle>
+          <CardTitle className="text-xl tracking-tight">Istifadah Ilmiyah 1448H</CardTitle>
           <CardDescription>Sign in with your ITS number to continue.</CardDescription>
         </CardHeader>
         <CardContent>

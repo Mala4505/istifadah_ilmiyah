@@ -35,8 +35,8 @@ const plexMono = IBM_Plex_Mono({
 })
 
 export const metadata: Metadata = {
-  title: 'Istefadah Ilmiyah',
-  description: 'Reconciliation, review and reporting for Istefadah Ilmiyah event finance.',
+  title: 'Istifadah Ilmiyah',
+  description: 'Reconciliation, review and reporting for Istifadah Ilmiyah event finance.',
 }
 
 // Sets the `dark` class before hydration so the first paint matches the

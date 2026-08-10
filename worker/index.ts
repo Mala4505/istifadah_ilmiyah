@@ -2,7 +2,7 @@
  * worker/index.ts
  *
  * Unused on Vercel — Vercel Cron calls /api/jobs/tick instead (MASTER-PLAN
- * §3.11). This becomes the Windows Service `istefadah-ilmiyah-worker` on
+ * §3.11). This becomes the Windows Service `istifadah-ilmiyah-worker` on
  * cutover (§13).
  *
  * Standalone Node process: loop { claim job; run handler }. This is the
@@ -15,7 +15,7 @@
  * queue — see §3.11's closing line.
  *
  * Run locally with `npm run worker` (tsx watch worker/index.ts).
- * Run in production (post-cutover) as the Windows Service `istefadah-ilmiyah-worker`.
+ * Run in production (post-cutover) as the Windows Service `istifadah-ilmiyah-worker`.
  */
 
 import * as Sentry from '@sentry/nextjs'
