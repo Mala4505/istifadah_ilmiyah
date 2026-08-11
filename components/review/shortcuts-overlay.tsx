@@ -1,0 +1,44 @@
+'use client'
+
+// `?` -- keyboard shortcut overlay (§7, last row of the table).
+
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+
+const SHORTCUTS: [string, string][] = [
+  ['Tab / Shift-Tab', 'Next / previous field'],
+  ['Enter', 'Accept the OCR value as verified and advance'],
+  ['Cmd/Ctrl-Enter', 'Accept all remaining unedited fields and save'],
+  ['J / K', 'Next / previous document'],
+  ['E', 'Flag as exception, with a note'],
+  ['R', 'Re-run extraction (Sonnet)'],
+  ['1-9', 'Jump to line item n'],
+  ['/', 'Focus vendor autocomplete'],
+  ['S', 'Set Hub status, with a note'],
+  ['?', 'This overlay'],
+]
+
+export function ShortcutsOverlay({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Keyboard shortcuts</DialogTitle>
+        </DialogHeader>
+        <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-sm">
+          {SHORTCUTS.map(([key, action]) => (
+            <div key={key} className="contents">
+              <dt>
+                <kbd className="rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-xs">{key}</kbd>
+              </dt>
+              <dd className="text-muted-foreground">{action}</dd>
+            </div>
+          ))}
+        </dl>
+        <p className="text-xs text-muted-foreground">
+          J/K, E, R, digits, / and S only act outside a focused text field -- typing amounts and notes is never
+          intercepted.
+        </p>
+      </DialogContent>
+    </Dialog>
+  )
+}
