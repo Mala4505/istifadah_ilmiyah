@@ -6,6 +6,24 @@
 
 ---
 
+## 0.1 Status snapshot — as of 2026-08-13
+
+One-glance answer to "what's implemented, what's left." Full detail: §15 (Definition of Done, binary checks) and §18 (pending checklist, task-by-task, split into "Mine" vs "Yours"). This snapshot is a summary of those two — if the two ever disagree, §15/§18 are the source of truth.
+
+| Phase | Code | Verification | What's actually left |
+|---|---|---|---|
+| **0 — Prerequisites** | — | ✅ Done (2026-08-11) | Nothing. |
+| **1A — The portal** | ✅ Complete (all 7 days merged) | ✅ Data + Security bullets **live-verified against production** (2026-08-13, via direct DB checks + 3 parallel verification passes). ⚠️ Workflow bullets (dry-run/commit, enrichment editing, export batch, exception resolution) are code-complete but not yet click-through-tested live. ⚠️ CSP is code-verified only — no production domain on file to check live headers/console. | **Yours:** confirm Sentry is receiving errors (one step, §17.18); restore a backup into `dev` (§17.19); enable leaked-password-protection in the Supabase dashboard (one click, not push-able from here safely). **Either:** click through the Workflow bullets live once, and check CSP against the real domain in a browser. |
+| **1B — Verification & review** | ✅ Complete (all 5 days merged) | ⚠️ Not yet run against real data — blocked on the 21 real invoices being labeled | **Yours:** write blind pre-notes for ~10 of the 21 invoices into `test/gold-blind-notes.json`, then upload + correct all 21 through the site (§18). **Mine, once that's done:** run `npm run gold:build` then `npm run score` and confirm every §9.1 bar is met; confirm cheque/passbook non-financial classification and Gujarati auto-escalation; measure real OCR cost/doc and reviewer speed. |
+| **2 — Analytics engine** | Not started, by design (§14) | — | Gated on ~200 verified documents existing (a byproduct of running Phase 1B, not separate work). Nothing to do until then. |
+| **3 — Two-way integration** | Type-derivation rule done (2026-08-13); rest not started | — | **Yours:** send a saved copy/screenshots of the open Audit portal table (§17.23) — this is what unblocks the bookmarklet reader. **Mine, once that lands:** build the bookmarklet, wire the Audit-side import, build the API push-back endpoint. |
+| **4 — Windows Server cutover** | Not started | — | **Parked at your request** — nothing to do until you un-park it. |
+| **5 — Event operations** | Runbook only (§16) | — | Nothing to build; becomes active once the event starts. |
+
+**Since 2026-08-11's version of this plan:** Phase 1A's data/security Definition-of-Done bullets went from "code complete" to "live-verified against production," two real bugs were found and fixed (a `reconciliation_exception.dedup_key` bug that let duplicate exceptions spawn on every re-import, and a stale advisor-flagged `SECURITY DEFINER` function left over from an earlier prototype), one advisor warning was closed (`pg_trgm` relocated out of `public`), the decided `type`-column rule (§18 Phase 3) was implemented and tested, the `gold.json` tooling (§17.22) was built, and two stale figures that predated the real fixture file were corrected throughout this document ("16 entries" → 14, "eight views" → nine).
+
+---
+
 ## 0. Decisions locked
 
 | Question | Decision |
@@ -1741,11 +1759,11 @@ Binary checks on the production URL with real data. Not "mostly", not "with a kn
 - [~] CSP running report-only with zero violations on 1A screens — **code-verified 2026-08-13** (report-only mode confirmed, nonce plumbing correct, no other violation sources found in 1A screens by static review), **not live-verified**: no production domain is recorded anywhere in this repo to check actual response headers/console against
 
 **Operations**
-- [ ] Live on your domain with real logins
-- [ ] Sentry receiving errors; uptime check live
-- [ ] A backup **restored** into `dev`, not merely taken
+- [x] Live on your domain with real logins — **DONE 2026-08-11**
+- [ ] Sentry receiving errors; uptime check live — you ran the test 2026-08-12, one step left: confirm it landed on sentry.io's Issues page (§17.18)
+- [ ] A backup **restored** into `dev`, not merely taken — how-to written up in §17.19, not yet actually done
 - [ ] Failed imports visible in the UI, not only in logs
-- [ ] Runbook exists for the 1A workflows and a colleague has followed it once
+- [ ] Runbook exists for the 1A workflows and a colleague has followed it once — runbook exists (§16, `docs/operator-runbook.md`); a colleague was confirmed 2026-08-11 to be doing this pass, not yet reported back
 
 ### 15.2 Phase 1B — verification and review
 
@@ -1815,7 +1833,7 @@ None of these block the seven days. Each one improves something specific.
 
 ## 18. Pending checklist — by phase
 
-As of 2026-08-11. "Mine" is code/build/verification work; "Yours" is setup, data, decisions, or physical-world actions only you can do. Code for Phase 1A and 1B is functionally complete (all seven 1A days and all five 1B days are merged) — what's pending there is mostly **verification against real data and live infrastructure**, not new code. Phases 2–5 have no code yet; they're gated on prerequisites below, by design (§14).
+As of 2026-08-13 (originally 2026-08-11; see §0.1 for the current one-glance summary). "Mine" is code/build/verification work; "Yours" is setup, data, decisions, or physical-world actions only you can do. Code for Phase 1A and 1B is functionally complete (all seven 1A days and all five 1B days are merged), and as of 2026-08-13 the Phase 1A data/security bullets in §15.1 are also **live-verified** against the production project, not just code-complete. What's pending there now is narrower: the Workflow/Operations bullets in §15.1 (live UI click-through, Sentry/backup confirmation), CSP live verification (needs a real domain/browser), and everything under "Yours" below. Phases 2–5 have no code yet; they're gated on prerequisites below, by design (§14).
 
 ### Phase 0 — Prerequisites
 
