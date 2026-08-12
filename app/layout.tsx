@@ -1,4 +1,5 @@
 import type { Metadata } from 'next'
+import { headers } from 'next/headers'
 import { Fraunces, Public_Sans, IBM_Plex_Mono } from 'next/font/google'
 import './globals.css'
 import { Toaster } from '@/components/ui/sonner'
@@ -40,22 +41,27 @@ export const metadata: Metadata = {
 }
 
 // Sets the `dark` class before hydration so the first paint matches the
-// user's saved preference (or the OS setting) instead of flashing light
-// mode. No next-themes — this project stays off that dependency, see
-// components/ui/sonner.tsx.
+// user's saved preference. Light is the default for anyone who hasn't
+// toggled yet -- deliberately ignores the OS setting. No next-themes —
+// this project stays off that dependency, see components/ui/sonner.tsx.
 const themeScript = `
 try {
   var stored = localStorage.getItem('theme');
-  var dark = stored ? stored === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches;
-  document.documentElement.classList.toggle('dark', dark);
+  document.documentElement.classList.toggle('dark', stored === 'dark');
 } catch (e) {}
 `
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode
 }>) {
+  // The theme script is the one inline <script> this app writes by hand (everything
+  // else is Next's own, which reads its nonce automatically from the CSP header --
+  // see middleware.ts). A hand-written inline script needs its nonce passed explicitly,
+  // or it's silently blocked the moment CSP_REPORT_ONLY flips to false (confirmed
+  // 2026-08-12 against a real report-only violation on /admin).
+  const nonce = (await headers()).get('x-nonce') ?? undefined
   return (
     <html
       lang="en"
@@ -63,7 +69,7 @@ export default function RootLayout({
       className={`${fraunces.variable} ${publicSans.variable} ${plexMono.variable}`}
     >
       <head>
-        <script dangerouslySetInnerHTML={{ __html: themeScript }} />
+        <script nonce={nonce} dangerouslySetInnerHTML={{ __html: themeScript }} />
       </head>
       <body className="font-sans antialiased">
         {children}

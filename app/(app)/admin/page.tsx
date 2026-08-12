@@ -307,13 +307,22 @@ export default async function AdminPage() {
                           {departmentHeads.length === 0 ? (
                             <p className="text-sm text-muted-foreground">None.</p>
                           ) : (
-                            <ul className="text-sm">
-                              {departmentHeads.map((head) => (
-                                <li key={head.id}>
-                                  {head.headNumber}. {head.name}
-                                </li>
-                              ))}
-                            </ul>
+                            <Table>
+                              <TableHeader>
+                                <TableRow>
+                                  <TableHead>No.</TableHead>
+                                  <TableHead>Name</TableHead>
+                                </TableRow>
+                              </TableHeader>
+                              <TableBody>
+                                {departmentHeads.map((head) => (
+                                  <TableRow key={head.id}>
+                                    <TableCell>{head.headNumber}</TableCell>
+                                    <TableCell>{head.name}</TableCell>
+                                  </TableRow>
+                                ))}
+                              </TableBody>
+                            </Table>
                           )}
                         </div>
                         <div className="flex flex-col gap-1">
@@ -323,13 +332,22 @@ export default async function AdminPage() {
                           {departmentZones.length === 0 ? (
                             <p className="text-sm text-muted-foreground">None.</p>
                           ) : (
-                            <ul className="text-sm">
-                              {departmentZones.map((zone) => (
-                                <li key={zone.id}>
-                                  {zone.zoneNumber}. {zone.name}
-                                </li>
-                              ))}
-                            </ul>
+                            <Table>
+                              <TableHeader>
+                                <TableRow>
+                                  <TableHead>No.</TableHead>
+                                  <TableHead>Name</TableHead>
+                                </TableRow>
+                              </TableHeader>
+                              <TableBody>
+                                {departmentZones.map((zone) => (
+                                  <TableRow key={zone.id}>
+                                    <TableCell>{zone.zoneNumber}</TableCell>
+                                    <TableCell>{zone.name}</TableCell>
+                                  </TableRow>
+                                ))}
+                              </TableBody>
+                            </Table>
                           )}
                         </div>
                       </div>

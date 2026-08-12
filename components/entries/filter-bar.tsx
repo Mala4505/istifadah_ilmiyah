@@ -84,10 +84,10 @@ export function FilterBar({
           </SelectNative>
         </Field>
 
-        <Field label="Budget category">
-          <SelectNative value={filters.budgetCategory} onChange={(e) => onChange({ budgetCategory: e.target.value })}>
-            <option value="">All budget categories</option>
-            {options.budgetCategories.map((c) => (
+        <Field label="Cost center">
+          <SelectNative value={filters.costCenter} onChange={(e) => onChange({ costCenter: e.target.value })}>
+            <option value="">All cost centers</option>
+            {options.costCenters.map((c) => (
               <option key={c.id} value={c.id}>
                 {c.label}
               </option>

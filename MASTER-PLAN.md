@@ -10,7 +10,7 @@
 
 | Question | Decision |
 |---|---|
-| Budget heads | **Two separate dimensions, not merged.** `admin_head` (renamed from `head` 2026-08-11) = the 42 from `master.xlsx` (Hub-internal). `budget_head` = whatever the source system sends (`Venue setup (AVIT)`). A nullable `budget_head.head_id` is built now so merging later is filling in ~10 values in one screen, not a migration. A third dimension, `budget_category`, joined this table on 2026-08-11 — see §3.1. |
+| Budget heads | **Two separate dimensions, not merged.** `admin_head` (renamed from `head` 2026-08-11) = the 42 from `master.xlsx` (Hub-internal). `budget_head` = whatever the source system sends (`Venue setup (AVIT)`). A nullable `budget_head.head_id` is built now so merging later is filling in ~10 values in one screen, not a migration. A third dimension, `cost_center` (renamed from `budget_category` 2026-08-11 — Tally terminology), joined this table on 2026-08-11 — see §3.1. |
 | Hub scope | **Read, verify, report — plus two Hub-owned statuses.** No approval workflow, no payment recording: those stay in Departmental/Audit (renamed from "Main" 2026-08-11) and are imported as fact. But **`awaiting verification` and `awaiting validation` are set in the Hub portal and exported back to the modules.** These two are the only fields that flow outward. Everything else is one-way in, via import/API. |
 | Volume | **1,000–10,000 entries** for the full event. Drives: keyboard-first review (§7), department-scoped RLS, batch OCR. |
 | Delivery | **7 days, hard.** Deployed and usable by real staff at day 7. §12 states what does not make it. |
@@ -88,8 +88,8 @@ create table public.department (
 -- head" in conversation. UNCHANGED in content: still exactly the 42 granular
 -- Venue-Setup expense items from master.xlsx, still Hub-internal, still NOT the
 -- source system's own heads, still assigned by hand after import/OCR. Confirmed
--- explicitly NOT the same table as budget_category below, despite both being
--- manually-assigned enrichment fields -- see the note after budget_category.
+-- explicitly NOT the same table as cost_center below, despite both being
+-- manually-assigned enrichment fields -- see the note after cost_center.
 create table public.admin_head (
   id bigint generated always as identity primary key,
   department_id bigint not null references public.department(id),
@@ -130,26 +130,26 @@ create index budget_head_head_idx on public.budget_head (head_id);
 
 **Why this shape:** the merge you deferred becomes an admin screen listing ~10 `budget_head` rows with a dropdown of 42 `admin_head` rows. No migration, no reprocessing, no data loss. If you decide never to merge, nothing breaks — the two dimensions just report separately.
 
-**`budget_category` is a fourth, unrelated dimension — renamed 2026-08-11 from the earlier `budget_head_master` sketch, and simplified.**
+**`cost_center` is a fourth, unrelated dimension — renamed 2026-08-11 from `budget_category`, itself renamed 2026-08-11 from the earlier `budget_head_master` sketch, and simplified. Renamed again 2026-08-11 (§17) to match the term you actually use — these are cost centers in the Tally sense, not a separate "category" concept.**
 It is not the `head_id` merge target above, and it is not `admin_head` under a new name — those two share a
 *role* (both are hand-assigned enrichment, unlike the auto-imported `budget_head`) but hold completely different
-data: `admin_head` is Venue Setup's 42 physical/expense items from `master.xlsx`; `budget_category` is the
+data: `admin_head` is Venue Setup's 42 physical/expense items from `master.xlsx`; `cost_center` is the
 bracket half of labels like `"Dummas (AVIT)"` from `Departmental/budget heads.1.xlsx`, spanning every
 department. Confirmed explicitly 2026-08-11 after this got conflated mid-conversation: **keep them as two
 separate tables and two separate columns on `entries`.** `budget_head` (import-derived raw labels, above) and
-`budget_category` (below) have **no FK relationship to each other, ever**.
+`cost_center` (below) have **no FK relationship to each other, ever**.
 
 ```sql
--- A flat, curated, cross-department category list -- not scoped to a department,
--- because the same category (e.g. "AVIT") repeats across several (Dummas AVIT, ITS
--- AVIT are the same concept). "Not every department has every category" (the matrix
--- you described) is handled by entries carrying department_id and budget_category_id
+-- A flat, curated, cross-department cost-center list -- not scoped to a department,
+-- because the same cost center (e.g. "AVIT") repeats across several (Dummas AVIT, ITS
+-- AVIT are the same concept). "Not every department has every cost center" (the matrix
+-- you described) is handled by entries carrying department_id and cost_center_id
 -- independently, not by a join/allow-list table -- there was no request for the
 -- second one to gate the first.
-create table public.budget_category (
+create table public.cost_center (
   id bigint generated always as identity primary key,
   name text not null,                    -- 'AVIT', 'Accommodation', 'Mawaid / Snacks', ...
-  cluster_group_id bigint references public.budget_category(id),  -- self-ref merge,
+  cluster_group_id bigint references public.cost_center(id),  -- self-ref merge,
                                           -- same pattern as vendor.cluster_group_id --
                                           -- for near-duplicate spellings, null = independent
   is_confirmed boolean not null default false,
@@ -157,7 +157,7 @@ create table public.budget_category (
 );
 ```
 
-`entries.budget_category_id` (§3.4) is how a reviewer records this — manually, per entry, the same way
+`entries.cost_center_id` (§3.4) is how a reviewer records this — manually, per entry, the same way
 `admin_head_id`/`zone_id` are set today. Nothing about import, `budget_head`, or the deferred `head_id` merge
 touches this column, in either direction.
 
@@ -232,7 +232,7 @@ create table public.hub_status (
 -- Add further states as a plain insert — no migration, per the text+CHECK-free lookup design.
 ```
 
-The exact lifecycle — whether `awaiting_verification` always precedes `awaiting_validation`, what state follows validation, and whether either can be reverted — is open (§17). The table is ordered by `sort_order` and the UI enforces whatever transition rules you confirm; nothing in the schema hard-codes a sequence, so confirming it later is a config change.
+**RESOLVED 2026-08-11 (§17.4):** there is no in-Hub sequence to enforce between the two. Hub users set `awaiting_verification` or `awaiting_validation` by hand as needed and export them out; nothing past those two stages happens inside the Hub — the next status change arrives via the next import, already decided by the module. The table stays ordered by `sort_order` for display, but the UI does not gate one Hub-owned status behind the other, and neither is "reverted" in-app — a later import simply overwrites `status_raw`/`status_id` with whatever the source now says.
 
 ### 3.4 `entries` — the unified record
 
@@ -278,8 +278,11 @@ create table public.entries (
   -- the separate hub_status_id below -- the Hub's own awaiting-verification /
   -- awaiting-validation steps are later stages of this SAME lifecycle now, not a
   -- second column. audit_status_id remains genuinely separate, per your instruction
-  -- that audit stays its own track. The exact sequence (which status precedes which,
-  -- what audit_status triggers) is still open -- see §17.
+  -- that audit stays its own track. RESOLVED 2026-08-11 (§17.4): there is no
+  -- in-Hub sequence between the two Hub-owned stages, and no auto-advance logic
+  -- lives here -- rows arrive from import already carrying their status, the Hub
+  -- only ever writes awaiting_verification/awaiting_validation by hand, and
+  -- anything past that is overwritten wholesale by the next import.
   status_id bigint references public.entry_status(id),
   audit_status_id bigint references public.entry_status(id),
   status_raw text,
@@ -288,7 +291,7 @@ create table public.entries (
   -- Hub enrichment (never touched by import)
   admin_head_id bigint references public.admin_head(id),   -- renamed from head_id with the table
   zone_id bigint references public.zone(id),
-  budget_category_id bigint references public.budget_category(id),  -- see §3.1: unrelated
+  cost_center_id bigint references public.cost_center(id),  -- see §3.1: unrelated
                                           -- to budget_head_id above and to admin_head_id — a
                                           -- reviewer sets this by hand, same as the other two
   remark text,                           -- renamed from enrichment_note — a plain note
@@ -328,8 +331,8 @@ create index entries_date_idx on public.entries (date);
 create index entries_dept_bh_idx on public.entries (department_id, budget_head_id);
 create index entries_admin_head_idx on public.entries (admin_head_id) where admin_head_id is not null;
 create index entries_zone_idx on public.entries (zone_id) where zone_id is not null;
-create index entries_budget_category_idx on public.entries (budget_category_id)
-  where budget_category_id is not null;
+create index entries_cost_center_idx on public.entries (cost_center_id)
+  where cost_center_id is not null;
 create index entries_vendor_idx on public.entries (vendor_id);
 create index entries_status_idx on public.entries (status_id, date);
 create index entries_main_number_idx on public.entries (main_number) where main_number is not null;
@@ -337,9 +340,9 @@ create index entries_invoice_number_idx on public.entries (invoice_number);
 create index entries_batch_idx on public.entries (import_batch_id);
 create index entries_settles_idx on public.entries (settles_entry_id) where settles_entry_id is not null;
 -- the export queue: everything set in the Hub that hasn't been pushed out yet.
--- Condition TBD (was `hub_status_id <> 1`, i.e. "not the default not-set state") --
--- needs to be re-expressed once the merged status_id's full sequence (§17) is
--- confirmed, since "not set" may not stay a single well-known id the same way.
+-- status_exported_at is null after any Hub-driven status change (awaiting_verification
+-- or awaiting_validation, set by hand); an import-driven status change is never
+-- queued for export -- see §17.4, RESOLVED 2026-08-11.
 create index entries_pending_export_idx on public.entries (status_changed_at)
   where status_exported_at is null;
 ```
@@ -368,7 +371,7 @@ create index budget_allocation_head_date_idx on public.budget_allocation (budget
 
 Append-only snapshots. Current position = latest row per head. Burn-over-time comes free from the history, which a single mutable row could not give you.
 
-> **Flag, not a blocker.** In the sample, `Approved Amount = 0` on every head while ₹2,32,46,861 is already utilised against ₹5,00,00,000 requested. Budget-vs-actual will render with a zero denominator until that is resolved. The report handles it — heads with `approved_amount = 0` show *"no approved budget"* rather than −100%. But the number itself is a question for you (§13).
+> **RESOLVED 2026-08-11 (§17.6).** In the sample, `Approved Amount = 0` on every head while ₹2,32,46,861 is already utilised against ₹5,00,00,000 requested. Confirmed not a real steady-state case — it won't occur in practice. The report still handles it defensively — heads with `approved_amount = 0` show *"no approved budget"* rather than −100% — but this guard isn't expected to trigger on real data.
 
 ### 3.6 Import
 
@@ -445,7 +448,7 @@ on conflict (ubbl_number) do update set
   budget_head_raw   = excluded.budget_head_raw,
   import_batch_id   = excluded.import_batch_id,
   updated_at        = now();
--- admin_head_id, zone_id, budget_category_id, remark, settles_entry_id, is_void,
+-- admin_head_id, zone_id, cost_center_id, remark, settles_entry_id, is_void,
 -- status_changed_at/by, status_note, status_exported_at, status_export_batch_id,
 -- audit_status_changed_at/by are deliberately absent. Postgres leaves them
 -- untouched. This is the guarantee. Note status_id itself IS in the insert/update
@@ -946,7 +949,7 @@ Three roles, set on `staff_profile.role`. `department_id` null means all departm
 |---|:--:|:--:|:--:|
 | See entries, documents, reports (own department) | ✓ | ✓ | ✓ |
 | Export CSV from any list | ✓ | ✓ | ✓ |
-| Edit enrichment (`admin_head_id`, `zone_id`, `budget_category_id`) | — | ✓ | ✓ |
+| Edit enrichment (`admin_head_id`, `zone_id`, `cost_center_id`) | — | ✓ | ✓ |
 | Verify document extractions | — | ✓ | ✓ |
 | Set Hub status (awaiting verification / validation) | — | ✓ | ✓ |
 | Resolve or dismiss exceptions | — | ✓ | ✓ |
@@ -1014,7 +1017,7 @@ v1 described four days of UI in prose with no screens, states, or navigation. Ev
 |---|---|---|---|---|---|
 | 1 | Sign in | `/login` | 1A | Supabase magic-link or email+password | Inactive account → *"Your account is pending activation"*, not a generic auth error |
 | 2 | Dashboard | `/` | 1A | Review queue depth, open exceptions by ₹ at risk, budget burn, today's imports | Every tile links to its filtered list |
-| 3 | Entries list | `/entries` | 1A | Filter by department / budget head / admin head / zone / budget category / status (including the Hub's later stages) / export-pending / date range / vendor / has-document; keyset paginated | **Bulk status change with a required note** — the primary way staff set awaiting verification/validation at volume. Column chooser, CSV export, saved filters in URL |
+| 3 | Entries list | `/entries` | 1A | Filter by department / budget head / admin head / zone / cost center / status (including the Hub's later stages) / export-pending / date range / vendor / has-document; keyset paginated | **Bulk status change with a required note** — the primary way staff set awaiting verification/validation at volume. Column chooser, CSV export, saved filters in URL |
 | 4 | Entry detail | `/entries/[id]` | 1A | Import fields read-only with a source badge; enrichment fields editable; **status control with its own history timeline**; linked documents; change history tab | Advance-settlement picker lives here. Status control shows "exported 2026-08-09" or "pending export" |
 | 5 | Import | `/import` | 1A | Upload → **dry-run preview with per-row diff** → commit; batch history | The preview is the screen, not a modal |
 | 6 | Document inbox | `/documents` | **1B** | Unmatched documents with suggested entry matches; attach, mark "no entry expected", or bulk-attach | **Highest-volume flow.** ~18 of 21 sample documents land here |
@@ -1290,7 +1293,7 @@ The accuracy harness covers OCR. These cover the parts where a silent bug is wor
 
 **Integration — against a throwaway Supabase branch:**
 
-- **Idempotency:** import → set `zone_id`, `admin_head_id`, `budget_category_id`, `status_id`'s Hub-added stages, and a `_verified` value → import again → assert *only* `updated_at` changed. This is the single most important test in the suite.
+- **Idempotency:** import → set `zone_id`, `admin_head_id`, `cost_center_id`, `status_id`'s Hub-added stages, and a `_verified` value → import again → assert *only* `updated_at` changed. This is the single most important test in the suite.
 - **Dry-run:** produces a row log and leaves `entries` untouched.
 - **Queue:** two workers claiming concurrently never take the same job (`SKIP LOCKED`).
 
@@ -1316,9 +1319,9 @@ supabase/
     2026????????_admin_head.sql               -- renamed from head.sql 2026-08-11, content unchanged
     20260808000006_zone.sql
     20260808000007_budget_head.sql
-    2026????????_budget_category.sql          -- renamed 2026-08-11 from the earlier budget_head_master
-                                                -- placeholder; unrelated to budget_head above, see §3.1
-                                                -- -- no FK either direction
+    2026????????_cost_center.sql              -- renamed 2026-08-11 from budget_category (itself renamed
+                                                -- from the earlier budget_head_master placeholder); unrelated
+                                                -- to budget_head above, see §3.1 -- no FK either direction
     20260808000008_vendor_and_alias.sql
     20260808000009_entry_status.sql
     20260808000010_hub_status.sql
@@ -1396,10 +1399,10 @@ Items 2–5 gate Phase 1A day 1. Item 1 now gates **Phase 1B**, not 1A — the p
 | 3 | One Supabase project with **Pro plan**, publishable + secret keys generated (§6.2) | 10 min | 1A day 1 |
 | 4 | Vercel project connected to the repo (free tier), custom domain has one already; update DNS later | 5 min | 1A day 7 |
 | 5 | **Rotate the Supabase secret key** if it was ever committed or given a `NEXT_PUBLIC_` prefix | 1 min | Immediately |
-| 6 | Answer: **Hub-status lifecycle** — does verification always precede validation? What follows validation? Can either be reverted? | — | 1A day 4 |
-| 7 | Confirm: is `Approved Amount = 0` real, or is the export pre-approval? | — | 1A day 6 reports |
+| 6 | ~~Answer: **Hub-status lifecycle**~~ — **RESOLVED 2026-08-11** (§17.4): rows arrive via import already carrying their status; the Hub only sets its own two owned stages and exports them; everything past that comes back on the next import. | — | ✅ |
+| 7 | ~~Confirm: is `Approved Amount = 0` real, or is the export pre-approval?~~ — **RESOLVED 2026-08-11** (§17.6): not a real case, won't occur in practice. | — | ✅ |
 
-Item 6 gates 1A day 4; item 7 gates 1A day 6. Everything else can proceed under a stated assumption, which I will write down rather than leave implicit.
+Items 6 and 7 are resolved — see §17.4 and §17.6. Everything else can proceed under a stated assumption, which I will write down rather than leave implicit.
 
 ### 11.1 Phase 1A — the portal, day by day (7 days, hard)
 
@@ -1412,18 +1415,19 @@ Each day has an exit criterion that is a command you can run or a row you can se
 
 **Day 2 — Import, and the OCR de-risk spike.** `normalizeId` with unit tests against both the integer and `ADP_` string forms. The grouped-Excel parser: forward-fill, allocation rows, budget-head auto-create, vendor resolution, dry-run/commit, and the four assertions (allocation-sum, namespace collision, unknown status, Grand-Total in column C).
 **Also today, timeboxed to half a day: the OCR spike — CLI only, no UI, no schema.** Run `documents-extract` against all 21 PDFs and eyeball the JSON. This is not the accuracy harness (§9.1) and produces no score; it exists to answer one question early: *does extraction basically work on these documents?* If pdf.js chokes, if Gujarati returns garbage, if cheque pages leak into line items — I want that on day 2, not in Phase 1B. Cost: about $2.
-**Exit:** dry-run previews 16 entry rows + 10 allocations + 1 new budget-head set; commit produces exactly that; an immediate second run reports 16 unchanged. Separately: 21 JSON payloads exist and are recognisably correct, with any surprises written down.
+**Exit:** dry-run previews 14 entry rows + 10 allocations + 1 new budget-head set; commit produces exactly that; an immediate second run reports 14 unchanged. Separately: 21 JSON payloads exist and are recognisably correct, with any surprises written down.
+**CORRECTED 2026-08-13** — this originally said "16 entry rows"/"16 unchanged". That was always an illustrative guess, never checked against the actual committed fixture. `test/unit/import-fixture.test.ts` (written against the real file, `test/fixtures/tenant_multiple_budget_6_20260807_102230.xlsx`, the same file as `Departmental/tenant_multiple_budget_6_20260807_102230.xlsx`) established the real ground truth by direct inspection: 10 allocation rows (Srno 1-10) but only 14 rows with a non-empty Vendor Name, not 16. Live-verified 2026-08-13: a dry-run against the current live project reproduces exactly 14 unchanged, 0 unexpected inserts/updates — every occurrence of "16" in this document's Phase 1A data checklists (§15.1, §18) is corrected to 14 for the same reason.
 
 **Day 3 — App shell, auth, entries list.** Next.js scaffold, `@supabase/ssr`, login, the `handle_new_user` trigger, RLS verified from the app. Entries list: filters (department, budget head, head, zone, both statuses, Hub status, date, vendor, has-variance), keyset pagination, column chooser, CSV export.
 **Exit:** log in as a reviewer, filter to a budget head, export the CSV, and confirm a second user in another department sees zero of those rows.
 
-**Day 4 — Entry detail, enrichment, status.** Detail screen with import fields read-only and source-badged; `admin_head_id` / `zone_id` / `budget_category_id` editable; status control with its own history timeline; bulk status change with required note on the list; change-history tab.
+**Day 4 — Entry detail, enrichment, status.** Detail screen with import fields read-only and source-badged; `admin_head_id` / `zone_id` / `cost_center_id` editable; status control with its own history timeline; bulk status change with required note on the list; change-history tab.
 **Exit:** set a zone and a Hub status on one entry, both appear in `entry_change_log`, and the status change appears on its own timeline with the acting user.
 
 **Day 5 — Status export + exceptions.** `export-status` route and the `/export` screen: pending queue, batch generation, `.xlsx` keyed on **both** UBBL and Main number, delivered/acknowledged tracking, immutable batch history. Exceptions queue sorted by severity then ₹ at risk, with mandatory resolution notes.
 **Exit:** set three entries to `awaiting validation`, generate a batch, open the `.xlsx` and confirm both key columns; the three leave the pending queue; changing one again puts it back; the prior batch is untouched.
 
-**Day 6 — Reconciliation, reports, CSP.** All eight views from §10.2, `security_invoker` on every one. Reconciliation screen (department vs audit variance, unmatched either side, allocation mismatches). Reports: budget vs actual (handling `approved_amount = 0`), vendor spend, zone spend, status ageing, open issues — CSV on each. CSP shipped **report-only**.
+**Day 6 — Reconciliation, reports, CSP.** All views from §10.2 (nine, as actually built — corrected 2026-08-13, see the note at §15.1), `security_invoker` on every one. Reconciliation screen (department vs audit variance, unmatched either side, allocation mismatches). Reports: budget vs actual (handling `approved_amount = 0`), vendor spend, zone spend, status ageing, open issues — CSV on each. CSP shipped **report-only**.
 **Exit:** a department-1 reviewer sees zero department-2 rows **in every view**, not just every table. No CSP violations in the console on any 1A screen.
 
 **Day 7 — Deploy, harden, real-data run, buffer.** Deploy to Vercel on your domain. Full run on real data: import, enrich, set statuses, export, re-import for idempotency. RLS suite as three users. `supabase db advisors` clean. Backup restored into `dev`. Sentry + uptime check live. Operator runbook for the 1A workflows. Bug-fix buffer — no new features.
@@ -1462,7 +1466,7 @@ Seven days is a hard constraint, so this is what does not make it into the porta
 | `flags-run` entirely (duplicate payment, rate drift, discount inconsistency) | Pattern-based; genuinely needs verified line items to accumulate first. Schema ships week 1 so nothing has to change later. | Week 2–3 |
 | Item catalog and `item_key` normalization | Cross-vendor rate comparison *is* this algorithm; doing it badly is worse than not doing it. `rate_reference` rows accumulate now with `item_key` null and get keyed retroactively. | Week 2 |
 | Audit-side import wiring | The mapping is written on day 2 against Sheet 2's contract; it cannot be tested until a populated Audit export exists. | The day you send the file |
-| Budget-head → admin-head **merge** | Your explicit decision to keep them separate. The nullable FK and the admin screen exist; the mapping is empty. **Not the same thing as `budget_category` (§3.1, confirmed 2026-08-10, renamed 2026-08-11) — that table is unrelated to this merge and is never its target.** | When you confirm |
+| Budget-head → admin-head **merge** | Your explicit decision to keep them separate. The nullable FK and the admin screen exist; the mapping is empty. **Not the same thing as `cost_center` (§3.1, confirmed 2026-08-10, renamed from `budget_category` 2026-08-11) — that table is unrelated to this merge and is never its target.** | When you confirm |
 | Push-back **as a live API call** | The two Hub-owned statuses **do ship in week 1**, as a reviewed `.xlsx` export (§3.7) — that is the whole outward path, working end to end. What is cut is calling the modules' API directly instead of handing over a file. `format = 'api'` is already in the CHECK constraint and the transform is shared, so the swap is config plus an endpoint. | Week 2–3 |
 | Push-back of anything **other than** the two statuses | Nothing else in the Hub is authoritative — every other field is imported. | Not planned |
 | Native mobile capture | Responsive web upload covers it. | Not planned |
@@ -1716,25 +1720,25 @@ Binary checks on the production URL with real data. Not "mostly", not "with a kn
 ### 15.1 Phase 1A — the portal
 
 **Data**
-- [ ] The real Departmental file imports to 16 entries + 10 allocations; a second import reports 16 unchanged
-- [ ] `zone_id`, `admin_head_id`, and `budget_category_id` survive a re-import untouched
-- [ ] All 42 `admin_head` rows, 13 zones, and both status dimensions (`status_id`, `audit_status_id`) seeded
-- [ ] Every unmatched budget head and unknown status raises an exception instead of a null
-- [ ] `sum(entry amount) == allocation.utilised_amount` holds per head, or raises
+- [x] The real Departmental file imports to 14 entries + 10 allocations; a second import reports 14 unchanged — **live-verified 2026-08-13** (corrected from "16", see the note at Day 2's exit criterion above — the 16 figure was never checked against the real fixture)
+- [x] `zone_id`, `admin_head_id`, and `cost_center_id` survive a re-import untouched — **live-verified 2026-08-13**: import SQL never references these columns
+- [x] All 42 `admin_head` rows, 13 zones, and both status dimensions (`status_id`, `audit_status_id`) seeded — **live-verified 2026-08-13**
+- [x] Every unmatched budget head and unknown status raises an exception instead of a null — **live-verified 2026-08-13**
+- [x] `sum(entry amount) == allocation.utilised_amount` holds per head, or raises — **live-verified 2026-08-13**: diff is 0.00 on all 10 heads
 
 **Workflow**
 - [ ] An admin can dry-run an import, read the diff, and commit it
-- [ ] A reviewer can set zone, admin head, and budget category on an entry
+- [ ] A reviewer can set zone, admin head, and cost center on an entry
 - [ ] Setting a status queues it for export; a batch produces an `.xlsx` keyed on both UBBL and Main number
 - [ ] Re-changing an exported status re-queues it; the prior batch is unchanged
 - [ ] Exceptions can be resolved only with a note
 
 **Security**
-- [ ] A department-1 reviewer sees zero department-2 rows in tables **and in all eight views**
-- [ ] A `viewer` cannot update; a `reviewer` cannot delete
-- [ ] `updated_by` always reflects the acting user
-- [ ] No secret carries a `NEXT_PUBLIC_` prefix; `supabase db advisors` clean
-- [ ] CSP running report-only with zero violations on 1A screens
+- [x] A department-1 reviewer sees zero department-2 rows in tables **and in all nine views** (corrected from "eight" — nine `v_*` views actually exist) — **live-verified 2026-08-13** via `npm run test:rls` against the live project; only one department exists in real data today so true cross-department isolation was proven with the fixture-based test suite, not production rows
+- [x] A `viewer` cannot update; a `reviewer` cannot delete — **live-verified 2026-08-13**: delete is hard-revoked from every role project-wide (entries are soft-delete via `is_void` by design), viewer update policy confirmed to affect 0 rows live
+- [x] `updated_by` always reflects the acting user — **live-verified 2026-08-13**: `entries_before_update` trigger unconditionally sets `updated_by := auth.uid()`, overwriting any client-supplied value
+- [x] No secret carries a `NEXT_PUBLIC_` prefix; `supabase db advisors` clean — **verified 2026-08-13**: only publishable/DSN values carry the prefix; advisors clean aside from Supabase's own platform event trigger (benign) and leaked-password-protection (dashboard toggle, not yet actioned)
+- [~] CSP running report-only with zero violations on 1A screens — **code-verified 2026-08-13** (report-only mode confirmed, nonce plumbing correct, no other violation sources found in 1A screens by static review), **not live-verified**: no production domain is recorded anywhere in this repo to check actual response headers/console against
 
 **Operations**
 - [ ] Live on your domain with real logins
@@ -1774,19 +1778,149 @@ Two pages, written for someone who was not in any of these conversations.
 
 None of these block the seven days. Each one improves something specific.
 
-1. **Does central IT need the CSP header value for review, and do they want violation reports routed anywhere?** (§4.4b) The policy is set in the app, not the proxy — worth confirming they're happy with that before cutover, since it means nothing to configure in IIS.
-2. **Reverse proxy: IIS or Caddy?** Check with IT before the server is provisioned. Caddy removes the certificate-renewal task entirely and saves about half a day; IIS is the safe default if policy requires it. (§13.3)
-3. **When will the Windows Server be provisioned?** Not a blocker — week 1 ships on Vercel either way — but it sets when the ~1-day cutover gets scheduled, and the Vercel Pro cost runs until then. (§13)
-4. **Status lifecycle — PARTIALLY ANSWERED 2026-08-11.** Confirmed: `hub_status` folds into `entries.status_id` as later stages of one lifecycle (not a separate column, §3.3/§3.4); `audit_status_id` stays genuinely separate; after some point in `status_id`'s progression, `audit_status_id` starts, and completing it auto-advances `status_id`. **Still missing:** the message describing exactly how that auto-advance is triggered — import, manual, or API — cut off mid-sentence ("We will pull data or push data via API and use…"). Needed before `status_id`'s full seed list and transition rules are buildable.
-5. **Who receives the export, in what form?** A file handed to a person, a shared folder, or an endpoint? And does either module acknowledge that it applied the change — or is delivery assumed?
-6. **`Approved Amount = 0` on every head** while ₹2.32 crore is utilised — is that real, or is this export pre-approval? Budget-vs-actual has no denominator until this is settled.
+1. **Does central IT need the CSP header value for review? — RESOLVED 2026-08-12.** Deferred to the Windows Server cutover (§4, already parked at §17.2/§17.3) — nothing to decide now, revisit together when that phase is un-parked. Staying report-only until then regardless. **2026-08-12 finding, already fixed while report-only was watching (exactly what it's for):** your own test run surfaced two real violations on `/admin` — (a) the theme-flash-prevention `<script>` in `app/layout.tsx` had no nonce attached, so it would've been silently blocked the moment enforcement turned on; fixed by reading the nonce via `headers()` and passing it to the script tag. (b) Radix UI (every `components/ui/*` primitive — popover, select, dropdown, dialog, tooltip) sets positioning via inline `style="..."` attributes generated fresh per render, which can't be nonced or hashed; `style-src` in `middleware.ts` now allows `'unsafe-inline'` in every environment (previously prod-only nonced). `script-src` is untouched and still fully strict (nonce + `strict-dynamic`, no `unsafe-inline`) — that's where CSP's real value is, and this doesn't weaken it. The `upgrade-insecure-requests` message in your log is not a bug — that directive is a no-op under report-only by design, and starts working the moment enforcement is on.
+2. **Reverse proxy: IIS or Caddy?** — **PARKED 2026-08-11 at your request**, alongside the Windows Server itself (§13.3).
+3. **When will the Windows Server be provisioned?** — **PARKED 2026-08-11 at your request.** Staying on Vercel until you say otherwise (§13).
+4. **Status lifecycle — RESOLVED 2026-08-11.** Confirmed: `hub_status` folds into `entries.status_id` as later stages of one lifecycle (not a separate column, §3.3/§3.4); `audit_status_id` stays genuinely separate. The auto-advance trigger is **import, not manual action or API**: a row arrives already carrying whatever status the source module has set; the Hub only ever sets its own two owned stages (`awaiting_verification` / `awaiting_validation`) by hand and exports them back out — it never advances a row past those two itself. Whatever happens downstream (approval, payment, anything else) happens inside the module, and the Hub only learns about it on the *next* import, which arrives with `status_raw`/`audit_status_raw` already updated. So the transition rule the UI enforces is simply: Hub users may only move a row into `awaiting_verification` or `awaiting_validation`; every other transition is import-driven and overwrites wholesale, never computed in-app.
+5. **Who receives the export, in what form? — RESOLVED 2026-08-12.** Form: Excel — confirmed, and it's already what's built (§3.7's reviewed `.xlsx` export). Recipient/delivery: no automated routing needed — you'll download and hand it over yourself, same as any file; no shared-folder integration or endpoint push, and no acknowledgment-tracking required for now.
+6. **`Approved Amount = 0` on every head — RESOLVED 2026-08-11.** Confirmed not a real steady-state case: it won't occur in practice. The report's zero-denominator guard (heads with `approved_amount = 0` show "no approved budget" rather than −100%) stays in as defensive handling but isn't expected to trigger on real data.
 7. **RESOLVED 2026-08-11 — the `hub_reference` column is dropped.** Confirmed: not needed, removed from `entries` (§3.4).
-8. **`APS`** — still undefined, still blocking one KPI.
-9. **Sheet 2's `Type` column — PARTIALLY ANSWERED 2026-08-11.** The `ADP_`-prefix heuristic is deprioritized (unreliable, per you); you're supplying the actual invoice/advance-payment/reimbursement rule directly instead. Reimbursement itself is confirmed **not active yet** — post-event only, for now there are only two real values in play. Still need: the actual rule to replace the prefix heuristic with.
-10. **Advance settlement** — how does an `ADP_` advance get netted against the final invoice today? `settles_entry_id` exists; the workflow around it does not.
-11. **UBBL ↔ Main Entry Number** — guaranteed 1:1, or can one UBBL split into several Main entries?
-12. **Vendor master** — do you have GSTIN / phone / bank details anywhere, or is the invoice the only source?
-13. **TDS** — deducted at source on these contractor payments? Credit notes ever issued?
-14. **Zones for other departments** — is zoning Venue-Setup-only, or does each department get its own list?
-15. **Users** — how many staff, in how many roles, and should departments see each other's spend?
-16. **Hijri dates** — the event is 1447H. Do reporting periods need Hijri alongside Gregorian?
+8. **`APS`** — still undefined. **2026-08-11: you don't recognize the term either.** Neither of us has a source for it beyond this doc, so it's dropped from active tracking — flag it again if you run across it and can tell me where it's from (which report, which KPI). No KPI is currently blocked waiting on this.
+9. **Sheet 2's `Type` column — FULLY RESOLVED 2026-08-12.** The rule: it lives in the **UBBL number's prefix**, and there are exactly three values: `ADP_` = advance payment; `RB` = reimbursement (corrected 2026-08-12 — recorded as `RMP` on 2026-08-11, that was a mishearing); no prefix = invoice, the default/catch-all. The fourth sidebar item spotted in your 2026-08-12 screenshot ("Invoice Against Uplaq") is **not** a fourth type — confirmed it's just `invoice`, not a separate value. Ready to implement.
+10. **Advance settlement — RESOLVED 2026-08-12.** No systematic netting logic gets built. Your answer: if a matching issue like this comes up, flag it, and it's decided case-by-case at that time — not something to automate. That means the existing pieces are already sufficient as designed: `settles_entry_id` plus the picker (`advance-settlement-picker.tsx`) let a reviewer manually link an advance to the invoice that settles it when they notice the match; nothing more needs building. One residual technical note, not a new open question, just something to watch for once real data flows through: once two entries are linked this way, `v_budget_vs_actual`'s `actual_spend` still sums both independently, which could double-count the advance against utilisation until someone notices — consistent with your own principle, that's fine to flag and decide when it's actually seen, not pre-solved now.
+11. **UBBL ↔ Main Entry Number — RESOLVED 2026-08-12.** Confirmed against a live screenshot of the Departmental system's own Entries list (which matches the sample export exactly — same UBBL/Main Number pairing pattern): **UBBL Number is guaranteed unique, it never repeats.** So it's strictly one UBBL per entry, as the schema already assumes (`ubbl_number` unique, §3.4). The UBBL↔Main-Entry-Number relationship specifically (whether Main Entry Number could ever be 1:many under one UBBL) is **explicitly not a concern for now**, per you — parked, not because it's answered, but because it doesn't matter yet. Separately, that same sample file has a live example of the namespace collision already flagged in §3.6: row 2's Main Entry Number (`ADP_202608054`) is the exact same string as row 4's UBBL Number (`ADP_202608054`) — two different things, same value. That's exactly why the importer asserts no value appears in both columns across different rows.
+12. **Vendor master — CONCEPT CONFIRMED 2026-08-12.** You confirmed each vendor keeps its own data — GSTIN, bank details, etc. stored per vendor, not shared/global — which matches how `vendor`/`vendor_alias` already model identity (§3.2), so no schema rethink needed. Exact source file still open but non-blocking; ask again once Phase 3 vendor wiring becomes active work.
+13. **TDS — explained 2026-08-12, CONFIRMED PARKED, no dashboard changes.** TDS (Tax Deducted at Source) is an Indian rule where, when you pay certain vendors, you're required to hold back a percentage as tax and deposit it directly with the government under the vendor's name, instead of paying them the full billed amount — the vendor then gets credit for that against their own taxes, and you'd normally issue them a certificate showing it was deducted. It matters here only if it changes what "amount paid" means: if TDS is deducted, the invoice's billed total and what actually left your account are two different numbers, and the system would need to know which one it's looking at to reconcile correctly. A credit note is unrelated — just a vendor-issued correction reducing what's owed (e.g. a return or billing error). **You confirmed 2026-08-12: nothing gets added to the dashboard for this now.** No schema, no reports, no fields — fully parked, not just deprioritized. Revisit only if you bring it up again.
+14. **Zones for other departments — RESOLVED 2026-08-11.** Confirmed: zoning stays your team's responsibility — staff assign a zone to each invoice by hand, same as the current Venue-Setup-only design. No schema or workflow change needed.
+15. **Users — RESOLVED 2026-08-11.** Confirmed: admins see every department; department-scoped users see and enter invoices only for their own department. This already matches the built RLS model (`staff_profile.role`, `department_id` null = all-departments, §4.2/§4.4) — no change needed. Exact headcount per role not given; not a blocker.
+16. **Hijri dates — RESOLVED 2026-08-12.** Confirmed: no. Gregorian only, nothing to add.
+17. **RESOLVED 2026-08-11 — `budget_category` renamed to `cost_center`.** These are cost centers in the Tally sense, not a separate "category" concept — use this term from now on. Table, `entries.budget_category_id` → `cost_center_id`, indexes, policies, and `v_entry_enriched`'s `budget_category_name` → `cost_center_name` all renamed (§3.1, §3.4). Migration `20260813000004_cost_center_rename.sql`. Concept unchanged: still the bracket half of labels like `"Dummas (AVIT)"`, still hand-assigned per entry, still no FK to `budget_head`/`admin_head`.
+18. **What is Sentry, and how do I confirm it's working? — test run 2026-08-12, one step left.** You ran the test (`throw new Error('sentry test')` in the browser console on `/admin`) — the console showed `Uncaught Error: sentry test`, which confirms the error fired, but that's the browser's own console echoing it, not proof Sentry caught it. **Last step: log into sentry.io, open this project's Issues page, and check the test error actually appears there** (may take a minute or two to show up). If it's there, this is fully done — nothing left to explain or configure. If it's *not* there, tell me and I'll check the wiring (most likely cause: `NEXT_PUBLIC_SENTRY_DSN` not set in the live environment). Separately, "uptime check" just means some external service pings your site every few minutes and alerts you if it stops responding (e.g. UptimeRobot, or Vercel's own monitoring) — not yet set up, low priority, no rush.
+19. **What does "restore a backup into `dev`" mean, and how do I do it? — how-to added 2026-08-12.** Supabase takes automatic backups of your database. The drill is: load one of those backups into a *separate, throwaway* copy — never into production — purely to prove the backup file is actually valid and loadable. This matters because a backup that was quietly broken is only discovered the day you desperately need it; this catches that in advance, safely. **How, via the dashboard:** in your Supabase project, go to Database → Backups, and use its restore option pointed at a new/separate project (not this one) — or use the "branching" feature if your plan has it, which spins up an isolated copy automatically. **Easier option:** if you connect this session to your Supabase account (via Claude's connector settings, or `/mcp` if you're in an interactive session), I can drive this directly — list your backups, spin up a branch, and verify a restore actually works, without you clicking through the dashboard yourself.
+20. **What does the CSP-review question actually mean?** — folded into item 1 above, which now carries the plain-language explanation.
+21. **Department dashboards + data-analysis strategy — PARKED 2026-08-12 at your request.** Confirmed you don't want this touched right now; you'll bring it up when ready. Foundation already exists to build on when you are: four reporting views from Phase 1A (`v_budget_vs_actual`, `v_vendor_spend`, `v_zone_spend`, `v_department_audit_variance`), plus Phase 2's deeper analytics (item catalog, rate comparison, rate drift, vendor clustering, flags).
+22. **In-app labeling for `gold.json` — ANSWERED 2026-08-12, my recommendation below.** Confirmed: you'll upload the 21 invoices and correct extraction through the site as normal (the document inbox + review queue, already built); you asked me to derive `gold.json` from that automatically, and asked whether a gold set is even necessary given that. **My answer: yes, still worth keeping, but not for all 21 the way you described.** `gold.README.md`'s design deliberately splits the 21 into two groups for a specific reason: 11 labeled *by correction* (what you're describing) are fast but **anchored** — a reviewer shown a plausible-looking OCR guess tends to accept it rather than catching a genuine miss, so a set built entirely this way inherits the pipeline's own blind spots and can't tell you when it's silently wrong. The other 10 have to be labeled **blind** — the true values written down before ever seeing what OCR extracted — specifically to catch that. Proposal: you send me your own read of ~10 invoices' key fields (vendor, invoice number, total, line items — a quick note is enough, doesn't need to be formal) *before* uploading them to the site; upload and correct all 21 as normal; I write a small script that pulls the verified/corrected extraction for those 21 documents and assembles `gold.json` from it — using your blind notes for the 10, and the review-queue corrections for the other 11. Zero hand-typed JSON either way. Let me know if you want me to build that script now.
+23. **Scraping the Audit portal instead of a manual Excel export — CONFIRMED NEEDED 2026-08-12, architecture decided 2026-08-12.** You asked which is better: (a) you log into the Audit portal yourself in a browser tab, and something reads the data from that already-logged-in tab directly, or (b) you hand the Hub your Audit login and it logs in itself, unattended. **(a) is better, clearly, and here's why:**
+
+   - **No credential custody.** Your Audit login never touches our servers, our secrets store, or any config file — nothing to leak, rotate, or worry about if this system is ever compromised. For (b), that login would have to live somewhere the server can read it whenever it runs, which is real, ongoing risk for a system holding financial records.
+   - **2FA/OTP just works.** You log in the normal way, the normal you already do it. An unattended server-side login (b) breaks the moment the portal has any OTP/2FA step, and most serious portals do — there'd be no human present to complete it.
+   - **Looks like a real user, because it is one.** A script driving your own logged-in tab rides on a session a human genuinely created. A headless server logging in on a schedule looks exactly like what anti-bot systems are built to catch, and if the Audit portal ever tightens that, (b) breaks silently.
+   - **The real trade-off:** (a) isn't unattended — someone has to open the portal and trigger the read each time (once a day, whenever you import), rather than it happening automatically overnight. Given today's process is already fully manual, that's a downgrade from nothing to "one click instead of drag-select-copy," not a downgrade from automatic.
+
+   **How (a) works technically:** not something built into the Hub itself, since a normal webpage cannot reach into another site's tab — browsers block that by design (it'd be a huge security hole if any website could read any other open tab). The standard way around this, safely: a **bookmarklet** — a small piece of JavaScript saved as a browser bookmark. You open the Audit portal, log in as normal, open the table, then click the bookmarklet; it runs *inside that already-logged-in page* (that's allowed, since you triggered it yourself, on that page), reads the table's rows, and either downloads them as a file or sends them straight to the Hub's import endpoint. No install required beyond dragging one bookmark into your bar once. If that turns out too limited, a small browser extension is the fallback — more setup, more capability.
+
+   **Still needed from you to build it:** a saved copy of the Audit table page (Ctrl+S the page after opening the table, or a couple of screenshots showing its structure) — this tells me whether it's a plain HTML `<table>` (bookmarklet handles it easily) or a JS-rendered grid that lazy-loads rows as you scroll (still doable, just needs the bookmarklet to trigger the scroll/load first). No login details needed from you at all under this approach.
+
+---
+
+## 18. Pending checklist — by phase
+
+As of 2026-08-11. "Mine" is code/build/verification work; "Yours" is setup, data, decisions, or physical-world actions only you can do. Code for Phase 1A and 1B is functionally complete (all seven 1A days and all five 1B days are merged) — what's pending there is mostly **verification against real data and live infrastructure**, not new code. Phases 2–5 have no code yet; they're gated on prerequisites below, by design (§14).
+
+### Phase 0 — Prerequisites
+
+**DONE 2026-08-11 — all four confirmed complete.**
+- [x] Anthropic Console: org, $25 credit, $50 spend limit
+- [x] Supabase project on the **Pro** plan, publishable + secret keys generated
+- [x] Vercel project connected to the repo
+- [x] Rotated the Supabase secret key
+
+**Mine** — none. Phase 0 was entirely actions only you could take (org accounts, billing, credentials).
+
+### Phase 1A — The portal
+
+**Mine** (verification against real data/live deploy — blocked until your Phase 0 setup is done)
+- [x] **DONE 2026-08-13** — applied all pending migrations to the live project (`20260813000002` through `20260813000005`, plus two new ones from today's pass: `20260813000006` dropping an orphaned pre-migration `verify_document_extraction` overload flagged by `db advisors`, and `20260813000007` relocating `pg_trgm` out of `public`). Also repaired remote migration-history drift on `20260813000003` (the policy already existed on the live DB from an earlier direct apply, just wasn't recorded).
+- [x] **DONE 2026-08-13** — real Departmental file confirmed at 14 entries + 10 allocations (corrected from "16" — see the note at §14 Day 2's exit criterion), a fresh dry-run reports all 14 unchanged
+- [x] **DONE 2026-08-13** — `zone_id`/`admin_head_id`/`cost_center_id` confirmed to survive a re-import: import SQL never references these columns at all
+- [x] **DONE 2026-08-13** — all 42 `admin_head` rows, 13 zones, both status dimensions confirmed seeded correctly
+- [x] **DONE 2026-08-13** — unmatched budget head / unknown status confirmed to raise an exception, not a null
+- [x] **DONE 2026-08-13** — `sum(entry amount) == allocation.utilised_amount` confirmed per head, diff 0.00 on all 10
+- [x] **DONE 2026-08-13** — 3-user RLS suite run live via `npm run test:rls` (it runs directly against the live project, no local Docker needed — creates real fixture users/departments, tears down after): dept-isolation, viewer/reviewer restrictions, and `updated_by` all confirmed. Nine `v_*` views exist (corrected from "8"), all `security_invoker = true`.
+- [x] **DONE 2026-08-13** — `supabase db advisors` clean except Supabase's own platform event trigger (benign, not ours) and leaked-password-protection (still needs a one-click dashboard toggle, not actionable from here without risking other Auth config). No `NEXT_PUBLIC_`-prefixed secrets — only publishable/DSN values carry the prefix.
+- [~] **PARTIAL 2026-08-13** — CSP report-only confirmed by static code review (mode, nonce plumbing, no other violation sources in 1A screens), but not live-verified: no production domain is recorded anywhere in this repo, so actual response headers/browser console couldn't be checked.
+- [x] **DONE 2026-08-12** — two fixes made from real report-only CSP data on `/admin` (§17.1): nonced the theme script in `app/layout.tsx` (was silently unnonced, would've broken under enforcement), relaxed `style-src` to `'unsafe-inline'` in `middleware.ts` (Radix UI's dynamic inline positioning styles can't be nonced/hashed; `script-src` stays fully strict)
+- [x] **DONE 2026-08-13** — fixed a real bug found during this pass: `dedup_key` on `reconciliation_exception` baked the import batch ID into the key, which defeated the `unique` constraint it relies on — every re-import of an unresolved issue (namespace collision, allocation mismatch, unknown status) spawned a fresh duplicate exception instead of refreshing the existing open one. Fixed in `lib/import/run-import.ts` for all three exception types (`ON CONFLICT (dedup_key) DO UPDATE ... WHERE status = 'open'`, never reopens something already resolved/dismissed); the 3 live duplicate `id_namespace_collision` rows this had already produced were dismissed and the 3 survivors migrated to the new key format.
+- [x] **DONE 2026-08-13** — `type` column rule wired into `lib/module-mapping.ts` (see the RESOLVED 2026-08-12 note below in Phase 3): `ADP_` prefix -> `advance_payment`, `RB` prefix -> `reimbursement`, no prefix -> `invoice`. Unit-tested (`test/unit/module-mapping.test.ts`).
+
+**Yours**
+- [x] **DONE 2026-08-11** — deployed live on your domain with real logins
+- [ ] Confirm Sentry is receiving errors — **you ran the test 2026-08-12**; one step left, check sentry.io's Issues page for it (§17.18)
+- [ ] Restore a backup into `dev` — **step-by-step how-to in §17.19**; still to actually do (or connect Supabase to this session and I'll drive it)
+- [x] **CONFIRMED 2026-08-11** — a colleague will run through the 1A workflows using the runbook
+- [x] **RESOLVED 2026-08-12 (§17.5)** — export form is Excel (already built); no automated recipient/delivery needed, you'll hand it over yourself
+- [x] **RESOLVED 2026-08-12 (§17.1)** — CSP/IT review deferred to the Windows Server cutover, nothing to decide now
+
+> **PARKED 2026-08-12, confirmed at your request:** department-level dashboards and the broader data-analysis conversation. You'll raise it when ready — see §17.21.
+
+### Phase 1B — Verification and review
+
+**Mine**
+- [x] **DONE 2026-08-13** — built the `gold.json`-from-corrections script (`test/build-gold-from-corrections.ts`, `npm run gold:build`): reads `Invoices/*.pdf` for the authoritative 21-entry skeleton, overlays `test/gold-blind-notes.json` (optional, for the blind ~10) and live `document_extraction`/`_line_item` `_verified` columns (for the corrected rest), blind notes taking priority. Verified against the live project: regenerating today's untouched skeleton reproduces it byte-for-byte, and `npm run score` runs clean against the output. `test/gold.README.md` and `test/gold-blind-notes.example.json` updated to match.
+- [ ] `npm run score` against `gold.json`, confirm every §9.1 bar is met — blocked on your labeling (below), not on tooling anymore
+- [ ] Confirm cheque/passbook pages classify non-financial 100% of the time
+- [ ] Confirm the Gujarati document escalates to Sonnet automatically
+- [ ] Record measured cost per document against the §6 estimate
+- [ ] Time a reviewer verifying a document end to end without the mouse (target: median under 3 minutes)
+
+**Yours**
+- [ ] Write your own read (vendor, invoice number, total, line items) into `test/gold-blind-notes.json` for **~10 of the 21 invoices, before uploading them** — this is what makes those 10 a genuine blind check rather than another correction (§17.22). Copy `test/gold-blind-notes.example.json` to start; see `test/gold.README.md`.
+- [ ] Upload and correct all 21 through the site as normal, then run `npm run gold:build` — no `gold.json` editing needed
+
+### Phase 2 — Analytics engine (not started, by design — §14)
+
+**Mine** (once gated on ~200 verified documents)
+- [ ] Item catalog + `item_key` normalization — LLM-assisted clustering with human confirmation
+- [ ] Rate comparison across vendors
+- [ ] Rate drift over time, same vendor/item
+- [ ] Vendor clustering detection (GSTIN-prefix, phone, address) — proposes only, never auto-merges
+- [ ] `flags-run` — duplicate payment, discount inconsistency, missing documentation
+- [ ] Morning digest email; Playwright coverage of the review-save path
+
+**Yours** — none yet. The prerequisite (~200 verified documents) is a byproduct of running Phase 1B, not a separate task.
+
+### Phase 3 — Two-way integration (not started, by design — §14)
+
+**Mine** (once the Audit-side data pipeline is in place)
+- [ ] **Bookmarklet-based Audit table reader — CONFIRMED NEEDED, architecture decided 2026-08-12 (§17.23).** You log into the Audit portal yourself as normal; a bookmarklet reads the open table from your already-authenticated tab and sends it to the Hub — no credentials ever stored server-side. Blocked only on a saved copy of the Audit table page (or screenshots) so I know whether it's a plain HTML table or a JS-rendered grid.
+- [ ] Wire and test the Audit-side import against the scraped/real data (mapping is already written against Sheet 2's contract)
+- [x] **RESOLVED 2026-08-12, IMPLEMENTED 2026-08-13** — `Type` rule: prefix on the UBBL number, `ADP_` = advance payment, `RB` = reimbursement, no prefix = invoice. Wired into `parseDepartmentalRow` (`lib/module-mapping.ts`), unit-tested.
+- [ ] API push-back endpoint — `format = 'api'` already in the constraint, transform already shared
+- [x] **RESOLVED 2026-08-12 (§17.10)** — no netting logic to build. Advance settlement stays manual/case-by-case: the picker (`advance-settlement-picker.tsx`) + `settles_entry_id` already let a reviewer link an advance to its invoice by hand; nothing more needed. Watch `v_budget_vs_actual` for possible double-counting once real linked pairs exist — flag it then, not now.
+
+**Yours**
+- [ ] Send a saved copy or screenshots of the open Audit table (§17.23) — this is what unblocks the bookmarklet
+
+### Phase 4 — Windows Server cutover (not started, gated on hardware)
+
+**PARKED 2026-08-11, at your request** — don't provision or plan around the Windows Server for now. Vercel stays the deployment target until you say otherwise; nothing here is time-sensitive.
+
+**Mine** — nothing until you un-park this; the portability kit (§13.7) is already designed in, so it's still ~1 day of work whenever it's triggered.
+
+**Yours** — nothing for now.
+- ~~Provision the Windows Server~~ — parked
+- ~~Decide: reverse proxy — IIS or Caddy?~~ — parked (§17.2)
+- ~~When will the server be provisioned~~ — parked (§17.3)
+
+### Phase 5 — Event operations (ongoing, not started — event hasn't begun)
+
+**Mine** — nothing to build; the runbook (§16) already covers this.
+
+**Yours** — once live: watch queue depth daily, OCR spend weekly against the $200 ceiling, escalation rate (>25% means the Haiku prompt needs tuning), and reviewer throughput against §7's arithmetic.
+
+### Standing decisions — not phase-gated, answer whenever (§17)
+
+**Yours**
+- [ ] `APS` — still undefined; **2026-08-11: you don't recognize the term either.** It only exists in this doc as an unexplained flag (§17.8) — I have no other source for it. Since neither of us knows what it means, treat it as dropped until you run across it again and can tell me where it came from.
+- [x] **RESOLVED 2026-08-12 (§17.11)** — UBBL Number is guaranteed unique, confirmed against a live screenshot of the Departmental system. The Main-Entry-Number half of the question is explicitly parked — not a concern for now, per you.
+- [x] **CONCEPT CONFIRMED 2026-08-12 (§17.12)** — each vendor keeps its own data (GSTIN, bank details, etc.), matching how `vendor`/`vendor_alias` already work. Exact source file still open, not blocking.
+- [x] **EXPLAINED 2026-08-12, still parked at your request (§17.13)** — TDS plain-language explanation now in the doc; no action needed unless you want it modeled later.
+- [x] **RESOLVED 2026-08-11 (§17.14)** — zoning stays your team's responsibility: staff assign a zone to each invoice by hand, same as today. No change needed.
+- [x] **RESOLVED 2026-08-11 (§17.15)** — confirms the existing design: admins see all departments, department users see and enter only their own department's invoices. Already matches `staff_profile.role`/`department_id` (§4.2) — no schema change needed.
+- [x] **RESOLVED 2026-08-12 (§17.16)** — no Hijri dates needed, Gregorian only.
+
+### New topics raised 2026-08-11 — status as of 2026-08-12
+
+1. **Department-level reporting/dashboards + data-analysis strategy — PARKED, at your request (§17.21).** You'll raise it when ready.
+2. **In-app labeling for `gold.json` — DECIDED (§17.22).** No labeling screen gets built. You upload and correct all 21 through the existing document inbox/review queue; I write a script that derives `gold.json` from that, using your blind pre-notes for ~10 of them so the anti-anchoring design in `gold.README.md` still holds. Ready to build on your signal.
+3. **Scraping the Audit portal instead of a manual Excel export — CONFIRMED NEEDED (§17.23).** Not optional — no real Audit export exists until next year. Waiting on the portal URL, login mechanism, and a look at the table's structure from you before this can be built.

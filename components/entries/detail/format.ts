@@ -59,7 +59,7 @@ const FIELD_LABELS: Record<string, string> = {
   audit_status_raw: 'Audit status (raw)',
   admin_head_id: 'Admin head',
   zone_id: 'Zone',
-  budget_category_id: 'Budget category',
+  cost_center_id: 'Cost center',
   remark: 'Remark',
   hub_status_id: 'Hub status',
   hub_status_note: 'Hub status note',
@@ -84,6 +84,8 @@ const FIELD_LABELS: Record<string, string> = {
   hub_reference: 'Hub reference (dropped 2026-08-11)',
   enrichment_note: 'Remark (pre-rename)',
   void_reason: 'Void reason (dropped 2026-08-11)',
+  // Pre-2026-08-11 field name: budget_category_id -> cost_center_id (§3.1/§17).
+  budget_category_id: 'Cost center (pre-rename)',
 }
 
 export function humanizeFieldName(field: string): string {
@@ -108,7 +110,7 @@ const BOOLEAN_FIELDS = new Set(['is_void'])
 /**
  * Best-effort human-readable rendering of a raw from/to value out of
  * `entry_change_log.changes` (§3.9). `resolveLookup` lets a caller resolve a
- * foreign-key id (admin_head_id, zone_id, budget_category_id, hub_status_id) to a name/label using
+ * foreign-key id (admin_head_id, zone_id, cost_center_id, hub_status_id) to a name/label using
  * option lists already fetched for the page — everything else renders as
  * its raw value, which is honest rather than guessing at a join that isn't
  * available client-side.

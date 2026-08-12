@@ -1,0 +1,37 @@
+# CodeRabbit configuration — https://docs.coderabbit.ai/reference/configuration
+language: en-US
+
+reviews:
+  profile: chill
+  request_changes_workflow: false
+  high_level_summary: true
+  auto_review:
+    enabled: true
+    drafts: false
+  path_filters:
+    - "!**/node_modules/**"
+    - "!**/.next/**"
+    - "!**/dist/**"
+    - "!**/coverage/**"
+    - "!supabase/.branches/**"
+    - "!supabase/.temp/**"
+    - "!**/*.lock"
+    - "!**/pnpm-lock.yaml"
+  path_instructions:
+    - path: "supabase/migrations/**/*.sql"
+      instructions: >
+        These are Postgres/Supabase migrations. Flag missing RLS policies on new
+        tables, destructive changes without a safe rollback path, and missing
+        indexes on foreign keys.
+    - path: "app/**/*.tsx"
+      instructions: >
+        Next.js App Router components. Flag missing loading/error boundaries,
+        client/server component boundary mistakes, and unhandled Supabase
+        query errors.
+    - path: "lib/actions/**/*.ts"
+      instructions: >
+        Server actions. Flag missing input validation (zod), missing auth/
+        permission checks, and unhandled errors surfaced to the client.
+
+chat:
+  auto_reply: true

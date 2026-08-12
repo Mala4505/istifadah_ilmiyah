@@ -114,8 +114,8 @@ function renderCell(row: EntryEnriched, key: ColumnKey) {
       return row.admin_head_name ?? <span className="text-muted-foreground">unassigned</span>
     case 'zone_name':
       return row.zone_name ?? <span className="text-muted-foreground">unassigned</span>
-    case 'budget_category_name':
-      return row.budget_category_name ?? <span className="text-muted-foreground">unassigned</span>
+    case 'cost_center_name':
+      return row.cost_center_name ?? <span className="text-muted-foreground">unassigned</span>
     case 'vendor_display_name':
       return row.vendor_display_name ?? row.vendor_raw ?? '—'
     case 'invoice_number':

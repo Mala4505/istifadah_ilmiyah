@@ -21,7 +21,7 @@ const EMPTY_OPTIONS: FilterOptions = {
   budgetHeads: [],
   adminHeads: [],
   zones: [],
-  budgetCategories: [],
+  costCenters: [],
   statuses: [],
   auditStatuses: [],
   hubStatuses: [],
@@ -33,7 +33,7 @@ function filtersToSearchParams(filters: EntriesFilters): URLSearchParams {
   if (filters.budgetHead) sp.set('bh', filters.budgetHead)
   if (filters.adminHead) sp.set('ahead', filters.adminHead)
   if (filters.zone) sp.set('zone', filters.zone)
-  if (filters.budgetCategory) sp.set('bcat', filters.budgetCategory)
+  if (filters.costCenter) sp.set('cc', filters.costCenter)
   if (filters.status) sp.set('st', filters.status)
   if (filters.auditStatus) sp.set('ast', filters.auditStatus)
   if (filters.hubStatus) sp.set('hs', filters.hubStatus)
@@ -52,7 +52,7 @@ function searchParamsToFilters(sp: URLSearchParams): EntriesFilters {
     budgetHead: sp.get('bh') ?? '',
     adminHead: sp.get('ahead') ?? '',
     zone: sp.get('zone') ?? '',
-    budgetCategory: sp.get('bcat') ?? '',
+    costCenter: sp.get('cc') ?? '',
     status: sp.get('st') ?? '',
     auditStatus: sp.get('ast') ?? '',
     hubStatus: sp.get('hs') ?? '',
@@ -96,12 +96,12 @@ export function EntriesExplorer() {
   useEffect(() => {
     let cancelled = false
     async function loadOptions() {
-      const [dept, bh, adminHead, zone, budgetCategory, status, hub, userRes] = await Promise.all([
+      const [dept, bh, adminHead, zone, costCenter, status, hub, userRes] = await Promise.all([
         supabase.from('department').select('id,name').eq('is_active', true).order('name'),
         supabase.from('budget_head').select('id,raw_label,short_label,department_id').order('raw_label'),
         supabase.from('admin_head').select('id,name,head_number,department_id').eq('is_active', true).order('head_number'),
         supabase.from('zone').select('id,name,zone_number,department_id').eq('is_active', true).order('zone_number'),
-        supabase.from('budget_category').select('id,name').order('name'),
+        supabase.from('cost_center').select('id,name').order('name'),
         supabase.from('entry_status').select('id,code,label,source_system').order('sort_order'),
         supabase.from('hub_status').select('id,code,label').order('sort_order'),
         supabase.auth.getUser(),
@@ -117,7 +117,7 @@ export function EntriesExplorer() {
         })),
         adminHeads: (adminHead.data ?? []).map((h) => ({ id: h.id, label: `${h.head_number}. ${h.name}`, department_id: h.department_id })),
         zones: (zone.data ?? []).map((z) => ({ id: z.id, label: `${z.zone_number}. ${z.name}`, department_id: z.department_id })),
-        budgetCategories: (budgetCategory.data ?? []).map((c) => ({ id: c.id, label: c.name })),
+        costCenters: (costCenter.data ?? []).map((c) => ({ id: c.id, label: c.name })),
         statuses: (status.data ?? [])
           .filter((s) => s.source_system === 'departmental')
           .map((s) => ({ id: s.id, label: s.label, code: s.code })),

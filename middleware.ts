@@ -9,6 +9,18 @@
 // not also set CSP in IIS/the reverse proxy on the Windows Server — browsers
 // apply the intersection of duplicate CSP headers, which produces breakage
 // that looks like a code bug.
+//
+// style-src is 'unsafe-inline', not nonced, in every environment (confirmed
+// 2026-08-12 against real report-only violations on /admin): Radix UI, which
+// every components/ui/* primitive is built on (popover, select, dropdown,
+// dialog, tooltip), sets positioning via inline style="..." attributes it
+// generates at runtime -- there is no nonce or fixed hash to attach to those,
+// since the value is different every render. A CSS-injection payload can at
+// worst exfiltrate data via selectors/attribute-reads, not execute arbitrary
+// code, so this is the standard, accepted trade-off wherever a nonce-based
+// CSP meets a component library like this one. script-src stays fully
+// strict (nonce + strict-dynamic, no unsafe-inline) -- that is where CSP's
+// real value is, and nothing here weakens it.
 import { NextResponse, type NextRequest } from 'next/server'
 import { createServerClient, type CookieOptions } from '@supabase/ssr'
 import { publicEnv } from '@/lib/env'
@@ -23,7 +35,7 @@ export async function middleware(request: NextRequest) {
   const csp = `
     default-src 'self';
     script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${isDev ? " 'unsafe-eval'" : ''};
-    style-src 'self' ${isDev ? "'unsafe-inline'" : `'nonce-${nonce}'`};
+    style-src 'self' 'unsafe-inline';
     img-src 'self' blob: data: ${supabase};
     font-src 'self';
     connect-src 'self' ${supabase} ${supabaseWs} https://*.sentry.io;

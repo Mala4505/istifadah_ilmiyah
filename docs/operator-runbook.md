@@ -46,7 +46,7 @@ Only admins can do this.
 **The dedicated review queue (with keyboard shortcuts) is not built yet — coming soon.** Until it ships, day-to-day review happens through **Entries**:
 
 1. Open **Entries**, find the entry (search or filter by department/vendor/status).
-2. Open it to see the **Enrichment** tab — fill in admin head, zone, budget category, and any remark. This is the only place these fields are edited; importing never overwrites them.
+2. Open it to see the **Enrichment** tab — fill in admin head, zone, cost center, and any remark. This is the only place these fields are edited; importing never overwrites them.
 3. For an invoice that settles an earlier advance payment, use the advance-settlement picker on the entry to link the two.
 4. Use the **Hub status** panel on the entry to move it to Awaiting Verification or Awaiting Validation once you're satisfied with it. **A note explaining why is required every time** — the system will not let you save a status change without one.
 5. The **Change history** tab shows every edit made to the entry, who made it, and when — check this if something looks off.

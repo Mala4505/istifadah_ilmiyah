@@ -36,8 +36,8 @@ export interface EntryEnriched {
   admin_head_name: string | null
   zone_id: number | null
   zone_name: string | null
-  budget_category_id: number | null
-  budget_category_name: string | null
+  cost_center_id: number | null
+  cost_center_name: string | null
   remark: string | null
   // hub_status_* columns unchanged/deferred, see supabase/migrations/20260811000003
   hub_status_id: number
@@ -64,7 +64,7 @@ export interface AdminHeadOption {
   name: string
 }
 
-export interface BudgetCategoryOption {
+export interface CostCenterOption {
   id: number
   name: string
 }

@@ -30,8 +30,8 @@ export type EntryEnriched = {
   admin_head_name: string | null
   zone_id: number | null
   zone_name: string | null
-  budget_category_id: number | null
-  budget_category_name: string | null
+  cost_center_id: number | null
+  cost_center_name: string | null
   remark: string | null
   // hub_status_* columns unchanged/deferred, see supabase/migrations/20260811000003
   hub_status_id: number
@@ -59,7 +59,7 @@ export type FilterOptions = {
   budgetHeads: LookupOption[]
   adminHeads: LookupOption[]
   zones: LookupOption[]
-  budgetCategories: LookupOption[]
+  costCenters: LookupOption[]
   statuses: LookupOption[]
   auditStatuses: LookupOption[]
   hubStatuses: LookupOption[]
@@ -72,7 +72,7 @@ export type EntriesFilters = {
   budgetHead: string
   adminHead: string
   zone: string
-  budgetCategory: string
+  costCenter: string
   status: string
   auditStatus: string
   hubStatus: string
@@ -89,7 +89,7 @@ export const DEFAULT_FILTERS: EntriesFilters = {
   budgetHead: '',
   adminHead: '',
   zone: '',
-  budgetCategory: '',
+  costCenter: '',
   status: '',
   auditStatus: '',
   hubStatus: '',
@@ -110,7 +110,7 @@ export type ColumnKey =
   | 'budget_head_short_label'
   | 'admin_head_name'
   | 'zone_name'
-  | 'budget_category_name'
+  | 'cost_center_name'
   | 'vendor_display_name'
   | 'invoice_number'
   | 'date'
@@ -137,7 +137,7 @@ export const ALL_COLUMNS: ColumnDef[] = [
   { key: 'budget_head_short_label', label: 'Budget head', defaultVisible: true },
   { key: 'admin_head_name', label: 'Admin head', defaultVisible: false },
   { key: 'zone_name', label: 'Zone', defaultVisible: false },
-  { key: 'budget_category_name', label: 'Budget category', defaultVisible: false },
+  { key: 'cost_center_name', label: 'Cost center', defaultVisible: false },
   { key: 'invoice_number', label: 'Invoice #', defaultVisible: false },
   { key: 'amount', label: 'Amount', defaultVisible: true, align: 'right' },
   { key: 'status_label', label: 'Status', defaultVisible: true },

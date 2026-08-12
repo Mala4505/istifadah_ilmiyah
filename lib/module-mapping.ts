@@ -94,7 +94,7 @@ export interface ParsedAllocationRow {
 }
 
 export interface ParsedEntryRow {
-  type: 'advance_payment' | 'invoice'
+  type: 'advance_payment' | 'reimbursement' | 'invoice'
   ubblNumber: string
   mainNumber: string | null
   vendorRaw: string | null
@@ -157,10 +157,14 @@ function hasValue(value: unknown): boolean {
  *    (column C), never via column A.
  * 5. Invoice Number is trimmed; `'NA'` and blank become null. `' quotation'`
  *    is left as-is — it is a real value (an advance against a quotation).
- * 6. `type` is `'advance_payment'` when the normalized UBBL starts with
- *    `ADP_`, else `'invoice'` — the placeholder heuristic §3.6 calls out to
- *    replace with Sheet 2's `Type` column once a populated Main export
- *    exists; isolated in this one branch so that swap is a one-line change.
+ * 6. `type` is derived from the normalized UBBL number's prefix (RESOLVED
+ *    2026-08-12, MASTER-PLAN §18 Phase 3): `ADP_` -> `'advance_payment'`,
+ *    `RB` -> `'reimbursement'`, no matching prefix -> `'invoice'`. Checked in
+ *    that order so `ADP_`-prefixed values never fall through to the `RB`
+ *    branch. This replaces the earlier "prefix isn't reliable, wait for
+ *    Sheet 2's own Type column" placeholder — you supplied this rule
+ *    directly instead, so the isolation into one branch just paid off as
+ *    "swap is a one-line change" without needing Sheet 2 at all.
  *
  * Status-code mapping (Status/Main Status -> `entry_status`) and the
  * tally-vs-allocation assertion are caller concerns (they need the
@@ -213,8 +217,12 @@ export function parseDepartmentalRow(
     const mainNumberRaw = toTrimmedStringOrNull(rawRow['Main Entry Number'])
 
     entry = {
-      // Rule 6: placeholder heuristic, isolated here per §3.6.
-      type: ubblNumber.startsWith('ADP_') ? 'advance_payment' : 'invoice',
+      // Rule 6: prefix rule, isolated here per §3.6.
+      type: ubblNumber.startsWith('ADP_')
+        ? 'advance_payment'
+        : ubblNumber.startsWith('RB')
+          ? 'reimbursement'
+          : 'invoice',
       ubblNumber,
       mainNumber: mainNumberRaw === null ? null : normalizeId(mainNumberRaw),
       vendorRaw: toTrimmedStringOrNull(rawRow['Vendor Name']),

@@ -347,11 +347,22 @@ async function resolveStatus(
   caches.statusByCode.set(rawText, id)
 
   const description = `Unseen status code "${rawText}" (${sourceSystem}) auto-inserted with sort_order = 999.`
+  // dedup_key deliberately excludes batchId: the same unseen code hit by a
+  // later import is the same finding, not a new one. ON CONFLICT refreshes
+  // the pointer to the latest batch that saw it while it's still open, but
+  // never reopens one a human already resolved/dismissed (2026-08-13 fix —
+  // batchId used to be baked into the key, which meant the `unique`
+  // constraint on dedup_key never actually deduped anything; see the
+  // matching fix on allocation_sum_mismatch and id_namespace_collision below).
   await client.query(
     `insert into public.reconciliation_exception
        (import_batch_id, exception_type, severity, description, dedup_key)
-     values ($1, 'unknown_status_code', 'low', $2, $3)`,
-    [batchId, description, `unknown_status_code:${rawText}:${sourceSystem}:${batchId}`]
+     values ($1, 'unknown_status_code', 'low', $2, $3)
+     on conflict (dedup_key) do update
+       set import_batch_id = excluded.import_batch_id,
+           description = excluded.description
+       where public.reconciliation_exception.status = 'open'`,
+    [batchId, description, `unknown_status_code:${rawText}:${sourceSystem}`]
   )
   exceptionsOut.push({ exceptionType: 'unknown_status_code', severity: 'low', description })
 
@@ -647,11 +658,21 @@ export async function runImport(params: RunImportParams): Promise<ImportResult> 
       )
       for (const m of mismatches) {
         const description = `Budget head "${m.budgetHeadLabel}" (id ${m.budgetHeadId}): sum(entries.amount) = ${m.actualEntrySum}, allocation.utilised_amount = ${m.expectedUtilised} (diff ${m.diff}).`
+        // dedup_key excludes batchId (2026-08-13 fix, see unknown_status_code
+        // above for the full rationale). Unlike that one, this key still
+        // depends on the diff amount itself: an unchanged mismatch across
+        // batches refreshes in place, but a genuinely different diff on the
+        // same head is a new fact worth its own open exception rather than
+        // silently overwriting a still-open one with a new amount_at_risk.
         await client.query(
           `insert into public.reconciliation_exception
              (import_batch_id, exception_type, severity, amount_at_risk, description, dedup_key)
-           values ($1, 'allocation_sum_mismatch', 'high', $2, $3, $4)`,
-          [batchId, Math.abs(m.diff), description, `allocation_sum_mismatch:${m.budgetHeadId}:${batchId}`]
+           values ($1, 'allocation_sum_mismatch', 'high', $2, $3, $4)
+           on conflict (dedup_key) do update
+             set import_batch_id = excluded.import_batch_id,
+                 description = excluded.description
+             where public.reconciliation_exception.status = 'open'`,
+          [batchId, Math.abs(m.diff), description, `allocation_sum_mismatch:${m.budgetHeadId}:${m.diff}`]
         )
         exceptions.push({ exceptionType: 'allocation_sum_mismatch', severity: 'high', description })
       }
@@ -670,11 +691,18 @@ export async function runImport(params: RunImportParams): Promise<ImportResult> 
     )
     for (const { value } of collisionRows.rows) {
       const description = `"${value}" appears as both a ubbl_number and a main_number on different rows — the two id namespaces overlap (§3.4).`
+      // dedup_key excludes batchId (2026-08-13 fix, see unknown_status_code
+      // above) -- the collision is a property of the value itself, present
+      // again on every re-import until a human resolves it.
       await client.query(
         `insert into public.reconciliation_exception
            (import_batch_id, exception_type, severity, description, dedup_key)
-         values ($1, 'id_namespace_collision', 'high', $2, $3)`,
-        [batchId, description, `id_namespace_collision:${value}:${batchId}`]
+         values ($1, 'id_namespace_collision', 'high', $2, $3)
+         on conflict (dedup_key) do update
+           set import_batch_id = excluded.import_batch_id,
+               description = excluded.description
+           where public.reconciliation_exception.status = 'open'`,
+        [batchId, description, `id_namespace_collision:${value}`]
       )
       exceptions.push({ exceptionType: 'id_namespace_collision', severity: 'high', description })
     }

@@ -7,7 +7,7 @@ export interface SaveEntryEnrichmentInput {
   entryId: number
   adminHeadId: number | null
   zoneId: number | null
-  budgetCategoryId: number | null
+  costCenterId: number | null
   remark: string | null
 }
 
@@ -19,7 +19,7 @@ export interface EntryActionResult {
 /**
  * Saves the Hub-owned enrichment fields on `entries` (MASTER-PLAN §3.4,
  * screen inventory row 4 in §5): `admin_head_id`, `zone_id`,
- * `budget_category_id`, `remark`. Never touched by import (§3.6's upsert
+ * `cost_center_id`, `remark`. Never touched by import (§3.6's upsert
  * excludes these columns by construction) — this is the only writer.
  *
  * Uses the session-bound client (`lib/supabase/server.ts`), so
@@ -45,7 +45,7 @@ export async function saveEntryEnrichment(
     .update({
       admin_head_id: input.adminHeadId,
       zone_id: input.zoneId,
-      budget_category_id: input.budgetCategoryId,
+      cost_center_id: input.costCenterId,
       remark: input.remark?.trim() || null,
     })
     .eq('id', entryId)

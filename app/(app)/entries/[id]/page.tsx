@@ -11,7 +11,7 @@ import { ImportFieldsPanel } from '@/components/entries/detail/import-fields-pan
 import type {
   AdminHeadOption,
   AdvanceEntrySummary,
-  BudgetCategoryOption,
+  CostCenterOption,
   ChangeLogRow,
   EntryEnriched,
   HubStatusOption,
@@ -71,7 +71,7 @@ export default async function EntryDetailPage({
   const [
     adminHeadsResult,
     zonesResult,
-    budgetCategoriesResult,
+    costCentersResult,
     hubStatusResult,
     changeLogResult,
     entryCoreResult,
@@ -94,7 +94,7 @@ export default async function EntryDetailPage({
           .eq('is_active', true)
           .order('zone_number')
       : Promise.resolve({ data: [], error: null }),
-    supabase.from('budget_category').select('id, name').order('name'),
+    supabase.from('cost_center').select('id, name').order('name'),
     supabase.from('hub_status').select('id, code, label, sort_order, is_exportable').order('sort_order'),
     supabase
       .from('entry_change_log')
@@ -117,7 +117,7 @@ export default async function EntryDetailPage({
 
   const adminHeadOptions = (adminHeadsResult.data ?? []) as AdminHeadOption[]
   const zoneOptions = (zonesResult.data ?? []) as ZoneOption[]
-  const budgetCategoryOptions = (budgetCategoriesResult.data ?? []) as BudgetCategoryOption[]
+  const costCenterOptions = (costCentersResult.data ?? []) as CostCenterOption[]
   const hubStatusOptions = (hubStatusResult.data ?? []) as HubStatusOption[]
   const changeLogRows = (changeLogResult.data ?? []) as ChangeLogRow[]
   const budgetHeadRaw = (entryCoreResult.data as { budget_head_raw: string | null } | null)
@@ -150,13 +150,13 @@ export default async function EntryDetailPage({
 
   const adminHeadById = new Map(adminHeadOptions.map((h) => [h.id, h]))
   const zoneById = new Map(zoneOptions.map((z) => [z.id, z]))
-  const budgetCategoryById = new Map(budgetCategoryOptions.map((c) => [c.id, c]))
+  const costCenterById = new Map(costCenterOptions.map((c) => [c.id, c]))
   const hubStatusById = new Map(hubStatusOptions.map((h) => [h.id, h]))
 
   function resolveLookup(field: string, value: number): string | null {
     if (field === 'admin_head_id') return adminHeadById.get(value)?.name ?? null
     if (field === 'zone_id') return zoneById.get(value)?.name ?? null
-    if (field === 'budget_category_id') return budgetCategoryById.get(value)?.name ?? null
+    if (field === 'cost_center_id') return costCenterById.get(value)?.name ?? null
     if (field === 'hub_status_id') return hubStatusById.get(value)?.label ?? null
     return null
   }
@@ -197,10 +197,10 @@ export default async function EntryDetailPage({
             entryId={entry.id}
             adminHeadOptions={adminHeadOptions}
             zoneOptions={zoneOptions}
-            budgetCategoryOptions={budgetCategoryOptions}
+            costCenterOptions={costCenterOptions}
             initialAdminHeadId={entry.admin_head_id}
             initialZoneId={entry.zone_id}
-            initialBudgetCategoryId={entry.budget_category_id}
+            initialCostCenterId={entry.cost_center_id}
             initialRemark={entry.remark}
             hasDepartment={entry.department_id !== null}
           />
