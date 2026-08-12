@@ -1,8 +1,8 @@
 'use client'
 
 import Link from 'next/link'
-import Image from 'next/image'
 import { usePathname } from 'next/navigation'
+import { Logo } from '@/components/app-shell/logo'
 import {
   LayoutDashboard,
   ListChecks,
@@ -54,14 +54,7 @@ export function NavRail({
   return (
     <nav className="sticky top-0 flex h-screen w-56 shrink-0 flex-col border-r border-border bg-card">
       <div className="flex items-center justify-center border-b border-border px-4 py-4">
-        <Image
-          src="/istifadah_logo_1_alpha.png"
-          alt="Istifadah Ilmiyah"
-          width={505}
-          height={502}
-          priority
-          className="h-auto w-20"
-        />
+        <Logo imageClassName="w-20" />
       </div>
       <ul className="flex-1 space-y-0.5 p-2">
         {NAV_ITEMS.map((item) => {

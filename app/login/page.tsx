@@ -1,13 +1,13 @@
 'use client'
 
 import { useState, useTransition, type FormEvent } from 'react'
-import Image from 'next/image'
 import { useRouter } from 'next/navigation'
 import { loginWithIts } from '@/lib/actions/auth'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
+import { Logo } from '@/components/app-shell/logo'
 
 // Screen 1 — Sign in (MASTER-PLAN §5). ITS number + password: the server
 // action (lib/actions/auth.ts) resolves the ITS number to Supabase Auth's
@@ -39,14 +39,7 @@ export default function LoginPage() {
     <main className="flex min-h-screen items-center justify-center bg-muted/40 p-4">
       <Card className="w-full max-w-sm">
         <CardHeader className="items-center text-center">
-          <Image
-            src="/istifadah_logo_1_alpha.png"
-            alt="Istifadah Ilmiyah"
-            width={505}
-            height={502}
-            priority
-            className="mb-2 h-auto w-40"
-          />
+          <Logo className="mb-2" imageClassName="w-40" />
           <CardTitle className="text-xl tracking-tight">Istifadah Ilmiyah 1448H</CardTitle>
           <CardDescription>Sign in with your ITS number to continue.</CardDescription>
         </CardHeader>
