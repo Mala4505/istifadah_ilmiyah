@@ -1,3 +1,4 @@
+import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
 import { ImportWorkspace } from '@/components/import/import-workspace'
 
@@ -33,6 +34,14 @@ export default async function ImportPage() {
         <span className="rounded-full bg-accent px-2.5 py-0.5 text-[11px] font-medium uppercase tracking-wide text-accent-foreground">
           Phase 1A · Day 2
         </span>
+        {isAdmin && (
+          <Link
+            href="/import/bookmarklet"
+            className="ml-auto text-sm font-medium text-primary underline-offset-4 hover:underline"
+          >
+            Portal reader (bookmarklet) →
+          </Link>
+        )}
       </div>
       <ImportWorkspace isAdmin={isAdmin} />
     </div>

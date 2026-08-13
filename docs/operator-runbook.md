@@ -17,9 +17,10 @@ If a button doesn't work or a save doesn't stick, the first thing to check is wh
 Work through this list at the start of the day:
 
 1. **Import today's export.** If an admin, open **Import** and load the latest Departmental file (see section 2). If you're not an admin, ask one to run it.
-2. **Document inbox and Review queue are not built yet** — these are coming in a later phase. Skip them; there is nothing to do here today.
-3. **Check Exceptions.** Open **Exceptions**, sort by severity (already the default), and resolve or dismiss anything above roughly **₹50,000 at risk** first. Everything else can wait, but don't leave the queue unread.
-4. **Generate an export batch if any Hub status changed today.** If you (or a reviewer) set an entry's status to Awaiting Verification or Awaiting Validation today, an admin should generate and send a status export batch before the day ends (section 5).
+2. **Scrape the Audit portal, after the import above — never before.** If an admin, use the bookmarklet to read today's Audit portal entry list into the Hub (see section 2a). This must happen *after* step 1: the Audit portal only links to a Hub entry through a number that today's Departmental import just wrote onto it, so scraping first means every row comes back unmatched. If you're not an admin, ask one to run it.
+3. **Document inbox and Review queue are not built yet** — these are coming in a later phase. Skip them; there is nothing to do here today.
+4. **Check Exceptions.** Open **Exceptions**, sort by severity (already the default), and resolve or dismiss anything above roughly **₹50,000 at risk** first. Everything else can wait, but don't leave the queue unread.
+5. **Generate an export batch if any Hub status changed today.** If you (or a reviewer) set an entry's status to Awaiting Verification or Awaiting Validation today, an admin should generate and send a status export batch before the day ends (section 5).
 
 ---
 
@@ -38,6 +39,45 @@ Only admins can do this.
    - A **high severity** exception appears that you don't recognise as expected (e.g. a large allocation mismatch).
    - The row counts look wildly different from a normal day's import (e.g. thousands of "skipped" rows).
    - If none of that applies, click **Commit this import**. Once committed, the batch is permanent — you can view it later in batch history, but not undo it by re-running.
+
+---
+
+## 2a. Reading the Audit portal (the bookmarklet)
+
+Only admins can do this.
+
+**Always import today's Departmental export (section 2) before you read the Audit portal — never the other way round.** The Audit portal's "Entry Number" column is not a UBBL number; it only matches a Hub entry because today's Departmental import just wrote that same number onto the entry. If you scrape the Audit portal first, that number doesn't exist on any entry yet, and every single row comes back as an "unmatched" exception. This is **recoverable, not damaging** — nothing is lost or corrupted — but it wastes the pass. If it happens, just import today's export and click the bookmark again.
+
+### First time only — installing the reader
+
+1. Go to **Import**, then click **Portal reader (bookmarklet) →** (or open `/import/bookmarklet` directly).
+2. Under **Portal**, choose **Audit portal**. Give it a **Label** if you want (e.g. "my laptop") — this just helps you tell tokens apart later.
+3. Click **Create token**.
+4. **Drag** the blue button that appears — do not click it — to your browser's bookmarks bar. Clicking it here does nothing useful; it only works on the Audit portal's own page.
+5. Keep this in mind about the token:
+   - It is shown **once and never again** — if you miss it, revoke it and create a new one.
+   - It **expires in 12 hours**.
+   - It **never contains your Audit portal password or login** — it only ever lets the bookmarklet submit rows to the Hub.
+   - **Never share it or paste it anywhere** (chat, email, a doc). If you think it's leaked, revoke it from the same **Import → Portal reader** page and create a fresh one.
+
+### Every time — reading the table
+
+1. Log into the Audit portal yourself, as normal, and navigate to the entry list.
+2. If there's a page-size picker or any filters on the list, **clear the filters and set the page size to show all rows.** The reader tries to switch the table to show everything on its own, but it can't tell if you've left a manual filter hiding rows — it will only see what's on screen.
+3. Click the bookmark.
+4. A small panel appears in the corner of the screen. Read it:
+   - Row counts by outcome (matched, updated, unmatched, and so on).
+   - **Amber** lines are warnings — most often an unrecognised column the reader didn't know what to do with. Worth a glance, not usually urgent.
+   - **Red** lines are exceptions. If you see a lot of **audit_row_unmatched** exceptions in bulk, that almost always means the portal was scraped before today's export was imported — see the warning above.
+5. If it looks right, click **Commit this import** in the panel. This is a dry run until you click Commit — nothing is saved before that, so it's safe to close the panel and ask someone if you're not sure.
+
+### If it doesn't work
+
+- **"No table found on this page."** You're not on the entry list. Navigate there first, then click the bookmark again.
+- **"Could not reach the Hub" and a file downloads instead.** The Audit portal blocked the upload (this is normal for some portals' security settings). The downloaded `.json` file is safe and contains exactly what was read — send it to an admin, or upload it yourself on the **Import** screen.
+- **A warning that the page shows only some of the rows.** The table is paginated and the reader couldn't switch it to show all. Set the page size to show all rows yourself, then click the bookmark again.
+- **"Invalid or expired scrape token."** Your token has expired (12 hours) or was revoked. Go back to **Import → Portal reader**, create a new token, and drag the new bookmark to replace the old one.
+- **Everything comes back unmatched.** You scraped the Audit portal before importing today's Departmental export. Import the export first, then click the bookmark again — see the warning at the top of this section.
 
 ---
 

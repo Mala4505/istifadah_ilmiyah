@@ -81,7 +81,7 @@ types.setTypeParser(1082 /* date */, (value: string) => value)
 
 let pool: Pool | null = null
 
-function getPool(): Pool {
+export function getPool(): Pool {
   if (!pool) {
     pool = new Pool({ connectionString: serverEnv.DATABASE_URL, max: 5 })
   }
@@ -92,6 +92,12 @@ function getPool(): Pool {
 // Public types
 // ---------------------------------------------------------------------------
 
+/**
+ * Must stay in lockstep with import_row_log's action check constraint
+ * (20260808000011, widened by 20260814000005). The first block is the .xlsx
+ * path; the second is the portal-scrape path in lib/import/run-portal-import.ts,
+ * whose outcomes annotate entries rather than create them.
+ */
 export type ImportRowAction =
   | 'inserted'
   | 'updated'
@@ -102,6 +108,11 @@ export type ImportRowAction =
   | 'new_budget_head'
   | 'new_vendor'
   | 'error'
+  | 'audit_status_updated'
+  | 'audit_status_unchanged'
+  | 'audit_unmatched'
+  | 'audit_ambiguous'
+  | 'skipped_no_identifier'
 
 export interface ImportRowLogEntry {
   rowNumber: number
@@ -187,14 +198,14 @@ function sanitizeNumericColumns(rawRow: Record<string, unknown>): Record<string,
 // Row-scoped resolver caches (per run, cleared each call to runImport)
 // ---------------------------------------------------------------------------
 
-interface ResolverCaches {
+export interface ResolverCaches {
   departmentByName: Map<string, number>
   budgetHeadByRawLabel: Map<string, { id: number; departmentId: number | null }>
   vendorByNormalizedName: Map<string, number>
   statusByCode: Map<string, number>
 }
 
-function newCaches(): ResolverCaches {
+export function newCaches(): ResolverCaches {
   return {
     departmentByName: new Map(),
     budgetHeadByRawLabel: new Map(),
@@ -268,7 +279,7 @@ async function resolveBudgetHead(
   return { id, created: true }
 }
 
-async function resolveVendor(
+export async function resolveVendor(
   client: PoolClient,
   caches: ResolverCaches,
   rawName: string
@@ -317,7 +328,7 @@ async function resolveVendor(
  * (§3.3, §3.6 point 7) — written once per newly-seen code per batch, not
  * once per row.
  */
-async function resolveStatus(
+export async function resolveStatus(
   client: PoolClient,
   caches: ResolverCaches,
   rawText: string,
@@ -325,15 +336,22 @@ async function resolveStatus(
   batchId: number,
   exceptionsOut: ImportExceptionSummary[]
 ): Promise<number> {
-  const cached = caches.statusByCode.get(rawText)
+  // Cache key carries the source system for the same reason the query does.
+  const cacheKey = `${sourceSystem}:${rawText}`
+  const cached = caches.statusByCode.get(cacheKey)
   if (cached !== undefined) return cached
 
+  // Keyed on (code, source_system), not code alone: the two sides share status
+  // LABELS (both portals render "Paid"), and 20260814000005 replaced the global
+  // unique constraint on code with a composite one for exactly that reason.
+  // Looking up on code alone would resolve an Audit status to the Departmental
+  // row that happened to be inserted first.
   const existing = await client.query<{ id: number }>(
-    'select id from public.entry_status where code = $1',
-    [rawText]
+    'select id from public.entry_status where code = $1 and source_system = $2',
+    [rawText, sourceSystem]
   )
   if (existing.rows[0]) {
-    caches.statusByCode.set(rawText, existing.rows[0].id)
+    caches.statusByCode.set(cacheKey, existing.rows[0].id)
     return existing.rows[0].id
   }
 
@@ -344,7 +362,7 @@ async function resolveStatus(
     [rawText, sourceSystem]
   )
   const id = created.rows[0]!.id
-  caches.statusByCode.set(rawText, id)
+  caches.statusByCode.set(cacheKey, id)
 
   const description = `Unseen status code "${rawText}" (${sourceSystem}) auto-inserted with sort_order = 999.`
   // dedup_key deliberately excludes batchId: the same unseen code hit by a
@@ -796,7 +814,7 @@ export async function runImport(params: RunImportParams): Promise<ImportResult> 
   }
 }
 
-async function writeRowLog(client: PoolClient, batchId: number, entry: ImportRowLogEntry): Promise<void> {
+export async function writeRowLog(client: PoolClient, batchId: number, entry: ImportRowLogEntry): Promise<void> {
   await client.query(
     `insert into public.import_row_log (import_batch_id, entry_id, row_number, raw_row_jsonb, action, fields_changed)
      values ($1, $2, $3, $4, $5, $6)`,
