@@ -36,7 +36,12 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import { publicEnv } from '@/lib/env'
 import { serverEnv } from '@/lib/env.server'
 
-export type JobType = 'extract_document' | 'poll_batch' | 'generate_export' | 'rasterize_retry'
+export type JobType =
+  | 'extract_document'
+  | 'poll_batch'
+  | 'generate_export'
+  | 'rasterize_retry'
+  | 'flags_run'
 export type JobStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'dead'
 
 /** Mirrors `public.job_queue` (§3.11) column-for-column. */

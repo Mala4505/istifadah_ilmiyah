@@ -28,7 +28,7 @@ import {
   type VendorSearchResult,
 } from '@/lib/actions/review'
 import { confidenceTint, type ReviewDocumentDetail } from '@/lib/review/types'
-import { PdfViewer } from './pdf-viewer'
+import { PdfViewer, type PdfViewerHandle } from './pdf-viewer'
 import { ExtractionForm, type HeaderFormState, type LineItemFormState } from './extraction-form'
 import { TallyFooter } from './tally-footer'
 import { ClaimBanner } from './claim-banner'
@@ -93,6 +93,7 @@ export function ReviewWorkspace({
 }) {
   const router = useRouter()
   const formContainerRef = useRef<HTMLDivElement>(null)
+  const pdfViewerRef = useRef<PdfViewerHandle>(null)
 
   const [header, setHeader] = useState<HeaderFormState>(() => buildHeaderState(detail))
   const [lineItems, setLineItems] = useState<LineItemFormState[]>(() => buildLineItemState(detail))
@@ -263,9 +264,10 @@ export function ReviewWorkspace({
     setHubStatusOpen(true)
   }
 
-  // Global keyboard contract (§7). Digits/J/K/E/R/S// only act outside a
-  // focused text field -- typing amounts and notes is never intercepted.
-  // Cmd/Ctrl-Enter saves everywhere, including inside a field.
+  // Global keyboard contract (§7). Digits/arrows/PageUp/PageDown/E/R/S//
+  // only act outside a focused text field -- typing amounts and notes is
+  // never intercepted. Cmd/Ctrl-Enter saves everywhere, including inside a
+  // field.
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
       if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
@@ -287,14 +289,30 @@ export function ReviewWorkspace({
         setShortcutsOpen((v) => !v)
         return
       }
-      if (e.key.toLowerCase() === 'j') {
+      // Document navigation: PageDown/PageUp (§7 keyboard contract, remapped
+      // from J/K so the arrow keys below are free for page turning within
+      // the current document -- the two operations reviewers do most, split
+      // onto two adjacent physical keys instead of one.
+      if (e.key === 'PageDown') {
         e.preventDefault()
         goToDocument(nextId)
         return
       }
-      if (e.key.toLowerCase() === 'k') {
+      if (e.key === 'PageUp') {
         e.preventDefault()
         goToDocument(prevId)
+        return
+      }
+      // Page navigation within the open document -- all four arrows work so
+      // either hand's natural rest position reaches one.
+      if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+        e.preventDefault()
+        pdfViewerRef.current?.nextPage()
+        return
+      }
+      if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+        e.preventDefault()
+        pdfViewerRef.current?.prevPage()
         return
       }
       if (e.key.toLowerCase() === 'e') {
@@ -383,15 +401,15 @@ export function ReviewWorkspace({
           Shortcuts (?)
         </Button>
         <Button type="button" size="sm" variant="ghost" disabled={prevId === null} onClick={() => goToDocument(prevId)}>
-          ← Prev (K)
+          ← Prev doc (PgUp)
         </Button>
         <Button type="button" size="sm" variant="ghost" disabled={nextId === null} onClick={() => goToDocument(nextId)}>
-          Next (J) →
+          Next doc (PgDn) →
         </Button>
       </div>
 
       <div className="grid min-h-0 flex-1 grid-cols-2 gap-3">
-        <PdfViewer sourceDocumentId={detail.sourceDocumentId} />
+        <PdfViewer ref={pdfViewerRef} sourceDocumentId={detail.sourceDocumentId} />
         <ExtractionForm
           ref={formContainerRef}
           header={header}

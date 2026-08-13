@@ -43,7 +43,7 @@ Sentry.init({
 // ---------------------------------------------------------------------------
 export interface JobQueueRow {
   id: number
-  job_type: 'extract_document' | 'poll_batch' | 'generate_export' | 'rasterize_retry'
+  job_type: 'extract_document' | 'poll_batch' | 'generate_export' | 'rasterize_retry' | 'flags_run'
   payload: Record<string, unknown>
   status: 'queued' | 'running' | 'succeeded' | 'failed' | 'dead'
   priority: number
@@ -97,6 +97,13 @@ async function dispatch(job: JobQueueRow): Promise<void> {
         '@/lib/jobs/handlers/batch-poll'
       )) as { default: JobHandler }
       await handlePollBatch(job)
+      return
+    }
+    case 'flags_run': {
+      const { default: handleFlagsRun } = (await import(
+        '@/lib/jobs/handlers/flags-run'
+      )) as { default: JobHandler }
+      await handleFlagsRun(job)
       return
     }
     case 'generate_export':

@@ -27,6 +27,7 @@ import {
   runExtractionPipeline,
   type ExtractionAttempt,
 } from '@/lib/extraction'
+import { buildTaxBreakdown } from '@/lib/extraction-schema'
 import { MODELS, type ModelId } from '@/lib/claude-client'
 
 export interface ExtractDocumentPayload {
@@ -148,8 +149,17 @@ export async function extractAndPersist(
           vendor_address_ocr: extraction.vendor_address,
           invoice_number_ocr: extraction.invoice_number,
           invoice_date_ocr: extraction.invoice_date,
+          instrument_type_ocr: extraction.instrument_type,
+          // Raw text as Claude read it — resolving to a GST state code is
+          // done downstream by lib/analytics/fetch.ts (stateCodeFromName),
+          // not at write time.
+          place_of_supply_ocr: extraction.place_of_supply,
           subtotal_ocr: extraction.subtotal,
           tax_amount_ocr: extraction.tax_amount,
+          // See buildTaxBreakdown (lib/extraction-schema.ts) for how the
+          // three flat cgst/sgst/igst_amount wire fields become this shape.
+          tax_breakdown_ocr: buildTaxBreakdown(extraction),
+          round_off_ocr: extraction.round_off,
           total_amount_ocr: extraction.total_amount,
           notes_ocr: extraction.notes,
         },

@@ -11,6 +11,7 @@ import {
   TriangleAlert,
   GitCompareArrows,
   FileBarChart,
+  LineChart,
   Download,
   Settings,
   LogOut,
@@ -33,6 +34,7 @@ const NAV_ITEMS = [
   { label: 'Exceptions', href: '/exceptions', icon: TriangleAlert },
   { label: 'Reconciliation', href: '/reconciliation', icon: GitCompareArrows },
   { label: 'Reports', href: '/reports', icon: FileBarChart },
+  { label: 'Analytics', href: '/analytics', icon: LineChart },
   { label: 'Export', href: '/export', icon: Download, adminOnly: true },
   { label: 'Admin', href: '/admin', icon: Settings, adminOnly: true },
 ] as const

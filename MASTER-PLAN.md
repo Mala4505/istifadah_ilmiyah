@@ -1148,7 +1148,8 @@ Three reviewers × 5 productive hours/day × 45 days = **675 hours**. At 3 minut
 | `Tab` / `Shift-Tab` | Next / previous field |
 | `Enter` | Accept the OCR value as verified and advance |
 | `Cmd/Ctrl-Enter` | Accept **all** remaining unedited fields and save |
-| `J` / `K` | Next / previous document (outside a text field) |
+| `Page Down` / `Page Up` | Next / previous **document** (outside a text field) — remapped 2026‑08‑13 from `J`/`K` to free the arrow keys below |
+| `→`/`↓` , `←`/`↑` | Next / previous **page** of the current document (outside a text field) |
 | `E` | Flag as exception, with a note |
 | `R` | Re-run extraction (`documents-reescalate`) |
 | `1`–`9` | Jump to line item *n* |

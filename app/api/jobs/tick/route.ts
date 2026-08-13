@@ -41,6 +41,13 @@ async function dispatch(job: JobQueueRow): Promise<'handled' | 'skipped'> {
       await handler(job)
       return 'handled'
     }
+    case 'flags_run': {
+      const { default: handler } = (await import('@/lib/jobs/handlers/flags-run')) as {
+        default: JobHandler
+      }
+      await handler(job)
+      return 'handled'
+    }
     default:
       // No handler wired yet (generate_export, rasterize_retry). Marking the
       // job failed would be a lie about a handler that was never attempted,

@@ -117,11 +117,13 @@ describe('validateGstin', () => {
     }
   })
 
-  it('leaves stateName null for a valid but unmapped state code', () => {
-    // 97 = Other Territory. Valid, deliberately not in the display map.
+  it('resolves stateName for every valid code, including the two non-state ones', () => {
+    // The state table backing stateCodeFromName is exhaustive (needed to
+    // resolve a real invoice's free-text "Place of Supply" field), so unlike
+    // an earlier, partial display map, nothing here is left unmapped.
     const built = '97AAKCA3560A1Z'
     const gstin = built + computeGstinCheckDigit(built)
-    expect(validateGstin(gstin)).toMatchObject({ valid: true, stateName: null })
+    expect(validateGstin(gstin)).toMatchObject({ valid: true, stateName: 'Other Territory' })
   })
 })
 

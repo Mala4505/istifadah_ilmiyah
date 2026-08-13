@@ -8,7 +8,9 @@ const SHORTCUTS: [string, string][] = [
   ['Tab / Shift-Tab', 'Next / previous field'],
   ['Enter', 'Accept the OCR value as verified and advance'],
   ['Cmd/Ctrl-Enter', 'Accept all remaining unedited fields and save'],
-  ['J / K', 'Next / previous document'],
+  ['Page Down / Page Up', 'Next / previous document'],
+  ['→ / ↓', 'Next page of the current document'],
+  ['← / ↑', 'Previous page of the current document'],
   ['E', 'Flag as exception, with a note'],
   ['R', 'Re-run extraction (Sonnet)'],
   ['1-9', 'Jump to line item n'],
@@ -35,8 +37,8 @@ export function ShortcutsOverlay({ open, onOpenChange }: { open: boolean; onOpen
           ))}
         </dl>
         <p className="text-xs text-muted-foreground">
-          J/K, E, R, digits, / and S only act outside a focused text field -- typing amounts and notes is never
-          intercepted.
+          Page Up/Down, arrows, E, R, digits, / and S only act outside a focused text field -- typing amounts and
+          notes is never intercepted.
         </p>
       </DialogContent>
     </Dialog>

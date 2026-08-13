@@ -16,10 +16,18 @@
  * section's "two pdf.js rules that keep the policy strict."
  */
 
-import { useEffect, useRef, useState } from 'react'
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react'
 import { ZoomIn, ZoomOut, RotateCw, ChevronLeft, ChevronRight } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { getReviewDocumentUrl } from '@/lib/actions/review'
+
+/** Imperative page-turn API so the review workspace's global Arrow-key
+ * handler (§7 keyboard contract) can drive this pane without lifting its
+ * whole pdf.js render loop up a level. */
+export interface PdfViewerHandle {
+  nextPage: () => void
+  prevPage: () => void
+}
 
 // Minimal shape of what this component actually calls, so it doesn't need to
 // import pdfjs-dist's full type surface (imported dynamically below anyway).
@@ -33,7 +41,10 @@ interface PdfDocumentProxy {
   destroy(): Promise<void>
 }
 
-export function PdfViewer({ sourceDocumentId }: { sourceDocumentId: number }) {
+export const PdfViewer = forwardRef<PdfViewerHandle, { sourceDocumentId: number }>(function PdfViewer(
+  { sourceDocumentId },
+  ref
+) {
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [numPages, setNumPages] = useState(0)
@@ -44,6 +55,15 @@ export function PdfViewer({ sourceDocumentId }: { sourceDocumentId: number }) {
   const docRef = useRef<PdfDocumentProxy | null>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const thumbCanvasRefs = useRef<Map<number, HTMLCanvasElement>>(new Map())
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      nextPage: () => setPageNumber((p) => (docRef.current ? Math.min(docRef.current.numPages, p + 1) : p)),
+      prevPage: () => setPageNumber((p) => Math.max(1, p - 1)),
+    }),
+    []
+  )
 
   // Load the document whenever the target document changes.
   useEffect(() => {
@@ -140,6 +160,7 @@ export function PdfViewer({ sourceDocumentId }: { sourceDocumentId: number }) {
           disabled={pageNumber <= 1}
           onClick={() => setPageNumber((p) => Math.max(1, p - 1))}
           aria-label="Previous page"
+          title="Previous page (← / ↑)"
         >
           <ChevronLeft className="h-4 w-4" />
         </Button>
@@ -153,6 +174,7 @@ export function PdfViewer({ sourceDocumentId }: { sourceDocumentId: number }) {
           disabled={pageNumber >= numPages}
           onClick={() => setPageNumber((p) => Math.min(numPages, p + 1))}
           aria-label="Next page"
+          title="Next page (→ / ↓)"
         >
           <ChevronRight className="h-4 w-4" />
         </Button>
@@ -207,4 +229,4 @@ export function PdfViewer({ sourceDocumentId }: { sourceDocumentId: number }) {
       </div>
     </div>
   )
-}
+})

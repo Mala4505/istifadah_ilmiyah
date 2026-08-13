@@ -16,12 +16,27 @@
  */
 
 import { z } from 'zod'
+import type { TaxBreakdown } from '@/lib/analytics/types'
 
 // ---------------------------------------------------------------------------
 // Zod schema — validated shape of the extraction response
 // ---------------------------------------------------------------------------
 
-export const SKIP_REASONS = ['bank_cheque', 'passbook', 'unrelated_document', 'blank', 'other'] as const
+export const SKIP_REASONS = [
+  'bank_cheque',
+  'passbook',
+  'unrelated_document',
+  'blank',
+  'other',
+  // Added by migration 20260814000002: a Gujarati land-permission letter in the
+  // pilot corpus had nowhere correct to land and fell into 'unrelated_document',
+  // which is wrong in a way that costs money later — these are REQUIRED
+  // supporting documentation, not noise, and the missing_documentation detector
+  // needs to tell the two apart.
+  'permission_letter',
+  'agreement',
+  'photo',
+] as const
 export const skipReasonSchema = z.enum(SKIP_REASONS)
 export type SkipReason = z.infer<typeof skipReasonSchema>
 
@@ -94,6 +109,52 @@ function isRealDate(year: number, month: number, day: number): boolean {
   return d.getUTCFullYear() === year && d.getUTCMonth() === month - 1 && d.getUTCDate() === day
 }
 
+/**
+ * Mirrors the CHECK constraint on `document_extraction.instrument_type_ocr`
+ * (migration 20260814000002). This is THE distinction a downstream compliance
+ * detector needs: it cannot tell "unregistered vendor, no GST, that's fine"
+ * from "tax invoice missing its GSTIN, that's a problem" without it.
+ */
+export const INSTRUMENT_TYPES = [
+  'tax_invoice',
+  'bill_of_supply',
+  'retail_cash_memo',
+  'letterhead_bill',
+  'proforma_invoice',
+  'quotation',
+  'receipt',
+  'delivery_challan',
+  'other',
+] as const
+export type InstrumentType = (typeof INSTRUMENT_TYPES)[number]
+const INSTRUMENT_TYPE_SET: ReadonlySet<string> = new Set(INSTRUMENT_TYPES)
+
+/**
+ * `instrument_type` is deliberately a plain (non-union) string on the wire —
+ * see `textField` usage in `extractionToolInputSchema` below — rather than an
+ * `enum`-constrained field. Combining a fixed value set with the `""`-for-
+ * absent convention every other text field uses would be awkward: `""` is
+ * neither a valid instrument type nor an obviously correct thing for the model
+ * to write when it can't tell. Validation against the known set happens
+ * entirely here instead, on the way in from the wire.
+ *
+ * Two decisions this transform makes:
+ *  - Empty string (nothing extracted / page too poor to classify) becomes
+ *    `null`, consistent with `absentTextAsNull` everywhere else.
+ *  - A non-empty value that is NOT one of INSTRUMENT_TYPES becomes `'other'`
+ *    rather than `null`. The model returning something recognisable-but-
+ *    unlisted (e.g. it wrote "credit_note") is meaningfully different from it
+ *    returning nothing — 'other' is exactly the bucket the CHECK constraint
+ *    provides for that case, and collapsing it to `null` would make it
+ *    indistinguishable from "not classified", defeating the column's purpose
+ *    for the compliance detector.
+ */
+const instrumentTypeOrNull = z.string().transform((value): InstrumentType | null => {
+  const trimmed = value.trim()
+  if (trimmed === '') return null
+  return INSTRUMENT_TYPE_SET.has(trimmed) ? (trimmed as InstrumentType) : 'other'
+})
+
 /** Per-page classification (§8 point 3: "classification-before-extraction is a real gate"). */
 export const extractionPageSchema = z.object({
   page_number: z.number().int().positive(),
@@ -131,6 +192,9 @@ export const extractionResponseSchema = z.object({
   extraction_confidence: z.number().min(0).max(1),
   contains_non_latin_script: z.boolean(),
 
+  /** One of INSTRUMENT_TYPES, or null — see instrumentTypeOrNull above. */
+  instrument_type: instrumentTypeOrNull,
+
   vendor_name: absentTextAsNull,
   vendor_gstin: absentTextAsNull,
   vendor_phone: absentTextAsNull,
@@ -138,8 +202,19 @@ export const extractionResponseSchema = z.object({
   invoice_number: absentTextAsNull,
   /** ISO 8601 date string (`YYYY-MM-DD`), or null when not legible/present. */
   invoice_date: isoDateOrNull,
+  /** Raw "Place of Supply" text as printed (e.g. "Maharashtra" or "27"). State
+   *  code resolution happens downstream (lib/analytics/gstin.ts), not here. */
+  place_of_supply: absentTextAsNull,
   subtotal: z.number().nullable(),
+  /** CGST/SGST/IGST amounts — see buildTaxBreakdown below for how these three
+   *  flat numbers become the nested tax_breakdown_ocr jsonb shape. Rates are
+   *  intentionally not captured (see buildTaxBreakdown's comment). */
+  cgst_amount: z.number().nullable(),
+  sgst_amount: z.number().nullable(),
+  igst_amount: z.number().nullable(),
   tax_amount: z.number().nullable(),
+  /** Explicit "Round Off" line some invoices print. */
+  round_off: z.number().nullable(),
   total_amount: z.number().nullable(),
   notes: absentTextAsNull,
 
@@ -202,14 +277,22 @@ export const extractionToolInputSchema = {
     extraction_confidence: { type: 'number' },
     contains_non_latin_script: { type: 'boolean' },
 
+    // Plain string, not enum-constrained — see instrumentTypeOrNull above for why.
+    instrument_type: textField,
+
     vendor_name: textField,
     vendor_gstin: textField,
     vendor_phone: textField,
     vendor_address: textField,
     invoice_number: textField,
     invoice_date: textField,
+    place_of_supply: textField,
     subtotal: nullableNumber,
+    cgst_amount: nullableNumber,
+    sgst_amount: nullableNumber,
+    igst_amount: nullableNumber,
     tax_amount: nullableNumber,
+    round_off: nullableNumber,
     total_amount: nullableNumber,
     notes: textField,
 
@@ -254,14 +337,20 @@ export const extractionToolInputSchema = {
     'legibility',
     'extraction_confidence',
     'contains_non_latin_script',
+    'instrument_type',
     'vendor_name',
     'vendor_gstin',
     'vendor_phone',
     'vendor_address',
     'invoice_number',
     'invoice_date',
+    'place_of_supply',
     'subtotal',
+    'cgst_amount',
+    'sgst_amount',
+    'igst_amount',
     'tax_amount',
+    'round_off',
     'total_amount',
     'notes',
     'line_items',
@@ -277,7 +366,14 @@ export const EXTRACTION_TOOL_DESCRIPTION =
   'phone, and address for later vendor-clustering; invoice number/date; subtotal/tax/total) and every ' +
   'line item, each tagged with the page it was read from. Write invoice_date as ISO YYYY-MM-DD (the ' +
   'source is usually DD/MM/YYYY — convert it). For anything illegible or genuinely absent, use an ' +
-  'empty string in a text field and null in a numeric field — never guess or fabricate a value.'
+  'empty string in a text field and null in a numeric field — never guess or fabricate a value. Also ' +
+  'classify instrument_type — one of tax_invoice, bill_of_supply, retail_cash_memo, letterhead_bill, ' +
+  'proforma_invoice, quotation, receipt, delivery_challan, or other — since a GST tax invoice missing ' +
+  'its GSTIN is a compliance problem while an unregistered vendor\'s cash memo charging no GST is not, ' +
+  'and only the instrument type tells those two cases apart. When the document is a GST invoice, also ' +
+  'capture place_of_supply (the state name or code printed as "Place of Supply") and report tax split ' +
+  'by component — cgst_amount, sgst_amount, and igst_amount — instead of only a combined tax_amount, ' +
+  'and capture round_off when the invoice prints an explicit rounding line.'
 
 /** The exact shape `messages.create({ tools: [...] })` expects, with `strict: true`. */
 export interface AnthropicStrictTool {
@@ -315,5 +411,39 @@ export function filterNonFinancialLineItems(extraction: ExtractionResponse): Ext
   return {
     ...extraction,
     line_items: extraction.line_items.filter((item) => financialPageNumbers.has(item.page_number)),
+  }
+}
+
+/**
+ * Assembles the three flat CGST/SGST/IGST amounts captured on the wire into
+ * the nested shape `document_extraction.tax_breakdown_ocr` (jsonb) and
+ * `lib/analytics/types.ts`'s `TaxBreakdown` actually expect:
+ *   { cgst: {rate, amount} | null, sgst: {...} | null, igst: {...} | null, cess: null }
+ *
+ * Modelling this as six-to-eight separate nested `anyOf`-typed sub-fields on
+ * the wire tool schema (cgst_rate, cgst_amount, sgst_rate, sgst_amount, ...)
+ * would have pushed the union-type count uncomfortably close to the 16 limit
+ * documented above `extractionToolInputSchema`, for a per-component *rate*
+ * that the compliance detector consuming this column does not actually read
+ * — only `.amount` is load-bearing there (a deliberate scope decision, not an
+ * oversight). So the wire schema stays flat (3 nullableNumber fields) and
+ * this pure function does the reshaping on the way in, the same role
+ * `filterNonFinancialLineItems` plays for line items. `rate` is always
+ * written as null; `cess` is not captured on the wire at all (rare in the
+ * pilot corpus) and is always null.
+ *
+ * Returns null — not an all-null object — when none of the three components
+ * were extracted, consistent with every other "nothing here" value in this
+ * schema and with tax_breakdown_ocr being a genuinely nullable column.
+ */
+export function buildTaxBreakdown(extraction: ExtractionResponse): TaxBreakdown | null {
+  const { cgst_amount, sgst_amount, igst_amount } = extraction
+  if (cgst_amount === null && sgst_amount === null && igst_amount === null) return null
+
+  return {
+    cgst: cgst_amount === null ? null : { rate: null, amount: cgst_amount },
+    sgst: sgst_amount === null ? null : { rate: null, amount: sgst_amount },
+    igst: igst_amount === null ? null : { rate: null, amount: igst_amount },
+    cess: null,
   }
 }

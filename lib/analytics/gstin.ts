@@ -32,23 +32,62 @@ const VALID_STATE_CODES = new Set<string>([
   '99',
 ])
 
-/** Human-readable state names, for the flag description. Not exhaustive by design —
- *  an unmapped-but-valid code falls back to the bare code rather than throwing. */
-const STATE_NAMES: Record<string, string> = {
-  '24': 'Gujarat',
-  '27': 'Maharashtra',
-  '29': 'Karnataka',
-  '32': 'Kerala',
-  '33': 'Tamil Nadu',
-  '06': 'Haryana',
-  '07': 'Delhi',
-  '08': 'Rajasthan',
-  '09': 'Uttar Pradesh',
-  '19': 'West Bengal',
-  '23': 'Madhya Pradesh',
-  '36': 'Telangana',
-  '37': 'Andhra Pradesh',
+/**
+ * Full GST state-code table. Unlike STATE_NAMES below (a display-only subset),
+ * this is exhaustive — it backs `stateCodeFromName`, which has to resolve
+ * whatever a real invoice's "Place of Supply" field says, not just the states
+ * common in the pilot corpus.
+ */
+const STATE_CODE_BY_NAME: Record<string, string> = {
+  'jammu and kashmir': '01',
+  'himachal pradesh': '02',
+  punjab: '03',
+  chandigarh: '04',
+  uttarakhand: '05',
+  haryana: '06',
+  delhi: '07',
+  rajasthan: '08',
+  'uttar pradesh': '09',
+  bihar: '10',
+  sikkim: '11',
+  'arunachal pradesh': '12',
+  nagaland: '13',
+  manipur: '14',
+  mizoram: '15',
+  tripura: '16',
+  meghalaya: '17',
+  assam: '18',
+  'west bengal': '19',
+  jharkhand: '20',
+  odisha: '21',
+  chhattisgarh: '22',
+  'madhya pradesh': '23',
+  gujarat: '24',
+  'daman and diu': '25',
+  'dadra and nagar haveli and daman and diu': '26',
+  maharashtra: '27',
+  karnataka: '29',
+  goa: '30',
+  lakshadweep: '31',
+  kerala: '32',
+  'tamil nadu': '33',
+  puducherry: '34',
+  'andaman and nicobar islands': '35',
+  telangana: '36',
+  'andhra pradesh': '37',
+  ladakh: '38',
+  'other territory': '97',
+  'centre jurisdiction': '99',
 }
+
+/** Human-readable state names, for the flag description. Derived from the
+ *  full table above, so display and resolution never drift apart. */
+const STATE_NAMES: Record<string, string> = Object.fromEntries(
+  Object.entries(STATE_CODE_BY_NAME).map(([name, code]) => [
+    code,
+    name.replace(/\b\w/g, (c) => c.toUpperCase()),
+  ])
+)
 
 /**
  * 15 characters: 2-digit state code, 10-character PAN, 1 entity number,
@@ -207,6 +246,27 @@ export function panFromGstin(raw: string | null | undefined): string | null {
   if (gstin.length !== 15) return null
   const pan = gstin.slice(2, 12)
   return /^[A-Z]{5}\d{4}[A-Z]$/.test(pan) ? pan : null
+}
+
+/**
+ * Resolves a "Place of Supply" field to a two-digit GST state code.
+ *
+ * Invoices write this field as either a bare code ("27") or a state name
+ * ("Maharashtra", sometimes "MAHARASHTRA" or with trailing whitespace from
+ * OCR). Accepts either. Returns null on anything else — including a name that
+ * simply is not in the table — so the caller abstains rather than guessing;
+ * see isInterstateSupply's own null-propagation for why that matters.
+ */
+export function stateCodeFromName(raw: string | null | undefined): string | null {
+  if (raw == null) return null
+  const trimmed = raw.trim()
+  if (trimmed === '') return null
+
+  if (/^\d{2}$/.test(trimmed)) {
+    return VALID_STATE_CODES.has(trimmed) ? trimmed : null
+  }
+
+  return STATE_CODE_BY_NAME[trimmed.toLowerCase()] ?? null
 }
 
 /**
