@@ -151,7 +151,7 @@ async function handlePOST(request: NextRequest) {
     if (!profile || !profile.is_active || profile.role !== 'admin') {
       return json(
         request,
-        { error: 'Only an active admin may run an import (MASTER-PLAN §4.4c).' },
+        { error: 'Only an active admin may run an import.' },
         403
       )
     }

@@ -1,11 +1,12 @@
 /**
  * Portal table reader (MASTER-PLAN §17.23, Phase 3 item 1).
  *
- * This file is the READABLE SOURCE of the bookmarklet. It is never loaded as a
- * script by the portal — app/(app)/tools/bookmarklet/page.tsx reads it at
- * request time, substitutes the three __PLACEHOLDER__ values below, and packs
- * the result into a single `javascript:` URL the operator drags to their
- * bookmarks bar.
+ * This file is the READABLE SOURCE of the Portal Reader link (the feature
+ * used to be labelled "bookmarklet" in the UI; same mechanism, plainer name).
+ * It is never loaded as a script by the portal — app/(app)/import/page.tsx
+ * reads it at request time, substitutes the four __PLACEHOLDER__ values
+ * below, and packs the result into a single `javascript:` URL the operator
+ * drags to their bookmarks bar.
  *
  * ---------------------------------------------------------------------------
  * WHY THE WHOLE SCRIPT IS INLINED INTO THE BOOKMARKLET RATHER THAN LOADED
@@ -320,6 +321,22 @@
     )
   }
 
+  /**
+   * "Saved." used to be the last word the operator saw — no way back to the
+   * Hub to actually look at what just landed, short of remembering the URL
+   * and navigating there by hand. This opens the Hub's import screen (where
+   * the committed batch and its rows are visible) in a new tab.
+   */
+  function savedMessage() {
+    return (
+      '<div style="color:#15803d">Saved.</div>' +
+      '<a href="' +
+      esc(HUB_URL) +
+      '/import" target="_blank" rel="noopener" style="display:inline-block;margin-top:6px;color:#2563eb">' +
+      'View in the Hub &rarr;</a>'
+    )
+  }
+
   function post(payload, mode, onResult, onError) {
     var body = {}
     for (var k in payload) if (Object.prototype.hasOwnProperty.call(payload, k)) body[k] = payload[k]
@@ -382,6 +399,12 @@
         ' rows. Set the page size to show all rows, then run this again.</div>'
       : ''
 
+    // Nothing is sent yet. Reading the table used to auto-fire a dry run —
+    // that surprised operators and left an empty-looking stub in the Hub's
+    // batch history every time (a dry run's row detail is never persisted;
+    // see app/api/import/route.ts). Now sending anything requires a click:
+    // "Preview" for a safe look with nothing saved, or "Commit" to go
+    // straight to writing the rows.
     ui(
       partialNote +
         '<div>Read <strong>' +
@@ -392,53 +415,86 @@
         '<div style="color:#71717a;margin:4px 0 10px">' +
         esc(headers.join(' · ')) +
         '</div>' +
-        '<div>Sending to the Hub as a dry run…</div>'
-    )
+        '<div style="display:flex;gap:8px;margin-top:4px">' +
+        '<button id="ih-preview" style="padding:7px 12px;border:1px solid #d4d4d8;border-radius:6px;' +
+        'background:#fff;color:#111;cursor:pointer;font:inherit">Preview changes</button>' +
+        '<button id="ih-commit-direct" style="padding:7px 12px;border:0;border-radius:6px;' +
+        'background:#111;color:#fff;cursor:pointer;font:inherit">Commit</button>' +
+        '</div>',
+      {
+        onReady: function () {
+          var previewBtn = document.getElementById('ih-preview')
+          var commitBtn = document.getElementById('ih-commit-direct')
+          if (!previewBtn || !commitBtn) return
 
-    post(
-      payload,
-      'dry_run',
-      function (result) {
-        ui(
-          partialNote +
-            summarise(result) +
-            '<button id="ih-commit" style="margin-top:8px;padding:7px 12px;border:0;border-radius:6px;' +
-            'background:#111;color:#fff;cursor:pointer;font:inherit">Commit this import</button>',
-          {
-            onReady: function () {
-              var btn = document.getElementById('ih-commit')
-              if (!btn) return
-              btn.onclick = function () {
-                btn.disabled = true
-                btn.textContent = 'Committing…'
-                post(
-                  payload,
-                  'commit',
-                  function (committed) {
-                    ui(partialNote + summarise(committed) + '<div style="color:#15803d">Saved.</div>')
-                  },
-                  function (error) {
-                    fail('Commit failed: ' + error.message)
+          function onPostFailure(error) {
+            // The likely cause is the portal's own `connect-src` CSP blocking
+            // the upload, which no amount of retrying fixes — hand the
+            // operator the file instead so the scrape is not wasted.
+            var saved = download(payload)
+            ui(
+              '<div style="color:#b91c1c;margin-bottom:8px">Could not reach the Hub: ' +
+                esc(error.message) +
+                '</div>' +
+                (saved
+                  ? '<div>The rows were downloaded as a .json file instead. Upload it on the Hub&rsquo;s import screen.</div>'
+                  : '<div>Saving a file also failed. Copy the rows manually, or ask for the paste-box workaround.</div>')
+            )
+          }
+
+          previewBtn.onclick = function () {
+            previewBtn.disabled = true
+            commitBtn.disabled = true
+            previewBtn.textContent = 'Previewing…'
+            post(
+              payload,
+              'dry_run',
+              function (result) {
+                ui(
+                  partialNote +
+                    summarise(result) +
+                    '<button id="ih-commit" style="margin-top:8px;padding:7px 12px;border:0;border-radius:6px;' +
+                    'background:#111;color:#fff;cursor:pointer;font:inherit">Commit this import</button>',
+                  {
+                    onReady: function () {
+                      var btn = document.getElementById('ih-commit')
+                      if (!btn) return
+                      btn.onclick = function () {
+                        btn.disabled = true
+                        btn.textContent = 'Committing…'
+                        post(
+                          payload,
+                          'commit',
+                          function (committed) {
+                            ui(partialNote + summarise(committed) + savedMessage())
+                          },
+                          function (error) {
+                            fail('Commit failed: ' + error.message)
+                          }
+                        )
+                      }
+                    },
                   }
                 )
-              }
-            },
+              },
+              onPostFailure
+            )
           }
-        )
-      },
-      function (error) {
-        // The likely cause is the portal's own `connect-src` CSP blocking the
-        // upload, which no amount of retrying fixes — hand the operator the
-        // file instead so the scrape is not wasted.
-        var saved = download(payload)
-        ui(
-          '<div style="color:#b91c1c;margin-bottom:8px">Could not reach the Hub: ' +
-            esc(error.message) +
-            '</div>' +
-            (saved
-              ? '<div>The rows were downloaded as a .json file instead. Upload it on the Hub&rsquo;s import screen.</div>'
-              : '<div>Saving a file also failed. Copy the rows manually, or ask for the paste-box workaround.</div>')
-        )
+
+          commitBtn.onclick = function () {
+            previewBtn.disabled = true
+            commitBtn.disabled = true
+            commitBtn.textContent = 'Committing…'
+            post(
+              payload,
+              'commit',
+              function (committed) {
+                ui(partialNote + summarise(committed) + savedMessage())
+              },
+              onPostFailure
+            )
+          }
+        },
       }
     )
   })

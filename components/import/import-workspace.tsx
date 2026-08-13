@@ -1,40 +1,20 @@
 'use client'
 
-import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import { toast } from 'sonner'
+import { UploadCloud } from 'lucide-react'
+import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { BatchStatusBadge } from '@/components/import/row-log-badge'
 import { RowLogTable, type RowLogEntry } from '@/components/import/row-log-table'
 import { SummaryBadges } from '@/components/import/summary-badges'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
+import { FriendlyError } from '@/components/ui/friendly-error'
 import type { ImportResult } from '@/lib/import/run-import'
 
-interface ImportBatchRow {
-  id: number
-  source_filename: string
-  mode: string
-  status: string
-  row_count: number | null
-  summary_jsonb: Record<string, number> | null
-  started_at: string
-  completed_at: string | null
-  error_message: string | null
-}
-
-function formatDateTime(iso: string): string {
-  return new Date(iso).toLocaleString(undefined, {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-  })
+function isSpreadsheet(file: File): boolean {
+  return /\.xlsx?$/i.test(file.name)
 }
 
 async function postImport(file: File, mode: 'dry_run' | 'commit'): Promise<{ ok: boolean; body: ImportResult & { error?: string } }> {
@@ -48,46 +28,50 @@ async function postImport(file: File, mode: 'dry_run' | 'commit'): Promise<{ ok:
   return { ok: res.ok, body }
 }
 
-export function ImportWorkspace({ isAdmin }: { isAdmin: boolean }) {
+/**
+ * The Departmental import: pick or drop a .xlsx export, preview the diff,
+ * commit. Reused as-is on both the dashboard (the primary landing action)
+ * and /import (alongside the fuller batch history table) — see
+ * components/import/import-page-client.tsx and app/(app)/page.tsx.
+ */
+export function ImportWorkspace({
+  isAdmin,
+  onCommitted,
+}: {
+  isAdmin: boolean
+  /** Called after a successful commit, so a host page can refresh its own batch history list. */
+  onCommitted?: () => void
+}) {
   const [file, setFile] = useState<File | null>(null)
   const [running, setRunning] = useState<'idle' | 'dry_run' | 'commit'>('idle')
   const [preview, setPreview] = useState<ImportResult | null>(null)
   const [committed, setCommitted] = useState<ImportResult | null>(null)
   const [formError, setFormError] = useState<string | null>(null)
+  const [isDragging, setIsDragging] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  const [batches, setBatches] = useState<ImportBatchRow[] | null>(null)
-  const [historyError, setHistoryError] = useState<string | null>(null)
-  const [selectedBatch, setSelectedBatch] = useState<number | null>(null)
-  const [selectedBatchRows, setSelectedBatchRows] = useState<RowLogEntry[] | null>(null)
-  const [batchDetailLoading, setBatchDetailLoading] = useState(false)
-
-  const loadHistory = useCallback(async () => {
-    setHistoryError(null)
-    try {
-      const res = await fetch('/api/import')
-      const body = await res.json()
-      if (!res.ok) {
-        setHistoryError(body.error ?? 'Could not load import history.')
-        setBatches([])
-        return
-      }
-      setBatches(body.batches ?? [])
-    } catch {
-      setHistoryError('Could not reach the server.')
-      setBatches([])
-    }
-  }, [])
-
-  useEffect(() => {
-    if (isAdmin) void loadHistory()
-  }, [isAdmin, loadHistory])
-
-  function resetImportState() {
-    setFile(null)
+  const chooseFile = useCallback((next: File | null) => {
+    setFile(next)
     setPreview(null)
     setCommitted(null)
     setFormError(null)
+  }, [])
+
+  const handleFiles = useCallback(
+    (fileList: FileList | File[]) => {
+      const picked = Array.from(fileList)[0]
+      if (!picked) return
+      if (!isSpreadsheet(picked)) {
+        toast.error('Only .xlsx or .xls files are supported.')
+        return
+      }
+      chooseFile(picked)
+    },
+    [chooseFile]
+  )
+
+  function resetImportState() {
+    chooseFile(null)
     if (fileInputRef.current) fileInputRef.current.value = ''
   }
 
@@ -132,45 +116,11 @@ export function ImportWorkspace({ isAdmin }: { isAdmin: boolean }) {
       } else {
         toast.success('Import committed.')
       }
-      void loadHistory()
+      onCommitted?.()
     } catch {
       setFormError('Could not reach the server.')
     } finally {
       setRunning('idle')
-    }
-  }
-
-  async function toggleBatchDetail(batchId: number) {
-    if (selectedBatch === batchId) {
-      setSelectedBatch(null)
-      setSelectedBatchRows(null)
-      return
-    }
-    setSelectedBatch(batchId)
-    setSelectedBatchRows(null)
-    setBatchDetailLoading(true)
-    try {
-      const res = await fetch(`/api/import?batchId=${batchId}`)
-      const body = await res.json()
-      if (!res.ok) {
-        toast.error(body.error ?? 'Could not load batch detail.')
-        setSelectedBatchRows([])
-        return
-      }
-      setSelectedBatchRows(
-        (body.rows ?? []).map((r: Record<string, unknown>) => ({
-          rowNumber: r.row_number,
-          rawRow: r.raw_row_jsonb,
-          action: r.action,
-          entryId: r.entry_id,
-          fieldsChanged: r.fields_changed,
-        }))
-      )
-    } catch {
-      toast.error('Could not reach the server.')
-      setSelectedBatchRows([])
-    } finally {
-      setBatchDetailLoading(false)
     }
   }
 
@@ -180,9 +130,8 @@ export function ImportWorkspace({ isAdmin }: { isAdmin: boolean }) {
         <CardContent className="pt-6">
           <p className="text-sm font-medium">You don&apos;t have permission to run imports.</p>
           <p className="mt-1 text-sm text-muted-foreground">
-            Running an import — dry-run or commit — is restricted to the admin role
-            (MASTER-PLAN §4.4c). Ask an admin to run it, or to grant you the role if this is
-            wrong.
+            Running an import — dry-run or commit — is restricted to the admin role. Ask an
+            admin to run it, or to grant you the role if this is wrong.
           </p>
         </CardContent>
       </Card>
@@ -193,176 +142,127 @@ export function ImportWorkspace({ isAdmin }: { isAdmin: boolean }) {
   const activeRows: RowLogEntry[] = activeResult?.rowLog ?? []
 
   return (
-    <div className="flex flex-col gap-6">
-      <Card>
-        <CardHeader>
-          <CardTitle>New import</CardTitle>
-          <CardDescription>
-            Upload a Departmental export, review the dry-run diff below, then commit. The
-            preview is the screen — nothing is written until you commit.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-4">
-          <div className="flex flex-wrap items-center gap-3">
+    <Card>
+      <CardHeader>
+        <CardTitle>New import</CardTitle>
+        <CardDescription>
+          Drop the Departmental export (.xlsx) or choose it below, review the dry-run diff, then
+          commit. The preview is the screen — nothing is written until you commit.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-4">
+        {!file ? (
+          <div
+            role="button"
+            tabIndex={0}
+            onClick={() => fileInputRef.current?.click()}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') fileInputRef.current?.click()
+            }}
+            onDragOver={(e) => {
+              e.preventDefault()
+              setIsDragging(true)
+            }}
+            onDragLeave={() => setIsDragging(false)}
+            onDrop={(e) => {
+              e.preventDefault()
+              setIsDragging(false)
+              if (e.dataTransfer.files.length > 0) handleFiles(e.dataTransfer.files)
+            }}
+            className={cn(
+              'flex cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed px-4 py-8 text-center transition-colors',
+              isDragging ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/50 hover:bg-muted/40'
+            )}
+          >
+            <UploadCloud className="h-8 w-8 text-muted-foreground" aria-hidden="true" />
+            <p className="text-sm font-medium">Drop the .xlsx export here, or tap to browse</p>
+            <p className="max-w-xs text-xs text-muted-foreground">
+              Choose the latest Departmental export to begin.
+            </p>
+            <Button type="button" variant="outline" size="sm" className="mt-1" onClick={(e) => e.stopPropagation()}>
+              Choose file
+            </Button>
             <input
               ref={fileInputRef}
               type="file"
               accept=".xlsx,.xls"
+              className="sr-only"
               onChange={(e) => {
-                setFile(e.target.files?.[0] ?? null)
-                setPreview(null)
-                setCommitted(null)
-                setFormError(null)
+                if (e.target.files && e.target.files.length > 0) handleFiles(e.target.files)
+                e.target.value = ''
               }}
-              className="block w-full max-w-sm text-sm text-foreground file:mr-3 file:rounded-md file:border-0 file:bg-secondary file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-secondary-foreground hover:file:bg-secondary/80"
             />
-            <Button onClick={handleDryRun} disabled={!file || running !== 'idle'}>
+          </div>
+        ) : (
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="truncate text-sm font-medium">{file.name}</span>
+            <Button onClick={handleDryRun} disabled={running !== 'idle'}>
               {running === 'dry_run' ? 'Running dry run…' : 'Run dry-run preview'}
             </Button>
-            {(preview || committed) && (
-              <Button variant="ghost" onClick={resetImportState} disabled={running !== 'idle'}>
-                Choose another file
-              </Button>
-            )}
+            <Button variant="ghost" onClick={resetImportState} disabled={running !== 'idle'}>
+              Choose another file
+            </Button>
           </div>
+        )}
 
-          {formError && (
-            <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
-              {formError}
-            </div>
-          )}
+        {formError && (
+          <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2">
+            <FriendlyError message={formError} />
+          </div>
+        )}
 
-          {running === 'dry_run' && (
-            <div className="flex flex-col gap-2">
-              <Skeleton className="h-4 w-64" />
-              <Skeleton className="h-24 w-full" />
-            </div>
-          )}
+        {running === 'dry_run' && (
+          <div className="flex flex-col gap-2">
+            <Skeleton className="h-4 w-64" />
+            <Skeleton className="h-24 w-full" />
+          </div>
+        )}
 
-          {activeResult && (
-            <div className="flex flex-col gap-4 border-t border-border pt-4">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div className="flex items-center gap-2">
-                  <BatchStatusBadge status={activeResult.status} />
-                  <span className="text-sm text-muted-foreground">
-                    {committed ? 'Committed' : 'Dry run (not written)'} · batch #{activeResult.batchId} ·{' '}
-                    {activeResult.rowCount} rows
-                  </span>
-                </div>
-                {!committed && activeResult.status !== 'failed' && (
-                  <Button onClick={handleCommit} disabled={running !== 'idle'}>
-                    {running === 'commit' ? 'Committing…' : 'Commit this import'}
-                  </Button>
-                )}
+        {activeResult && (
+          <div className="flex flex-col gap-4 border-t border-border pt-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <BatchStatusBadge status={activeResult.status} />
+                <span className="text-sm text-muted-foreground">
+                  {committed ? 'Committed' : 'Dry run (not written)'} · batch #{activeResult.batchId} ·{' '}
+                  {activeResult.rowCount} rows
+                </span>
               </div>
-
-              <SummaryBadges summary={activeResult.summary} />
-
-              {activeResult.exceptions.length > 0 && (
-                <div className="rounded-md border border-amber-300/50 bg-amber-50 p-3 text-sm dark:border-amber-900 dark:bg-amber-950/40">
-                  <p className="mb-1 font-medium text-amber-900 dark:text-amber-200">
-                    {activeResult.exceptions.length} exception
-                    {activeResult.exceptions.length === 1 ? '' : 's'} raised
-                  </p>
-                  <ul className="list-inside list-disc space-y-0.5 text-amber-800 dark:text-amber-300">
-                    {activeResult.exceptions.map((exc, i) => (
-                      <li key={i}>
-                        <span className="font-medium uppercase">{exc.severity}</span> — {exc.description}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
+              {!committed && activeResult.status !== 'failed' && (
+                <Button onClick={handleCommit} disabled={running !== 'idle'}>
+                  {running === 'commit' ? 'Committing…' : 'Commit this import'}
+                </Button>
               )}
-
-              {activeResult.errorMessage && (
-                <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
-                  {activeResult.errorMessage}
-                </div>
-              )}
-
-              <RowLogTable rows={activeRows} />
             </div>
-          )}
 
-          {!file && !activeResult && (
-            <p className="text-sm text-muted-foreground">
-              No file selected. Choose the latest Departmental export (.xlsx) to begin.
-            </p>
-          )}
-        </CardContent>
-      </Card>
+            <SummaryBadges summary={activeResult.summary} />
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Batch history</CardTitle>
-          <CardDescription>Past import runs. Select a row to see its per-row log.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          {historyError && (
-            <div className="mb-3 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
-              {historyError}
-            </div>
-          )}
-
-          {batches === null ? (
-            <div className="flex flex-col gap-2">
-              <Skeleton className="h-8 w-full" />
-              <Skeleton className="h-8 w-full" />
-              <Skeleton className="h-8 w-full" />
-            </div>
-          ) : batches.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No imports have been run yet.</p>
-          ) : (
-            <div className="rounded-md border border-border">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Started</TableHead>
-                    <TableHead>File</TableHead>
-                    <TableHead>Mode</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead className="text-right">Rows</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {batches.map((b) => (
-                    <Fragment key={b.id}>
-                      <TableRow
-                        className="cursor-pointer"
-                        onClick={() => toggleBatchDetail(b.id)}
-                        aria-expanded={selectedBatch === b.id}
-                      >
-                        <TableCell className="whitespace-nowrap text-muted-foreground">
-                          {formatDateTime(b.started_at)}
-                        </TableCell>
-                        <TableCell className="max-w-[20rem] truncate">{b.source_filename}</TableCell>
-                        <TableCell className="capitalize">{b.mode.replace('_', ' ')}</TableCell>
-                        <TableCell>
-                          <BatchStatusBadge status={b.status} />
-                        </TableCell>
-                        <TableCell className="text-right tabular-nums">{b.row_count ?? '—'}</TableCell>
-                      </TableRow>
-                      {selectedBatch === b.id && (
-                        <TableRow>
-                          <TableCell colSpan={5} className="bg-muted/30 p-3">
-                            {batchDetailLoading ? (
-                              <Skeleton className="h-24 w-full" />
-                            ) : b.error_message ? (
-                              <p className="text-sm text-destructive">{b.error_message}</p>
-                            ) : (
-                              <RowLogTable rows={selectedBatchRows ?? []} />
-                            )}
-                          </TableCell>
-                        </TableRow>
-                      )}
-                    </Fragment>
+            {activeResult.exceptions.length > 0 && (
+              <div className="rounded-md border border-amber-300/50 bg-amber-50 p-3 text-sm dark:border-amber-900 dark:bg-amber-950/40">
+                <p className="mb-1 font-medium text-amber-900 dark:text-amber-200">
+                  {activeResult.exceptions.length} exception
+                  {activeResult.exceptions.length === 1 ? '' : 's'} raised
+                </p>
+                <ul className="list-inside list-disc space-y-0.5 text-amber-800 dark:text-amber-300">
+                  {activeResult.exceptions.map((exc, i) => (
+                    <li key={i}>
+                      <span className="font-medium uppercase">{exc.severity}</span> — {exc.description}
+                    </li>
                   ))}
-                </TableBody>
-              </Table>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-    </div>
+                </ul>
+              </div>
+            )}
+
+            {activeResult.errorMessage && (
+              <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2">
+                <FriendlyError message={activeResult.errorMessage} />
+              </div>
+            )}
+
+            <RowLogTable rows={activeRows} />
+          </div>
+        )}
+      </CardContent>
+    </Card>
   )
 }

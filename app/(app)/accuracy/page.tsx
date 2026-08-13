@@ -416,7 +416,7 @@ function PermissionDeniedState({ reason }: { reason: Extract<AdminGate, { ok: fa
     },
     not_admin: {
       title: 'Admins only',
-      body: 'The accuracy report is admin-only (MASTER-PLAN §5 row 13) — its export is what feeds prompt tuning decisions. Ask an admin to run this, or ask to be granted the admin role if you should have access.',
+      body: 'The accuracy report is admin-only — its export is what feeds prompt tuning decisions. Ask an admin to run this, or ask to be granted the admin role if you should have access.',
     },
   }
   const { title, body } = copy[reason] ?? copy.not_admin!

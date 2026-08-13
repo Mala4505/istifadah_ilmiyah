@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
+import { GripVertical } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -15,7 +16,15 @@ import {
   TableRow,
 } from '@/components/ui/table'
 
+/**
+ * Only the Audit portal is read this way today — the Departmental side comes
+ * in through the .xlsx export (New import, alongside this card). The type
+ * stays a union with 'departmental' because app/api/scrape-token and
+ * app/api/import/portal already support it; this workspace just never offers
+ * it as a choice.
+ */
 type SourceSystem = 'departmental' | 'audit'
+const PORTAL_READER_SOURCE: SourceSystem = 'audit'
 
 interface MintedToken {
   token: string
@@ -45,20 +54,20 @@ interface Props {
 }
 
 /**
- * Packs the bookmarklet source into a `javascript:` URL.
+ * Packs the reader script into a `javascript:` URL.
  *
- * The token is substituted into the source rather than fetched by the
- * bookmarklet at run time: the bookmarklet has no session on the portal's
- * origin, so there is nothing for it to authenticate a fetch WITH — the token
- * has to travel inside the bookmark. That is what makes it worth keeping short
- * lived and revocable (see lib/scrape-token.ts).
+ * The token is substituted into the source rather than fetched at run time:
+ * the dragged link has no session on the portal's origin, so there is nothing
+ * for it to authenticate a fetch WITH — the token has to travel inside the
+ * link itself. That is what makes it worth keeping short-lived and revocable
+ * (see lib/scrape-token.ts).
  *
  * `encodeURIComponent` over the whole body preserves newlines as %0A, so the
  * source's `//` line comments still terminate correctly. Minifying first is
  * therefore unnecessary, and keeping the readable text means an operator who
- * inspects their own bookmark can see exactly what it does.
+ * inspects their own link can see exactly what it does.
  */
-function packBookmarklet(input: {
+function packReaderLink(input: {
   source: string
   hubUrl: string
   token: string
@@ -84,8 +93,13 @@ function tokenState(row: TokenRow): string {
   return 'Live'
 }
 
-export function BookmarkletWorkspace({ isAdmin, source, hubUrl }: Props) {
-  const [sourceSystem, setSourceSystem] = useState<SourceSystem>('audit')
+/**
+ * "Portal Reader" (previously "bookmarklet" in this UI — same feature, a
+ * plainer name). Mints a short-lived token and hands the operator a
+ * drag-to-install link that reads the Audit portal's on-screen table straight
+ * into the Hub, without ever storing a portal password.
+ */
+export function PortalReaderWorkspace({ isAdmin, source, hubUrl }: Props) {
   const [label, setLabel] = useState('')
   const [minting, setMinting] = useState(false)
   const [minted, setMinted] = useState<MintedToken | null>(null)
@@ -99,10 +113,11 @@ export function BookmarkletWorkspace({ isAdmin, source, hubUrl }: Props) {
       const res = await fetch('/api/scrape-token')
       const body = await res.json()
       if (!res.ok) {
-        toast.error(body.error ?? 'Could not load tokens.')
+        toast.error(body.error ?? 'Could not load reader links.')
         return
       }
-      setTokens(body.tokens ?? [])
+      // Revoked links are dead — showing them here would just be clutter.
+      setTokens((body.tokens ?? []).filter((t: TokenRow) => !t.revoked_at))
     } catch {
       toast.error('Could not reach the server.')
     } finally {
@@ -120,22 +135,22 @@ export function BookmarkletWorkspace({ isAdmin, source, hubUrl }: Props) {
       const res = await fetch('/api/scrape-token', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sourceSystem, label: label.trim() || null }),
+        body: JSON.stringify({ sourceSystem: PORTAL_READER_SOURCE, label: label.trim() || null }),
       })
       const body = await res.json()
       if (!res.ok) {
-        toast.error(body.error ?? 'Could not create a token.')
+        toast.error(body.error ?? 'Could not create a reader link.')
         return
       }
       setMinted(body as MintedToken)
-      toast.success('Token created — drag the link below to your bookmarks bar now.')
+      toast.success('Reader link created — drag it to your bookmarks bar now.')
       void loadTokens()
     } catch {
       toast.error('Could not reach the server.')
     } finally {
       setMinting(false)
     }
-  }, [sourceSystem, label, loadTokens])
+  }, [label, loadTokens])
 
   const revoke = useCallback(
     async (id: number) => {
@@ -146,7 +161,7 @@ export function BookmarkletWorkspace({ isAdmin, source, hubUrl }: Props) {
           toast.error(body.error ?? 'Could not revoke.')
           return
         }
-        toast.success('Token revoked.')
+        toast.success('Reader link revoked.')
         if (minted?.id === id) setMinted(null)
         void loadTokens()
       } catch {
@@ -156,9 +171,9 @@ export function BookmarkletWorkspace({ isAdmin, source, hubUrl }: Props) {
     [loadTokens, minted]
   )
 
-  const bookmarkletHref = useMemo(() => {
+  const readerHref = useMemo(() => {
     if (!minted) return null
-    return packBookmarklet({
+    return packReaderLink({
       source,
       hubUrl,
       token: minted.token,
@@ -173,19 +188,19 @@ export function BookmarkletWorkspace({ isAdmin, source, hubUrl }: Props) {
   // bookmark is empty). Setting it with the native DOM API through a ref
   // bypasses that guard -- it only intercepts React's own prop-driven
   // attribute writes, not an imperative `setAttribute` call. This is not an
-  // XSS hole: the string comes from packBookmarklet() above, built from our
+  // XSS hole: the string comes from packReaderLink() above, built from our
   // own known-good source file plus a token WE minted, never from anything
   // a user typed in.
   const dragLinkRef = useRef<HTMLAnchorElement>(null)
   useEffect(() => {
     const el = dragLinkRef.current
     if (!el) return
-    if (bookmarkletHref) {
-      el.setAttribute('href', bookmarkletHref)
+    if (readerHref) {
+      el.setAttribute('href', readerHref)
     } else {
       el.removeAttribute('href')
     }
-  }, [bookmarkletHref])
+  }, [readerHref])
 
   if (!isAdmin) {
     return (
@@ -193,7 +208,7 @@ export function BookmarkletWorkspace({ isAdmin, source, hubUrl }: Props) {
         <CardHeader>
           <CardTitle>Admins only</CardTitle>
           <CardDescription>
-            Creating a portal-reader token lets its holder submit an import, so it is restricted to
+            Creating a Portal Reader link lets its holder submit an import, so it is restricted to
             the same role that may run one.
           </CardDescription>
         </CardHeader>
@@ -202,53 +217,28 @@ export function BookmarkletWorkspace({ isAdmin, source, hubUrl }: Props) {
   }
 
   return (
-    <div className="flex flex-col gap-4">
-      <Card>
-        <CardHeader>
-          <CardTitle>How this works</CardTitle>
-          <CardDescription>
-            You stay logged into the portal yourself. Nothing here ever stores a portal password.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <ol className="ml-4 list-decimal space-y-1.5 text-sm text-muted-foreground">
-            <li>Create a token below and drag the blue link to your browser&rsquo;s bookmarks bar.</li>
-            <li>Open the portal, log in as normal, and go to the entry list.</li>
-            <li>
-              Set the table to show all rows if it is paginated, then click the bookmark. It reads
-              what is on screen and sends it here as a dry run.
-            </li>
-            <li>Read the summary it shows, then press <em>Commit</em> if it looks right.</li>
-          </ol>
-          <p className="mt-3 text-sm text-muted-foreground">
-            If the portal blocks the upload, the bookmark saves a <code>.json</code> file instead —
-            upload that on the Import screen.
-          </p>
-        </CardContent>
-      </Card>
+    <Card>
+      <CardHeader>
+        <CardTitle>Portal Reader</CardTitle>
+        <CardDescription>
+          Reads the Audit portal&rsquo;s table straight into the Hub. You stay logged into the
+          portal yourself — nothing here ever stores a portal password.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-5">
+        <ol className="ml-4 list-decimal space-y-1.5 text-sm text-muted-foreground">
+          <li>Create a link below and drag it to your browser&rsquo;s bookmarks bar.</li>
+          <li>Open the Audit portal, log in as normal, and go to the entry list.</li>
+          <li>Set the table to show all rows if it is paginated, then click the bookmark.</li>
+          <li>Preview what it read, or commit straight away if you trust it.</li>
+        </ol>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Create a reader token</CardTitle>
-          <CardDescription>
-            The token is shown once and never again. It expires in 12 hours and can be revoked at
-            any time.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-4">
-          <div className="flex flex-wrap items-end gap-4">
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="source-system">Portal</Label>
-              <select
-                id="source-system"
-                className="h-9 rounded-md border border-input bg-background px-3 text-sm"
-                value={sourceSystem}
-                onChange={(e) => setSourceSystem(e.target.value as SourceSystem)}
-              >
-                <option value="audit">Audit portal</option>
-                <option value="departmental">Departmental portal</option>
-              </select>
-            </div>
+        <div className="flex flex-col gap-3 border-t border-border pt-4">
+          <p className="text-sm font-medium">Create a reader link</p>
+          <p className="text-xs text-muted-foreground">
+            Shown once and never again. Expires in 12 hours and can be revoked at any time.
+          </p>
+          <div className="flex flex-wrap items-end gap-3">
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="token-label">Label (optional)</Label>
               <Input
@@ -256,22 +246,21 @@ export function BookmarkletWorkspace({ isAdmin, source, hubUrl }: Props) {
                 value={label}
                 placeholder="e.g. my laptop"
                 onChange={(e) => setLabel(e.target.value)}
-                className="w-56"
+                className="w-48"
               />
             </div>
             <Button onClick={() => void mint()} disabled={minting}>
-              {minting ? 'Creating…' : 'Create token'}
+              {minting ? 'Creating…' : 'Create link'}
             </Button>
           </div>
 
-          {minted && bookmarkletHref && (
+          {minted && readerHref && (
             <div className="rounded-md border border-dashed p-4">
               <p className="text-sm font-medium">
                 Drag this to your bookmarks bar now — it will not be shown again.
               </p>
               <p className="mt-1 text-sm text-muted-foreground">
-                Expires {formatDateTime(minted.expiresAt)} · reads the{' '}
-                {minted.sourceSystem === 'audit' ? 'Audit' : 'Departmental'} portal
+                Expires {formatDateTime(minted.expiresAt)}
               </p>
               <a
                 ref={dragLinkRef}
@@ -282,34 +271,31 @@ export function BookmarkletWorkspace({ isAdmin, source, hubUrl }: Props) {
                   e.preventDefault()
                   toast.info('Drag this link to your bookmarks bar — clicking it here does nothing.')
                 }}
-                className="mt-3 inline-block cursor-grab rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground"
+                className="mt-3 inline-flex cursor-grab items-center gap-1.5 rounded-md bg-primary px-2.5 py-1.5 text-xs font-medium text-primary-foreground"
               >
-                Read {minted.sourceSystem === 'audit' ? 'Audit' : 'Departmental'} portal → Hub
+                <GripVertical className="h-3.5 w-3.5" aria-hidden="true" />
+                Read Audit portal
               </a>
             </div>
           )}
-        </CardContent>
-      </Card>
+        </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Tokens</CardTitle>
-          <CardDescription>
-            Only the first 8 characters are stored in readable form, so a token cannot be recovered
-            here — revoke and create a new one instead.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
+        <div className="flex flex-col gap-2 border-t border-border pt-4">
+          <p className="text-sm font-medium">Reader links</p>
+          <p className="text-xs text-muted-foreground">
+            The drag-to-install link only ever appears once, right after you create it — by
+            design, the Hub never stores it in a form it could show you again. If you didn&rsquo;t
+            drag it in time, revoke it below and create a new one; that&rsquo;s expected, not an
+            error.
+          </p>
           {loadingTokens ? (
             <p className="text-sm text-muted-foreground">Loading…</p>
           ) : tokens.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No tokens yet.</p>
+            <p className="text-sm text-muted-foreground">No reader links yet.</p>
           ) : (
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Prefix</TableHead>
-                  <TableHead>Portal</TableHead>
                   <TableHead>Label</TableHead>
                   <TableHead>State</TableHead>
                   <TableHead>Expires</TableHead>
@@ -321,9 +307,7 @@ export function BookmarkletWorkspace({ isAdmin, source, hubUrl }: Props) {
               <TableBody>
                 {tokens.map((row) => (
                   <TableRow key={row.id}>
-                    <TableCell className="font-mono text-xs">{row.token_prefix}…</TableCell>
-                    <TableCell>{row.source_system}</TableCell>
-                    <TableCell>{row.label ?? '—'}</TableCell>
+                    <TableCell>{row.label ?? row.token_prefix + '…'}</TableCell>
                     <TableCell>{tokenState(row)}</TableCell>
                     <TableCell>{formatDateTime(row.expires_at)}</TableCell>
                     <TableCell>{formatDateTime(row.last_used_at)}</TableCell>
@@ -340,8 +324,8 @@ export function BookmarkletWorkspace({ isAdmin, source, hubUrl }: Props) {
               </TableBody>
             </Table>
           )}
-        </CardContent>
-      </Card>
-    </div>
+        </div>
+      </CardContent>
+    </Card>
   )
 }

@@ -7,6 +7,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { FriendlyError } from '@/components/ui/friendly-error'
 import type { ExportBatchSummary, ExportBatchRow } from '@/lib/export/queries'
 
 function formatDateTime(value: string | null): string {
@@ -157,7 +158,9 @@ function BatchHistoryRow({ batch }: { batch: ExportBatchSummary }) {
         </div>
 
         {batch.status === 'failed' && batch.error_message && (
-          <p className="rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive">{batch.error_message}</p>
+          <div className="rounded-md bg-destructive/10 px-3 py-2">
+            <FriendlyError message={batch.error_message} className="text-xs" />
+          </div>
         )}
         {batch.delivered_at && (
           <p className="text-xs text-muted-foreground">Delivered {formatDateTime(batch.delivered_at)}</p>

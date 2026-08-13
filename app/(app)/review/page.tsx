@@ -4,6 +4,7 @@ import { getStaffContext } from '@/lib/export/auth'
 import { Card, CardContent } from '@/components/ui/card'
 import { ReviewWorkspace } from '@/components/review/review-workspace'
 import type { LineItemDetail, OpenExceptionSummary, QueueEntry, ReviewDocumentDetail } from '@/lib/review/types'
+import { friendlyErrorMessage } from '@/lib/friendly-error'
 
 /**
  * /review -- Screen 7, the throughput screen (MASTER-PLAN §5 row 7, §7,
@@ -38,7 +39,7 @@ export default async function ReviewPage({
     return (
       <GatedState
         title="Reviewers and admins only"
-        body="Verifying document extractions (MASTER-PLAN §4.4c) requires the reviewer or admin role."
+        body="Verifying document extractions requires the reviewer or admin role."
       />
     )
   }
@@ -57,7 +58,9 @@ export default async function ReviewPage({
     .limit(QUEUE_ROW_CAP)
 
   if (queueError) {
-    return <GatedState title="Could not load the review queue" body={queueError.message} />
+    return (
+      <GatedState title="Could not load the review queue" body={friendlyErrorMessage(queueError.message)} />
+    )
   }
 
   const queue: QueueEntry[] = (queueRows ?? []).map((r) => ({

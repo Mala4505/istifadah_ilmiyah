@@ -1,13 +1,14 @@
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
+import { FriendlyError } from '@/components/ui/friendly-error'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { AdvanceSettlementPicker } from '@/components/entries/detail/advance-settlement-picker'
 import { ChangeHistoryList } from '@/components/entries/detail/change-history-list'
-import { DocumentsNote } from '@/components/entries/detail/documents-note'
 import { EnrichmentForm } from '@/components/entries/detail/enrichment-form'
 import { EntryNotFound } from '@/components/entries/detail/entry-not-found'
 import { HubStatusSection } from '@/components/entries/detail/hub-status-section'
 import { ImportFieldsPanel } from '@/components/entries/detail/import-fields-panel'
+import { LinkedDocuments, type LinkedDocumentView } from '@/components/entries/detail/linked-documents'
 import type {
   AdminHeadOption,
   AdvanceEntrySummary,
@@ -52,7 +53,7 @@ export default async function EntryDetailPage({
         <Card>
           <CardContent className="flex flex-col gap-2 pt-6">
             <p className="text-sm font-medium">Could not load this entry</p>
-            <p className="text-sm text-muted-foreground">{entryError.message}</p>
+            <FriendlyError message={entryError.message} />
           </CardContent>
         </Card>
       </div>
@@ -163,6 +164,39 @@ export default async function EntryDetailPage({
 
   const hubStatusTimelineRows = changeLogRows.filter((r) => 'hub_status_id' in r.changes)
 
+  // Answers "how does this PDF connect to this entry line": the actual
+  // attached documents, plus the OCR'd values the match was made on — not
+  // just a bare count (see components/entries/detail/linked-documents.tsx).
+  const { data: linkedDocsData } = await supabase
+    .from('source_document')
+    .select('id, original_filename, uploaded_at, page_count')
+    .eq('entry_id', id)
+    .order('uploaded_at', { ascending: false })
+  const linkedDocIds = (linkedDocsData ?? []).map((d) => d.id)
+  const { data: linkedExtractionsData } =
+    linkedDocIds.length > 0
+      ? await supabase
+          .from('document_extraction')
+          .select('source_document_id, vendor_name_ocr, invoice_number_ocr, total_amount_ocr, invoice_date_ocr')
+          .in('source_document_id', linkedDocIds)
+      : { data: [] as never[] }
+  const linkedExtractionByDocId = new Map(
+    (linkedExtractionsData ?? []).map((e) => [e.source_document_id, e])
+  )
+  const linkedDocuments: LinkedDocumentView[] = (linkedDocsData ?? []).map((d) => {
+    const extraction = linkedExtractionByDocId.get(d.id)
+    return {
+      id: d.id,
+      originalFilename: d.original_filename,
+      uploadedAt: d.uploaded_at,
+      pageCount: d.page_count,
+      vendorNameOcr: extraction?.vendor_name_ocr ?? null,
+      invoiceNumberOcr: extraction?.invoice_number_ocr ?? null,
+      totalAmountOcr: extraction?.total_amount_ocr ?? null,
+      invoiceDateOcr: extraction?.invoice_date_ocr ?? null,
+    }
+  })
+
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center gap-3">
@@ -174,7 +208,7 @@ export default async function EntryDetailPage({
 
       <ImportFieldsPanel entry={entry} vendorConfirmed={vendorConfirmed} budgetHeadRaw={budgetHeadRaw} />
 
-      <DocumentsNote count={entry.document_count} />
+      <LinkedDocuments entryId={entry.id} documents={linkedDocuments} />
 
       <HubStatusSection
         entryId={entry.id}

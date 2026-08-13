@@ -1,4 +1,5 @@
 import { Card, CardContent } from '@/components/ui/card'
+import { FriendlyError } from '@/components/ui/friendly-error'
 import { createClient } from '@/lib/supabase/server'
 import { getStaffContext } from '@/lib/export/auth'
 import { rankCandidates, type MatchableEntry } from '@/lib/matching'
@@ -64,7 +65,8 @@ export default async function DocumentsPage() {
       <PageShell>
         <Card>
           <CardContent className="pt-6">
-            <p className="text-sm text-destructive">Could not load the document inbox: {docsError.message}</p>
+            <p className="text-sm font-medium">Could not load the document inbox</p>
+            <FriendlyError message={docsError.message} />
           </CardContent>
         </Card>
       </PageShell>

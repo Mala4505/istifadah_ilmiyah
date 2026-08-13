@@ -100,7 +100,7 @@ function PermissionDeniedState({ reason }: { reason: Extract<AdminGate, { ok: fa
     },
     not_admin: {
       title: 'Admins only',
-      body: 'Generating and delivering status export batches is an admin-only action (MASTER-PLAN §4.4c). Ask an admin to run this, or ask to be granted the admin role if you should have access.',
+      body: 'Generating and delivering status export batches is an admin-only action. Ask an admin to run this, or ask to be granted the admin role if you should have access.',
     },
   }
   const { title, body } = copy[reason] ?? copy.not_admin!

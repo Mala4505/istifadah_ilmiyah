@@ -157,6 +157,37 @@ export async function markNoEntryExpected(documentId: number): Promise<ActionRes
   return { ok: true }
 }
 
+/**
+ * Detaches a document from an entry: clears `entry_id` and sends it back to
+ * 'unmatched' so it reappears in the inbox rather than staying invisibly
+ * linked to the wrong entry. The inverse of attachDocumentToEntry.
+ */
+export async function detachDocumentFromEntry(
+  documentId: number,
+  entryId: number
+): Promise<ActionResult> {
+  if (!Number.isInteger(documentId) || documentId <= 0) {
+    return { ok: false, error: 'Invalid document id.' }
+  }
+
+  const supabase = await createClient()
+  const { data, error } = await supabase
+    .from('source_document')
+    .update({ entry_id: null, match_status: 'unmatched' })
+    .eq('id', documentId)
+    .select('id')
+
+  if (error) return { ok: false, error: error.message }
+  if (!data || data.length === 0) {
+    return { ok: false, error: `No document was updated. ${PERMISSION_HINT}` }
+  }
+
+  revalidatePath('/documents')
+  revalidatePath('/entries')
+  revalidatePath(`/entries/${entryId}`)
+  return { ok: true }
+}
+
 export interface EntrySearchResult {
   id: number
   ubblNumber: string

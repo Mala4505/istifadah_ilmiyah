@@ -48,7 +48,7 @@ async function handlePOST(request: NextRequest) {
   }
   if (!profile || !profile.is_active || profile.role !== 'admin') {
     return NextResponse.json(
-      { error: 'Only an active admin may run an import (MASTER-PLAN §4.4c).' },
+      { error: 'Only an active admin may run an import.' },
       { status: 403 }
     )
   }
@@ -75,7 +75,7 @@ async function handlePOST(request: NextRequest) {
   const sourceSystem = sourceSystemField === 'audit' ? 'audit' : 'departmental'
   if (sourceSystem !== 'departmental') {
     return NextResponse.json(
-      { error: 'Audit-side import is not implemented yet (MASTER-PLAN §12).' },
+      { error: 'Importing the Audit side by file isn’t available yet — use the Portal Reader instead.' },
       { status: 400 }
     )
   }
@@ -154,9 +154,13 @@ async function handleGET(request: NextRequest) {
     return NextResponse.json({ batch, rows: rows ?? [] })
   }
 
+  // Dry runs never keep their per-row detail (see lib/import/run-import.ts's
+  // rollback comment) — showing them here would just be an entry that always
+  // opens to "No rows to show." History is for what actually happened.
   const { data: batches, error } = await supabase
     .from('import_batch')
     .select('*')
+    .eq('mode', 'commit')
     .order('started_at', { ascending: false })
     .limit(50)
 
