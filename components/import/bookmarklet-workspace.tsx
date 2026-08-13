@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -166,6 +166,27 @@ export function BookmarkletWorkspace({ isAdmin, source, hubUrl }: Props) {
     })
   }, [minted, source, hubUrl])
 
+  // React 19 refuses to set `href` to a `javascript:` string via a normal
+  // JSX prop -- it throws "React has blocked a javascript: URL as a
+  // security precaution" instead, which silently breaks the drag-to-install
+  // link entirely (no real href ever reaches the DOM, so the dragged
+  // bookmark is empty). Setting it with the native DOM API through a ref
+  // bypasses that guard -- it only intercepts React's own prop-driven
+  // attribute writes, not an imperative `setAttribute` call. This is not an
+  // XSS hole: the string comes from packBookmarklet() above, built from our
+  // own known-good source file plus a token WE minted, never from anything
+  // a user typed in.
+  const dragLinkRef = useRef<HTMLAnchorElement>(null)
+  useEffect(() => {
+    const el = dragLinkRef.current
+    if (!el) return
+    if (bookmarkletHref) {
+      el.setAttribute('href', bookmarkletHref)
+    } else {
+      el.removeAttribute('href')
+    }
+  }, [bookmarkletHref])
+
   if (!isAdmin) {
     return (
       <Card>
@@ -253,7 +274,7 @@ export function BookmarkletWorkspace({ isAdmin, source, hubUrl }: Props) {
                 {minted.sourceSystem === 'audit' ? 'Audit' : 'Departmental'} portal
               </p>
               <a
-                href={bookmarkletHref}
+                ref={dragLinkRef}
                 onClick={(e) => {
                   // Clicking it here would run it against the Hub's own page,
                   // which has no portal table on it — a confusing no-op. It is
