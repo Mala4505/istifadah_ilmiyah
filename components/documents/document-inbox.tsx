@@ -6,8 +6,12 @@ import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { bulkAttachDocuments } from '@/lib/actions/documents'
 import { UploadDropzone } from './upload-dropzone'
-import { DocumentCard } from './document-card'
+import { DocumentTable } from './document-table'
 import type { InboxDocumentView } from './types'
+
+/** While any document sits in 'uploaded' or 'processing', poll the RSC data path so the stage tracker reflects a background worker's progress without a dedicated status endpoint. */
+const PENDING_STATUSES: ReadonlySet<InboxDocumentView['uploadStatus']> = new Set(['uploaded', 'processing'])
+const POLL_INTERVAL_MS = 4000
 
 /**
  * Client shell for /documents (MASTER-PLAN §11.2 Day 3): owns the upload
@@ -47,6 +51,15 @@ export function DocumentInbox({
       return new Set([...current].filter((id) => validIds.has(id)))
     })
   }, [initialDocuments])
+
+  useEffect(() => {
+    const hasPending = documents.some((d) => PENDING_STATUSES.has(d.uploadStatus))
+    if (!hasPending) return
+    const interval = setInterval(() => {
+      router.refresh()
+    }, POLL_INTERVAL_MS)
+    return () => clearInterval(interval)
+  }, [documents, router])
 
   function toggleSelected(documentId: number) {
     setSelected((current) => {
@@ -140,20 +153,15 @@ export function DocumentInbox({
       {documents.length === 0 ? (
         <EmptyState />
       ) : (
-        <div className="flex flex-col gap-4">
-          {documents.map((doc) => (
-            <DocumentCard
-              key={doc.id}
-              document={doc}
-              canAct={canAct}
-              selected={selected.has(doc.id)}
-              onToggleSelected={() => toggleSelected(doc.id)}
-              chosenEntryId={chosenByDocument.get(doc.id) ?? null}
-              onChooseEntry={(entryId) => chooseEntry(doc.id, entryId)}
-              onMutated={() => removeDocumentLocally(doc.id)}
-            />
-          ))}
-        </div>
+        <DocumentTable
+          documents={documents}
+          canAct={canAct}
+          selected={selected}
+          onToggleSelected={toggleSelected}
+          chosenByDocument={chosenByDocument}
+          onChooseEntry={chooseEntry}
+          onMutated={removeDocumentLocally}
+        />
       )}
     </div>
   )

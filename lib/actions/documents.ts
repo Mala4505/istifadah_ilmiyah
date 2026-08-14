@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 import { getSignedUrl } from '@/lib/storage'
+import { extractAndPersist } from '@/lib/jobs/handlers/extract'
 
 /**
  * Document-inbox actions (MASTER-PLAN §5 row 6, §11.2 Day 3): attach, bulk
@@ -47,6 +48,47 @@ export async function attachDocumentToEntry(input: {
   revalidatePath('/documents')
   revalidatePath('/entries')
   revalidatePath(`/entries/${input.entryId}`)
+  return { ok: true }
+}
+
+/**
+ * Manual "Extract now" bypass (Documents inbox: no worker is guaranteed to
+ * be draining `public.job_queue` right now, so staff should never be stuck
+ * waiting on one). Same permission gate as attachDocumentToEntry above — an
+ * update on `source_document`, gated by `source_document_update` RLS
+ * (private.is_reviewer_or_admin(), 20260808000026), with a 0-rows result
+ * read as "not visible / not permitted" rather than a silent no-op. Once
+ * the gate passes, this hands off to extractAndPersist — the same function
+ * the `extract_document` job handler (lib/jobs/handlers/extract.ts) and
+ * `/api/documents/reescalate` both call — which runs on the service-role
+ * client, bypasses `job_queue` entirely, and owns its own upload_status
+ * bookkeeping (processing → processed/failed), so this action only needs to
+ * gate access and turn a thrown error into an ActionResult.
+ */
+export async function manualExtractNow(documentId: number): Promise<ActionResult> {
+  if (!Number.isInteger(documentId) || documentId <= 0) {
+    return { ok: false, error: 'Invalid document id.' }
+  }
+
+  const supabase = await createClient()
+  const { data, error } = await supabase
+    .from('source_document')
+    .update({ upload_status: 'processing' })
+    .eq('id', documentId)
+    .select('id')
+
+  if (error) return { ok: false, error: error.message }
+  if (!data || data.length === 0) {
+    return { ok: false, error: `No document was updated. ${PERMISSION_HINT}` }
+  }
+
+  try {
+    await extractAndPersist({ sourceDocumentId: documentId, runReason: 'manual_reescalation' })
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'Extraction failed.' }
+  }
+
+  revalidatePath('/documents')
   return { ok: true }
 }
 

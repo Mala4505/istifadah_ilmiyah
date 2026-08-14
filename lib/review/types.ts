@@ -44,6 +44,7 @@ export interface HeaderFieldSet<T> {
   vendorName: T
   vendorGstin: T
   vendorPhone: T
+  vendorEmail: T
   vendorAddress: T
   invoiceNumber: T
   invoiceDate: T

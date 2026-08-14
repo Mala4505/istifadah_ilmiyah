@@ -232,6 +232,20 @@ export function validateGstin(raw: string | null | undefined): GstinValidation {
 }
 
 /**
+ * Whether two GSTINs are the same, after normalizing both (case, spaces,
+ * hyphens — see normalizeGstin). Used by the own-org GSTIN exclusion
+ * (lib/jobs/handlers/extract.ts) to tell "OCR read the community's own
+ * GSTIN off the page as if it were the vendor's" from a genuine vendor
+ * GSTIN. Deliberately does not validate either side — a malformed
+ * COMMUNITY_GSTIN or vendor_gstin should simply fail to match, not throw.
+ */
+export function isSameGstin(a: string | null, b: string | null): boolean {
+  if (a === null || b === null) return false
+  if (a.trim() === '' || b.trim() === '') return false
+  return normalizeGstin(a) === normalizeGstin(b)
+}
+
+/**
  * Extracts the PAN from a GSTIN without requiring the checksum to pass.
  *
  * Vendor clustering wants the PAN even off a GSTIN whose last character OCR got

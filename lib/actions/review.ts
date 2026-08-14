@@ -19,6 +19,7 @@ export interface VerifiedHeaderInput {
   vendor_name: string | null
   vendor_gstin: string | null
   vendor_phone: string | null
+  vendor_email: string | null
   vendor_address: string | null
   invoice_number: string | null
   invoice_date: string | null

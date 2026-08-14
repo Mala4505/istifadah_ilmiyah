@@ -198,6 +198,7 @@ export const extractionResponseSchema = z.object({
   vendor_name: absentTextAsNull,
   vendor_gstin: absentTextAsNull,
   vendor_phone: absentTextAsNull,
+  vendor_email: absentTextAsNull,
   vendor_address: absentTextAsNull,
   invoice_number: absentTextAsNull,
   /** ISO 8601 date string (`YYYY-MM-DD`), or null when not legible/present. */
@@ -283,6 +284,7 @@ export const extractionToolInputSchema = {
     vendor_name: textField,
     vendor_gstin: textField,
     vendor_phone: textField,
+    vendor_email: textField,
     vendor_address: textField,
     invoice_number: textField,
     invoice_date: textField,
@@ -341,6 +343,7 @@ export const extractionToolInputSchema = {
     'vendor_name',
     'vendor_gstin',
     'vendor_phone',
+    'vendor_email',
     'vendor_address',
     'invoice_number',
     'invoice_date',
@@ -363,7 +366,7 @@ export const EXTRACTION_TOOL_DESCRIPTION =
   'Record the structured extraction of a financial document (invoice, chit, or receipt) that may span ' +
   'multiple pages. Classify every page first — only line items sourced from pages where ' +
   'is_financial_document is true will be kept. Extract header fields (vendor identity including GSTIN, ' +
-  'phone, and address for later vendor-clustering; invoice number/date; subtotal/tax/total) and every ' +
+  'phone, email, and address for later vendor-clustering; invoice number/date; subtotal/tax/total) and every ' +
   'line item, each tagged with the page it was read from. Write invoice_date as ISO YYYY-MM-DD (the ' +
   'source is usually DD/MM/YYYY — convert it). For anything illegible or genuinely absent, use an ' +
   'empty string in a text field and null in a numeric field — never guess or fabricate a value. Also ' +

@@ -3,8 +3,8 @@
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
-import { Loader2, Search, ExternalLink, FileX2 } from 'lucide-react'
-import { Badge, type BadgeProps } from '@/components/ui/badge'
+import { Loader2, Search, ExternalLink, FileX2, CheckCircle2, XCircle, Circle, RefreshCw } from 'lucide-react'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -13,25 +13,109 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import {
   attachDocumentToEntry,
   getDocumentPreviewUrl,
+  manualExtractNow,
   markNoEntryExpected,
   searchEntriesForAttach,
   type EntrySearchResult,
 } from '@/lib/actions/documents'
-import { formatDate, formatDateTime, formatMoney, formatScore } from './format'
+import { formatDate, formatDateTime, formatElapsed, formatMoney, formatScore } from './format'
 import type { CandidateEntryView, InboxDocumentView } from './types'
 
-const UPLOAD_STATUS_LABEL: Record<InboxDocumentView['uploadStatus'], string> = {
-  uploaded: 'Uploaded',
-  processing: 'Extracting…',
-  processed: 'Extracted',
-  failed: 'Extraction failed',
+type StageState = 'done' | 'active' | 'pending' | 'failed'
+
+/**
+ * Honest progress for a one-shot, non-streaming extraction call: there is no
+ * partial percentage to report, so "how much is left" is answered as stages
+ * instead — Uploaded (the HTTP upload already finished) → Queued (sitting in
+ * `job_queue`, or about to be) → Extracting (the Claude call is in flight) →
+ * Extracted / Failed. Shared between the card (full labels) and the table's
+ * compact row rendering (icons only) so the mapping from `uploadStatus` to
+ * stage lives in exactly one place.
+ */
+function stagesFor(uploadStatus: InboxDocumentView['uploadStatus']): Array<{ label: string; state: StageState }> {
+  const queuedState: StageState = uploadStatus === 'uploaded' ? 'active' : 'done'
+  const extractingState: StageState =
+    uploadStatus === 'processing'
+      ? 'active'
+      : uploadStatus === 'processed' || uploadStatus === 'failed'
+        ? 'done'
+        : 'pending'
+  const finalStage: { label: string; state: StageState } =
+    uploadStatus === 'processed'
+      ? { label: 'Extracted', state: 'done' }
+      : uploadStatus === 'failed'
+        ? { label: 'Failed', state: 'failed' }
+        : { label: 'Extracted', state: 'pending' }
+
+  return [
+    { label: 'Uploaded', state: 'done' },
+    { label: 'Queued', state: queuedState },
+    { label: 'Extracting', state: extractingState },
+    finalStage,
+  ]
 }
 
-const UPLOAD_STATUS_VARIANT: Record<InboxDocumentView['uploadStatus'], BadgeProps['variant']> = {
-  uploaded: 'outline',
-  processing: 'warning',
-  processed: 'success',
-  failed: 'destructive',
+/** "queued 6m ago" / "extracting, started 2h ago" / "failed just now" — so a document stuck for hours is visually obvious next to the stage row. */
+function elapsedLabelFor(uploadStatus: InboxDocumentView['uploadStatus'], uploadedAt: string): string {
+  const elapsed = formatElapsed(uploadedAt)
+  switch (uploadStatus) {
+    case 'uploaded':
+      return `queued ${elapsed}`
+    case 'processing':
+      return `extracting, started ${elapsed}`
+    case 'failed':
+      return `failed ${elapsed}`
+    case 'processed':
+      return `extracted ${elapsed}`
+  }
+}
+
+function StageIcon({ state, className }: { state: StageState; className: string }) {
+  if (state === 'done') return <CheckCircle2 className={`${className} text-emerald-600`} aria-hidden="true" />
+  if (state === 'active') return <Loader2 className={`${className} animate-spin text-amber-600`} aria-hidden="true" />
+  if (state === 'failed') return <XCircle className={`${className} text-destructive`} aria-hidden="true" />
+  return <Circle className={`${className} text-muted-foreground/40`} aria-hidden="true" />
+}
+
+/** Reused by document-table.tsx (`size="sm"`) so the stage-to-icon mapping isn't duplicated. */
+export function DocumentStageTracker({
+  uploadStatus,
+  uploadedAt,
+  size = 'default',
+}: {
+  uploadStatus: InboxDocumentView['uploadStatus']
+  uploadedAt: string
+  size?: 'default' | 'sm'
+}) {
+  const stages = stagesFor(uploadStatus)
+  const iconClass = size === 'sm' ? 'h-3 w-3' : 'h-3.5 w-3.5'
+
+  return (
+    <div className="flex flex-col gap-0.5">
+      <div className="flex items-center gap-1">
+        {stages.map((stage, i) => (
+          <span key={stage.label} className="flex items-center gap-1">
+            {i > 0 && <span className="text-[10px] text-muted-foreground/40">&rarr;</span>}
+            <StageIcon state={stage.state} className={iconClass} />
+            {size === 'default' && (
+              <span
+                className={`text-xs ${
+                  stage.state === 'pending'
+                    ? 'text-muted-foreground/60'
+                    : stage.state === 'failed'
+                      ? 'font-medium text-destructive'
+                      : 'font-medium'
+                }`}
+              >
+                {stage.label}
+              </span>
+            )}
+          </span>
+        ))}
+      </div>
+      <span className="text-[10px] text-muted-foreground">{elapsedLabelFor(uploadStatus, uploadedAt)}</span>
+    </div>
+  )
 }
 
 export function DocumentCard({
@@ -60,8 +144,32 @@ export function DocumentCard({
   const [searchPending, setSearchPending] = useState(false)
   const [manualSelection, setManualSelection] = useState<EntrySearchResult | null>(null)
   const [previewPending, setPreviewPending] = useState(false)
+  const [extractPending, setExtractPending] = useState(false)
 
   const hasExtraction = document.extraction !== null
+  // 'processing' is included alongside 'uploaded'/'failed' because nothing in
+  // this codebase reclaims a job whose worker died mid-run (the sweeper
+  // described in MASTER-PLAN §3.11 was never implemented) — without this, a
+  // document that crashed mid-extraction is stuck in "Extracting" forever
+  // with no way for a reviewer to retry it.
+  const canExtractNow =
+    document.uploadStatus === 'uploaded' ||
+    document.uploadStatus === 'failed' ||
+    document.uploadStatus === 'processing'
+
+  function handleExtractNow() {
+    setExtractPending(true)
+    void (async () => {
+      const result = await manualExtractNow(document.id)
+      setExtractPending(false)
+      if (!result.ok) {
+        toast.error(result.error)
+        return
+      }
+      toast.success(`Extraction finished for "${document.originalFilename}".`)
+      router.refresh()
+    })()
+  }
 
   function handleAttach() {
     if (chosenEntryId === null) {
@@ -158,10 +266,18 @@ export function DocumentCard({
             </p>
           </div>
         </div>
-        <div className="flex flex-shrink-0 items-center gap-2">
-          <Badge variant={UPLOAD_STATUS_VARIANT[document.uploadStatus]}>
-            {UPLOAD_STATUS_LABEL[document.uploadStatus]}
-          </Badge>
+        <div className="flex flex-shrink-0 items-center gap-3">
+          <DocumentStageTracker uploadStatus={document.uploadStatus} uploadedAt={document.uploadedAt} />
+          {canExtractNow && (
+            <Button variant="outline" size="sm" onClick={handleExtractNow} disabled={extractPending}>
+              {extractPending ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
+              )}
+              <span className="ml-1.5 hidden sm:inline">Extract now</span>
+            </Button>
+          )}
           <Button variant="ghost" size="sm" onClick={handlePreview} disabled={previewPending}>
             {previewPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ExternalLink className="h-3.5 w-3.5" />}
             <span className="ml-1.5 hidden sm:inline">View PDF</span>

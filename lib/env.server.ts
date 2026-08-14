@@ -37,6 +37,13 @@ const serverSchema = z.object({
   // Supabase Auth's login handle only. It is never sent anywhere as a real
   // address, so the domain does not need to exist or accept mail.
   ITS_LOGIN_EMAIL_DOMAIN: z.string().min(1).default('members.istifadah.internal'),
+  // The organization's own GSTIN, so extraction can tell "the seller's GSTIN"
+  // from "our own GSTIN printed as the recipient" -- see buildSystemPrompt in
+  // lib/claude-client.ts and the own-org exclusion in
+  // lib/jobs/handlers/extract.ts. Optional: when unset, no exclusion runs and
+  // vendor_gstin is written exactly as extracted, same as before this field
+  // existed.
+  COMMUNITY_GSTIN: z.string().optional().default(''),
 })
 
 function readServerEnv() {
@@ -54,6 +61,7 @@ function readServerEnv() {
     CSP_REPORT_ONLY: process.env.CSP_REPORT_ONLY,
     WORKER_ID: process.env.WORKER_ID,
     ITS_LOGIN_EMAIL_DOMAIN: process.env.ITS_LOGIN_EMAIL_DOMAIN,
+    COMMUNITY_GSTIN: process.env.COMMUNITY_GSTIN,
   })
   if (!parsed.success) {
     throw new Error(

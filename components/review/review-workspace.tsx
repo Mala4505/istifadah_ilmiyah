@@ -53,6 +53,7 @@ function buildHeaderState(detail: ReviewDocumentDetail): HeaderFormState {
     vendorName: numToStr(h.vendorName.verified ?? h.vendorName.ocr),
     vendorGstin: numToStr(h.vendorGstin.verified ?? h.vendorGstin.ocr),
     vendorPhone: numToStr(h.vendorPhone.verified ?? h.vendorPhone.ocr),
+    vendorEmail: numToStr(h.vendorEmail.verified ?? h.vendorEmail.ocr),
     vendorAddress: numToStr(h.vendorAddress.verified ?? h.vendorAddress.ocr),
     invoiceNumber: numToStr(h.invoiceNumber.verified ?? h.invoiceNumber.ocr),
     invoiceDate: numToStr(h.invoiceDate.verified ?? h.invoiceDate.ocr),
@@ -82,6 +83,8 @@ function buildLineItemState(detail: ReviewDocumentDetail): LineItemFormState[] {
 
 export function ReviewWorkspace({
   detail,
+  queue,
+  currentIndex,
   prevId,
   nextId,
 }: {
@@ -165,6 +168,7 @@ export function ReviewWorkspace({
         vendor_name: header.vendorName.trim() || null,
         vendor_gstin: header.vendorGstin.trim() || null,
         vendor_phone: header.vendorPhone.trim() || null,
+        vendor_email: header.vendorEmail.trim() || null,
         vendor_address: header.vendorAddress.trim() || null,
         invoice_number: header.invoiceNumber.trim() || null,
         invoice_date: header.invoiceDate.trim() || null,
@@ -406,6 +410,9 @@ export function ReviewWorkspace({
         <Button type="button" size="sm" variant="ghost" disabled={nextId === null} onClick={() => goToDocument(nextId)}>
           Next doc (PgDn) →
         </Button>
+        <span className="text-xs text-muted-foreground">
+          Document {currentIndex + 1} of {queue.length}
+        </span>
       </div>
 
       <div className="grid min-h-0 flex-1 grid-cols-2 gap-3">

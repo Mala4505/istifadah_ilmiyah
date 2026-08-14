@@ -30,6 +30,7 @@ function baseInput(overrides: Record<string, unknown> = {}) {
     vendor_name: 'Adinath Furniture Pvt Ltd',
     vendor_gstin: '24AAKCA3560A1Z7',
     vendor_phone: '',
+    vendor_email: '',
     vendor_address: '',
     invoice_number: 'AFPL/SOS/TI/65',
     invoice_date: '13/08/2025',

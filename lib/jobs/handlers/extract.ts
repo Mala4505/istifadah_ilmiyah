@@ -29,6 +29,8 @@ import {
 } from '@/lib/extraction'
 import { buildTaxBreakdown } from '@/lib/extraction-schema'
 import { MODELS, type ModelId } from '@/lib/claude-client'
+import { serverEnv } from '@/lib/env.server'
+import { isSameGstin } from '@/lib/analytics/gstin'
 
 export interface ExtractDocumentPayload {
   source_document_id: number
@@ -136,6 +138,18 @@ export async function extractAndPersist(
       (pages ?? []).map((p) => [p.page_number as number, p.id as number])
     )
 
+    // Own-org GSTIN exclusion: when COMMUNITY_GSTIN is configured and the
+    // model read it back as vendor_gstin, it almost certainly picked up the
+    // recipient's GSTIN off the page rather than the seller's (buildSystemPrompt
+    // in lib/claude-client.ts already asks it not to, but this is the
+    // code-level backstop — same "never trust the model alone" posture as
+    // filterNonFinancialLineItems). The write below nulls vendor_gstin_ocr in
+    // that case; the reconciliation_exception raised further down is what
+    // tells a reviewer *why* it's blank instead of leaving them to assume OCR
+    // simply missed it.
+    const isOwnOrgGstin =
+      serverEnv.COMMUNITY_GSTIN !== '' && isSameGstin(extraction.vendor_gstin, serverEnv.COMMUNITY_GSTIN)
+
     // ---- document_extraction: _ocr columns only. _verified stays null (§8 point 4).
     const { data: extractionRow, error: extractionError } = await admin
       .from('document_extraction')
@@ -144,8 +158,9 @@ export async function extractAndPersist(
           source_document_id: sourceDocumentId,
           current_extraction_run_id: currentRunId,
           vendor_name_ocr: extraction.vendor_name,
-          vendor_gstin_ocr: extraction.vendor_gstin,
+          vendor_gstin_ocr: isOwnOrgGstin ? null : extraction.vendor_gstin,
           vendor_phone_ocr: extraction.vendor_phone,
+          vendor_email_ocr: extraction.vendor_email,
           vendor_address_ocr: extraction.vendor_address,
           invoice_number_ocr: extraction.invoice_number,
           invoice_date_ocr: extraction.invoice_date,
@@ -174,6 +189,22 @@ export async function extractAndPersist(
       )
     }
     const documentExtractionId = extractionRow.id as number
+
+    if (isOwnOrgGstin) {
+      await admin.from('reconciliation_exception').upsert(
+        {
+          document_extraction_id: documentExtractionId,
+          exception_type: 'vendor_gstin_is_own_org',
+          severity: 'low',
+          description:
+            'Extracted vendor_gstin matched the community\'s own GSTIN (COMMUNITY_GSTIN) — almost ' +
+            'certainly the recipient\'s GSTIN on the page, not the seller\'s. vendor_gstin_ocr was left ' +
+            'blank rather than written with the wrong value; enter the real vendor GSTIN on review if legible.',
+          dedup_key: `vendor_gstin_is_own_org:${documentExtractionId}:${currentRunId}`,
+        },
+        { onConflict: 'dedup_key' }
+      )
+    }
 
     // Re-extraction replaces this document's line items. Scoped to a single
     // document_extraction_id — never a broad delete.

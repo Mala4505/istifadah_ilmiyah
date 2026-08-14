@@ -110,14 +110,34 @@ export interface ExtractDocumentResult {
 
 const EXTRACTION_MAX_TOKENS = 2000
 
-const SYSTEM_PROMPT =
-  'You are extracting structured data from a scanned financial document (invoice, chit, or receipt) ' +
-  'submitted for expense reconciliation. The document may span multiple pages, and some pages may not ' +
-  'be financial documents at all (e.g. a bank cheque, a passbook page, or an unrelated scan caught in ' +
-  'the same batch) — classify every page first via the tool schema before extracting anything from it. ' +
-  'Read every page as part of one document: a line-item table may continue across a page break. Never ' +
-  'fabricate a value — for anything illegible or genuinely absent use an empty string in a text field ' +
-  'and null in a numeric field, and reflect uncertainty via the confidence fields rather than guessing.'
+/**
+ * Builds the system prompt, optionally appending an own-GSTIN exclusion rule
+ * when `communityGstin` is set (COMMUNITY_GSTIN, lib/env.server.ts). This is
+ * a function rather than a module-level constant so the prompt can vary per
+ * call without threading a second parameter through the whole extraction
+ * pipeline — `extractDocument` is the only caller, and it reads
+ * `serverEnv.COMMUNITY_GSTIN` itself.
+ */
+function buildSystemPrompt(communityGstin: string | null): string {
+  const base =
+    'You are extracting structured data from a scanned financial document (invoice, chit, or receipt) ' +
+    'submitted for expense reconciliation. The document may span multiple pages, and some pages may not ' +
+    'be financial documents at all (e.g. a bank cheque, a passbook page, or an unrelated scan caught in ' +
+    'the same batch) — classify every page first via the tool schema before extracting anything from it. ' +
+    'Read every page as part of one document: a line-item table may continue across a page break. Never ' +
+    'fabricate a value — for anything illegible or genuinely absent use an empty string in a text field ' +
+    'and null in a numeric field, and reflect uncertainty via the confidence fields rather than guessing.'
+
+  if (!communityGstin) return base
+
+  return (
+    base +
+    ' For vendor_gstin specifically: extract the VENDOR/SELLER\'s GSTIN — the one printed under ' +
+    '"GSTIN"/"Seller" near the vendor\'s own name and address — never the buyer/recipient\'s GSTIN. ' +
+    `If the community's own GSTIN (${communityGstin}) appears on the page as the recipient, do not ` +
+    'return it as vendor_gstin; leave vendor_gstin empty instead.'
+  )
+}
 
 // TODO Phase 1B: Batch API path — this file intentionally implements only the
 // single-request `extractDocument` call for today (MASTER-PLAN §8 points 3-4).
@@ -198,7 +218,7 @@ export async function extractDocument(params: ExtractDocumentParams): Promise<Ex
   const response = await client.messages.create({
     model,
     max_tokens: maxTokens,
-    system: SYSTEM_PROMPT,
+    system: buildSystemPrompt(serverEnv.COMMUNITY_GSTIN || null),
     tools: [tool],
     tool_choice: { type: 'tool', name: EXTRACTION_TOOL_NAME },
     messages: [

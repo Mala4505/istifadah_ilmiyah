@@ -23,6 +23,7 @@ export interface HeaderFormState {
   vendorName: string
   vendorGstin: string
   vendorPhone: string
+  vendorEmail: string
   vendorAddress: string
   invoiceNumber: string
   invoiceDate: string
@@ -111,6 +112,8 @@ export const ExtractionForm = forwardRef(function ExtractionForm(
           value={header.vendorGstin} onChange={(v) => onHeaderChange('vendorGstin', v)} />
         <Field label="Phone" tintClass={tintClass} disabled={disabled} onKeyDown={handleEnter}
           value={header.vendorPhone} onChange={(v) => onHeaderChange('vendorPhone', v)} />
+        <Field label="Email" tintClass={tintClass} disabled={disabled} onKeyDown={handleEnter}
+          value={header.vendorEmail} onChange={(v) => onHeaderChange('vendorEmail', v)} />
         <div className="col-span-2">
           <Field label="Address" tintClass={tintClass} disabled={disabled} onKeyDown={handleEnter}
             value={header.vendorAddress} onChange={(v) => onHeaderChange('vendorAddress', v)} />

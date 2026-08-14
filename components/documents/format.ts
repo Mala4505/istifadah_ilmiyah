@@ -38,3 +38,17 @@ export function formatDateTime(value: string | null): string {
 export function formatScore(score: number): string {
   return `${Math.round(score * 100)}%`
 }
+
+/** Compact relative-time string for the inbox stage tracker, e.g. "6m ago", "2h ago", "just now". */
+export function formatElapsed(value: string): string {
+  const then = new Date(value).getTime()
+  if (Number.isNaN(then)) return '—'
+  const ms = Math.max(0, Date.now() - then)
+  const minutes = Math.floor(ms / 60000)
+  if (minutes < 1) return 'just now'
+  if (minutes < 60) return `${minutes}m ago`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours}h ago`
+  const days = Math.floor(hours / 24)
+  return `${days}d ago`
+}

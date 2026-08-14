@@ -19,6 +19,7 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react'
 import { ZoomIn, ZoomOut, RotateCw, ChevronLeft, ChevronRight } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Skeleton } from '@/components/ui/skeleton'
 import { getReviewDocumentUrl } from '@/lib/actions/review'
 
 /** Imperative page-turn API so the review workspace's global Arrow-key
@@ -219,7 +220,11 @@ export const PdfViewer = forwardRef<PdfViewerHandle, { sourceDocumentId: number 
 
         <div className="flex-1 overflow-auto p-3">
           {loading ? (
-            <p className="text-sm text-muted-foreground">Loading document…</p>
+            // Roughly an A4 page's aspect ratio (1:1.414) -- the canvas below
+            // renders at whatever the actual page size turns out to be, but
+            // this keeps the placeholder from looking like a random box while
+            // getReviewDocumentUrl + pdf.js's getDocument() are in flight.
+            <Skeleton className="mx-auto h-full max-h-[80vh] w-full max-w-md" style={{ aspectRatio: '1 / 1.414' }} />
           ) : error ? (
             <p className="text-sm text-destructive">Could not load document: {error}</p>
           ) : (
