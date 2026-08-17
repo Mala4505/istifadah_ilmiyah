@@ -52,6 +52,15 @@ import {
   type DepartmentalRowContext,
 } from '@/lib/module-mapping'
 import { checkAllocationSumMismatches, checkNamespaceCollisions, parseBudgetHeadShortLabel } from '@/lib/import/assertions'
+// Circular by module graph (run-portal-import.ts imports getPool/newCaches/
+// resolveStatus/resolveVendor/writeRowLog back from THIS file) but safe: both
+// sides only call each other's exports from inside function bodies invoked
+// later at request time, never at module top-level, and every export
+// crossing the boundary is a hoisted function declaration. See
+// retryUnmatchedAuditRows's own header comment (run-portal-import.ts) for why
+// the retry orchestration lives there instead of here — it needs
+// parsePortalTable and the ParsedPortalRow shape that module already owns.
+import { retryUnmatchedAuditRows } from '@/lib/import/run-portal-import'
 
 // Re-exported so existing callers/imports of these three functions can keep
 // using `@/lib/import/run-import` — the actual implementations and their
@@ -729,6 +738,29 @@ export async function runImport(params: RunImportParams): Promise<ImportResult> 
     for (const entry of rowLog) {
       summary[entry.action] = (summary[entry.action] ?? 0) + 1
     }
+
+    if (params.mode === 'commit') {
+      // Auto-retry unmatched Audit-portal rows (docs/hub-refinements-plan.md
+      // §4). This Departmental import may just have created/updated the
+      // entry an Audit row was waiting on (main_number only ever arrives via
+      // this path — see run-portal-import.ts's file header), so a commit is
+      // exactly the moment a stale audit_row_unmatched exception is most
+      // likely to resolve itself. Runs INSIDE this same transaction/client,
+      // atomically with the rest of the batch: either the whole commit lands
+      // with the retried match applied, or none of it does. Deliberately
+      // placed AFTER the row loop (so it sees this batch's own writes) and
+      // BEFORE `status` is computed (so a variance the retry surfaces, e.g.
+      // tenant_vs_main_variance, counts toward this batch's own status/
+      // exceptions like any other finding). Never runs for a dry_run: a dry
+      // run rolls back every write below, so retrying against a transaction
+      // about to be discarded would just be wasted queries with nothing to
+      // show for it — the mode check on the outer `if` already excludes it.
+      const retry = await retryUnmatchedAuditRows(client, caches, batchId, exceptions)
+      if (retry.resolvedCount > 0) {
+        summary.audit_retry_resolved = retry.resolvedCount
+      }
+    }
+
     const status: ImportResult['status'] = exceptions.length > 0 ? 'completed_with_exceptions' : 'completed'
 
     if (params.mode === 'commit') {

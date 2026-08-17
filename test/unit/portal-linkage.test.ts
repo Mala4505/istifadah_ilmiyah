@@ -22,7 +22,11 @@
 import { describe, it, expect } from 'vitest'
 import * as XLSX from 'xlsx'
 import path from 'node:path'
-import { parsePortalTable } from '@/lib/import/portal-mapping'
+import {
+  findPortalRowByIdentifier,
+  parseAuditRowUnmatchedIdentifier,
+  parsePortalTable,
+} from '@/lib/import/portal-mapping'
 import { parseDepartmentalRow, INITIAL_DEPARTMENTAL_CONTEXT, type DepartmentalRowContext } from '@/lib/module-mapping'
 
 const EXPORT_PATH = path.join(
@@ -150,5 +154,83 @@ describe('Audit portal entry numbers link to Hub entries via main_number', () =>
     expect(scraped.rows[0]!.auditStatus).toBeNull()
     expect(scraped.rows[0]!.status?.raw).toBe('Tax Invoice Upload Pending (Paid)')
     expect(scraped.rows[1]!.status?.code).toBe('paid')
+  })
+})
+
+/**
+ * §4 of docs/hub-refinements-plan.md: an Audit row with no match today should
+ * keep retrying on every later Departmental import instead of sitting as a
+ * permanent exception. The DB-coupled half of that (querying open
+ * reconciliation_exception rows, re-attempting the match, writing the
+ * resolution) is orchestrated in lib/import/run-portal-import.ts's
+ * retryUnmatchedAuditRows, which is deliberately NOT unit tested here — it
+ * needs a real `pg` transaction, same as runImport/runPortalImport
+ * themselves (see test/unit/run-import.test.ts's header for why this
+ * codebase verifies that half against the live dev Supabase project instead
+ * of faking Postgres).
+ *
+ * What IS pure, and is the actual crux of "how does a retry, months later,
+ * find the same row an old exception was about": parseAuditRowUnmatchedIdentifier
+ * (recovering the identifier from dedup_key) and findPortalRowByIdentifier
+ * (re-parsing the stored scrape payload and finding that identifier's row).
+ * Pinned here, against the same real Audit-portal rows the rest of this file
+ * already trusts, exactly like the direct linkage above.
+ */
+describe('retry-on-later-import: correlating an audit_row_unmatched exception back to its row (§4)', () => {
+  it('recovers the identifier from a real audit_row_unmatched dedup_key', () => {
+    expect(parseAuditRowUnmatchedIdentifier('audit_row_unmatched:2026080532')).toBe('2026080532')
+  })
+
+  it('returns null for a dedup_key belonging to a different exception type', () => {
+    expect(parseAuditRowUnmatchedIdentifier('tenant_vs_main_variance:12:100:200')).toBeNull()
+    expect(parseAuditRowUnmatchedIdentifier('allocation_sum_mismatch:5:100')).toBeNull()
+  })
+
+  it('returns null for the defensive "(none)" placeholder — nothing real to retry', () => {
+    expect(parseAuditRowUnmatchedIdentifier('audit_row_unmatched:(none)')).toBeNull()
+  })
+
+  it('re-parsing the stored scrape payload finds the exact row an exception was raised for', () => {
+    // Simulates what retryUnmatchedAuditRows does: only { headers, rows,
+    // sourceSystem } survives in scrape_payload_jsonb, read back out
+    // (possibly a Departmental import or two) later. Re-parsing it must
+    // recover the identical row parsePortalTable produced the first time.
+    const identifier = parseAuditRowUnmatchedIdentifier('audit_row_unmatched:2026080528')!
+    const row = findPortalRowByIdentifier(
+      { headers: AUDIT_HEADERS, rows: AUDIT_ROWS, sourceSystem: 'audit' },
+      identifier
+    )
+    expect(row?.mainNumber).toBe('2026080528')
+    expect(row?.vendorRaw).toBe('Al Nafees Tech')
+    expect(row?.amount).toBe(742118)
+  })
+
+  it('finds nothing when the identifier is not present in this batch\'s rows', () => {
+    // E.g. the entry was renumbered, or the exception is stale beyond
+    // recovery — retryUnmatchedAuditRows must skip it, not throw.
+    const row = findPortalRowByIdentifier(
+      { headers: AUDIT_HEADERS, rows: AUDIT_ROWS, sourceSystem: 'audit' },
+      'not-a-real-entry-number'
+    )
+    expect(row).toBeNull()
+  })
+
+  it('every Audit row in this fixture round-trips through its own dedup_key back to itself', () => {
+    // End-to-end proof that the format run-portal-import.ts's raiseException
+    // writes (`audit_row_unmatched:${row.mainNumber ?? row.ubblNumber}`) and
+    // the format this retry parses agree with each other, for every row a
+    // real unmatched exception could have been raised for.
+    const scraped = parsePortalTable({ headers: AUDIT_HEADERS, rows: AUDIT_ROWS, sourceSystem: 'audit' })
+    for (const row of scraped.rows) {
+      const identifier = row.mainNumber ?? row.ubblNumber!
+      const dedupKey = `audit_row_unmatched:${identifier}`
+      const recovered = parseAuditRowUnmatchedIdentifier(dedupKey)
+      expect(recovered).toBe(identifier)
+      const found = findPortalRowByIdentifier(
+        { headers: AUDIT_HEADERS, rows: AUDIT_ROWS, sourceSystem: 'audit' },
+        recovered!
+      )
+      expect(found?.mainNumber ?? found?.ubblNumber).toBe(identifier)
+    }
   })
 })

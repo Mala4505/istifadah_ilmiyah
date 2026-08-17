@@ -58,6 +58,8 @@ import {
 } from '@/lib/import/run-import'
 import {
   deriveEntryType,
+  findPortalRowByIdentifier,
+  parseAuditRowUnmatchedIdentifier,
   parsePortalTable,
   type ParsedPortalRow,
   type ParsedPortalStatus,
@@ -441,60 +443,50 @@ async function logRow(
   await writeRowLog(client, batchId, entry)
 }
 
+/** Outcome of attemptAuditRowMatch — see that function for what each case means. */
+type AuditRowMatchOutcome =
+  | { kind: 'ambiguous' }
+  | { kind: 'unmatched' }
+  | {
+      kind: 'matched'
+      entryId: number
+      fieldsChanged: Record<string, { from: unknown; to: unknown }> | null
+    }
+
 /**
- * One Audit-portal row. Annotates an existing entry; never creates one.
+ * Matches one Audit-portal row against the CURRENT state of `entries` and,
+ * if matched, applies the same update `importAuditRow` always has: fills
+ * main_number if the Hub has never seen it, writes the audit status, and
+ * raises tenant_vs_main_variance on an amount disagreement. Never creates an
+ * entry (this file's header).
+ *
+ * Deliberately does NOT decide what "ambiguous" or "unmatched" MEANS for the
+ * caller — no exception is raised and no row is logged for those two cases
+ * here. That decision is the one place the two callers genuinely disagree:
+ *
+ *   - importAuditRow (below), the original scrape path, raises a fresh
+ *     audit_row_unmatched/audit_ambiguous_match exception on every scrape,
+ *     because on that path "no match" is new information worth recording.
+ *   - retryUnmatchedAuditRows (docs/hub-refinements-plan.md §4), called from
+ *     run-import.ts's commit path, means "still open, leave the existing
+ *     exception alone, try again on the next Departmental import" — raising
+ *     a second exception, or touching the row log of an import that never
+ *     saw this row as one of its own source rows, would be wrong there.
+ *
+ * Extracted so there is exactly one definition of "how an Audit row matches
+ * and updates an entry" — the task brief's explicit ask, to avoid the retry
+ * path silently drifting from the original scrape path's matching rules.
  */
-async function importAuditRow(
+async function attemptAuditRowMatch(
   client: PoolClient,
   caches: ResolverCaches,
   batchId: number,
   row: ParsedPortalRow,
-  rowLog: ImportRowLogEntry[],
   exceptions: ImportExceptionSummary[]
-): Promise<void> {
+): Promise<AuditRowMatchOutcome> {
   const { entry, ambiguous } = await findEntry(client, row)
-
-  if (ambiguous) {
-    const identifier = row.mainNumber ?? row.ubblNumber ?? '(none)'
-    await raiseException(client, batchId, exceptions, {
-      type: 'audit_ambiguous_match',
-      severity: 'high',
-      description: `Audit row "${identifier}" matched more than one Hub entry; no audit status was written. Resolve the duplicate entries first.`,
-      dedupKey: `audit_ambiguous_match:${identifier}`,
-      amountAtRisk: row.amount,
-    })
-    await logRow(client, batchId, rowLog, {
-      rowNumber: row.rowNumber,
-      rawRow: row.rawRow,
-      action: 'audit_ambiguous',
-      entryId: null,
-      fieldsChanged: null,
-    })
-    return
-  }
-
-  if (!entry) {
-    const identifier = row.mainNumber ?? row.ubblNumber ?? '(none)'
-    await raiseException(client, batchId, exceptions, {
-      type: 'audit_row_unmatched',
-      severity: 'medium',
-      description:
-        `Audit entry "${identifier}"${row.vendorRaw ? ` (${row.vendorRaw})` : ''} has no corresponding Hub entry. ` +
-        `The usual cause is ordering: the Audit portal was scraped before today's Departmental export was imported, ` +
-        `so no entry carries this number in main_number yet. Import the export, then scrape again. ` +
-        `If it persists after that, the two sides genuinely disagree about this entry and it needs a human.`,
-      dedupKey: `audit_row_unmatched:${identifier}`,
-      amountAtRisk: row.amount,
-    })
-    await logRow(client, batchId, rowLog, {
-      rowNumber: row.rowNumber,
-      rawRow: row.rawRow,
-      action: 'audit_unmatched',
-      entryId: null,
-      fieldsChanged: null,
-    })
-    return
-  }
+  if (ambiguous) return { kind: 'ambiguous' }
+  if (!entry) return { kind: 'unmatched' }
 
   // The Audit portal's status is the AUDIT status, whichever column it came
   // from: on that portal the plain "Status" column IS the audit-side state.
@@ -571,13 +563,185 @@ async function importAuditRow(
     })
   }
 
+  return {
+    kind: 'matched',
+    entryId: entry.id,
+    fieldsChanged: Object.keys(fieldsChanged).length > 0 ? fieldsChanged : null,
+  }
+}
+
+/**
+ * One Audit-portal row. Annotates an existing entry; never creates one.
+ */
+async function importAuditRow(
+  client: PoolClient,
+  caches: ResolverCaches,
+  batchId: number,
+  row: ParsedPortalRow,
+  rowLog: ImportRowLogEntry[],
+  exceptions: ImportExceptionSummary[]
+): Promise<void> {
+  const outcome = await attemptAuditRowMatch(client, caches, batchId, row, exceptions)
+
+  if (outcome.kind === 'ambiguous') {
+    const identifier = row.mainNumber ?? row.ubblNumber ?? '(none)'
+    await raiseException(client, batchId, exceptions, {
+      type: 'audit_ambiguous_match',
+      severity: 'high',
+      description: `Audit row "${identifier}" matched more than one Hub entry; no audit status was written. Resolve the duplicate entries first.`,
+      dedupKey: `audit_ambiguous_match:${identifier}`,
+      amountAtRisk: row.amount,
+    })
+    await logRow(client, batchId, rowLog, {
+      rowNumber: row.rowNumber,
+      rawRow: row.rawRow,
+      action: 'audit_ambiguous',
+      entryId: null,
+      fieldsChanged: null,
+    })
+    return
+  }
+
+  if (outcome.kind === 'unmatched') {
+    const identifier = row.mainNumber ?? row.ubblNumber ?? '(none)'
+    await raiseException(client, batchId, exceptions, {
+      type: 'audit_row_unmatched',
+      severity: 'medium',
+      description:
+        `Audit entry "${identifier}"${row.vendorRaw ? ` (${row.vendorRaw})` : ''} has no corresponding Hub entry. ` +
+        `The usual cause is ordering: the Audit portal was scraped before today's Departmental export was imported, ` +
+        `so no entry carries this number in main_number yet. Import the export, then scrape again. ` +
+        `If it persists after that, the two sides genuinely disagree about this entry and it needs a human. ` +
+        `It will also be re-attempted automatically on every later Departmental import (docs/hub-refinements-plan.md §4).`,
+      dedupKey: `audit_row_unmatched:${identifier}`,
+      amountAtRisk: row.amount,
+    })
+    await logRow(client, batchId, rowLog, {
+      rowNumber: row.rowNumber,
+      rawRow: row.rawRow,
+      action: 'audit_unmatched',
+      entryId: null,
+      fieldsChanged: null,
+    })
+    return
+  }
+
   await logRow(client, batchId, rowLog, {
     rowNumber: row.rowNumber,
     rawRow: row.rawRow,
-    action: Object.keys(fieldsChanged).length > 0 ? 'audit_status_updated' : 'audit_status_unchanged',
-    entryId: entry.id,
-    fieldsChanged: Object.keys(fieldsChanged).length > 0 ? fieldsChanged : null,
+    action: outcome.fieldsChanged ? 'audit_status_updated' : 'audit_status_unchanged',
+    entryId: outcome.entryId,
+    fieldsChanged: outcome.fieldsChanged,
   })
+}
+
+/**
+ * Re-attempts matching for every Audit row still sitting as an open
+ * `audit_row_unmatched` exception, against the CURRENT state of `entries`
+ * (docs/hub-refinements-plan.md §4).
+ *
+ * WHY THIS RUNS FROM run-import.ts, NOT HERE
+ *
+ * An unmatched Audit row is waiting on a `main_number` that only a
+ * Departmental import can supply (this file's header: "Departmental import
+ * must run before the Audit scrape"). A Departmental commit is therefore
+ * exactly the moment a stale Audit exception is most likely to resolve
+ * itself — so run-import.ts's commit path calls this, inside its own
+ * transaction, after its own row loop has had a chance to create/update the
+ * entry the Audit row was waiting for. Called ONLY on commit (never
+ * dry_run): a dry run rolls every write back anyway, and driving this
+ * against a transaction that is about to be discarded would just be wasted
+ * queries against nothing durable.
+ *
+ * WHY REJOIN THROUGH scrape_payload_jsonb INSTEAD OF RE-SCRAPING
+ *
+ * The row data an unmatched exception needs was never lost — the scrape
+ * that produced it wrote its entire original payload to
+ * `import_batch.scrape_payload_jsonb` (see runPortalImport above). Re-parsing
+ * that payload with the same `parsePortalTable` the original scrape used
+ * reproduces the identical row deterministically, so no re-scrape is needed
+ * to retry it.
+ *
+ * Each exception is resolved independently and left untouched on any
+ * failure to correlate it back to a row (older exception predating this
+ * feature, a batch inserted through a path that never set
+ * scrape_payload_jsonb, or the identifier no longer present in that batch's
+ * rows) — one unrecoverable exception must never abort the whole
+ * Departmental import.
+ */
+export async function retryUnmatchedAuditRows(
+  client: PoolClient,
+  caches: ResolverCaches,
+  batchId: number,
+  exceptions: ImportExceptionSummary[]
+): Promise<{ resolvedCount: number }> {
+  const openExceptions = await client.query<{
+    id: number
+    dedup_key: string
+    import_batch_id: number | null
+  }>(
+    `select id, dedup_key, import_batch_id
+       from public.reconciliation_exception
+      where status = 'open' and exception_type = 'audit_row_unmatched'`
+  )
+
+  let resolvedCount = 0
+
+  for (const exception of openExceptions.rows) {
+    const identifier = parseAuditRowUnmatchedIdentifier(exception.dedup_key)
+    if (!identifier || exception.import_batch_id === null) continue
+
+    const batchRow = await client.query<{ scrape_payload_jsonb: ScrapePayload | null }>(
+      `select scrape_payload_jsonb from public.import_batch where id = $1`,
+      [exception.import_batch_id]
+    )
+    const payload = batchRow.rows[0]?.scrape_payload_jsonb ?? null
+    // Older exception, or a batch inserted via a path that never set this
+    // column — nothing to re-parse. Skip, don't throw: this must not abort
+    // the Departmental import that is currently mid-commit.
+    if (!payload) continue
+
+    const row = findPortalRowByIdentifier(
+      { headers: payload.headers, rows: payload.rows, sourceSystem: payload.sourceSystem },
+      identifier
+    )
+    if (!row) continue
+
+    const outcome = await attemptAuditRowMatch(client, caches, batchId, row, exceptions)
+    // Still ambiguous or still unmatched: per the task's point 5, leave the
+    // exception exactly as it is rather than refreshing/re-raising it. The
+    // ON CONFLICT ... WHERE status = 'open' pattern in raiseException already
+    // handles "still open" naturally for the paths that go through it; this
+    // path just does nothing, which is simpler and has the same effect.
+    if (outcome.kind !== 'matched') continue
+
+    // 'resolved', not 'dismissed': this codebase's other use of 'dismissed'
+    // (lib/jobs/handlers/extract.ts, the re-run-supersedes-prior-findings
+    // block) marks a finding as no longer relevant because something ELSE
+    // replaced it. Here the exact same finding is now genuinely fixed — the
+    // row matched, the update was applied — so 'resolved' is the accurate
+    // outcome. resolved_by stays null (nullable per
+    // supabase/migrations/20260808000023_reconciliation_exception.sql,
+    // `resolved_by uuid references auth.users(id)` with no NOT NULL): no
+    // human resolved this.
+    await client.query(
+      `update public.reconciliation_exception
+          set status = 'resolved',
+              entry_id = coalesce(entry_id, $2),
+              resolved_at = now(),
+              resolution_note = $3
+        where id = $1`,
+      [
+        exception.id,
+        outcome.entryId,
+        `Auto-matched by a later Departmental import (batch ${batchId}) — the entry's main_number ` +
+          `now links to it. No human resolved this (docs/hub-refinements-plan.md §4).`,
+      ]
+    )
+    resolvedCount++
+  }
+
+  return { resolvedCount }
 }
 
 /**
