@@ -4,6 +4,7 @@ import {
   extractionResponseSchema,
   extractionToolInputSchema,
   INSTRUMENT_TYPES,
+  sanitizeExtractionResponse,
   type ExtractionResponse,
 } from '@/lib/extraction-schema'
 
@@ -137,6 +138,102 @@ describe('buildTaxBreakdown', () => {
     expect(result?.cgst?.rate).toBeNull()
     expect(result?.sgst?.rate).toBeNull()
   })
+})
+
+describe('sanitizeExtractionResponse — leaked tool-call tag syntax backstop (§3b)', () => {
+  /**
+   * Real example from hub-refinements-plan.md §3b: a GSTIN field once showed
+   * `</antml.parameter><parameter name="vendor_phone">+91 9925755` — Claude's
+   * own internal tool-call formatting leaked into the field's text content.
+   */
+  const LEAKED_TAG_EXAMPLE = '</antml.parameter><parameter name="vendor_phone">+91 9925755'
+
+  function extractionWithLineItems(
+    headerOverrides: Record<string, unknown> = {},
+    lineItemOverrides: Record<string, unknown> = {}
+  ): ExtractionResponse {
+    return extractionResponseSchema.parse(
+      baseInput({
+        ...headerOverrides,
+        line_items: [
+          {
+            page_number: 1,
+            line_order: 0,
+            description: 'Chairs x4',
+            hsn_sac_code: '9401',
+            quantity: 4,
+            quantity_raw_text: '4 nos',
+            unit: 'NOS',
+            list_rate: 500,
+            discount_pct: 0,
+            discount_note: '',
+            net_rate: 500,
+            line_amount: 2000,
+            ...lineItemOverrides,
+          },
+        ],
+      })
+    )
+  }
+
+  it('passes a clean extraction through untouched', () => {
+    const extraction = extractionWithLineItems()
+    const { cleaned, blankedFields } = sanitizeExtractionResponse(extraction)
+    expect(blankedFields).toEqual([])
+    expect(cleaned).toEqual(extraction)
+  })
+
+  it('blanks a header field containing leaked tool-call tag syntax', () => {
+    const extraction = extractionWithLineItems({ vendor_gstin: LEAKED_TAG_EXAMPLE })
+    const { cleaned, blankedFields } = sanitizeExtractionResponse(extraction)
+    expect(cleaned.vendor_gstin).toBeNull()
+    expect(blankedFields).toEqual(['vendor_gstin'])
+    // Everything else on the header is untouched, not just vendor_gstin.
+    expect(cleaned.vendor_name).toBe(extraction.vendor_name)
+    expect(cleaned.invoice_number).toBe(extraction.invoice_number)
+  })
+
+  it('blanks a line-item field containing leaked tag syntax, tagged by index', () => {
+    const extraction = extractionWithLineItems({}, { description: 'Chairs <parameter name="foo">' })
+    const { cleaned, blankedFields } = sanitizeExtractionResponse(extraction)
+    expect(cleaned.line_items[0]?.description).toBeNull()
+    expect(blankedFields).toEqual(['line_items[0].description'])
+    // The rest of the line item survives untouched.
+    expect(cleaned.line_items[0]?.hsn_sac_code).toBe('9401')
+    expect(cleaned.line_items[0]?.line_amount).toBe(2000)
+  })
+
+  it('reports every blanked field across header and line items in one call', () => {
+    const extraction = extractionWithLineItems({ vendor_phone: '<foo>' }, { discount_note: '</bar>' })
+    const { blankedFields } = sanitizeExtractionResponse(extraction)
+    expect(blankedFields).toEqual(['vendor_phone', 'line_items[0].discount_note'])
+  })
+
+  it('does not flag a bare angle bracket that is not tag-shaped', () => {
+    // "<" not immediately followed by a word/namespace token is real invoice
+    // text (e.g. a quantity threshold), not leaked formatting.
+    const extraction = extractionWithLineItems({ notes: 'Item < 5kg, price > 100' })
+    const { cleaned, blankedFields } = sanitizeExtractionResponse(extraction)
+    expect(blankedFields).toEqual([])
+    expect(cleaned.notes).toBe('Item < 5kg, price > 100')
+  })
+
+  it.each([
+    'Item<5kg box, discount>10%',
+    'Rate<100, Qty>5',
+    'Weight <100kg, discount >50Rs applies',
+  ])(
+    'does not flag an unspaced numeric comparison as tag-shaped: %s',
+    (text) => {
+      // Regression: an earlier version of LEAKED_TAG_PATTERN let a digit open
+      // the "tag name" and let arbitrary text span to the next `>`, so real
+      // line-item text using `<`/`>` as comparators was wrongly blanked.
+      const extraction = extractionWithLineItems({}, { discount_note: text })
+      const { cleaned, blankedFields } = sanitizeExtractionResponse(extraction)
+      expect(blankedFields).toEqual([])
+      expect(cleaned.line_items[0]?.discount_note).toBe(text)
+    }
+  )
 })
 
 describe('extractionToolInputSchema — union-type parameter budget', () => {
