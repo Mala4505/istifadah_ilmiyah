@@ -62,6 +62,17 @@ export interface OpenExceptionSummary {
   createdAt: string
 }
 
+/** Per-page classification verdict from `document_page` (written by the extract
+ * job, lib/jobs/handlers/extract.ts) -- surfaced here so the review UI can show
+ * which pages were skipped and why, instead of silently dropping them from the
+ * extraction with no visible record. */
+export interface PageStatus {
+  pageNumber: number
+  isFinancialDocument: boolean | null
+  skipReason: string | null
+  classificationConfidence: number | null
+}
+
 export interface ReviewDocumentDetail {
   sourceDocumentId: number
   documentExtractionId: number
@@ -87,6 +98,7 @@ export interface ReviewDocumentDetail {
   verifiedAt: string | null
   header: HeaderFieldSet<{ ocr: string | number | null; verified: string | number | null }>
   lineItems: LineItemDetail[]
+  pages: PageStatus[]
   openExceptions: OpenExceptionSummary[]
   canSetHubStatus: boolean
   hubStatusCode: string | null

@@ -416,7 +416,7 @@ export function ReviewWorkspace({
       </div>
 
       <div className="grid min-h-0 flex-1 grid-cols-2 gap-3">
-        <PdfViewer ref={pdfViewerRef} sourceDocumentId={detail.sourceDocumentId} />
+        <PdfViewer ref={pdfViewerRef} sourceDocumentId={detail.sourceDocumentId} pages={detail.pages} />
         <ExtractionForm
           ref={formContainerRef}
           header={header}

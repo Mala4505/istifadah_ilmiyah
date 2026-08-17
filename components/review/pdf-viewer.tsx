@@ -16,11 +16,18 @@
  * section's "two pdf.js rules that keep the policy strict."
  */
 
-import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react'
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
 import { ZoomIn, ZoomOut, RotateCw, ChevronLeft, ChevronRight } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { getReviewDocumentUrl } from '@/lib/actions/review'
+import type { PageStatus } from '@/lib/review/types'
+
+/** "bank_cheque" -> "Bank cheque", for the skipped-page tooltip/label. */
+function formatSkipReason(reason: string): string {
+  const words = reason.split('_')
+  return words[0]!.charAt(0).toUpperCase() + words[0]!.slice(1) + (words.length > 1 ? ' ' + words.slice(1).join(' ') : '')
+}
 
 /** Imperative page-turn API so the review workspace's global Arrow-key
  * handler (§7 keyboard contract) can drive this pane without lifting its
@@ -42,10 +49,8 @@ interface PdfDocumentProxy {
   destroy(): Promise<void>
 }
 
-export const PdfViewer = forwardRef<PdfViewerHandle, { sourceDocumentId: number }>(function PdfViewer(
-  { sourceDocumentId },
-  ref
-) {
+export const PdfViewer = forwardRef<PdfViewerHandle, { sourceDocumentId: number; pages?: PageStatus[] }>(
+  function PdfViewer({ sourceDocumentId, pages = [] }, ref) {
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [numPages, setNumPages] = useState(0)
@@ -56,6 +61,12 @@ export const PdfViewer = forwardRef<PdfViewerHandle, { sourceDocumentId: number 
   const docRef = useRef<PdfDocumentProxy | null>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const thumbCanvasRefs = useRef<Map<number, HTMLCanvasElement>>(new Map())
+
+  const pageStatusByNumber = useMemo(() => {
+    const map = new Map<number, PageStatus>()
+    for (const p of pages) map.set(p.pageNumber, p)
+    return map
+  }, [pages])
 
   useImperativeHandle(
     ref,
@@ -194,27 +205,41 @@ export const PdfViewer = forwardRef<PdfViewerHandle, { sourceDocumentId: number 
       <div className="flex min-h-0 flex-1">
         {numPages > 1 ? (
           <div className="flex w-20 flex-shrink-0 flex-col gap-2 overflow-y-auto border-r border-border bg-background p-2">
-            {Array.from({ length: numPages }, (_, i) => i + 1).map((n) => (
-              <button
-                key={n}
-                type="button"
-                onClick={() => setPageNumber(n)}
-                className={`rounded border p-1 text-[10px] transition-colors ${
-                  n === pageNumber ? 'border-primary bg-primary/10' : 'border-border hover:bg-accent'
-                }`}
-              >
-                <canvas
-                  ref={(el) => {
-                    if (el) {
-                      thumbCanvasRefs.current.set(n, el)
-                      void renderThumbnail(n)
-                    }
-                  }}
-                  className="mx-auto max-w-full"
-                />
-                <div className="mt-0.5 text-center">{n}</div>
-              </button>
-            ))}
+            {Array.from({ length: numPages }, (_, i) => i + 1).map((n) => {
+              const status = pageStatusByNumber.get(n)
+              const skipped = status?.isFinancialDocument === false
+              const skipLabel = status?.skipReason ? formatSkipReason(status.skipReason) : null
+              return (
+                <button
+                  key={n}
+                  type="button"
+                  onClick={() => setPageNumber(n)}
+                  title={skipped ? `Skipped${skipLabel ? `: ${skipLabel}` : ''} -- not extracted as a bill` : undefined}
+                  className={`relative rounded border p-1 text-[10px] transition-colors ${
+                    n === pageNumber ? 'border-primary bg-primary/10' : 'border-border hover:bg-accent'
+                  } ${skipped ? 'opacity-60' : ''}`}
+                >
+                  {skipped ? (
+                    <span className="absolute right-0.5 top-0.5 rounded-sm bg-muted-foreground/80 px-1 text-[8px] font-medium leading-tight text-background">
+                      Skipped
+                    </span>
+                  ) : null}
+                  <canvas
+                    ref={(el) => {
+                      if (el) {
+                        thumbCanvasRefs.current.set(n, el)
+                        void renderThumbnail(n)
+                      }
+                    }}
+                    className="mx-auto max-w-full"
+                  />
+                  <div className="mt-0.5 text-center">
+                    {n}
+                    {skipped && skipLabel ? <div className="truncate text-[8px] text-muted-foreground">{skipLabel}</div> : null}
+                  </div>
+                </button>
+              )
+            })}
           </div>
         ) : null}
 

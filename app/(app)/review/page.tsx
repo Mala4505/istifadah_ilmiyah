@@ -3,7 +3,7 @@ import { createClient } from '@/lib/supabase/server'
 import { getStaffContext } from '@/lib/export/auth'
 import { Card, CardContent } from '@/components/ui/card'
 import { ReviewWorkspace } from '@/components/review/review-workspace'
-import type { LineItemDetail, OpenExceptionSummary, QueueEntry, ReviewDocumentDetail } from '@/lib/review/types'
+import type { LineItemDetail, OpenExceptionSummary, PageStatus, QueueEntry, ReviewDocumentDetail } from '@/lib/review/types'
 import { friendlyErrorMessage } from '@/lib/friendly-error'
 
 /**
@@ -171,7 +171,7 @@ async function loadDocumentDetail(
   } = await supabase.auth.getUser()
   if (!user) return null
 
-  const [sourceDocRes, extractionRes, lineItemsRes] = await Promise.all([
+  const [sourceDocRes, extractionRes, lineItemsRes, pagesRes] = await Promise.all([
     supabase
       .from('source_document')
       .select('id, entry_id, original_filename, match_status, claimed_by, claimed_at')
@@ -191,6 +191,11 @@ async function loadDocumentDetail(
       )
       .eq('document_extraction_id', documentExtractionId)
       .order('line_order'),
+    supabase
+      .from('document_page')
+      .select('page_number, is_financial_document, skip_reason, classification_confidence')
+      .eq('source_document_id', sourceDocumentId)
+      .order('page_number'),
   ])
 
   const sourceDoc = sourceDocRes.data
@@ -271,6 +276,13 @@ async function loadDocumentDetail(
     lineAmount: { ocr: li.line_amount_ocr as number | null, verified: li.line_amount_verified as number | null },
   }))
 
+  const pages: PageStatus[] = (pagesRes.data ?? []).map((p) => ({
+    pageNumber: p.page_number as number,
+    isFinancialDocument: p.is_financial_document as boolean | null,
+    skipReason: p.skip_reason as string | null,
+    classificationConfidence: p.classification_confidence as number | null,
+  }))
+
   const openExceptions: OpenExceptionSummary[] = (exceptionsRes.data ?? []).map((e) => ({
     id: e.id as number,
     exceptionType: e.exception_type as string,
@@ -313,6 +325,7 @@ async function loadDocumentDetail(
       notes: { ocr: extraction.notes_ocr, verified: extraction.notes_verified },
     },
     lineItems,
+    pages,
     openExceptions,
     canSetHubStatus: entryId !== null,
     hubStatusCode: entryHubStatusCode,
