@@ -1,14 +1,21 @@
 'use client'
 
 import { useRouter } from 'next/navigation'
+import { ArrowDown, ArrowUp, ArrowUpDown } from 'lucide-react'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { cn } from '@/lib/utils'
-import type { ColumnKey, EntryEnriched } from './types'
+import type { ColumnKey, EntriesSort, EntryEnriched, SortColumn } from './types'
 import { ALL_COLUMNS } from './types'
 import { formatDate, formatMoney, hubStatusBadgeVariant, statusBadgeVariant } from './format'
+
+// Click-to-sort (hub-refinements-plan.md §1/§2): "amount, date, vendor, status
+// at minimum". Each key here is also a valid SortColumn (see types.ts) — the
+// values are identical strings on purpose, so no translation table is needed
+// between "which column was clicked" and "what to sort by".
+const SORTABLE_COLUMNS = new Set<ColumnKey>(['date', 'amount', 'vendor_display_name', 'status_label'])
 
 export function EntriesTable({
   rows,
@@ -17,6 +24,8 @@ export function EntriesTable({
   selected,
   onToggleRow,
   onToggleAll,
+  sort,
+  onSortChange,
 }: {
   rows: EntryEnriched[]
   visibleColumns: Set<ColumnKey>
@@ -24,6 +33,8 @@ export function EntriesTable({
   selected: Set<number>
   onToggleRow: (id: number) => void
   onToggleAll: () => void
+  sort: EntriesSort
+  onSortChange: (column: SortColumn) => void
 }) {
   const router = useRouter()
   const columns = ALL_COLUMNS.filter((c) => visibleColumns.has(c.key))
@@ -42,11 +53,41 @@ export function EntriesTable({
                 onCheckedChange={onToggleAll}
               />
             </TableHead>
-            {columns.map((col) => (
-              <TableHead key={col.key} className={col.align === 'right' ? 'text-right' : undefined}>
-                {col.label}
-              </TableHead>
-            ))}
+            {columns.map((col) => {
+              const sortable = SORTABLE_COLUMNS.has(col.key)
+              const isActive = sortable && sort.column === col.key
+              return (
+                <TableHead
+                  key={col.key}
+                  className={col.align === 'right' ? 'text-right' : undefined}
+                  aria-sort={isActive ? (sort.direction === 'asc' ? 'ascending' : 'descending') : undefined}
+                >
+                  {sortable ? (
+                    <button
+                      type="button"
+                      className={cn(
+                        'inline-flex items-center gap-1 select-none hover:text-foreground',
+                        col.align === 'right' && 'flex-row-reverse'
+                      )}
+                      onClick={() => onSortChange(col.key as SortColumn)}
+                    >
+                      {col.label}
+                      {isActive ? (
+                        sort.direction === 'asc' ? (
+                          <ArrowUp className="h-3 w-3" />
+                        ) : (
+                          <ArrowDown className="h-3 w-3" />
+                        )
+                      ) : (
+                        <ArrowUpDown className="h-3 w-3 text-muted-foreground/50" />
+                      )}
+                    </button>
+                  ) : (
+                    col.label
+                  )}
+                </TableHead>
+              )
+            })}
           </TableRow>
         </TableHeader>
         <TableBody>

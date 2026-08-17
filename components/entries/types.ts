@@ -103,6 +103,19 @@ export const DEFAULT_FILTERS: EntriesFilters = {
 
 export const PAGE_SIZE = 50
 
+// Click-to-sort (hub-refinements-plan.md §1): "amount, date, vendor, status at
+// minimum" — these four map 1:1 onto ColumnKeys of the same name in
+// v_entry_enriched, which is what makes the EntriesTable → fetchEntriesPage wiring
+// a simple pass-through rather than needing a translation table. `id` is the
+// pre-existing default order (query.ts:75 used to hard-code `id desc`
+// unconditionally) — it's now the *default* rather than the *only* option, per
+// the plan's own wording, and is the only column keyset pagination stays exact
+// for (see query.ts's fetchEntriesPage header for why).
+export type SortColumn = 'id' | 'amount' | 'date' | 'vendor_display_name' | 'status_label'
+export type SortDirection = 'asc' | 'desc'
+export type EntriesSort = { column: SortColumn; direction: SortDirection }
+export const DEFAULT_SORT: EntriesSort = { column: 'id', direction: 'desc' }
+
 export type ColumnKey =
   | 'ubbl_number'
   | 'main_number'
