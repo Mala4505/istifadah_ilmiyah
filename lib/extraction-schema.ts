@@ -465,16 +465,23 @@ export function buildTaxBreakdown(extraction: ExtractionResponse): TaxBreakdown 
  * filterNonFinancialLineItems above and isOwnOrgGstin in
  * lib/jobs/handlers/extract.ts.
  *
- * Deliberately permissive rather than a strict XML/HTML parser: real invoice
- * text can legitimately contain a bare `<` or `>` (e.g. "Item <5kg"), but a
- * *tag-shaped* run -- an angle bracket immediately followed by a
- * word/namespace token and eventually closed by another angle bracket -- is
- * not something a genuine OCR read of a scanned document produces. A closing
- * tag (`</...>`) is the strongest signal (the real-world example above), but
- * an opening tag reads the same way to a downstream consumer, so both are
- * caught by one pattern.
+ * Deliberately permissive rather than a strict XML/HTML parser, but not so
+ * permissive that it catches numeric comparisons: real invoice/line-item
+ * text legitimately contains unspaced `<`/`>` used as comparators (e.g.
+ * "Rate<100, Qty>5", "Weight <100kg, discount >50Rs applies") -- a first
+ * version of this pattern that allowed a digit to open the "tag name" and
+ * let `[^>]*` span arbitrary text between the brackets wrongly blanked
+ * exactly this kind of text. Two constraints fix that while still catching
+ * the real leak shape: the tag name must start with a letter (real
+ * tool-call/XML element names always do; a numeric comparator never does),
+ * and anything after the tag name must look like well-formed attributes
+ * (`\s+name="value"` or `\s+name`), not arbitrary text up to the next `>`.
+ * A closing tag (`</...>`) is the strongest signal (the real-world example
+ * above), but an opening tag reads the same way to a downstream consumer,
+ * so both are caught by one pattern.
  */
-const LEAKED_TAG_PATTERN = /<\/?[\w:.]+[^>]*>/
+const LEAKED_TAG_PATTERN =
+  /<\/?[a-zA-Z][\w:.-]*(?:\s+[\w:.-]+(?:=(?:"[^"<>]*"|'[^'<>]*'|[^\s<>]+))?)*\s*\/?>/
 
 /** Result of scanning one object's string fields for leaked tag syntax. */
 export interface SanitizeLeakedTagSyntaxResult<T> {

@@ -217,6 +217,23 @@ describe('sanitizeExtractionResponse — leaked tool-call tag syntax backstop (�
     expect(blankedFields).toEqual([])
     expect(cleaned.notes).toBe('Item < 5kg, price > 100')
   })
+
+  it.each([
+    'Item<5kg box, discount>10%',
+    'Rate<100, Qty>5',
+    'Weight <100kg, discount >50Rs applies',
+  ])(
+    'does not flag an unspaced numeric comparison as tag-shaped: %s',
+    (text) => {
+      // Regression: an earlier version of LEAKED_TAG_PATTERN let a digit open
+      // the "tag name" and let arbitrary text span to the next `>`, so real
+      // line-item text using `<`/`>` as comparators was wrongly blanked.
+      const extraction = extractionWithLineItems({}, { discount_note: text })
+      const { cleaned, blankedFields } = sanitizeExtractionResponse(extraction)
+      expect(blankedFields).toEqual([])
+      expect(cleaned.line_items[0]?.discount_note).toBe(text)
+    }
+  )
 })
 
 describe('extractionToolInputSchema — union-type parameter budget', () => {
