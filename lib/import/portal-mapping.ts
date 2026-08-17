@@ -491,6 +491,81 @@ export function parsePortalTable(params: ParsePortalTableParams): ParsePortalTab
   return { mapping, rows: parsedRows, warnings }
 }
 
+// ---------------------------------------------------------------------------
+// Retry correlation (docs/hub-refinements-plan.md §4: "Auto-retry unmatched
+// Audit-portal rows on later imports")
+//
+// Kept in this file, not lib/import/run-portal-import.ts, for the same
+// reason checkAllocationSumMismatches/checkNamespaceCollisions live in
+// lib/import/assertions.ts rather than run-import.ts: this file has no `pg`
+// or `@/lib/env.server` dependency, so it can be imported by a unit test
+// with no DATABASE_URL/SUPABASE_SECRET_KEY present. run-portal-import.ts
+// pulls in lib/import/run-import.ts, which evaluates `serverEnv` at module
+// load (lib/env.server.ts) and throws without real secrets — exactly why
+// test/unit/run-import.test.ts already avoids importing run-import.ts
+// directly. Putting the actually-testable part of the retry (recovering an
+// identifier from a dedup_key, then re-finding its row in a re-parsed
+// payload) here, rather than in the DB-coupled orchestrator, is what makes
+// it possible to pin this logic down in test/unit/portal-linkage.test.ts
+// against the same real fixtures that file already trusts.
+// ---------------------------------------------------------------------------
+
+/**
+ * Recovers the identifier an `audit_row_unmatched` reconciliation_exception
+ * encodes in its `dedup_key` (`audit_row_unmatched:${identifier}`, set by
+ * `raiseException` in lib/import/run-portal-import.ts). Returns null when
+ * `dedupKey` is not that exception type, or when the identifier is the
+ * defensive `'(none)'` placeholder (only ever written when neither
+ * mainNumber nor ubblNumber existed — a case parsePortalTable already
+ * prevents from reaching importAuditRow at all, via the `no_identifier`
+ * skip, so it should not occur in practice; guarded anyway since it is not a
+ * real identifier there is anything to retry against).
+ *
+ * A prefix STRIP, deliberately not a generic split on ':'. `dedup_key`'s
+ * shape is entirely under this codebase's own control (built here, in this
+ * module's caller), so the fixed prefix is a safe anchor even if a future
+ * identifier itself happened to contain a colon — normalizeId
+ * (lib/normalize.ts) only trims a string id, it does not forbid one.
+ *
+ * A real schema column carrying the identifier was the alternative
+ * considered (per the task brief) and rejected: `dedup_key` already carries
+ * a `unique` constraint and is the one field every exception-raising path in
+ * this codebase already treats as the durable "what is this row about"
+ * handle (see the `ON CONFLICT (dedup_key)` pattern reused across
+ * unknown_status_code, allocation_sum_mismatch and id_namespace_collision in
+ * run-import.ts, and audit_row_unmatched itself below). A second column
+ * would duplicate that fact, need its own backfill plan for exceptions
+ * raised before this feature shipped, and still need to agree with
+ * dedup_key or risk drifting from it — for no correctness gain over parsing
+ * a format this codebase generates end to end.
+ */
+export function parseAuditRowUnmatchedIdentifier(dedupKey: string): string | null {
+  const prefix = 'audit_row_unmatched:'
+  if (!dedupKey.startsWith(prefix)) return null
+  const identifier = dedupKey.slice(prefix.length)
+  return identifier && identifier !== '(none)' ? identifier : null
+}
+
+/**
+ * Re-parses a stored scrape payload (`import_batch.scrape_payload_jsonb`)
+ * and finds the one row an `audit_row_unmatched` exception was raised for, by
+ * its identifier. `parsePortalTable` is deterministic — the same
+ * headers+rows always reproduces the identical `ParsedPortalRow[]` (this
+ * file's header comment) — so the row found here is exactly the row the
+ * original scrape produced, not a fuzzy re-guess.
+ *
+ * Same precedence as `findEntry` in run-portal-import.ts: mainNumber first,
+ * falling back to ubblNumber. Skipped rows (total rows, rows with no
+ * identifier at all) are never candidates.
+ */
+export function findPortalRowByIdentifier(
+  params: ParsePortalTableParams,
+  identifier: string
+): ParsedPortalRow | null {
+  const { rows } = parsePortalTable(params)
+  return rows.find((row) => !row.skipReason && (row.mainNumber ?? row.ubblNumber) === identifier) ?? null
+}
+
 /**
  * `normalizeId` throws on anything that is not a usable id, which is right for
  * the .xlsx path where a bad id means a corrupt file. On the scrape path a
