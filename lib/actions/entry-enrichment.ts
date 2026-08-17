@@ -68,6 +68,106 @@ export async function saveEntryEnrichment(
   return { success: true }
 }
 
+export interface BulkSaveEntryEnrichmentInput {
+  entryIds: number[]
+  // `undefined` (the field simply absent/omitted) = "don't touch this column
+  // for the batch". `null` = "clear this column for every selected entry."
+  // A specific id = "set this column to that value for every selected entry."
+  adminHeadId?: number | null
+  zoneId?: number | null
+  costCenterId?: number | null
+}
+
+export interface BulkEntryActionResult {
+  success: boolean
+  updatedCount: number
+  requestedCount: number
+  error?: string
+}
+
+/**
+ * Bulk-sets the Hub-owned enrichment fields (`admin_head_id`, `zone_id`,
+ * `cost_center_id`) across many entries in one action (hub-refinements-plan.md
+ * §5/§6: bulk assignment "in addition to" the single-entry form above, which
+ * keeps working unchanged). Mirrors `setHubStatus`'s (lib/actions/hub-status.ts)
+ * bulk-update-with-count pattern: this runs on the session-bound client, so
+ * `entries_update` RLS (role in ('admin','reviewer'), department-scoped) is the
+ * actual gate, and a row outside the caller's access silently isn't updated
+ * rather than erroring. This turns that into a countable partial-success
+ * result (`updatedCount < requestedCount`) for the caller to toast, exactly
+ * like the bulk Hub-status action.
+ *
+ * Field semantics deliberately differ from `saveEntryEnrichment` above: that
+ * single-entry form always writes all three columns, because "leave this
+ * dropdown at Not set" there is one human's explicit choice for one specific
+ * row. Here, a field the caller doesn't include in the input at all means
+ * "don't touch this column" for the whole batch — opt-in per field, not
+ * all-or-nothing. Forcing every one of N selected entries (which may span
+ * several departments/zones already) to the same cost center just because the
+ * caller also wanted to bulk-set zone would be a much stronger, more
+ * destructive claim than the plan asked for. An explicit `null` is still
+ * honoured as "clear this field for all of them" — a deliberate batch clear,
+ * distinct from "don't touch it."
+ */
+export async function bulkSaveEntryEnrichment(
+  input: BulkSaveEntryEnrichmentInput
+): Promise<BulkEntryActionResult> {
+  const cleanIds = Array.from(new Set(input.entryIds)).filter((id) => Number.isInteger(id) && id > 0)
+  const requestedCount = cleanIds.length
+
+  if (requestedCount === 0) {
+    return { success: false, updatedCount: 0, requestedCount, error: 'No entries selected.' }
+  }
+
+  // Only include a column in the patch if the caller actually set it (opt-in
+  // per field, see header comment) — `undefined` means "omit", `null` means
+  // "clear."
+  const patch: Record<string, number | null> = {}
+  if (input.adminHeadId !== undefined) patch.admin_head_id = input.adminHeadId
+  if (input.zoneId !== undefined) patch.zone_id = input.zoneId
+  if (input.costCenterId !== undefined) patch.cost_center_id = input.costCenterId
+
+  if (Object.keys(patch).length === 0) {
+    return { success: false, updatedCount: 0, requestedCount, error: 'Choose at least one field to set or clear.' }
+  }
+
+  const supabase = await createClient()
+
+  const { data, error } = await supabase.from('entries').update(patch).in('id', cleanIds).select('id')
+
+  if (error) {
+    return { success: false, updatedCount: 0, requestedCount, error: error.message }
+  }
+
+  const updatedCount = data?.length ?? 0
+
+  if (updatedCount === 0) {
+    return {
+      success: false,
+      updatedCount: 0,
+      requestedCount,
+      error:
+        'No entries were updated. This usually means a viewer role (reviewer/admin required to edit enrichment fields), or the entries are outside your assigned department.',
+    }
+  }
+
+  for (const id of cleanIds) {
+    revalidatePath(`/entries/${id}`)
+  }
+  revalidatePath('/entries')
+
+  if (updatedCount < requestedCount) {
+    return {
+      success: true,
+      updatedCount,
+      requestedCount,
+      error: `${requestedCount - updatedCount} of ${requestedCount} selected entries could not be updated (permission or department scope).`,
+    }
+  }
+
+  return { success: true, updatedCount, requestedCount }
+}
+
 /**
  * Sets or clears `entries.settles_entry_id` — the advance-settlement link
  * (§3.4: "this invoice settles that advance"; §5 row 4: "the

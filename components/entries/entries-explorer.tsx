@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { toast } from 'sonner'
-import { Download, RotateCcw, Tag } from 'lucide-react'
+import { Building2, Download, RotateCcw, Tag } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -11,10 +11,11 @@ import { FilterBar } from './filter-bar'
 import { ColumnChooser } from './column-chooser'
 import { EntriesTable } from './entries-table'
 import { BulkStatusDialog } from './bulk-status-dialog'
+import { BulkEnrichmentDialog } from './bulk-enrichment-dialog'
 import { exportEntriesToCsv } from './csv-export'
-import { fetchEntriesPage } from './query'
-import { ALL_COLUMNS, PAGE_SIZE } from './types'
-import type { ColumnKey, EntriesFilters, EntryEnriched, FilterOptions } from './types'
+import { fetchEntriesPage, type PageCursor } from './query'
+import { ALL_COLUMNS, DEFAULT_SORT, PAGE_SIZE } from './types'
+import type { ColumnKey, EntriesFilters, EntriesSort, EntryEnriched, FilterOptions, SortColumn, SortDirection } from './types'
 
 const EMPTY_OPTIONS: FilterOptions = {
   departments: [],
@@ -65,6 +66,28 @@ function searchParamsToFilters(sp: URLSearchParams): EntriesFilters {
   }
 }
 
+// Sort state gets the same URL-sync treatment as filters (hub-refinements-plan.md
+// §1/§2): "a sorted view stays copy-pasteable." Only written to the URL when it
+// differs from the default, so the common case (id desc, unsorted) doesn't clutter
+// every entries-list link with `?sort=id&dir=desc`.
+const SORT_COLUMNS: SortColumn[] = ['id', 'amount', 'date', 'vendor_display_name', 'status_label']
+
+function sortToSearchParams(sort: EntriesSort): URLSearchParams {
+  const sp = new URLSearchParams()
+  if (sort.column !== DEFAULT_SORT.column) sp.set('sort', sort.column)
+  if (sort.direction !== DEFAULT_SORT.direction) sp.set('dir', sort.direction)
+  return sp
+}
+
+function searchParamsToSort(sp: URLSearchParams): EntriesSort {
+  const column = sp.get('sort')
+  const direction = sp.get('dir')
+  return {
+    column: (SORT_COLUMNS as string[]).includes(column ?? '') ? (column as SortColumn) : DEFAULT_SORT.column,
+    direction: direction === 'asc' || direction === 'desc' ? (direction as SortDirection) : DEFAULT_SORT.direction,
+  }
+}
+
 export function EntriesExplorer() {
   const supabase = useMemo(() => createClient(), [])
   const router = useRouter()
@@ -72,12 +95,14 @@ export function EntriesExplorer() {
   const searchParams = useSearchParams()
 
   const [filters, setFilters] = useState<EntriesFilters>(() => searchParamsToFilters(searchParams))
+  const [sort, setSort] = useState<EntriesSort>(() => searchParamsToSort(searchParams))
   const [options, setOptions] = useState<FilterOptions>(EMPTY_OPTIONS)
   const [optionsLoaded, setOptionsLoaded] = useState(false)
   const [role, setRole] = useState<'admin' | 'reviewer' | 'viewer' | null>(null)
 
   const [pages, setPages] = useState<EntryEnriched[][]>([])
   const [hasMoreFlags, setHasMoreFlags] = useState<boolean[]>([])
+  const [cursors, setCursors] = useState<PageCursor[]>([])
   const [pageIndex, setPageIndex] = useState(0)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -87,6 +112,7 @@ export function EntriesExplorer() {
     () => new Set(ALL_COLUMNS.filter((c) => c.defaultVisible).map((c) => c.key))
   )
   const [bulkDialogOpen, setBulkDialogOpen] = useState(false)
+  const [bulkEnrichDialogOpen, setBulkEnrichDialogOpen] = useState(false)
   const [exporting, setExporting] = useState(false)
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -144,31 +170,39 @@ export function EntriesExplorer() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // ---- fetch page 1 whenever filters change, debounced + URL-synced ----
+  // ---- fetch page 1 whenever filters or sort change, debounced + URL-synced ----
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current)
     debounceRef.current = setTimeout(() => {
       const sp = filtersToSearchParams(filters)
+      for (const [key, value] of sortToSearchParams(sort)) sp.set(key, value)
       const qs = sp.toString()
       router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false })
-      void loadFirstPage(filters)
+      void loadFirstPage(filters, sort)
     }, 300)
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filters])
+  }, [filters, sort])
 
   const loadFirstPage = useCallback(
-    async (activeFilters: EntriesFilters) => {
+    async (activeFilters: EntriesFilters, activeSort: EntriesSort) => {
       const requestId = ++requestIdRef.current
       setLoading(true)
       setLoadError(null)
       try {
-        const result = await fetchEntriesPage({ supabase, filters: activeFilters, cursor: null, limit: PAGE_SIZE })
+        const result = await fetchEntriesPage({
+          supabase,
+          filters: activeFilters,
+          sort: activeSort,
+          cursor: null,
+          limit: PAGE_SIZE,
+        })
         if (requestId !== requestIdRef.current) return // a newer request superseded this one
         setPages([result.rows])
         setHasMoreFlags([result.hasMore])
+        setCursors([result.nextCursor])
         setPageIndex(0)
         setSelected(new Set())
       } catch (err) {
@@ -176,6 +210,7 @@ export function EntriesExplorer() {
         setLoadError(err instanceof Error ? err.message : 'Could not load entries.')
         setPages([])
         setHasMoreFlags([])
+        setCursors([])
       } finally {
         if (requestId === requestIdRef.current) setLoading(false)
       }
@@ -189,20 +224,28 @@ export function EntriesExplorer() {
       return
     }
     if (!hasMoreFlags[pageIndex]) return
-    const currentRows = pages[pageIndex] ?? []
-    const lastRow = currentRows[currentRows.length - 1]
-    if (!lastRow) return
+    const cursor = cursors[pageIndex] ?? null
     setLoading(true)
     try {
-      const result = await fetchEntriesPage({ supabase, filters, cursor: lastRow.id, limit: PAGE_SIZE })
+      const result = await fetchEntriesPage({ supabase, filters, sort, cursor, limit: PAGE_SIZE })
       setPages((prev) => [...prev, result.rows])
       setHasMoreFlags((prev) => [...prev, result.hasMore])
+      setCursors((prev) => [...prev, result.nextCursor])
       setPageIndex(pageIndex + 1)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Could not load the next page.')
     } finally {
       setLoading(false)
     }
+  }
+
+  function handleSortChange(column: SortColumn) {
+    setSort((prev) => {
+      if (prev.column === column) {
+        return { column, direction: prev.direction === 'asc' ? 'desc' : 'asc' }
+      }
+      return { column, direction: 'asc' }
+    })
   }
 
   function goPrev() {
@@ -300,12 +343,25 @@ export function EntriesExplorer() {
                 {selected.size} selected
               </span>
               {canBulkEdit ? (
-                <Button size="sm" className="gap-1.5" onClick={() => setBulkDialogOpen(true)}>
-                  <Tag className="h-3.5 w-3.5" />
-                  Set Hub status…
-                </Button>
+                <>
+                  <Button size="sm" className="gap-1.5" onClick={() => setBulkDialogOpen(true)}>
+                    <Tag className="h-3.5 w-3.5" />
+                    Set Hub status…
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="gap-1.5"
+                    onClick={() => setBulkEnrichDialogOpen(true)}
+                  >
+                    <Building2 className="h-3.5 w-3.5" />
+                    Assign zone / head…
+                  </Button>
+                </>
               ) : (
-                <span className="text-xs text-muted-foreground">Your role can view but not change Hub status.</span>
+                <span className="text-xs text-muted-foreground">
+                  Your role can view but not change Hub status or enrichment fields.
+                </span>
               )}
               <Button variant="ghost" size="sm" onClick={() => setSelected(new Set())}>
                 Clear selection
@@ -318,7 +374,7 @@ export function EntriesExplorer() {
               <CardContent className="flex flex-col items-center gap-3 py-12 text-center">
                 <p className="text-sm font-medium text-destructive">Could not load entries.</p>
                 <p className="max-w-md text-sm text-muted-foreground">{loadError}</p>
-                <Button variant="outline" size="sm" className="gap-1.5" onClick={() => loadFirstPage(filters)}>
+                <Button variant="outline" size="sm" className="gap-1.5" onClick={() => loadFirstPage(filters, sort)}>
                   <RotateCcw className="h-3.5 w-3.5" />
                   Retry
                 </Button>
@@ -333,6 +389,8 @@ export function EntriesExplorer() {
                 selected={selected}
                 onToggleRow={toggleRow}
                 onToggleAll={toggleAllOnPage}
+                sort={sort}
+                onSortChange={handleSortChange}
               />
 
               <div className="flex items-center justify-between">
@@ -361,7 +419,20 @@ export function EntriesExplorer() {
         hubStatuses={options.hubStatuses}
         onDone={() => {
           setSelected(new Set())
-          void loadFirstPage(filters)
+          void loadFirstPage(filters, sort)
+        }}
+      />
+
+      <BulkEnrichmentDialog
+        open={bulkEnrichDialogOpen}
+        onOpenChange={setBulkEnrichDialogOpen}
+        entryIds={Array.from(selected)}
+        adminHeadOptions={options.adminHeads}
+        zoneOptions={options.zones}
+        costCenterOptions={options.costCenters}
+        onDone={() => {
+          setSelected(new Set())
+          void loadFirstPage(filters, sort)
         }}
       />
     </div>

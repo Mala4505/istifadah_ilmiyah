@@ -9,9 +9,18 @@ import { SelectNative } from '@/components/ui/select-native'
 import { DEFAULT_FILTERS, type EntriesFilters, type FilterOptions } from './types'
 
 /**
- * Filter controls for the entries list (MASTER-PLAN §5 row 3). Purely
- * controlled — entries-explorer.tsx owns the actual filter state and syncs
- * it to the URL, so a filtered view is copy-pasteable.
+ * Filter controls for the entries list (MASTER-PLAN §5 row 3; grouping per
+ * hub-refinements-plan.md §1). Purely controlled — entries-explorer.tsx owns
+ * the actual filter state and syncs it to the URL, so a filtered view is
+ * copy-pasteable.
+ *
+ * All 13 filters stay — the plan's decision (§1) was explicit that every
+ * group gets used regularly, so this is a reorganization into four labelled
+ * sections, not a removal:
+ *   - Status: Status, Audit status, Hub status
+ *   - Classification: Department, Budget head, Admin head, Zone, Cost center
+ *   - Search: Vendor, Date from, Date to
+ *   - Flags: Export-pending, Missing Main #, Has document
  */
 export function FilterBar({
   filters,
@@ -35,8 +44,43 @@ export function FilterBar({
   }).length
 
   return (
-    <div className="flex flex-col gap-3 rounded-lg border border-border bg-card p-3">
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+    <div className="flex flex-col gap-4 rounded-lg border border-border bg-card p-3">
+      <FilterSection label="Status">
+        <Field label="Status">
+          <SelectNative value={filters.status} onChange={(e) => onChange({ status: e.target.value })}>
+            <option value="">Any status</option>
+            {options.statuses.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.label}
+              </option>
+            ))}
+          </SelectNative>
+        </Field>
+
+        <Field label="Audit status">
+          <SelectNative value={filters.auditStatus} onChange={(e) => onChange({ auditStatus: e.target.value })}>
+            <option value="">Any audit status</option>
+            {options.auditStatuses.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.label}
+              </option>
+            ))}
+          </SelectNative>
+        </Field>
+
+        <Field label="Hub status">
+          <SelectNative value={filters.hubStatus} onChange={(e) => onChange({ hubStatus: e.target.value })}>
+            <option value="">Any Hub status</option>
+            {options.hubStatuses.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.label}
+              </option>
+            ))}
+          </SelectNative>
+        </Field>
+      </FilterSection>
+
+      <FilterSection label="Classification">
         <Field label="Department">
           <SelectNative
             value={filters.department}
@@ -94,40 +138,9 @@ export function FilterBar({
             ))}
           </SelectNative>
         </Field>
+      </FilterSection>
 
-        <Field label="Status">
-          <SelectNative value={filters.status} onChange={(e) => onChange({ status: e.target.value })}>
-            <option value="">Any status</option>
-            {options.statuses.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.label}
-              </option>
-            ))}
-          </SelectNative>
-        </Field>
-
-        <Field label="Audit status">
-          <SelectNative value={filters.auditStatus} onChange={(e) => onChange({ auditStatus: e.target.value })}>
-            <option value="">Any audit status</option>
-            {options.auditStatuses.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.label}
-              </option>
-            ))}
-          </SelectNative>
-        </Field>
-
-        <Field label="Hub status">
-          <SelectNative value={filters.hubStatus} onChange={(e) => onChange({ hubStatus: e.target.value })}>
-            <option value="">Any Hub status</option>
-            {options.hubStatuses.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.label}
-              </option>
-            ))}
-          </SelectNative>
-        </Field>
-
+      <FilterSection label="Search">
         <Field label="Vendor">
           <Input
             placeholder="Search vendor…"
@@ -143,42 +156,69 @@ export function FilterBar({
         <Field label="Date to">
           <Input type="date" value={filters.dateTo} onChange={(e) => onChange({ dateTo: e.target.value })} />
         </Field>
-      </div>
+      </FilterSection>
 
-      <div className="flex flex-wrap items-center gap-4 border-t border-border pt-3">
-        <ToggleField
-          label="Export-pending"
-          checked={filters.exportPending}
-          onCheckedChange={(v) => onChange({ exportPending: v })}
-        />
-        <ToggleField
-          label="Missing Main #"
-          checked={filters.hasVariance}
-          onCheckedChange={(v) => onChange({ hasVariance: v })}
-        />
-        <ToggleField
-          label="Has document"
-          checked={filters.hasDocument}
-          onCheckedChange={(v) => onChange({ hasDocument: v })}
-        />
-        <div className="ml-auto flex items-center gap-2">
-          {activeCount > 0 && (
-            <span className="text-xs text-muted-foreground">
-              {activeCount} filter{activeCount === 1 ? '' : 's'} active
-            </span>
-          )}
-          <Button
-            variant="ghost"
-            size="sm"
-            className="gap-1 text-xs"
-            disabled={activeCount === 0}
-            onClick={() => onChange(DEFAULT_FILTERS)}
-          >
-            <X className="h-3.5 w-3.5" />
-            Clear filters
-          </Button>
+      <div className="border-t border-border pt-3">
+        <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-foreground/70">Flags</h3>
+        <div className="flex flex-wrap items-center gap-4">
+          <ToggleField
+            label="Export-pending"
+            checked={filters.exportPending}
+            onCheckedChange={(v) => onChange({ exportPending: v })}
+          />
+          <ToggleField
+            label="Missing Main #"
+            checked={filters.hasVariance}
+            onCheckedChange={(v) => onChange({ hasVariance: v })}
+          />
+          <ToggleField
+            label="Has document"
+            checked={filters.hasDocument}
+            onCheckedChange={(v) => onChange({ hasDocument: v })}
+          />
         </div>
       </div>
+
+      <div className="flex items-center justify-end gap-2 border-t border-border pt-3">
+        {activeCount > 0 && (
+          <span className="text-xs text-muted-foreground">
+            {activeCount} filter{activeCount === 1 ? '' : 's'} active
+          </span>
+        )}
+        <Button
+          variant="ghost"
+          size="sm"
+          className="gap-1 text-xs"
+          disabled={activeCount === 0}
+          onClick={() => onChange(DEFAULT_FILTERS)}
+        >
+          <X className="h-3.5 w-3.5" />
+          Clear filters
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * One labelled group within the filter bar (hub-refinements-plan.md §1:
+ * "four visually distinct, labelled groups"). A fieldset-style heading
+ * rather than a bordered box per group — keeps the bar from turning into
+ * four separate cards while still giving each group a clear label.
+ */
+function FilterSection({
+  label,
+  className,
+  children,
+}: {
+  label: string
+  className?: string
+  children: React.ReactNode
+}) {
+  return (
+    <div className={className}>
+      <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-foreground/70">{label}</h3>
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">{children}</div>
     </div>
   )
 }
