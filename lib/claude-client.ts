@@ -126,7 +126,10 @@ function buildSystemPrompt(communityGstin: string | null): string {
     'the same batch) — classify every page first via the tool schema before extracting anything from it. ' +
     'Read every page as part of one document: a line-item table may continue across a page break. Never ' +
     'fabricate a value — for anything illegible or genuinely absent use an empty string in a text field ' +
-    'and null in a numeric field, and reflect uncertainty via the confidence fields rather than guessing.'
+    'and null in a numeric field, and reflect uncertainty via the confidence fields rather than guessing. ' +
+    'Every field value must be plain text transcribed from the document — never emit tag-like syntax ' +
+    '(anything shaped like `<...>` or `</...>`) inside a field, even if it resembles formatting you have ' +
+    'seen elsewhere; that is never part of a real invoice.'
 
   if (!communityGstin) return base
 

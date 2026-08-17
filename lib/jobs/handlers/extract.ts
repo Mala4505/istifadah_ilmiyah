@@ -27,7 +27,7 @@ import {
   runExtractionPipeline,
   type ExtractionAttempt,
 } from '@/lib/extraction'
-import { buildTaxBreakdown } from '@/lib/extraction-schema'
+import { buildTaxBreakdown, sanitizeExtractionResponse } from '@/lib/extraction-schema'
 import { MODELS, type ModelId } from '@/lib/claude-client'
 import { serverEnv } from '@/lib/env.server'
 import { isSameGstin } from '@/lib/analytics/gstin'
@@ -113,7 +113,15 @@ export async function extractAndPersist(
     }
     const currentRunId = runIds[runIds.length - 1]!
     const final = pipeline.final
-    const extraction = final.extraction
+    // Leaked tool-call tag syntax backstop (§3b, hub-refinements-plan.md): the
+    // system prompt (buildSystemPrompt in lib/claude-client.ts) already asks
+    // the model not to do this, but `strict: true` tool calling only
+    // guarantees the JSON *structure* is valid, not what text ends up
+    // *inside* a string field — same "never trust the model alone" posture
+    // as filterNonFinancialLineItems and the own-org GSTIN exclusion below.
+    // Every downstream use of `extraction` (document_extraction upsert, line
+    // item insert, tally checks) reads the sanitized copy from here on.
+    const { cleaned: extraction, blankedFields: leakedTagFields } = sanitizeExtractionResponse(final.extraction)
 
     // ---- document_page: the classification gate's per-page verdict (§8 point 3)
     const pageRows = extraction.pages.map((page) => ({
@@ -201,6 +209,27 @@ export async function extractAndPersist(
             'certainly the recipient\'s GSTIN on the page, not the seller\'s. vendor_gstin_ocr was left ' +
             'blank rather than written with the wrong value; enter the real vendor GSTIN on review if legible.',
           dedup_key: `vendor_gstin_is_own_org:${documentExtractionId}:${currentRunId}`,
+        },
+        { onConflict: 'dedup_key' }
+      )
+    }
+
+    // Leaked tool-call tag syntax (§3b): one exception per document_extraction
+    // naming every field that was blanked, rather than one per field — a
+    // reviewer gets a single actionable row instead of a flood of duplicates
+    // when several fields on the same document leaked syntax.
+    if (leakedTagFields.length > 0) {
+      await admin.from('reconciliation_exception').upsert(
+        {
+          document_extraction_id: documentExtractionId,
+          exception_type: 'ocr_leaked_tag_syntax',
+          severity: 'low',
+          description:
+            `Extracted text for ${leakedTagFields.join(', ')} looked like leaked internal tool-call ` +
+            'formatting (e.g. "</antml.parameter>...") rather than real document content, so the ' +
+            'affected field(s) were left blank instead of written with corrupted text. Enter the ' +
+            'correct value manually on review.',
+          dedup_key: `ocr_leaked_tag_syntax:${documentExtractionId}:${currentRunId}`,
         },
         { onConflict: 'dedup_key' }
       )

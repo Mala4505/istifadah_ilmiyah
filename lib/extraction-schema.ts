@@ -450,3 +450,129 @@ export function buildTaxBreakdown(extraction: ExtractionResponse): TaxBreakdown 
     cess: null,
   }
 }
+
+/**
+ * Code-level backstop for leaked tool-call syntax in OCR text fields
+ * (hub-refinements-plan.md §3b). Real example observed in production: a
+ * GSTIN field showed `</antml.parameter><parameter name="vendor_phone">+91
+ * 9925755` -- Claude's own internal tool-call formatting, leaked into the
+ * field's text content. `strict: true` tool calling (lib/claude-client.ts,
+ * buildExtractionTool) guarantees the JSON *structure* is valid but does not
+ * constrain what text the model puts *inside* a string field, so a momentary
+ * hallucination of the model's own formatting can end up as literal field
+ * content -- the prompt instruction in buildSystemPrompt is Layer 1, this is
+ * Layer 2, same "never trust the model alone" posture as
+ * filterNonFinancialLineItems above and isOwnOrgGstin in
+ * lib/jobs/handlers/extract.ts.
+ *
+ * Deliberately permissive rather than a strict XML/HTML parser: real invoice
+ * text can legitimately contain a bare `<` or `>` (e.g. "Item <5kg"), but a
+ * *tag-shaped* run -- an angle bracket immediately followed by a
+ * word/namespace token and eventually closed by another angle bracket -- is
+ * not something a genuine OCR read of a scanned document produces. A closing
+ * tag (`</...>`) is the strongest signal (the real-world example above), but
+ * an opening tag reads the same way to a downstream consumer, so both are
+ * caught by one pattern.
+ */
+const LEAKED_TAG_PATTERN = /<\/?[\w:.]+[^>]*>/
+
+/** Result of scanning one object's string fields for leaked tag syntax. */
+export interface SanitizeLeakedTagSyntaxResult<T> {
+  /** Shallow copy of the input, with every matching field set to null. */
+  cleaned: T
+  /** Field names (from `fields`) whose value was blanked. Empty when nothing matched. */
+  blankedFields: string[]
+}
+
+/**
+ * Scans the given fields of `obj` for tag-shaped content and blanks any that
+ * match, same "blank it, don't write corrupted text" posture as
+ * `isOwnOrgGstin` nulling `vendor_gstin_ocr` in lib/jobs/handlers/extract.ts.
+ *
+ * Generic over T rather than typed to ExtractionResponse directly: the same
+ * scanning behaviour is needed for the header extraction object AND for each
+ * line item (see HEADER_TEXT_FIELDS_TO_SANITIZE / LINE_ITEM_TEXT_FIELDS_TO_SANITIZE
+ * below), and those two shapes share no common field list -- only the
+ * mechanics of "check this field, blank it if it matches" are shared.
+ */
+export function sanitizeLeakedTagSyntax<T extends Record<string, unknown>>(
+  obj: T,
+  fields: readonly (keyof T)[]
+): SanitizeLeakedTagSyntaxResult<T> {
+  // Mutated as a loosely-typed record rather than T directly: T's fields are
+  // typed `string | null` (every field this is called with went through
+  // absentTextAsNull), but TypeScript cannot see that generically through a
+  // `keyof T` index, so the cast happens once here rather than fighting the
+  // type system at every assignment below.
+  const cleaned: Record<string, unknown> = { ...obj }
+  const blankedFields: string[] = []
+
+  for (const field of fields) {
+    const key = field as string
+    const value = cleaned[key]
+    if (typeof value === 'string' && LEAKED_TAG_PATTERN.test(value)) {
+      cleaned[key] = null
+      blankedFields.push(key)
+    }
+  }
+
+  return { cleaned: cleaned as T, blankedFields }
+}
+
+/** Header text fields to scan -- every free-text field on the extraction response
+ *  (absentTextAsNull-typed). instrument_type and invoice_date are excluded: both
+ *  are transformed against a fixed value set / ISO date shape, not raw OCR text,
+ *  so leaked tag syntax could never survive their transforms unnoticed. */
+export const HEADER_TEXT_FIELDS_TO_SANITIZE = [
+  'vendor_name',
+  'vendor_gstin',
+  'vendor_phone',
+  'vendor_email',
+  'vendor_address',
+  'invoice_number',
+  'place_of_supply',
+  'notes',
+] as const satisfies readonly (keyof ExtractionResponse)[]
+
+/** Line-item text fields to scan -- every free-text field on a line item
+ *  (absentTextAsNull-typed); quantity/rate/amount fields are numeric and excluded. */
+export const LINE_ITEM_TEXT_FIELDS_TO_SANITIZE = [
+  'description',
+  'hsn_sac_code',
+  'quantity_raw_text',
+  'unit',
+  'discount_note',
+] as const satisfies readonly (keyof ExtractionLineItem)[]
+
+/** Result of sanitizing a whole extraction response, header and every line item. */
+export interface ExtractionSanitizeResult {
+  cleaned: ExtractionResponse
+  /** e.g. `['vendor_phone', 'line_items[2].description']`. Empty when nothing was blanked. */
+  blankedFields: string[]
+}
+
+/**
+ * Runs `sanitizeLeakedTagSyntax` over the header fields and every line item of
+ * one extraction response, and rolls the results into a single field list --
+ * lib/jobs/handlers/extract.ts raises ONE `ocr_leaked_tag_syntax` exception
+ * per document_extraction naming every blanked field, not one exception per
+ * field (a flood of duplicate exceptions for the same document is less useful
+ * to a reviewer than one that lists everything).
+ */
+export function sanitizeExtractionResponse(extraction: ExtractionResponse): ExtractionSanitizeResult {
+  const header = sanitizeLeakedTagSyntax(extraction, HEADER_TEXT_FIELDS_TO_SANITIZE)
+  const blankedFields = [...header.blankedFields]
+
+  const line_items = extraction.line_items.map((item, index) => {
+    const { cleaned, blankedFields: itemFields } = sanitizeLeakedTagSyntax(item, LINE_ITEM_TEXT_FIELDS_TO_SANITIZE)
+    if (itemFields.length > 0) {
+      blankedFields.push(...itemFields.map((field) => `line_items[${index}].${field}`))
+    }
+    return cleaned
+  })
+
+  return {
+    cleaned: { ...header.cleaned, line_items },
+    blankedFields,
+  }
+}
