@@ -22,6 +22,8 @@ export interface QueueEntry {
   maxOpenSeverityRank: number
   openIssueCount: number
   queueAmount: number | null
+  billIndex: number
+  billCount: number
 }
 
 export interface LineItemDetail {
@@ -76,6 +78,10 @@ export interface PageStatus {
 export interface ReviewDocumentDetail {
   sourceDocumentId: number
   documentExtractionId: number
+  billIndex: number
+  billCount: number
+  pageNumberStart: number | null
+  pageNumberEnd: number | null
   originalFilename: string
   matchStatus: string
   entryId: number | null

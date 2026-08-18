@@ -127,14 +127,20 @@ async function runExtraction(pdfPath: string): Promise<ExtractionResult> {
   const result = await runExtractionPipeline(pdfBytes)
   const extraction = result.final.extraction
 
+  // gold.json's ground truth (§9.1) is shaped for one bill per sample PDF —
+  // the pilot corpus, pre-Phase-2, was single-bill. Score against the first
+  // bill Claude returned; a genuine multi-bill sample would need its own
+  // per-bill gold entries, out of scope for this harness today.
+  const bill = extraction.bills[0]
+
   return {
-    vendor_name: extraction.vendor_name,
-    invoice_number: extraction.invoice_number,
-    invoice_date: extraction.invoice_date,
-    subtotal: extraction.subtotal,
-    tax_amount: extraction.tax_amount,
-    total_amount: extraction.total_amount,
-    line_items: extraction.line_items.map((item) => ({
+    vendor_name: bill?.vendor_name ?? null,
+    invoice_number: bill?.invoice_number ?? null,
+    invoice_date: bill?.invoice_date ?? null,
+    subtotal: bill?.subtotal ?? null,
+    tax_amount: bill?.tax_amount ?? null,
+    total_amount: bill?.total_amount ?? null,
+    line_items: (bill?.line_items ?? []).map((item) => ({
       description: item.description ?? '',
       amount: item.line_amount ?? 0,
     })),

@@ -17,7 +17,7 @@ import {
 } from '@/lib/claude-client'
 import { toBase64 } from '@/lib/pdf'
 import { serverEnv } from '@/lib/env.server'
-import type { ExtractionResponse } from '@/lib/extraction-schema'
+import type { ExtractionBill, ExtractionResponse } from '@/lib/extraction-schema'
 
 /**
  * Below this `extraction_confidence`, a Haiku run is re-run on Sonnet
@@ -168,15 +168,18 @@ async function callOnce(
 }
 
 /**
- * Sum of the line items Claude returned, in rupees. Non-financial pages are
- * already hard-filtered upstream by `filterNonFinancialLineItems`, so this is
- * the number the §8 point 5 tally check compares against `total_amount`.
+ * Sum of one bill's line items, in rupees. Non-financial pages are already
+ * hard-filtered upstream by `filterNonFinancialLineItems`, so this is the
+ * number the §8 point 5 tally check compares against that bill's
+ * `total_amount` (Phase 2: called once per bill inside the persistence loop,
+ * lib/jobs/handlers/extract.ts — each bill's own line items tally against its
+ * own total, not the whole document's).
  * Returns null when no line item carried an amount at all — a document with
  * no extractable lines is not a tally mismatch, it is just a document with no
  * lines (cheque pages, §11.2 Day 2 exit criteria).
  */
-export function lineItemTotal(extraction: ExtractionResponse): number | null {
-  const amounts = extraction.line_items
+export function lineItemTotal(bill: ExtractionBill): number | null {
+  const amounts = bill.line_items
     .map((item) => item.line_amount)
     .filter((amount): amount is number => amount !== null)
   if (amounts.length === 0) return null

@@ -90,11 +90,18 @@ async function handlePOST(request: NextRequest) {
   // Server-derived page count wins; the client-declared value is only a
   // fallback for a PDF pdf.js refuses to parse.
   let pageCount: number | null = null
+  let pageCountUnresolved = false
   try {
     pageCount = await getPdfPageCount(bytes)
   } catch {
     const declared = Number(form.get('pageCount'))
     pageCount = Number.isInteger(declared) && declared > 0 ? declared : null
+    // Neither the server-side parse nor a client-declared count worked. No
+    // document_page rows get created below, and page_count stays null until
+    // (if ever) extraction succeeds and backfills it from the model's own
+    // pages[] count (lib/jobs/handlers/extract.ts) — silently, unless this is
+    // flagged now (I1).
+    pageCountUnresolved = pageCount === null
   }
 
   const entryIdRaw = form.get('entryId')
@@ -176,6 +183,23 @@ async function handlePOST(request: NextRequest) {
         `Uploaded file has the same SHA-256 as source_document ${duplicateOf}. ` +
         'Re-scans of the same bill are legitimate — confirm before discarding either copy.',
       dedup_key: `duplicate_document_hash:${fileHash}:${documentId}`,
+    })
+  }
+
+  // I1: page count could not be derived from the PDF or a client-declared
+  // fallback. document_page rows are not created below, so page classification
+  // for this document is absent until (if ever) extraction backfills it — flag
+  // that now instead of leaving it silent.
+  if (pageCountUnresolved) {
+    await admin.from('reconciliation_exception').insert({
+      exception_type: 'page_count_unresolved',
+      severity: 'low',
+      description:
+        `Could not determine the page count for source_document ${documentId} at ingest ` +
+        '(server-side PDF parse failed and no client-declared count was supplied). No document_page ' +
+        'rows were created; this backfills automatically once extraction succeeds, or needs manual review ' +
+        'if extraction keeps failing.',
+      dedup_key: `page_count_unresolved:${documentId}`,
     })
   }
 

@@ -21,7 +21,7 @@
 import * as Sentry from '@sentry/nextjs'
 import { serverEnv } from '@/lib/env.server'
 import { publicEnv } from '@/lib/env'
-import { claimNextJob } from '@/lib/jobs/queue'
+import { claimNextJob, sweepJobQueue } from '@/lib/jobs/queue'
 
 // This is a standalone Node process (not booted through Next.js), so it
 // doesn't go through instrumentation.ts — it needs its own Sentry.init(),
@@ -77,7 +77,39 @@ const EMPTY_POLL_BACKOFF_MS = 2000
 // persistent failure (e.g. DB unreachable) doesn't spin the CPU.
 const ERROR_BACKOFF_MS = 5000
 
+// How often to run sweepJobQueue() (plan.md Phase 3 I15). Well under the
+// 10-minute staleness timeout in 20260817000007_sweep_job_queue.sql, so a
+// stale row is reclaimed within roughly one extra cycle of going stale;
+// far above EMPTY_POLL_BACKOFF_MS so an idle worker isn't running a
+// full-table sweep on every 2-second poll.
+const SWEEP_INTERVAL_MS = 5 * 60 * 1000
+
 let shuttingDown = false
+let lastSweptAt = 0
+
+/**
+ * Runs sweepJobQueue() at most once per SWEEP_INTERVAL_MS. Called once per
+ * main() loop iteration rather than gated behind an empty poll, so it also
+ * runs promptly on startup (lastSweptAt starts at 0) to reclaim anything a
+ * previous crashed instance of this process left locked.
+ */
+async function maybeSweep(): Promise<void> {
+  const now = Date.now()
+  if (now - lastSweptAt < SWEEP_INTERVAL_MS) return
+  lastSweptAt = now
+
+  try {
+    const result = await sweepJobQueue()
+    if (result.reclaimedCount || result.deadenedCount || result.purgedCount) {
+      console.log(
+        `[worker] sweep: reclaimed=${result.reclaimedCount} deadened=${result.deadenedCount} purged=${result.purgedCount}`
+      )
+    }
+  } catch (err) {
+    console.error('[worker] sweep failed:', err)
+    Sentry.captureException(err, { tags: { job_type: 'sweep_job_queue' } })
+  }
+}
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
@@ -109,9 +141,11 @@ async function dispatch(job: JobQueueRow): Promise<void> {
     case 'generate_export':
     case 'rasterize_retry':
       // Not implemented yet — log and skip rather than claiming and
-      // silently dropping. The job stays 'running'/locked until the
-      // sweeper (§3.11) reclaims it, which is preferable to marking it
-      // failed for a handler that was never attempted.
+      // silently dropping. The job stays 'running'/locked until
+      // sweepJobQueue() reclaims it (plan.md Phase 3 I15,
+      // 20260817000007_sweep_job_queue.sql, called periodically from
+      // main() below), which is preferable to marking it failed for a
+      // handler that was never attempted.
       console.log(
         `[worker] job ${job.id} (${job.job_type}) has no handler wired yet — skipping`
       )
@@ -155,6 +189,8 @@ async function main(): Promise<void> {
   console.log(`[worker] starting — worker id = ${serverEnv.WORKER_ID}`)
 
   while (!shuttingDown) {
+    await maybeSweep()
+
     let outcome: 'claimed' | 'empty'
     try {
       outcome = await loopOnce()

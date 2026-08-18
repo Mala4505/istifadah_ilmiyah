@@ -1,5 +1,15 @@
 -- New exception_type: 'ocr_leaked_tag_syntax' (hub-refinements-plan.md §3b).
 --
+-- Renamed from 20260817000001 (I17, plan.md): it shared that exact 14-digit
+-- version prefix with 20260817000001_entry_status_counts_view.sql, which
+-- `supabase db push` tracks as a primary key -- the collision surfaced as a
+-- duplicate-key error on `supabase_migrations.schema_migrations` the first
+-- time both were pushed together, after the sibling file's row had already
+-- been inserted. This migration's own DDL never ran in that attempt (only
+-- the tracking insert failed), so the rename+repush here is a clean retry,
+-- not a partial-state repair. No ordering dependency on the document
+-- extraction migrations that sort between the two former 000001 files.
+--
 -- Real example observed in production: a GSTIN field showed
 -- `</antml.parameter><parameter name="vendor_phone">+91 9925755` -- Claude's own
 -- internal tool-call formatting, leaked into the field's text content.

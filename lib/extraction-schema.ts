@@ -182,15 +182,17 @@ export const extractionLineItemSchema = z.object({
 export type ExtractionLineItem = z.infer<typeof extractionLineItemSchema>
 
 /**
- * The full extraction response for one document (all pages, one call —
- * §8 point 3). Header fields map onto `document_extraction.*_ocr` columns;
+ * One bill's worth of header fields + its own line items (Phase 2 — one
+ * uploaded PDF may be a batch scan containing several distinct bills, see
+ * `bills[]` on `extractionResponseSchema` below). Field-for-field the same
+ * header fields §3.8 previously had at the response root; only the container
+ * changed. Maps onto one `document_extraction` row (`bill_index`-scoped);
  * `line_items[]` map onto `document_extraction_line_item.*_ocr` columns.
  */
-export const extractionResponseSchema = z.object({
-  pages: z.array(extractionPageSchema).min(1),
-  legibility: legibilitySchema,
-  extraction_confidence: z.number().min(0).max(1),
-  contains_non_latin_script: z.boolean(),
+export const extractionBillSchema = z.object({
+  /** Page range this bill's header/totals were read from, within the whole document. */
+  page_number_start: z.number().int().positive(),
+  page_number_end: z.number().int().positive(),
 
   /** One of INSTRUMENT_TYPES, or null — see instrumentTypeOrNull above. */
   instrument_type: instrumentTypeOrNull,
@@ -220,6 +222,25 @@ export const extractionResponseSchema = z.object({
   notes: absentTextAsNull,
 
   line_items: z.array(extractionLineItemSchema),
+})
+export type ExtractionBill = z.infer<typeof extractionBillSchema>
+
+/**
+ * The full extraction response for one document (all pages, one call —
+ * §8 point 3). `pages[]`, `legibility`, `extraction_confidence`, and
+ * `contains_non_latin_script` stay whole-document — page classification and
+ * the escalation signal are not per-bill (Phase 2 explicitly keeps escalation
+ * whole-document; see plan.md §3). `bills[]` holds one entry per distinct
+ * bill Claude found in the document — the overwhelming majority of documents
+ * produce exactly one.
+ */
+export const extractionResponseSchema = z.object({
+  pages: z.array(extractionPageSchema).min(1),
+  legibility: legibilitySchema,
+  extraction_confidence: z.number().min(0).max(1),
+  contains_non_latin_script: z.boolean(),
+
+  bills: z.array(extractionBillSchema).min(1),
 })
 export type ExtractionResponse = z.infer<typeof extractionResponseSchema>
 
@@ -278,102 +299,119 @@ export const extractionToolInputSchema = {
     extraction_confidence: { type: 'number' },
     contains_non_latin_script: { type: 'boolean' },
 
-    // Plain string, not enum-constrained — see instrumentTypeOrNull above for why.
-    instrument_type: textField,
-
-    vendor_name: textField,
-    vendor_gstin: textField,
-    vendor_phone: textField,
-    vendor_email: textField,
-    vendor_address: textField,
-    invoice_number: textField,
-    invoice_date: textField,
-    place_of_supply: textField,
-    subtotal: nullableNumber,
-    cgst_amount: nullableNumber,
-    sgst_amount: nullableNumber,
-    igst_amount: nullableNumber,
-    tax_amount: nullableNumber,
-    round_off: nullableNumber,
-    total_amount: nullableNumber,
-    notes: textField,
-
-    line_items: {
+    // One entry per distinct bill found in the document (Phase 2) — the
+    // overwhelming majority of documents produce exactly one.
+    bills: {
       type: 'array',
       items: {
         type: 'object',
         additionalProperties: false,
         properties: {
-          page_number: { type: 'integer' },
-          line_order: { type: 'integer' },
-          description: textField,
-          hsn_sac_code: textField,
-          quantity: nullableNumber,
-          quantity_raw_text: textField,
-          unit: textField,
-          list_rate: nullableNumber,
-          discount_pct: nullableNumber,
-          discount_note: textField,
-          net_rate: nullableNumber,
-          line_amount: nullableNumber,
+          // Page range this bill's header/totals were read from.
+          page_number_start: { type: 'integer' },
+          page_number_end: { type: 'integer' },
+
+          // Plain string, not enum-constrained — see instrumentTypeOrNull above for why.
+          instrument_type: textField,
+
+          vendor_name: textField,
+          vendor_gstin: textField,
+          vendor_phone: textField,
+          vendor_email: textField,
+          vendor_address: textField,
+          invoice_number: textField,
+          invoice_date: textField,
+          place_of_supply: textField,
+          subtotal: nullableNumber,
+          cgst_amount: nullableNumber,
+          sgst_amount: nullableNumber,
+          igst_amount: nullableNumber,
+          tax_amount: nullableNumber,
+          round_off: nullableNumber,
+          total_amount: nullableNumber,
+          notes: textField,
+
+          line_items: {
+            type: 'array',
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              properties: {
+                page_number: { type: 'integer' },
+                line_order: { type: 'integer' },
+                description: textField,
+                hsn_sac_code: textField,
+                quantity: nullableNumber,
+                quantity_raw_text: textField,
+                unit: textField,
+                list_rate: nullableNumber,
+                discount_pct: nullableNumber,
+                discount_note: textField,
+                net_rate: nullableNumber,
+                line_amount: nullableNumber,
+              },
+              required: [
+                'page_number',
+                'line_order',
+                'description',
+                'hsn_sac_code',
+                'quantity',
+                'quantity_raw_text',
+                'unit',
+                'list_rate',
+                'discount_pct',
+                'discount_note',
+                'net_rate',
+                'line_amount',
+              ],
+            },
+          },
         },
         required: [
-          'page_number',
-          'line_order',
-          'description',
-          'hsn_sac_code',
-          'quantity',
-          'quantity_raw_text',
-          'unit',
-          'list_rate',
-          'discount_pct',
-          'discount_note',
-          'net_rate',
-          'line_amount',
+          'page_number_start',
+          'page_number_end',
+          'instrument_type',
+          'vendor_name',
+          'vendor_gstin',
+          'vendor_phone',
+          'vendor_email',
+          'vendor_address',
+          'invoice_number',
+          'invoice_date',
+          'place_of_supply',
+          'subtotal',
+          'cgst_amount',
+          'sgst_amount',
+          'igst_amount',
+          'tax_amount',
+          'round_off',
+          'total_amount',
+          'notes',
+          'line_items',
         ],
       },
     },
   },
-  required: [
-    'pages',
-    'legibility',
-    'extraction_confidence',
-    'contains_non_latin_script',
-    'instrument_type',
-    'vendor_name',
-    'vendor_gstin',
-    'vendor_phone',
-    'vendor_email',
-    'vendor_address',
-    'invoice_number',
-    'invoice_date',
-    'place_of_supply',
-    'subtotal',
-    'cgst_amount',
-    'sgst_amount',
-    'igst_amount',
-    'tax_amount',
-    'round_off',
-    'total_amount',
-    'notes',
-    'line_items',
-  ],
+  required: ['pages', 'legibility', 'extraction_confidence', 'contains_non_latin_script', 'bills'],
 } as const
 
 export const EXTRACTION_TOOL_NAME = 'record_document_extraction'
 
 export const EXTRACTION_TOOL_DESCRIPTION =
   'Record the structured extraction of a financial document (invoice, chit, or receipt) that may span ' +
-  'multiple pages. Classify every page first — only line items sourced from pages where ' +
-  'is_financial_document is true will be kept. Extract header fields (vendor identity including GSTIN, ' +
-  'phone, email, and address for later vendor-clustering; invoice number/date; subtotal/tax/total) and every ' +
-  'line item, each tagged with the page it was read from. Write invoice_date as ISO YYYY-MM-DD (the ' +
-  'source is usually DD/MM/YYYY — convert it). For anything illegible or genuinely absent, use an ' +
-  'empty string in a text field and null in a numeric field — never guess or fabricate a value. Also ' +
-  'classify instrument_type — one of tax_invoice, bill_of_supply, retail_cash_memo, letterhead_bill, ' +
+  'multiple pages. It may also be a batch scan containing SEVERAL DISTINCT BILLS from different vendors ' +
+  '— give each bill its own entry in bills[], never merge two vendors\' headers/totals/line items into ' +
+  'one entry. Classify every page first — only line items sourced from pages where is_financial_document ' +
+  'is true will be kept. For each bill, extract header fields (vendor identity including GSTIN, phone, ' +
+  'email, and address for later vendor-clustering; invoice number/date; subtotal/tax/total), the page ' +
+  'range (page_number_start/page_number_end) its header and totals were read from, and every line item, ' +
+  'each tagged with the page it was read from. Write invoice_date as ISO YYYY-MM-DD (the source is ' +
+  'usually DD/MM/YYYY — convert it). For anything illegible or genuinely absent, use an empty string in ' +
+  'a text field and null in a numeric field — never guess or fabricate a value. Also classify ' +
+  'instrument_type — one of tax_invoice, bill_of_supply, retail_cash_memo, letterhead_bill, ' +
   'proforma_invoice, quotation, receipt, delivery_challan, or other — since a GST tax invoice missing ' +
   'its GSTIN is a compliance problem while an unregistered vendor\'s cash memo charging no GST is not, ' +
-  'and only the instrument type tells those two cases apart. When the document is a GST invoice, also ' +
+  'and only the instrument type tells those two cases apart. When a bill is a GST invoice, also ' +
   'capture place_of_supply (the state name or code printed as "Place of Supply") and report tax split ' +
   'by component — cgst_amount, sgst_amount, and igst_amount — instead of only a combined tax_amount, ' +
   'and capture round_off when the invoice prints an explicit rounding line.'
@@ -413,7 +451,10 @@ export function filterNonFinancialLineItems(extraction: ExtractionResponse): Ext
 
   return {
     ...extraction,
-    line_items: extraction.line_items.filter((item) => financialPageNumbers.has(item.page_number)),
+    bills: extraction.bills.map((bill) => ({
+      ...bill,
+      line_items: bill.line_items.filter((item) => financialPageNumbers.has(item.page_number)),
+    })),
   }
 }
 
@@ -435,12 +476,17 @@ export function filterNonFinancialLineItems(extraction: ExtractionResponse): Ext
  * written as null; `cess` is not captured on the wire at all (rare in the
  * pilot corpus) and is always null.
  *
+ * Takes one bill, not the whole response: `document_extraction.tax_breakdown_ocr`
+ * is a per-bill column (Phase 2 — a multi-bill document has no single tax
+ * breakdown), so this is called once per bill inside the persistence loop
+ * (lib/jobs/handlers/extract.ts), not once per document.
+ *
  * Returns null — not an all-null object — when none of the three components
  * were extracted, consistent with every other "nothing here" value in this
  * schema and with tax_breakdown_ocr being a genuinely nullable column.
  */
-export function buildTaxBreakdown(extraction: ExtractionResponse): TaxBreakdown | null {
-  const { cgst_amount, sgst_amount, igst_amount } = extraction
+export function buildTaxBreakdown(bill: ExtractionBill): TaxBreakdown | null {
+  const { cgst_amount, sgst_amount, igst_amount } = bill
   if (cgst_amount === null && sgst_amount === null && igst_amount === null) return null
 
   return {
@@ -539,7 +585,7 @@ export const HEADER_TEXT_FIELDS_TO_SANITIZE = [
   'invoice_number',
   'place_of_supply',
   'notes',
-] as const satisfies readonly (keyof ExtractionResponse)[]
+] as const satisfies readonly (keyof ExtractionBill)[]
 
 /** Line-item text fields to scan -- every free-text field on a line item
  *  (absentTextAsNull-typed); quantity/rate/amount fields are numeric and excluded. */
@@ -551,35 +597,46 @@ export const LINE_ITEM_TEXT_FIELDS_TO_SANITIZE = [
   'discount_note',
 ] as const satisfies readonly (keyof ExtractionLineItem)[]
 
-/** Result of sanitizing a whole extraction response, header and every line item. */
+/** Result of sanitizing a whole extraction response, every bill's header and every line item. */
 export interface ExtractionSanitizeResult {
   cleaned: ExtractionResponse
-  /** e.g. `['vendor_phone', 'line_items[2].description']`. Empty when nothing was blanked. */
+  /** e.g. `['bills[0].vendor_phone', 'bills[2].line_items[1].description']`. Empty when nothing was blanked. */
   blankedFields: string[]
 }
 
 /**
- * Runs `sanitizeLeakedTagSyntax` over the header fields and every line item of
- * one extraction response, and rolls the results into a single field list --
- * lib/jobs/handlers/extract.ts raises ONE `ocr_leaked_tag_syntax` exception
- * per document_extraction naming every blanked field, not one exception per
- * field (a flood of duplicate exceptions for the same document is less useful
- * to a reviewer than one that lists everything).
+ * Runs `sanitizeLeakedTagSyntax` over every bill's header fields and every
+ * line item of one extraction response, and rolls the results into a single
+ * field list -- lib/jobs/handlers/extract.ts raises ONE `ocr_leaked_tag_syntax`
+ * exception per document_extraction (i.e. per bill) naming every blanked
+ * field on that bill, not one exception per field (a flood of duplicate
+ * exceptions for the same document is less useful to a reviewer than one
+ * that lists everything). Field names are prefixed with `bills[i].` so a
+ * per-bill exception can filter this flat list down to just its own bill's
+ * blanked fields.
  */
 export function sanitizeExtractionResponse(extraction: ExtractionResponse): ExtractionSanitizeResult {
-  const header = sanitizeLeakedTagSyntax(extraction, HEADER_TEXT_FIELDS_TO_SANITIZE)
-  const blankedFields = [...header.blankedFields]
+  const blankedFields: string[] = []
 
-  const line_items = extraction.line_items.map((item, index) => {
-    const { cleaned, blankedFields: itemFields } = sanitizeLeakedTagSyntax(item, LINE_ITEM_TEXT_FIELDS_TO_SANITIZE)
-    if (itemFields.length > 0) {
-      blankedFields.push(...itemFields.map((field) => `line_items[${index}].${field}`))
+  const bills = extraction.bills.map((bill, billIndex) => {
+    const header = sanitizeLeakedTagSyntax(bill, HEADER_TEXT_FIELDS_TO_SANITIZE)
+    if (header.blankedFields.length > 0) {
+      blankedFields.push(...header.blankedFields.map((field) => `bills[${billIndex}].${field}`))
     }
-    return cleaned
+
+    const line_items = bill.line_items.map((item, lineIndex) => {
+      const { cleaned, blankedFields: itemFields } = sanitizeLeakedTagSyntax(item, LINE_ITEM_TEXT_FIELDS_TO_SANITIZE)
+      if (itemFields.length > 0) {
+        blankedFields.push(...itemFields.map((field) => `bills[${billIndex}].line_items[${lineIndex}].${field}`))
+      }
+      return cleaned
+    })
+
+    return { ...header.cleaned, line_items }
   })
 
   return {
-    cleaned: { ...header.cleaned, line_items },
+    cleaned: { ...extraction, bills },
     blankedFields,
   }
 }

@@ -35,6 +35,7 @@ import { ClaimBanner } from './claim-banner'
 import { ShortcutsOverlay } from './shortcuts-overlay'
 import { ExceptionDialog } from './exception-dialog'
 import { HubStatusDialog } from './hub-status-dialog'
+import { EntryAttachCombobox } from './entry-attach-combobox'
 
 function numToStr(v: string | number | null): string {
   return v === null || v === undefined ? '' : String(v)
@@ -89,7 +90,7 @@ export function ReviewWorkspace({
   nextId,
 }: {
   detail: ReviewDocumentDetail
-  queue: { sourceDocumentId: number }[]
+  queue: { documentExtractionId: number }[]
   currentIndex: number
   prevId: number | null
   nextId: number | null
@@ -164,6 +165,7 @@ export function ReviewWorkspace({
   function buildSavePayload(): SaveVerificationInput {
     return {
       sourceDocumentId: detail.sourceDocumentId,
+      documentExtractionId: detail.documentExtractionId,
       header: {
         vendor_name: header.vendorName.trim() || null,
         vendor_gstin: header.vendorGstin.trim() || null,
@@ -232,7 +234,9 @@ export function ReviewWorkspace({
         toast.error(json.error ?? 'Re-extraction failed.')
         return
       }
-      toast.success(`Re-extracted with ${json.model} -- ${json.lineItemCount} line item(s).`)
+      toast.success(
+        `Re-extracted with ${json.model} — ${json.lineItemCount} line item(s)${json.billCount > 1 ? ` across ${json.billCount} bill(s)` : ''}.`
+      )
       router.refresh()
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err))
@@ -416,7 +420,23 @@ export function ReviewWorkspace({
         <span className="text-xs text-muted-foreground">
           Document {currentIndex + 1} of {queue.length}
         </span>
+        {detail.billCount > 1 ? (
+          <span className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
+            Bill {detail.billIndex + 1} of {detail.billCount} in this PDF
+          </span>
+        ) : null}
       </div>
+
+      {detail.billCount > 1 ? (
+        <div className="flex flex-wrap items-center gap-2 rounded-md border border-border bg-background px-2 py-1.5">
+          <span className="text-xs text-muted-foreground">This bill&apos;s ledger match:</span>
+          <EntryAttachCombobox
+            documentExtractionId={detail.documentExtractionId}
+            entryDisplayLabel={detail.entryId !== null ? detail.entryUbblNumber : null}
+            onAttached={() => router.refresh()}
+          />
+        </div>
+      ) : null}
 
       <div className="grid min-h-0 flex-1 grid-cols-2 gap-3">
         <PdfViewer ref={pdfViewerRef} sourceDocumentId={detail.sourceDocumentId} pages={detail.pages} />

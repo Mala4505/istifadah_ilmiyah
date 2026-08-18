@@ -50,7 +50,7 @@ export default async function ReviewPage({
   const { data: queueRows, error: queueError } = await supabase
     .from('v_review_queue')
     .select(
-      'document_extraction_id, source_document_id, original_filename, extraction_confidence, max_open_severity_rank, open_issue_count, queue_amount'
+      'document_extraction_id, source_document_id, original_filename, extraction_confidence, max_open_severity_rank, open_issue_count, queue_amount, bill_index, page_number_start, page_number_end, bill_count'
     )
     .order('max_open_severity_rank', { ascending: false })
     .order('extraction_confidence', { ascending: true, nullsFirst: true })
@@ -71,6 +71,8 @@ export default async function ReviewPage({
     maxOpenSeverityRank: r.max_open_severity_rank as number,
     openIssueCount: r.open_issue_count as number,
     queueAmount: r.queue_amount as number | null,
+    billIndex: r.bill_index as number,
+    billCount: r.bill_count as number,
   }))
 
   if (queue.length === 0) {
@@ -91,35 +93,35 @@ export default async function ReviewPage({
   }
 
   const requestedId = idParam ? Number(idParam) : null
-  const currentIndex = requestedId !== null ? queue.findIndex((q) => q.sourceDocumentId === requestedId) : -1
+  const currentIndex = requestedId !== null ? queue.findIndex((q) => q.documentExtractionId === requestedId) : -1
 
   if (currentIndex === -1) {
     // No id, or a stale/invalid one (e.g. just-verified, or another
     // reviewer's bookmark) -- canonicalize to the top of the queue rather
     // than rendering nothing.
-    redirect(`/review?id=${queue[0]!.sourceDocumentId}`)
+    redirect(`/review?id=${queue[0]!.documentExtractionId}`)
   }
 
   const current = queue[currentIndex]!
-  const detail = await loadDocumentDetail(supabase, current.sourceDocumentId, current.documentExtractionId)
+  const detail = await loadDocumentDetail(supabase, current.sourceDocumentId, current.documentExtractionId, current.billCount)
 
   if (!detail) {
     // The document left the queue between the list query and the detail
     // query (verified by someone else in the last few hundred ms) -- redirect
     // rather than render a broken form.
-    redirect(`/review?id=${queue[currentIndex + 1]?.sourceDocumentId ?? queue[0]!.sourceDocumentId}`)
+    redirect(`/review?id=${queue[currentIndex + 1]?.documentExtractionId ?? queue[0]!.documentExtractionId}`)
   }
 
-  const prevId = queue[currentIndex - 1]?.sourceDocumentId ?? null
-  const nextId = queue[currentIndex + 1]?.sourceDocumentId ?? null
+  const prevId = queue[currentIndex - 1]?.documentExtractionId ?? null
+  const nextId = queue[currentIndex + 1]?.documentExtractionId ?? null
 
   return (
     <div className="flex h-[calc(100vh-3rem)] flex-col gap-3">
       <PageHeader position={currentIndex + 1} total={queue.length} />
       <ReviewWorkspace
-        key={`${detail.sourceDocumentId}:${detail.currentExtractionRunId ?? 'none'}`}
+        key={`${detail.documentExtractionId}:${detail.currentExtractionRunId ?? 'none'}`}
         detail={detail}
-        queue={queue.map((q) => ({ sourceDocumentId: q.sourceDocumentId }))}
+        queue={queue.map((q) => ({ documentExtractionId: q.documentExtractionId }))}
         currentIndex={currentIndex}
         prevId={prevId}
         nextId={nextId}
@@ -164,7 +166,8 @@ type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>
 async function loadDocumentDetail(
   supabase: SupabaseServerClient,
   sourceDocumentId: number,
-  documentExtractionId: number
+  documentExtractionId: number,
+  billCount: number
 ): Promise<ReviewDocumentDetail | null> {
   const {
     data: { user },
@@ -180,7 +183,7 @@ async function loadDocumentDetail(
     supabase
       .from('document_extraction')
       .select(
-        'id, current_extraction_run_id, verified_at, vendor_name_ocr, vendor_name_verified, vendor_gstin_ocr, vendor_gstin_verified, vendor_phone_ocr, vendor_phone_verified, vendor_email_ocr, vendor_email_verified, vendor_address_ocr, vendor_address_verified, invoice_number_ocr, invoice_number_verified, invoice_date_ocr, invoice_date_verified, subtotal_ocr, subtotal_verified, tax_amount_ocr, tax_amount_verified, total_amount_ocr, total_amount_verified, notes_ocr, notes_verified'
+        'id, current_extraction_run_id, verified_at, bill_index, page_number_start, page_number_end, vendor_name_ocr, vendor_name_verified, vendor_gstin_ocr, vendor_gstin_verified, vendor_phone_ocr, vendor_phone_verified, vendor_email_ocr, vendor_email_verified, vendor_address_ocr, vendor_address_verified, invoice_number_ocr, invoice_number_verified, invoice_date_ocr, invoice_date_verified, subtotal_ocr, subtotal_verified, tax_amount_ocr, tax_amount_verified, total_amount_ocr, total_amount_verified, notes_ocr, notes_verified'
       )
       .eq('id', documentExtractionId)
       .maybeSingle(),
@@ -294,6 +297,10 @@ async function loadDocumentDetail(
   return {
     sourceDocumentId,
     documentExtractionId,
+    billIndex: extraction.bill_index as number,
+    billCount,
+    pageNumberStart: extraction.page_number_start as number | null,
+    pageNumberEnd: extraction.page_number_end as number | null,
     originalFilename: sourceDoc.original_filename as string,
     matchStatus: sourceDoc.match_status as string,
     entryId,

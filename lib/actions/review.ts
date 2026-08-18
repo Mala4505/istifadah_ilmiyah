@@ -46,6 +46,7 @@ export interface VerifiedLineItemInput {
 
 export interface SaveVerificationInput {
   sourceDocumentId: number
+  documentExtractionId: number
   header: VerifiedHeaderInput
   lineItems: VerifiedLineItemInput[]
   vendorId: number | null
@@ -74,7 +75,7 @@ export async function saveVerification(input: SaveVerificationInput): Promise<Sa
 
   const { data, error } = await supabase
     .rpc('verify_document_extraction', {
-      p_source_document_id: input.sourceDocumentId,
+      p_document_extraction_id: input.documentExtractionId,
       p_header: input.header,
       p_line_items: input.lineItems,
       p_vendor_id: input.vendorId,
@@ -261,6 +262,42 @@ export async function flagReviewException(input: {
 
   revalidatePath('/review')
   revalidatePath('/exceptions')
+  return { ok: true }
+}
+
+/**
+ * Attaches a single bill (`document_extraction` row) to its ledger entry --
+ * the per-bill counterpart to attachDocumentToEntry
+ * (lib/actions/documents.ts), which stays whole-document. Only meaningful
+ * once a source_document produces more than one bill (Phase 2, plan.md
+ * §3): single-bill documents keep matching via source_document.entry_id
+ * through the existing document-inbox flow, untouched.
+ */
+export async function attachExtractionToEntry(input: {
+  documentExtractionId: number
+  entryId: number
+}): Promise<SimpleActionResult> {
+  if (!Number.isInteger(input.documentExtractionId) || !Number.isInteger(input.entryId)) {
+    return { ok: false, error: 'Invalid document extraction or entry id.' }
+  }
+
+  const supabase = await createClient()
+  const { data, error } = await supabase
+    .from('document_extraction')
+    .update({ entry_id: input.entryId })
+    .eq('id', input.documentExtractionId)
+    .select('id')
+
+  if (error) return { ok: false, error: error.message }
+  if (!data || data.length === 0) {
+    return {
+      ok: false,
+      error:
+        'No document extraction was updated. This usually means a viewer role (reviewer/admin required), or the document is no longer visible to you.',
+    }
+  }
+
+  revalidatePath('/review')
   return { ok: true }
 }
 

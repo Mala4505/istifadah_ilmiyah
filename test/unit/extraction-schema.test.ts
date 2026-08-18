@@ -5,6 +5,7 @@ import {
   extractionToolInputSchema,
   INSTRUMENT_TYPES,
   sanitizeExtractionResponse,
+  type ExtractionBill,
   type ExtractionResponse,
 } from '@/lib/extraction-schema'
 
@@ -12,9 +13,15 @@ import {
  * Base wire-shaped payload: every field present, matching what
  * `extractionToolInputSchema` (`strict: true`) actually sends back — text
  * fields are plain strings (`""` for absent, never `null`), numbers are
- * `number | null`. Individual tests override only what they're exercising.
+ * `number | null`. `bills[]` (Phase 2) replaces the old flat header fields +
+ * top-level `line_items[]`; one bill is present by default.
+ *
+ * `rootOverrides` merges into the response root (pages, legibility, ... and,
+ * if a test wants to replace `bills` wholesale, `bills` itself).
+ * `billOverrides` merges into `bills[0]` — the common case of exercising one
+ * header field or `line_items` without having to restate the whole bill.
  */
-function baseInput(overrides: Record<string, unknown> = {}) {
+function baseInput(rootOverrides: Record<string, unknown> = {}, billOverrides: Record<string, unknown> = {}) {
   return {
     pages: [
       {
@@ -27,84 +34,154 @@ function baseInput(overrides: Record<string, unknown> = {}) {
     legibility: 'clear',
     extraction_confidence: 0.9,
     contains_non_latin_script: false,
-    instrument_type: 'tax_invoice',
-    vendor_name: 'Adinath Furniture Pvt Ltd',
-    vendor_gstin: '24AAKCA3560A1Z7',
-    vendor_phone: '',
-    vendor_email: '',
-    vendor_address: '',
-    invoice_number: 'AFPL/SOS/TI/65',
-    invoice_date: '13/08/2025',
-    place_of_supply: 'Maharashtra',
-    subtotal: 3000,
-    cgst_amount: null,
-    sgst_amount: null,
-    igst_amount: 540,
-    tax_amount: 540,
-    round_off: null,
-    total_amount: 3540,
-    notes: '',
-    line_items: [],
-    ...overrides,
+    bills: [
+      {
+        page_number_start: 1,
+        page_number_end: 1,
+        instrument_type: 'tax_invoice',
+        vendor_name: 'Adinath Furniture Pvt Ltd',
+        vendor_gstin: '24AAKCA3560A1Z7',
+        vendor_phone: '',
+        vendor_email: '',
+        vendor_address: '',
+        invoice_number: 'AFPL/SOS/TI/65',
+        invoice_date: '13/08/2025',
+        place_of_supply: 'Maharashtra',
+        subtotal: 3000,
+        cgst_amount: null,
+        sgst_amount: null,
+        igst_amount: 540,
+        tax_amount: 540,
+        round_off: null,
+        total_amount: 3540,
+        notes: '',
+        line_items: [],
+        ...billOverrides,
+      },
+    ],
+    ...rootOverrides,
   }
 }
 
 describe('extractionResponseSchema — new fields round-trip', () => {
   it.each(INSTRUMENT_TYPES)('accepts %s as a valid instrument_type', (value) => {
-    const parsed = extractionResponseSchema.parse(baseInput({ instrument_type: value }))
-    expect(parsed.instrument_type).toBe(value)
+    const parsed = extractionResponseSchema.parse(baseInput({}, { instrument_type: value }))
+    expect(parsed.bills[0]!.instrument_type).toBe(value)
   })
 
   it('maps an unrecognized non-empty instrument_type to "other"', () => {
-    const parsed = extractionResponseSchema.parse(baseInput({ instrument_type: 'credit_note' }))
-    expect(parsed.instrument_type).toBe('other')
+    const parsed = extractionResponseSchema.parse(baseInput({}, { instrument_type: 'credit_note' }))
+    expect(parsed.bills[0]!.instrument_type).toBe('other')
   })
 
   it('maps an empty-string instrument_type to null (absent, not classified)', () => {
-    const parsed = extractionResponseSchema.parse(baseInput({ instrument_type: '' }))
-    expect(parsed.instrument_type).toBeNull()
+    const parsed = extractionResponseSchema.parse(baseInput({}, { instrument_type: '' }))
+    expect(parsed.bills[0]!.instrument_type).toBeNull()
   })
 
   it('trims whitespace before matching instrument_type', () => {
-    const parsed = extractionResponseSchema.parse(baseInput({ instrument_type: '  bill_of_supply  ' }))
-    expect(parsed.instrument_type).toBe('bill_of_supply')
+    const parsed = extractionResponseSchema.parse(baseInput({}, { instrument_type: '  bill_of_supply  ' }))
+    expect(parsed.bills[0]!.instrument_type).toBe('bill_of_supply')
   })
 
   it('round-trips place_of_supply as text, empty string becomes null', () => {
-    const withValue = extractionResponseSchema.parse(baseInput({ place_of_supply: '27' }))
-    expect(withValue.place_of_supply).toBe('27')
+    const withValue = extractionResponseSchema.parse(baseInput({}, { place_of_supply: '27' }))
+    expect(withValue.bills[0]!.place_of_supply).toBe('27')
 
-    const absent = extractionResponseSchema.parse(baseInput({ place_of_supply: '' }))
-    expect(absent.place_of_supply).toBeNull()
+    const absent = extractionResponseSchema.parse(baseInput({}, { place_of_supply: '' }))
+    expect(absent.bills[0]!.place_of_supply).toBeNull()
   })
 
   it('round-trips round_off, including the legitimate 0 value', () => {
-    const zero = extractionResponseSchema.parse(baseInput({ round_off: 0 }))
-    expect(zero.round_off).toBe(0)
+    const zero = extractionResponseSchema.parse(baseInput({}, { round_off: 0 }))
+    expect(zero.bills[0]!.round_off).toBe(0)
 
-    const negative = extractionResponseSchema.parse(baseInput({ round_off: -0.4 }))
-    expect(negative.round_off).toBe(-0.4)
+    const negative = extractionResponseSchema.parse(baseInput({}, { round_off: -0.4 }))
+    expect(negative.bills[0]!.round_off).toBe(-0.4)
 
-    const absent = extractionResponseSchema.parse(baseInput({ round_off: null }))
-    expect(absent.round_off).toBeNull()
+    const absent = extractionResponseSchema.parse(baseInput({}, { round_off: null }))
+    expect(absent.bills[0]!.round_off).toBeNull()
   })
 
   it('round-trips cgst_amount/sgst_amount/igst_amount independently', () => {
     const parsed = extractionResponseSchema.parse(
-      baseInput({ cgst_amount: 270, sgst_amount: 270, igst_amount: null })
+      baseInput({}, { cgst_amount: 270, sgst_amount: 270, igst_amount: null })
     )
-    expect(parsed.cgst_amount).toBe(270)
-    expect(parsed.sgst_amount).toBe(270)
-    expect(parsed.igst_amount).toBeNull()
+    expect(parsed.bills[0]!.cgst_amount).toBe(270)
+    expect(parsed.bills[0]!.sgst_amount).toBe(270)
+    expect(parsed.bills[0]!.igst_amount).toBeNull()
+  })
+
+  it('accepts multiple bills, each with its own page range and header fields', () => {
+    const parsed = extractionResponseSchema.parse(
+      baseInput({
+        bills: [
+          {
+            page_number_start: 1,
+            page_number_end: 2,
+            instrument_type: 'tax_invoice',
+            vendor_name: 'Vendor One',
+            vendor_gstin: '',
+            vendor_phone: '',
+            vendor_email: '',
+            vendor_address: '',
+            invoice_number: 'INV-1',
+            invoice_date: '',
+            place_of_supply: '',
+            subtotal: 1000,
+            cgst_amount: null,
+            sgst_amount: null,
+            igst_amount: null,
+            tax_amount: null,
+            round_off: null,
+            total_amount: 1000,
+            notes: '',
+            line_items: [],
+          },
+          {
+            page_number_start: 3,
+            page_number_end: 3,
+            instrument_type: 'retail_cash_memo',
+            vendor_name: 'Vendor Two',
+            vendor_gstin: '',
+            vendor_phone: '',
+            vendor_email: '',
+            vendor_address: '',
+            invoice_number: 'INV-2',
+            invoice_date: '',
+            place_of_supply: '',
+            subtotal: 500,
+            cgst_amount: null,
+            sgst_amount: null,
+            igst_amount: null,
+            tax_amount: null,
+            round_off: null,
+            total_amount: 500,
+            notes: '',
+            line_items: [],
+          },
+        ],
+      })
+    )
+    expect(parsed.bills).toHaveLength(2)
+    expect(parsed.bills[0]!.vendor_name).toBe('Vendor One')
+    expect(parsed.bills[0]!.page_number_start).toBe(1)
+    expect(parsed.bills[0]!.page_number_end).toBe(2)
+    expect(parsed.bills[1]!.vendor_name).toBe('Vendor Two')
+    expect(parsed.bills[1]!.page_number_start).toBe(3)
+  })
+
+  it('rejects an empty bills array', () => {
+    expect(() => extractionResponseSchema.parse(baseInput({ bills: [] }))).toThrow()
   })
 })
 
 describe('buildTaxBreakdown', () => {
-  function extraction(overrides: Partial<ExtractionResponse> = {}): ExtractionResponse {
-    return {
-      ...extractionResponseSchema.parse(baseInput({ cgst_amount: null, sgst_amount: null, igst_amount: null })),
-      ...overrides,
-    }
+  function extraction(overrides: Partial<ExtractionBill> = {}): ExtractionBill {
+    const bill = extractionResponseSchema.parse(
+      baseInput({}, { cgst_amount: null, sgst_amount: null, igst_amount: null })
+    ).bills[0]!
+    return { ...bill, ...overrides }
   }
 
   it('returns null when none of the three components were extracted', () => {
@@ -153,26 +230,29 @@ describe('sanitizeExtractionResponse — leaked tool-call tag syntax backstop (�
     lineItemOverrides: Record<string, unknown> = {}
   ): ExtractionResponse {
     return extractionResponseSchema.parse(
-      baseInput({
-        ...headerOverrides,
-        line_items: [
-          {
-            page_number: 1,
-            line_order: 0,
-            description: 'Chairs x4',
-            hsn_sac_code: '9401',
-            quantity: 4,
-            quantity_raw_text: '4 nos',
-            unit: 'NOS',
-            list_rate: 500,
-            discount_pct: 0,
-            discount_note: '',
-            net_rate: 500,
-            line_amount: 2000,
-            ...lineItemOverrides,
-          },
-        ],
-      })
+      baseInput(
+        {},
+        {
+          ...headerOverrides,
+          line_items: [
+            {
+              page_number: 1,
+              line_order: 0,
+              description: 'Chairs x4',
+              hsn_sac_code: '9401',
+              quantity: 4,
+              quantity_raw_text: '4 nos',
+              unit: 'NOS',
+              list_rate: 500,
+              discount_pct: 0,
+              discount_note: '',
+              net_rate: 500,
+              line_amount: 2000,
+              ...lineItemOverrides,
+            },
+          ],
+        }
+      )
     )
   }
 
@@ -186,27 +266,27 @@ describe('sanitizeExtractionResponse — leaked tool-call tag syntax backstop (�
   it('blanks a header field containing leaked tool-call tag syntax', () => {
     const extraction = extractionWithLineItems({ vendor_gstin: LEAKED_TAG_EXAMPLE })
     const { cleaned, blankedFields } = sanitizeExtractionResponse(extraction)
-    expect(cleaned.vendor_gstin).toBeNull()
-    expect(blankedFields).toEqual(['vendor_gstin'])
+    expect(cleaned.bills[0]?.vendor_gstin).toBeNull()
+    expect(blankedFields).toEqual(['bills[0].vendor_gstin'])
     // Everything else on the header is untouched, not just vendor_gstin.
-    expect(cleaned.vendor_name).toBe(extraction.vendor_name)
-    expect(cleaned.invoice_number).toBe(extraction.invoice_number)
+    expect(cleaned.bills[0]?.vendor_name).toBe(extraction.bills[0]?.vendor_name)
+    expect(cleaned.bills[0]?.invoice_number).toBe(extraction.bills[0]?.invoice_number)
   })
 
-  it('blanks a line-item field containing leaked tag syntax, tagged by index', () => {
+  it('blanks a line-item field containing leaked tag syntax, tagged by bill and line index', () => {
     const extraction = extractionWithLineItems({}, { description: 'Chairs <parameter name="foo">' })
     const { cleaned, blankedFields } = sanitizeExtractionResponse(extraction)
-    expect(cleaned.line_items[0]?.description).toBeNull()
-    expect(blankedFields).toEqual(['line_items[0].description'])
+    expect(cleaned.bills[0]?.line_items[0]?.description).toBeNull()
+    expect(blankedFields).toEqual(['bills[0].line_items[0].description'])
     // The rest of the line item survives untouched.
-    expect(cleaned.line_items[0]?.hsn_sac_code).toBe('9401')
-    expect(cleaned.line_items[0]?.line_amount).toBe(2000)
+    expect(cleaned.bills[0]?.line_items[0]?.hsn_sac_code).toBe('9401')
+    expect(cleaned.bills[0]?.line_items[0]?.line_amount).toBe(2000)
   })
 
   it('reports every blanked field across header and line items in one call', () => {
     const extraction = extractionWithLineItems({ vendor_phone: '<foo>' }, { discount_note: '</bar>' })
     const { blankedFields } = sanitizeExtractionResponse(extraction)
-    expect(blankedFields).toEqual(['vendor_phone', 'line_items[0].discount_note'])
+    expect(blankedFields).toEqual(['bills[0].vendor_phone', 'bills[0].line_items[0].discount_note'])
   })
 
   it('does not flag a bare angle bracket that is not tag-shaped', () => {
@@ -215,7 +295,7 @@ describe('sanitizeExtractionResponse — leaked tool-call tag syntax backstop (�
     const extraction = extractionWithLineItems({ notes: 'Item < 5kg, price > 100' })
     const { cleaned, blankedFields } = sanitizeExtractionResponse(extraction)
     expect(blankedFields).toEqual([])
-    expect(cleaned.notes).toBe('Item < 5kg, price > 100')
+    expect(cleaned.bills[0]?.notes).toBe('Item < 5kg, price > 100')
   })
 
   it.each([
@@ -231,9 +311,70 @@ describe('sanitizeExtractionResponse — leaked tool-call tag syntax backstop (�
       const extraction = extractionWithLineItems({}, { discount_note: text })
       const { cleaned, blankedFields } = sanitizeExtractionResponse(extraction)
       expect(blankedFields).toEqual([])
-      expect(cleaned.line_items[0]?.discount_note).toBe(text)
+      expect(cleaned.bills[0]?.line_items[0]?.discount_note).toBe(text)
     }
   )
+
+  it('scopes blanked-field names to the right bill in a multi-bill document', () => {
+    const parsed = extractionResponseSchema.parse(
+      baseInput({
+        pages: [
+          { page_number: 1, is_financial_document: true, skip_reason: null, classification_confidence: 0.95 },
+          { page_number: 2, is_financial_document: true, skip_reason: null, classification_confidence: 0.95 },
+        ],
+        bills: [
+          {
+            page_number_start: 1,
+            page_number_end: 1,
+            instrument_type: 'tax_invoice',
+            vendor_name: 'Vendor One',
+            vendor_gstin: '',
+            vendor_phone: '',
+            vendor_email: '',
+            vendor_address: '',
+            invoice_number: 'INV-1',
+            invoice_date: '',
+            place_of_supply: '',
+            subtotal: null,
+            cgst_amount: null,
+            sgst_amount: null,
+            igst_amount: null,
+            tax_amount: null,
+            round_off: null,
+            total_amount: null,
+            notes: '',
+            line_items: [],
+          },
+          {
+            page_number_start: 2,
+            page_number_end: 2,
+            instrument_type: 'tax_invoice',
+            vendor_name: 'Vendor Two',
+            vendor_gstin: LEAKED_TAG_EXAMPLE,
+            vendor_phone: '',
+            vendor_email: '',
+            vendor_address: '',
+            invoice_number: 'INV-2',
+            invoice_date: '',
+            place_of_supply: '',
+            subtotal: null,
+            cgst_amount: null,
+            sgst_amount: null,
+            igst_amount: null,
+            tax_amount: null,
+            round_off: null,
+            total_amount: null,
+            notes: '',
+            line_items: [],
+          },
+        ],
+      })
+    )
+    const { cleaned, blankedFields } = sanitizeExtractionResponse(parsed)
+    expect(blankedFields).toEqual(['bills[1].vendor_gstin'])
+    expect(cleaned.bills[0]?.vendor_gstin).toBe(parsed.bills[0]?.vendor_gstin)
+    expect(cleaned.bills[1]?.vendor_gstin).toBeNull()
+  })
 })
 
 describe('extractionToolInputSchema — union-type parameter budget', () => {
@@ -274,11 +415,15 @@ describe('extractionToolInputSchema — union-type parameter budget', () => {
     expect(count).toBeLessThanOrEqual(16)
   })
 
-  it('the four new fields (round_off, cgst/sgst/igst_amount) are exactly 4 new union parameters', () => {
-    // Pre-existing count, from before this change: subtotal, tax_amount,
-    // total_amount, skip_reason, quantity, list_rate, discount_pct, net_rate,
-    // line_amount = 9. New: round_off, cgst_amount, sgst_amount, igst_amount = 4.
-    // instrument_type and place_of_supply are plain (non-union) strings and add none.
+  it('moving header fields under bills.items.properties does not add new union parameters', () => {
+    // Pre-existing count, unchanged by the Phase 2 bills[] move: skip_reason
+    // (pages.items) = 1; subtotal, tax_amount, total_amount, cgst_amount,
+    // sgst_amount, igst_amount, round_off (bills.items) = 7; quantity,
+    // list_rate, discount_pct, net_rate, line_amount (bills.items.line_items.items)
+    // = 5. Total 13 — same total as before the move, since instrument_type,
+    // vendor_*, invoice_number, invoice_date, place_of_supply, notes stay
+    // plain (non-union) strings and page_number_start/page_number_end are
+    // plain integers, none of which were ever union-typed.
     const count = countUnionTypedProperties(extractionToolInputSchema)
     expect(count).toBe(13)
   })

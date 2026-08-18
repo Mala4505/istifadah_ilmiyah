@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import * as Sentry from '@sentry/nextjs'
 import { serverEnv } from '@/lib/env.server'
-import { claimNextJob, failJob, type JobQueueRow } from '@/lib/jobs/queue'
+import { claimNextJob, failJob, sweepJobQueue, type JobQueueRow } from '@/lib/jobs/queue'
 import { getStaffContext } from '@/lib/export/auth'
 
 /**
@@ -51,7 +51,8 @@ async function dispatch(job: JobQueueRow): Promise<'handled' | 'skipped'> {
     default:
       // No handler wired yet (generate_export, rasterize_retry). Marking the
       // job failed would be a lie about a handler that was never attempted,
-      // so it is left running for the sweeper to reclaim (§3.11).
+      // so it is left running for sweepJobQueue() to reclaim (plan.md Phase
+      // 3 I15, 20260817000007_sweep_job_queue.sql) once it goes stale.
       return 'skipped'
   }
 }
@@ -92,6 +93,20 @@ async function drain(request: NextRequest) {
   let skipped = 0
   const errors: string[] = []
 
+  // Vercel Cron already runs this route on a schedule, and this repo has no
+  // separate cron config to add a new schedule to — piggyback the sweep here
+  // (plan.md Phase 3 I15) rather than invent one. Run once per tick, before
+  // the claim loop, so a job the sweep just reclaimed can be picked up by
+  // this same drain instead of waiting for the next cron invocation.
+  let sweep: { reclaimedCount: number; deadenedCount: number; purgedCount: number } | null = null
+  try {
+    sweep = await sweepJobQueue()
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    errors.push(`sweep: ${message}`)
+    Sentry.captureException(err, { tags: { job_type: 'tick', phase: 'sweep' } })
+  }
+
   while (Date.now() < deadline) {
     let job: JobQueueRow | null
     try {
@@ -124,7 +139,7 @@ async function drain(request: NextRequest) {
     }
   }
 
-  return NextResponse.json({ ok: true, workerId, claimed, handled, skipped, errors })
+  return NextResponse.json({ ok: true, workerId, sweep, claimed, handled, skipped, errors })
 }
 
 export const POST = drain

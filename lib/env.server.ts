@@ -61,6 +61,26 @@ const serverSchema = z.object({
     .optional()
     .default('false')
     .transform((v) => v === 'true'),
+  // Whether the queue-driven initial extraction (handleExtractDocument,
+  // lib/jobs/handlers/extract.ts) submits to Anthropic's Batch API instead of
+  // calling the synchronous Messages API in-process (plan.md Phase 3 I16).
+  // Default OFF, same idiom as OCR_AUTO_ESCALATION above.
+  //
+  // The Batch API halves per-page cost (estimateCostUsd's `batched` discount,
+  // lib/claude-client.ts) but trades latency for it: a batch can take up to
+  // 24h to finish processing, vs. seconds synchronously. Flipping this on
+  // changes ONLY the queue-driven initial-extraction path -- extractAndPersist
+  // itself (used by the manual "Re-extract with Sonnet" button and
+  // test/score.ts's accuracy harness) is untouched by this flag and always
+  // stays synchronous, so OCR_USE_BATCH_API=false (the default) reproduces
+  // today's behavior exactly. See the design-decision comments on
+  // submitExtractionBatchAndEnqueuePoll (lib/jobs/handlers/extract.ts) for
+  // why the batch path does not chain auto-escalation.
+  OCR_USE_BATCH_API: z
+    .string()
+    .optional()
+    .default('false')
+    .transform((v) => v === 'true'),
 })
 
 function readServerEnv() {
@@ -80,6 +100,7 @@ function readServerEnv() {
     ITS_LOGIN_EMAIL_DOMAIN: process.env.ITS_LOGIN_EMAIL_DOMAIN,
     COMMUNITY_GSTIN: process.env.COMMUNITY_GSTIN,
     OCR_AUTO_ESCALATION: process.env.OCR_AUTO_ESCALATION,
+    OCR_USE_BATCH_API: process.env.OCR_USE_BATCH_API,
   })
   if (!parsed.success) {
     throw new Error(

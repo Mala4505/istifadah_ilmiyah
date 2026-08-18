@@ -127,13 +127,23 @@ export interface ExtractDocumentResult {
  * were previously landing in the retry path. It also leaves room for Sonnet's
  * adaptive thinking on the manual re-escalation path: `max_tokens` caps
  * thinking *and* response text together, and `claude-sonnet-5` runs adaptive
- * thinking by default when no `thinking` parameter is set (which this SDK pin
- * cannot express — see the PdfDocumentBlockParam note above). Under the old
+ * thinking by default when no `thinking` parameter is set. That parameter is
+ * deliberately left unset rather than `{ type: 'disabled' }`: disabling
+ * thinking on a Claude 5-generation model carries two documented failure
+ * modes — tool calls occasionally emitted as plain assistant text instead of
+ * a real tool_use block, and internal <thinking> content leaking into field
+ * values (the leaked-tag syntax `sanitizeLeakedTagSyntax` guards against).
+ * Raising max_tokens fixes the truncation without either risk. Under the old
  * 2,000 cap, Sonnet spent part of the budget thinking and then truncated the
  * tool call mid-JSON, which is why escalation so often returned partial data.
  * The retry at 8,000 stays as the backstop for genuine outliers.
+ *
+ * Exported (not just used internally) so the Batch API submission path
+ * (plan.md Phase 3 I16, submitExtractionBatch below and
+ * lib/jobs/handlers/extract.ts's submitExtractionBatchAndEnqueuePoll) uses
+ * the exact same default rather than a second hard-coded copy of "4000".
  */
-const EXTRACTION_MAX_TOKENS = 4000
+export const EXTRACTION_MAX_TOKENS = 4000
 
 /**
  * Builds the system prompt, optionally appending an own-GSTIN exclusion rule
@@ -151,10 +161,10 @@ function buildSystemPrompt(communityGstin: string | null): string {
     'the same batch) — classify every page first via the tool schema before extracting anything from it. ' +
     'A line-item table may continue across a page break, so treat continuation pages as part of the bill ' +
     'they belong to. Note that a batch scan may contain SEVERAL SEPARATE BILLS from different vendors: a ' +
-    'new vendor header, invoice number, and total starting on a later page is a NEW bill, not a ' +
-    'continuation of the previous one. The schema currently has room for only one bill\'s header fields — ' +
-    'fill them from the FIRST bill in the document, and record each additional bill\'s vendor, invoice ' +
-    'number, date and total in `notes` so a reviewer can see what else the document contains. Never ' +
+    'new vendor header, invoice number, and total starting on a later page is a NEW bill — extract it as ' +
+    'its own entry in `bills[]`, never folded into `notes` and never merged with the previous bill\'s ' +
+    'line items. Give each bill entry the page_number_start/page_number_end its own header and totals ' +
+    'were read from. Never ' +
     'fabricate a value — for anything illegible or genuinely absent use an empty string in a text field ' +
     'and null in a numeric field, and reflect uncertainty via the confidence fields rather than guessing. ' +
     'Every field value must be plain text transcribed from the document — never emit tag-like syntax ' +
@@ -172,48 +182,17 @@ function buildSystemPrompt(communityGstin: string | null): string {
   )
 }
 
-// TODO Phase 1B: Batch API path — this file intentionally implements only the
-// single-request `extractDocument` call for today (MASTER-PLAN §8 points 3-4).
-// The Batch API wrapper (submit, poll by custom_id, never by position — §8
-// point 8) belongs in lib/jobs/handlers/batch-poll.ts once the job-queue SQL
-// function exists.
-
-/**
- * The wire shape of a base64 PDF `document` content block.
- *
- * Hand-written rather than imported: @anthropic-ai/sdk is pinned at 0.32.1
- * here, which predates PDF support being GA, so `ContentBlockParam` has no
- * `document` member to import. The block below is the documented GA wire
- * format and needs no beta header — the SDK serialises `content` straight to
- * JSON, so the cast at the call site is a typing gap, not a protocol one.
- * Delete this and import the SDK's own type whenever the pin moves.
- */
-interface PdfDocumentBlockParam {
-  type: 'document'
-  source: { type: 'base64'; media_type: 'application/pdf'; data: string }
-}
-
 /** What this SDK version accepts inside a user turn's `content` array. */
-type UserContentBlockParam = Anthropic.ImageBlockParam | Anthropic.TextBlockParam
+type UserContentBlockParam = Anthropic.ImageBlockParam | Anthropic.TextBlockParam | Anthropic.DocumentBlockParam
 
 function buildPdfBlock(data: string): UserContentBlockParam {
-  const block: PdfDocumentBlockParam = {
+  return {
     type: 'document',
     source: { type: 'base64', media_type: 'application/pdf', data },
   }
-  return block as unknown as UserContentBlockParam
 }
 
 /**
- * Same hand-typed-cast pattern as `PdfDocumentBlockParam` above: this SDK
- * version (0.32.1) predates typed `cache_control` support on the non-beta
- * `client.messages` surface (it only exists on `client.beta.messages`'
- * request types) — but prompt caching itself is GA on the wire, so the field
- * is accepted by the API with no beta header regardless of which client
- * surface sent it. Casting the request body, as buildPdfBlock already does
- * for the `document` content block, avoids taking on the beta response type
- * (`Anthropic.Beta.BetaMessage`) throughout this file just to set one field.
- *
  * The system prompt (buildSystemPrompt below) and the extraction tool
  * schema (buildExtractionTool, lib/extraction-schema.ts) are both identical
  * on every call — only the per-document PDF/image content varies. Render
@@ -222,56 +201,32 @@ function buildPdfBlock(data: string): UserContentBlockParam {
  * prompt together; every subsequent extraction call within the 5-minute TTL
  * reads that ~90% cheaper instead of paying full price for it again.
  */
-interface CachedSystemBlockParam {
-  type: 'text'
-  text: string
-  cache_control: { type: 'ephemeral' }
-}
-
-function buildCachedSystemPrompt(communityGstin: string | null): string {
-  const block: CachedSystemBlockParam = {
-    type: 'text',
-    text: buildSystemPrompt(communityGstin),
-    cache_control: { type: 'ephemeral' },
-  }
-  return [block] as unknown as string
+function buildCachedSystemPrompt(communityGstin: string | null): Anthropic.TextBlockParam[] {
+  return [
+    {
+      type: 'text',
+      text: buildSystemPrompt(communityGstin),
+      cache_control: { type: 'ephemeral' },
+    },
+  ]
 }
 
 /**
- * Runs one Claude extraction call for one document — every page in a single
- * message, either as image blocks or as one PDF block (§8 point 3). Throws a
- * clear error instead of attempting the call when no real API key is
- * configured.
+ * Builds the `client.messages.create` request body shared by the synchronous
+ * path (`extractDocument` below) and the Batch API submission path
+ * (`submitExtractionBatch` below, plan.md Phase 3 I16) — same system prompt,
+ * same tool, same tool_choice; only the source content blocks and per-call
+ * model/max_tokens vary. `MessageCreateParamsNonStreaming` is exactly the
+ * shape `BatchCreateParams.Request.params` expects (see batches.d.ts), so
+ * this one function is reused for both call shapes rather than kept in sync
+ * by hand in two places.
  */
-export async function extractDocument(params: ExtractDocumentParams): Promise<ExtractDocumentResult> {
-  if (!hasAnthropicKey) {
-    throw new Error('ANTHROPIC_API_KEY not set — see MASTER-PLAN §6.4')
-  }
-
-  const hasImages = (params.documentImages?.length ?? 0) > 0
-  const hasPdf = Boolean(params.documentPdf)
-  if (hasImages && hasPdf) {
-    throw new TypeError('extractDocument: pass documentImages or documentPdf, not both')
-  }
-  if (!hasImages && !hasPdf) {
-    throw new TypeError('extractDocument: documentImages must contain at least one page, or documentPdf must be set')
-  }
-
-  const model = params.model ?? MODELS.haiku
-  const client = new Anthropic({ apiKey: serverEnv.ANTHROPIC_API_KEY })
+function buildExtractionRequestParams(params: {
+  sourceBlocks: UserContentBlockParam[]
+  model: ModelId
+  maxTokens: number
+}): Anthropic.MessageCreateParamsNonStreaming {
   const tool = buildExtractionTool()
-
-  const sourceBlocks: UserContentBlockParam[] = hasPdf
-    ? [buildPdfBlock(params.documentPdf!.data)]
-    : (params.documentImages ?? []).map((image) => ({
-        type: 'image',
-        source: {
-          type: 'base64',
-          media_type: image.mediaType,
-          data: image.data,
-        },
-      }))
-
   const textBlock: Anthropic.TextBlockParam = {
     type: 'text',
     text:
@@ -279,22 +234,44 @@ export async function extractDocument(params: ExtractDocumentParams): Promise<Ex
       'in order) using the record_document_extraction tool.',
   }
 
-  const maxTokens = params.maxTokens ?? EXTRACTION_MAX_TOKENS
-
-  const response = await client.messages.create({
-    model,
-    max_tokens: maxTokens,
+  return {
+    model: params.model,
+    max_tokens: params.maxTokens,
     system: buildCachedSystemPrompt(serverEnv.COMMUNITY_GSTIN || null),
-    tools: [tool],
+    // `tool` is built from `extractionToolInputSchema`'s `as const` literal
+    // (lib/extraction-schema.ts), whose `required` arrays are readonly
+    // tuples; the SDK's `Tool.InputSchema.required` is typed as a mutable
+    // `string[]`. That's a TS array-variance formality — the wire shapes are
+    // identical, and JSON.stringify does not care about readonly — not a
+    // missing-type gap like the casts this file used to carry, so it is not
+    // worth widening `required` throughout the schema file to avoid it.
+    tools: [tool as unknown as Anthropic.Tool],
     tool_choice: { type: 'tool', name: EXTRACTION_TOOL_NAME },
     messages: [
       {
         role: 'user',
-        content: [...sourceBlocks, textBlock],
+        content: [...params.sourceBlocks, textBlock],
       },
     ],
-  })
+  }
+}
 
+/**
+ * Turns one `Anthropic.Message` (a completed, non-streaming response) into
+ * the same `ExtractDocumentResult` shape regardless of whether it arrived
+ * synchronously from `client.messages.create` or asynchronously from a
+ * Batch API result (plan.md Phase 3 I16) — a `MessageBatchSucceededResult`'s
+ * `.message` field is typed as exactly this same `Anthropic.Message`, so one
+ * parse/validate/cost path covers both. `batched` selects the 50% Batch API
+ * discount in `estimateCostUsd` (see its own doc comment) — the only thing
+ * that differs between the two call shapes once a `Message` is in hand.
+ */
+function parseExtractionMessage(
+  response: Anthropic.Message,
+  model: ModelId,
+  maxTokens: number,
+  batched: boolean
+): ExtractDocumentResult {
   // Check truncation before parsing: a cut-off tool call fails Zod with a
   // missing-field error that says nothing about the real cause.
   if (response.stop_reason === 'max_tokens') {
@@ -319,10 +296,203 @@ export async function extractDocument(params: ExtractDocumentParams): Promise<Ex
       inputTokens: response.usage.input_tokens,
       outputTokens: response.usage.output_tokens,
     },
-    costUsd: estimateCostUsd(model, response.usage.input_tokens, response.usage.output_tokens),
+    costUsd: estimateCostUsd(model, response.usage.input_tokens, response.usage.output_tokens, batched),
     rawResponse: response,
   }
 }
+
+/**
+ * Runs one Claude extraction call for one document — every page in a single
+ * message, either as image blocks or as one PDF block (§8 point 3). Throws a
+ * clear error instead of attempting the call when no real API key is
+ * configured.
+ */
+export async function extractDocument(params: ExtractDocumentParams): Promise<ExtractDocumentResult> {
+  if (!hasAnthropicKey) {
+    throw new Error('ANTHROPIC_API_KEY not set — see MASTER-PLAN §6.4')
+  }
+
+  const hasImages = (params.documentImages?.length ?? 0) > 0
+  const hasPdf = Boolean(params.documentPdf)
+  if (hasImages && hasPdf) {
+    throw new TypeError('extractDocument: pass documentImages or documentPdf, not both')
+  }
+  if (!hasImages && !hasPdf) {
+    throw new TypeError('extractDocument: documentImages must contain at least one page, or documentPdf must be set')
+  }
+
+  const model = params.model ?? MODELS.haiku
+  const client = new Anthropic({ apiKey: serverEnv.ANTHROPIC_API_KEY })
+
+  const sourceBlocks: UserContentBlockParam[] = hasPdf
+    ? [buildPdfBlock(params.documentPdf!.data)]
+    : (params.documentImages ?? []).map((image) => ({
+        type: 'image',
+        source: {
+          type: 'base64',
+          media_type: image.mediaType,
+          data: image.data,
+        },
+      }))
+
+  const maxTokens = params.maxTokens ?? EXTRACTION_MAX_TOKENS
+
+  const response = await client.messages.create(
+    buildExtractionRequestParams({ sourceBlocks, model, maxTokens })
+  )
+
+  return parseExtractionMessage(response, model, maxTokens, false)
+}
+
+// ---------------------------------------------------------------------------
+// Batch API (plan.md Phase 3 I16) — same request shape as extractDocument
+// above, submitted asynchronously at a 50% cost discount. Opt-in via
+// OCR_USE_BATCH_API (lib/env.server.ts, default false); the only caller is
+// lib/jobs/handlers/extract.ts's submitExtractionBatchAndEnqueuePoll, and the
+// only consumer of results is lib/jobs/handlers/batch-poll.ts. Server-side
+// only (documentPdf, not documentImages) — batch submission always runs from
+// the queue-driven ingest path, which already has the PDF bytes in hand the
+// same way extractAndPersist does, never from a browser.
+// ---------------------------------------------------------------------------
+
+/** One request to submit as part of a Batch API call. */
+export interface BatchSubmitRequest {
+  /** Unique within this batch; see buildExtractionBatchCustomId below. */
+  customId: string
+  documentPdf: DocumentPdfInput
+  model: ModelId
+  maxTokens?: number
+}
+
+export interface BatchSubmitResult {
+  batchId: string
+  createdAt: string
+  /** RFC 3339 — Anthropic auto-ends processing 24h after creation. */
+  expiresAt: string
+}
+
+/**
+ * Submits one Anthropic Message Batch containing `requests.length` requests
+ * and returns immediately with the batch id — processing happens
+ * asynchronously on Anthropic's side (up to 24h) and is picked up later by
+ * `retrieveExtractionBatch`/`listExtractionBatchResults` from a `poll_batch`
+ * job (lib/jobs/handlers/batch-poll.ts).
+ *
+ * `client.messages.batches` is a non-beta surface on this SDK version (see
+ * node_modules/@anthropic-ai/sdk/resources/messages/batches.d.ts — `Batches`
+ * is a plain field on the `Messages` resource, not under `client.beta`), so
+ * no beta header is needed.
+ */
+export async function submitExtractionBatch(requests: BatchSubmitRequest[]): Promise<BatchSubmitResult> {
+  if (!hasAnthropicKey) {
+    throw new Error('ANTHROPIC_API_KEY not set — see MASTER-PLAN §6.4')
+  }
+  if (requests.length === 0) {
+    throw new TypeError('submitExtractionBatch: requests must not be empty')
+  }
+
+  const client = new Anthropic({ apiKey: serverEnv.ANTHROPIC_API_KEY })
+
+  const batchRequests: Anthropic.Messages.BatchCreateParams.Request[] = requests.map((req) => ({
+    custom_id: req.customId,
+    params: buildExtractionRequestParams({
+      sourceBlocks: [buildPdfBlock(req.documentPdf.data)],
+      model: req.model,
+      maxTokens: req.maxTokens ?? EXTRACTION_MAX_TOKENS,
+    }),
+  }))
+
+  const batch = await client.messages.batches.create({ requests: batchRequests })
+
+  return { batchId: batch.id, createdAt: batch.created_at, expiresAt: batch.expires_at }
+}
+
+/** Thin wrapper — current status of a submitted batch, incl. request_counts and results_url once ended. */
+export async function retrieveExtractionBatch(batchId: string): Promise<Anthropic.Messages.MessageBatch> {
+  if (!hasAnthropicKey) {
+    throw new Error('ANTHROPIC_API_KEY not set — see MASTER-PLAN §6.4')
+  }
+  const client = new Anthropic({ apiKey: serverEnv.ANTHROPIC_API_KEY })
+  return client.messages.batches.retrieve(batchId)
+}
+
+/**
+ * Fetches every result line for an ended batch. `client.messages.batches.results`
+ * streams a `.jsonl` file as an async iterator (results are NOT guaranteed to
+ * be in request order — §8 point 8, plan.md's "keyed by custom_id, never by
+ * position"); this buffers it into an array because every batch this
+ * pipeline submits today is a single request (see the design-decision
+ * comment on submitExtractionBatchAndEnqueuePoll in
+ * lib/jobs/handlers/extract.ts), so the buffered size is always tiny. If a
+ * future change pools many documents into one batch, this should become a
+ * streaming consumer instead of buffering the whole file.
+ */
+export async function listExtractionBatchResults(
+  batchId: string
+): Promise<Anthropic.Messages.MessageBatchIndividualResponse[]> {
+  if (!hasAnthropicKey) {
+    throw new Error('ANTHROPIC_API_KEY not set — see MASTER-PLAN §6.4')
+  }
+  const client = new Anthropic({ apiKey: serverEnv.ANTHROPIC_API_KEY })
+  const decoder = await client.messages.batches.results(batchId)
+
+  const results: Anthropic.Messages.MessageBatchIndividualResponse[] = []
+  for await (const line of decoder) {
+    results.push(line)
+  }
+  return results
+}
+
+/** What interpretBatchResult found for one batch request, after parsing. */
+export type BatchResultOutcome =
+  | { status: 'succeeded'; extraction: ExtractDocumentResult }
+  /** Same condition ExtractionTruncatedError signals synchronously — caller decides how to rescue it. */
+  | { status: 'truncated' }
+  | { status: 'errored'; message: string }
+  | { status: 'canceled' }
+  | { status: 'expired' }
+
+/**
+ * Interprets one `MessageBatchResult` (the `result` field of one line from
+ * `listExtractionBatchResults`) using the same parse/validate/cost logic
+ * `extractDocument` uses for a synchronous response — see
+ * `parseExtractionMessage` above. `maxTokens` must be the exact value that
+ * request was submitted with (the caller's own record of it — a batch result
+ * carries no `max_tokens` echo), so the truncation check is correct.
+ */
+export function interpretBatchResult(
+  result: Anthropic.Messages.MessageBatchResult,
+  model: ModelId,
+  maxTokens: number
+): BatchResultOutcome {
+  switch (result.type) {
+    case 'succeeded':
+      try {
+        return { status: 'succeeded', extraction: parseExtractionMessage(result.message, model, maxTokens, true) }
+      } catch (err) {
+        if (err instanceof ExtractionTruncatedError) return { status: 'truncated' }
+        throw err
+      }
+    case 'errored': {
+      const inner = result.error.error
+      const message = inner && typeof inner === 'object' && 'message' in inner
+        ? String((inner as { message: unknown }).message)
+        : JSON.stringify(result.error.error)
+      return { status: 'errored', message }
+    }
+    case 'canceled':
+      return { status: 'canceled' }
+    case 'expired':
+      return { status: 'expired' }
+  }
+}
+
+// custom_id encoding/decoding lives in lib/jobs/batch-custom-id.ts, not here
+// — it's pure (no serverEnv, no network) and kept in a module free of this
+// file's transitive `server-only` import so it stays unit-testable. Callers
+// (lib/jobs/handlers/extract.ts, lib/jobs/handlers/batch-poll.ts) import
+// buildExtractionBatchCustomId/parseExtractionBatchCustomId from there
+// directly.
 
 /** Per-million-token rates from MASTER-PLAN §6.1 (full, non-batched price). */
 const MODEL_RATES_USD_PER_MTOK: Record<ModelId, { input: number; output: number }> = {

@@ -64,6 +64,8 @@ async function handlePOST(request: NextRequest) {
     return NextResponse.json({
       ok: true,
       documentId: result.sourceDocumentId,
+      documentExtractionIds: result.documentExtractionIds,
+      billCount: result.billCount,
       runId: result.currentRunId,
       model: result.modelUsed,
       lineItemCount: result.lineItemCount,
