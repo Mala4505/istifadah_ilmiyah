@@ -390,7 +390,10 @@ export function ReviewWorkspace({
           Flag exception (E)
         </Button>
         <Button type="button" size="sm" variant="outline" onClick={() => void handleReExtract()} disabled={reExtracting}>
-          {reExtracting ? 'Re-extracting…' : 'Re-extract (R)'}
+          {/* Named because this control forces Sonnet, unlike the Documents
+              inbox's "Extract now (Haiku)" — and Sonnet costs materially
+              more per document, so the choice should be deliberate. */}
+          {reExtracting ? 'Re-extracting…' : 'Re-extract with Sonnet (R)'}
         </Button>
         <Button
           type="button"

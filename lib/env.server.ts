@@ -44,6 +44,23 @@ const serverSchema = z.object({
   // vendor_gstin is written exactly as extracted, same as before this field
   // existed.
   COMMUNITY_GSTIN: z.string().optional().default(''),
+  // Whether a low-confidence / non-Latin-script Haiku run may automatically
+  // re-run on Sonnet (§8 escalation rule, lib/extraction.ts). Default OFF.
+  //
+  // The rule as written escalates on `contains_non_latin_script`, which is
+  // true for most documents in this corpus (Gujarati/Devanagari appear on
+  // nearly every vendor bill), so in practice almost every document was
+  // running twice -- roughly 4x the intended spend for a second opinion
+  // nobody had yet shown was worth it. Haiku runs alone until its output has
+  // been reviewed on real documents; set OCR_AUTO_ESCALATION=true to restore
+  // the automatic second pass. The manual "Re-extract with Sonnet" button
+  // (app/api/documents/reescalate/route.ts) is unaffected either way -- that
+  // is a reviewer explicitly asking for Sonnet on one document.
+  OCR_AUTO_ESCALATION: z
+    .string()
+    .optional()
+    .default('false')
+    .transform((v) => v === 'true'),
 })
 
 function readServerEnv() {
@@ -62,6 +79,7 @@ function readServerEnv() {
     WORKER_ID: process.env.WORKER_ID,
     ITS_LOGIN_EMAIL_DOMAIN: process.env.ITS_LOGIN_EMAIL_DOMAIN,
     COMMUNITY_GSTIN: process.env.COMMUNITY_GSTIN,
+    OCR_AUTO_ESCALATION: process.env.OCR_AUTO_ESCALATION,
   })
   if (!parsed.success) {
     throw new Error(

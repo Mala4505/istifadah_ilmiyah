@@ -275,7 +275,10 @@ export function DocumentCard({
               ) : (
                 <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
               )}
-              <span className="ml-1.5 hidden sm:inline">Extract now</span>
+              {/* Model named on the button because the review screen has a
+                  second, different re-extract control that forces Sonnet —
+                  a reviewer pressing one of them should know which. */}
+              <span className="ml-1.5 hidden sm:inline">Extract now (Haiku)</span>
             </Button>
           )}
           <Button variant="ghost" size="sm" onClick={handlePreview} disabled={previewPending}>

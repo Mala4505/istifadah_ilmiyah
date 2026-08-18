@@ -16,6 +16,7 @@ import {
   type ModelId,
 } from '@/lib/claude-client'
 import { toBase64 } from '@/lib/pdf'
+import { serverEnv } from '@/lib/env.server'
 import type { ExtractionResponse } from '@/lib/extraction-schema'
 
 /**
@@ -85,14 +86,20 @@ export interface RunPipelineOptions {
    * Whether a low-confidence / non-Latin first attempt may auto-escalate to
    * Sonnet. False when the caller already started on Sonnet — there is
    * nothing to escalate to (§8 point 4: "Do not automatically re-escalate").
+   *
+   * Note this is only the *caller's* half of the decision: `OCR_AUTO_ESCALATION`
+   * gates it as well, and is off by default (see lib/env.server.ts). A caller
+   * passing `true` is saying "escalation would be valid here", not "escalate
+   * regardless of configuration".
    */
   allowEscalation?: boolean
 }
 
 /**
  * Runs one document through the pipeline: Haiku first, then Sonnet if the
- * §8 escalation rule fires. One call per document, every page in that one
- * call — never one call per page (§8 point 3).
+ * §8 escalation rule fires *and* `OCR_AUTO_ESCALATION` is on (it is off by
+ * default — see lib/env.server.ts for why). One call per document, every page
+ * in that one call — never one call per page (§8 point 3).
  */
 export async function runExtractionPipeline(
   pdfBytes: Uint8Array,
@@ -108,7 +115,12 @@ export async function runExtractionPipeline(
   const first = await callOnce(data, firstModel, firstReason)
   attempts.push(first)
 
-  if (allowEscalation && firstModel !== MODELS.sonnet && escalationReason(first.extraction) !== null) {
+  if (
+    serverEnv.OCR_AUTO_ESCALATION &&
+    allowEscalation &&
+    firstModel !== MODELS.sonnet &&
+    escalationReason(first.extraction) !== null
+  ) {
     attempts.push(await callOnce(data, MODELS.sonnet, 'auto_escalation'))
   }
 

@@ -83,7 +83,16 @@ export async function manualExtractNow(documentId: number): Promise<ActionResult
   }
 
   try {
-    await extractAndPersist({ sourceDocumentId: documentId, runReason: 'manual_reescalation' })
+    // `initial`, not `manual_reescalation`: this button runs Haiku (no model
+    // is passed, so extractAndPersist takes its default) on a document that
+    // has not been extracted yet. It is a first extraction that happens to be
+    // hand-triggered because no worker is guaranteed to be draining the queue
+    // — not a reviewer asking for a second opinion. Logging it as a
+    // re-escalation made `ocr_extraction_run` misreport both the cost split
+    // between first passes and re-runs, and the "did Haiku struggle here?"
+    // history the review screen reads. The real re-escalation path is
+    // app/api/documents/reescalate/route.ts, which forces Sonnet.
+    await extractAndPersist({ sourceDocumentId: documentId, runReason: 'initial' })
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'Extraction failed.' }
   }

@@ -108,7 +108,32 @@ export interface ExtractDocumentResult {
   rawResponse: Anthropic.Message
 }
 
-const EXTRACTION_MAX_TOKENS = 2000
+/**
+ * Default output budget for one extraction call.
+ *
+ * §8 specifies 2,000, which fits a typical one-page bill's tool call with room
+ * to spare — but it is a *false* economy at this size, for two reasons:
+ *
+ *  1. `max_tokens` is a ceiling, not a reservation. Nothing is billed for
+ *     headroom that goes unused, so a bill that fits in 1,200 tokens costs
+ *     exactly the same under a 4,000 cap as under a 2,000 one.
+ *  2. Every time the cap *is* hit, `runExtractionPipeline` retries the whole
+ *     call at TRUNCATION_RETRY_MAX_TOKENS — re-billing the entire PDF's input
+ *     tokens, which on a multi-page scan dwarf the output side. A cap set
+ *     just below what dense invoices need makes the expensive documents cost
+ *     roughly double.
+ *
+ * 4,000 covers the densely itemised multi-page scans in the pilot corpus that
+ * were previously landing in the retry path. It also leaves room for Sonnet's
+ * adaptive thinking on the manual re-escalation path: `max_tokens` caps
+ * thinking *and* response text together, and `claude-sonnet-5` runs adaptive
+ * thinking by default when no `thinking` parameter is set (which this SDK pin
+ * cannot express — see the PdfDocumentBlockParam note above). Under the old
+ * 2,000 cap, Sonnet spent part of the budget thinking and then truncated the
+ * tool call mid-JSON, which is why escalation so often returned partial data.
+ * The retry at 8,000 stays as the backstop for genuine outliers.
+ */
+const EXTRACTION_MAX_TOKENS = 4000
 
 /**
  * Builds the system prompt, optionally appending an own-GSTIN exclusion rule
@@ -124,7 +149,12 @@ function buildSystemPrompt(communityGstin: string | null): string {
     'submitted for expense reconciliation. The document may span multiple pages, and some pages may not ' +
     'be financial documents at all (e.g. a bank cheque, a passbook page, or an unrelated scan caught in ' +
     'the same batch) — classify every page first via the tool schema before extracting anything from it. ' +
-    'Read every page as part of one document: a line-item table may continue across a page break. Never ' +
+    'A line-item table may continue across a page break, so treat continuation pages as part of the bill ' +
+    'they belong to. Note that a batch scan may contain SEVERAL SEPARATE BILLS from different vendors: a ' +
+    'new vendor header, invoice number, and total starting on a later page is a NEW bill, not a ' +
+    'continuation of the previous one. The schema currently has room for only one bill\'s header fields — ' +
+    'fill them from the FIRST bill in the document, and record each additional bill\'s vendor, invoice ' +
+    'number, date and total in `notes` so a reviewer can see what else the document contains. Never ' +
     'fabricate a value — for anything illegible or genuinely absent use an empty string in a text field ' +
     'and null in a numeric field, and reflect uncertainty via the confidence fields rather than guessing. ' +
     'Every field value must be plain text transcribed from the document — never emit tag-like syntax ' +
@@ -175,6 +205,39 @@ function buildPdfBlock(data: string): UserContentBlockParam {
 }
 
 /**
+ * Same hand-typed-cast pattern as `PdfDocumentBlockParam` above: this SDK
+ * version (0.32.1) predates typed `cache_control` support on the non-beta
+ * `client.messages` surface (it only exists on `client.beta.messages`'
+ * request types) — but prompt caching itself is GA on the wire, so the field
+ * is accepted by the API with no beta header regardless of which client
+ * surface sent it. Casting the request body, as buildPdfBlock already does
+ * for the `document` content block, avoids taking on the beta response type
+ * (`Anthropic.Beta.BetaMessage`) throughout this file just to set one field.
+ *
+ * The system prompt (buildSystemPrompt below) and the extraction tool
+ * schema (buildExtractionTool, lib/extraction-schema.ts) are both identical
+ * on every call — only the per-document PDF/image content varies. Render
+ * order is tools -> system -> messages, so a cache_control breakpoint on
+ * this last (only) system block caches the tool schema and the system
+ * prompt together; every subsequent extraction call within the 5-minute TTL
+ * reads that ~90% cheaper instead of paying full price for it again.
+ */
+interface CachedSystemBlockParam {
+  type: 'text'
+  text: string
+  cache_control: { type: 'ephemeral' }
+}
+
+function buildCachedSystemPrompt(communityGstin: string | null): string {
+  const block: CachedSystemBlockParam = {
+    type: 'text',
+    text: buildSystemPrompt(communityGstin),
+    cache_control: { type: 'ephemeral' },
+  }
+  return [block] as unknown as string
+}
+
+/**
  * Runs one Claude extraction call for one document — every page in a single
  * message, either as image blocks or as one PDF block (§8 point 3). Throws a
  * clear error instead of attempting the call when no real API key is
@@ -221,7 +284,7 @@ export async function extractDocument(params: ExtractDocumentParams): Promise<Ex
   const response = await client.messages.create({
     model,
     max_tokens: maxTokens,
-    system: buildSystemPrompt(serverEnv.COMMUNITY_GSTIN || null),
+    system: buildCachedSystemPrompt(serverEnv.COMMUNITY_GSTIN || null),
     tools: [tool],
     tool_choice: { type: 'tool', name: EXTRACTION_TOOL_NAME },
     messages: [
