@@ -84,11 +84,34 @@ export default async function DocumentsPage() {
     docIds.length > 0
       ? await supabase
           .from('document_extraction')
-          .select('source_document_id, vendor_name_ocr, invoice_date_ocr, invoice_number_ocr, total_amount_ocr')
+          .select('id, source_document_id, vendor_name_ocr, invoice_date_ocr, invoice_number_ocr, total_amount_ocr')
           .in('source_document_id', docIds)
       : { data: [] as never[] }
 
   const extractionByDocId = new Map((extractionsData ?? []).map((e) => [e.source_document_id, e]))
+
+  // Failure reasons are fetched separately, only for documents currently
+  // sitting in 'failed' — most documents never fail, so this is a small,
+  // targeted query rather than joining ocr_extraction_run for every document.
+  // Ordered newest-first so the Map (first-seen-wins) lands on each
+  // document's most recent failed run, in case it was retried more than once.
+  const failedDocIds = docs.filter((d) => d.upload_status === 'failed').map((d) => d.id)
+  const { data: failedRunsData } =
+    failedDocIds.length > 0
+      ? await supabase
+          .from('ocr_extraction_run')
+          .select('source_document_id, error_message, created_at')
+          .in('source_document_id', failedDocIds)
+          .eq('status', 'failed')
+          .order('created_at', { ascending: false })
+      : { data: [] as never[] }
+
+  const failureReasonByDocId = new Map<number, string | null>()
+  for (const run of failedRunsData ?? []) {
+    if (!failureReasonByDocId.has(run.source_document_id)) {
+      failureReasonByDocId.set(run.source_document_id, run.error_message)
+    }
+  }
 
   // Entries already attached to some document are excluded from the
   // candidate pool — one invoice does not usually belong to two documents,
@@ -162,6 +185,7 @@ export default async function DocumentsPage() {
       pageCount: doc.page_count,
       extraction: extraction
         ? {
+            id: extraction.id,
             vendorNameOcr: extraction.vendor_name_ocr,
             invoiceDateOcr: extraction.invoice_date_ocr,
             invoiceNumberOcr: extraction.invoice_number_ocr,
@@ -169,6 +193,7 @@ export default async function DocumentsPage() {
           }
         : null,
       candidates,
+      failureReason: doc.upload_status === 'failed' ? failureReasonByDocId.get(doc.id) ?? null : null,
     }
   })
 
@@ -184,9 +209,6 @@ function PageShell({ children, count }: { children: React.ReactNode; count?: num
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-center gap-3">
         <h1 className="text-xl font-semibold tracking-tight">Document inbox</h1>
-        <span className="rounded-full bg-accent px-2.5 py-0.5 text-[11px] font-medium uppercase tracking-wide text-accent-foreground">
-          Phase 1B · Day 3
-        </span>
         {count !== undefined && (
           <span className="text-sm text-muted-foreground">
             {count} unmatched {count === 1 ? 'document' : 'documents'}

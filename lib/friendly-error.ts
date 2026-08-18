@@ -68,3 +68,31 @@ export function friendlyErrorMessage(raw: string | null | undefined): string {
 
   return message
 }
+
+/**
+ * Maps a raw OCR-pipeline failure (`ocr_extraction_run.error_message`,
+ * written by recordExtractionFailure in lib/jobs/handlers/extract.ts) to a
+ * next step a reviewer can actually take. Unlike friendlyErrorMessage above,
+ * the raw message here is shown verbatim alongside this guidance rather than
+ * replaced by it — it's the real diagnostic (image too large, a Batch API
+ * outcome, a download failure), not Postgres plumbing a reviewer can't act on.
+ */
+export function extractionFailureGuidance(raw: string | null | undefined): string {
+  const fallback = 'Re-run extraction. If it keeps failing, park this document or flag it for a closer look.'
+  if (!raw) return fallback
+  const message = raw.toLowerCase()
+
+  if (/max_tokens|truncat/.test(message)) {
+    return 'The document produced more content than the model could return in one pass. Re-run extraction — if it fails again, this document likely needs fewer pages per run.'
+  }
+  if (/downloading .* failed|http \d{3}/.test(message)) {
+    return 'The file could not be downloaded from storage. Re-run extraction — if it keeps failing, re-upload the file.'
+  }
+  if (/batch|errored|canceled|expired/.test(message)) {
+    return 'The extraction batch was interrupted by the AI provider before finishing. Re-run extraction to submit it again.'
+  }
+  if (/permission denied|not authorized|row-level security/.test(message)) {
+    return 'A permissions problem stopped extraction — contact an admin.'
+  }
+  return fallback
+}

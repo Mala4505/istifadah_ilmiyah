@@ -3,13 +3,25 @@
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
-import { Loader2, Search, ExternalLink, FileX2, CheckCircle2, XCircle, Circle, RefreshCw } from 'lucide-react'
+import {
+  Loader2,
+  Search,
+  ExternalLink,
+  FileX2,
+  CheckCircle2,
+  XCircle,
+  Circle,
+  RefreshCw,
+  AlertTriangle,
+  Flag,
+  PenLine,
+} from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Textarea } from '@/components/ui/textarea'
 import {
   attachDocumentToEntry,
   getDocumentPreviewUrl,
@@ -18,6 +30,8 @@ import {
   searchEntriesForAttach,
   type EntrySearchResult,
 } from '@/lib/actions/documents'
+import { flagReviewException } from '@/lib/actions/review'
+import { extractionFailureGuidance } from '@/lib/friendly-error'
 import { formatDate, formatDateTime, formatElapsed, formatMoney, formatScore } from './format'
 import type { CandidateEntryView, InboxDocumentView } from './types'
 
@@ -137,7 +151,7 @@ export function DocumentCard({
 }) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
-  const [confirmParkOpen, setConfirmParkOpen] = useState(false)
+  const [parkConfirming, setParkConfirming] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [searchResults, setSearchResults] = useState<EntrySearchResult[] | null>(null)
@@ -145,6 +159,9 @@ export function DocumentCard({
   const [manualSelection, setManualSelection] = useState<EntrySearchResult | null>(null)
   const [previewPending, setPreviewPending] = useState(false)
   const [extractPending, setExtractPending] = useState(false)
+  const [flagOpen, setFlagOpen] = useState(false)
+  const [flagNote, setFlagNote] = useState('')
+  const [flagPending, setFlagPending] = useState(false)
 
   const hasExtraction = document.extraction !== null
   // 'processing' is included alongside 'uploaded'/'failed' because nothing in
@@ -191,7 +208,7 @@ export function DocumentCard({
   function handleParkConfirm() {
     startTransition(async () => {
       const result = await markNoEntryExpected(document.id)
-      setConfirmParkOpen(false)
+      setParkConfirming(false)
       if (!result.ok) {
         toast.error(result.error)
         return
@@ -200,6 +217,31 @@ export function DocumentCard({
       onMutated()
       router.refresh()
     })
+  }
+
+  function handleFlagSubmit() {
+    const note = flagNote.trim()
+    if (!note) {
+      toast.error('Describe what looks wrong before flagging.')
+      return
+    }
+    setFlagPending(true)
+    void (async () => {
+      const result = await flagReviewException({
+        sourceDocumentId: document.id,
+        documentExtractionId: document.extraction!.id,
+        entryId: chosenEntryId,
+        note,
+      })
+      setFlagPending(false)
+      if (!result.ok) {
+        toast.error(result.error)
+        return
+      }
+      toast.success('Flagged for a closer look.')
+      setFlagNote('')
+      setFlagOpen(false)
+    })()
   }
 
   function handleSearch() {
@@ -266,34 +308,53 @@ export function DocumentCard({
             </p>
           </div>
         </div>
-        <div className="flex flex-shrink-0 items-center gap-3">
+        <div className="flex-shrink-0">
           <DocumentStageTracker uploadStatus={document.uploadStatus} uploadedAt={document.uploadedAt} />
-          {canExtractNow && (
-            <Button variant="outline" size="sm" onClick={handleExtractNow} disabled={extractPending}>
-              {extractPending ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
-              )}
-              {/* Model named on the button because the review screen has a
-                  second, different re-extract control that forces Sonnet —
-                  a reviewer pressing one of them should know which. */}
-              <span className="ml-1.5 hidden sm:inline">Extract now (Haiku)</span>
-            </Button>
-          )}
-          <Button variant="ghost" size="sm" onClick={handlePreview} disabled={previewPending}>
-            {previewPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ExternalLink className="h-3.5 w-3.5" />}
-            <span className="ml-1.5 hidden sm:inline">View PDF</span>
-          </Button>
         </div>
       </CardHeader>
 
+      {/* Its own row, separate from the identity/status header above — retry
+          and preview are actions, not status, and previously fought the
+          stage tracker for the same eye-line. */}
+      <div className="flex items-center gap-2 border-b border-border px-6 py-2.5">
+        {canExtractNow && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleExtractNow}
+            disabled={extractPending}
+            title="Runs the fast Haiku extraction model again. For a second opinion from a stronger model, use the review screen's re-extract instead."
+          >
+            {extractPending ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
+            )}
+            <span className="ml-1.5">Re-run extraction</span>
+          </Button>
+        )}
+        <Button variant="ghost" size="sm" onClick={handlePreview} disabled={previewPending}>
+          {previewPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ExternalLink className="h-3.5 w-3.5" />}
+          <span className="ml-1.5">View PDF</span>
+        </Button>
+      </div>
+
       <CardContent className="flex flex-col gap-4">
-        {!hasExtraction ? (
+        {document.uploadStatus === 'failed' ? (
+          <div className="flex flex-col gap-2 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2.5">
+            <div className="flex items-center gap-1.5 text-xs font-semibold text-destructive">
+              <AlertTriangle className="h-3.5 w-3.5" aria-hidden="true" />
+              Extraction failed
+            </div>
+            <p className="rounded bg-background px-2.5 py-1.5 font-mono text-[11px] leading-relaxed text-foreground">
+              {document.failureReason ?? 'No error details were recorded for this attempt.'}
+            </p>
+            <p className="text-xs text-muted-foreground">{extractionFailureGuidance(document.failureReason)}</p>
+          </div>
+        ) : !hasExtraction ? (
           <p className="rounded-md border border-dashed border-border px-3 py-2 text-xs text-muted-foreground">
-            {document.uploadStatus === 'failed'
-              ? 'Extraction failed — no vendor, amount, or date to match on yet. This document can still be parked, or attached once a manual look confirms which entry it belongs to.'
-              : 'Extraction pending — vendor, invoice date, and total amount will appear here once the OCR pipeline finishes.'}
+            Extraction pending — vendor, invoice date, and total amount will appear here once the OCR pipeline
+            finishes.
           </p>
         ) : (
           <div className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
@@ -322,6 +383,49 @@ export function DocumentCard({
                     disabled={!canAct}
                   />
                 ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {hasExtraction && (
+          <div className="flex flex-col gap-2">
+            <button
+              type="button"
+              onClick={() => setFlagOpen((v) => !v)}
+              className="flex items-center gap-1.5 self-start text-xs font-medium text-muted-foreground hover:text-foreground"
+            >
+              <Flag className="h-3.5 w-3.5" aria-hidden="true" />
+              {flagOpen ? 'Hide' : 'A field looks wrong?'}
+            </button>
+            {flagOpen && (
+              <div className="flex flex-col gap-2.5 rounded-md border border-border p-3">
+                <a
+                  href={`/review?id=${document.extraction!.id}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 self-start text-xs font-medium text-primary hover:underline"
+                >
+                  <PenLine className="h-3.5 w-3.5" aria-hidden="true" />
+                  Correct the extracted fields in Review
+                </a>
+                <p className="text-[11px] text-muted-foreground">
+                  Opens the field-by-field review screen in a new tab, where the corrected value is saved as the
+                  record of truth (your place here in the inbox is kept).
+                </p>
+                <div className="h-px bg-border" />
+                <p className="text-[11px] text-muted-foreground">
+                  Not sure of the right value, or want someone else to check first? Leave a note instead:
+                </p>
+                <Textarea
+                  value={flagNote}
+                  onChange={(e) => setFlagNote(e.target.value)}
+                  placeholder="e.g. Total doesn't match the PDF — looks like tax was double-counted."
+                  className="min-h-16 text-sm"
+                />
+                <Button type="button" size="sm" onClick={handleFlagSubmit} disabled={flagPending} className="self-start">
+                  {flagPending ? 'Flagging…' : 'Flag for a closer look'}
+                </Button>
               </div>
             )}
           </div>
@@ -373,49 +477,47 @@ export function DocumentCard({
           )}
         </div>
 
-        {canAct && (
-          <div className="flex flex-wrap items-center gap-2 pt-1">
-            <Button size="sm" onClick={handleAttach} disabled={isPending || chosenEntryId === null}>
-              {isPending ? 'Attaching…' : 'Attach to selected entry'}
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => setConfirmParkOpen(true)}
-              disabled={isPending}
-            >
-              <FileX2 className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
-              No entry expected
-            </Button>
-            {chosenEntryId !== null && (
-              <span className="text-xs text-muted-foreground">
-                Will attach to entry #{chosenEntryId}
-                {showingManualSelection ? ' (manual selection)' : ''}
-              </span>
-            )}
+        {canAct && chosenEntryId !== null && (
+          <p className="rounded bg-muted/50 px-2.5 py-1.5 text-xs text-muted-foreground">
+            Attach will use <span className="font-medium text-foreground">entry #{chosenEntryId}</span>
+            {showingManualSelection ? ' (your manual selection)' : ''}.
+          </p>
+        )}
+
+        {canAct && parkConfirming ? (
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border bg-muted/30 px-3 py-2">
+            <p className="text-xs text-muted-foreground">
+              Move &ldquo;{document.originalFilename}&rdquo; out of the inbox with no entry attached? You can
+              re-attach it later if one turns up.
+            </p>
+            <div className="flex flex-shrink-0 gap-2">
+              <Button size="sm" variant="outline" onClick={() => setParkConfirming(false)} disabled={isPending}>
+                Cancel
+              </Button>
+              <Button size="sm" onClick={handleParkConfirm} disabled={isPending}>
+                {isPending ? 'Marking…' : 'Confirm — no entry'}
+              </Button>
+            </div>
           </div>
+        ) : (
+          canAct && (
+            <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+              <Button size="sm" onClick={handleAttach} disabled={isPending || chosenEntryId === null}>
+                {isPending ? 'Attaching…' : 'Attach to selected entry'}
+              </Button>
+              <button
+                type="button"
+                onClick={() => setParkConfirming(true)}
+                disabled={isPending}
+                className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground underline-offset-2 hover:text-foreground hover:underline disabled:pointer-events-none disabled:opacity-60"
+              >
+                <FileX2 className="h-3.5 w-3.5" aria-hidden="true" />
+                No matching entry
+              </button>
+            </div>
+          )
         )}
       </CardContent>
-
-      <Dialog open={confirmParkOpen} onOpenChange={setConfirmParkOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Mark as &ldquo;no entry expected&rdquo;?</DialogTitle>
-            <DialogDescription>
-              &ldquo;{document.originalFilename}&rdquo; will move out of the unmatched inbox as a document with
-              genuinely no matching entry. You can still find it later and re-attach it if one turns up.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setConfirmParkOpen(false)} disabled={isPending}>
-              Cancel
-            </Button>
-            <Button onClick={handleParkConfirm} disabled={isPending}>
-              {isPending ? 'Parking…' : 'Confirm'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </Card>
   )
 }
@@ -445,12 +547,15 @@ function CandidateRow({
   return (
     <button
       type="button"
+      role="radio"
+      aria-checked={selected}
       onClick={onSelect}
       disabled={disabled}
       className={`flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border px-3 py-2 text-left text-xs transition-colors disabled:cursor-not-allowed disabled:opacity-70 ${
         selected ? 'border-primary bg-primary/5' : 'border-border hover:bg-muted/40'
       }`}
     >
+      <RadioDot selected={selected} />
       <Badge variant={selected ? 'default' : 'secondary'} className="text-[10px]">
         {formatScore(candidate.score)} match
       </Badge>
@@ -477,17 +582,34 @@ function SearchResultRow({
   return (
     <button
       type="button"
+      role="radio"
+      aria-checked={selected}
       onClick={onSelect}
       disabled={disabled}
       className={`flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border px-3 py-2 text-left text-xs transition-colors disabled:cursor-not-allowed disabled:opacity-70 ${
         selected ? 'border-primary bg-primary/5' : 'border-border hover:bg-muted/40'
       }`}
     >
+      <RadioDot selected={selected} />
       <span className="font-medium">{result.vendorRaw ?? '(no vendor on entry)'}</span>
       <span className="text-muted-foreground">{formatMoney(result.amount)}</span>
       <span className="text-muted-foreground">{formatDate(result.date)}</span>
       <span className="text-muted-foreground">UBBL {result.ubblNumber}</span>
       {result.mainNumber && <span className="text-muted-foreground">Main {result.mainNumber}</span>}
     </button>
+  )
+}
+
+/** Single-select affordance for candidate/search rows — states in the UI, not just a color tint, which entry "Attach" will use. */
+function RadioDot({ selected }: { selected: boolean }) {
+  return (
+    <span
+      aria-hidden="true"
+      className={`flex h-3.5 w-3.5 flex-shrink-0 items-center justify-center rounded-full border-2 ${
+        selected ? 'border-primary bg-primary' : 'border-muted-foreground/40'
+      }`}
+    >
+      {selected && <span className="h-1.5 w-1.5 rounded-full bg-primary-foreground" />}
+    </span>
   )
 }

@@ -47,9 +47,6 @@ export default async function ImportPage() {
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center gap-3">
         <h1 className="text-xl font-semibold tracking-tight">Import</h1>
-        <span className="rounded-full bg-accent px-2.5 py-0.5 text-[11px] font-medium uppercase tracking-wide text-accent-foreground">
-          Phase 1A · Day 2
-        </span>
       </div>
       <ImportPageClient
         isAdmin={isAdmin}

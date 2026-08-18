@@ -134,9 +134,6 @@ function PageHeader({ position, total }: { position?: number; total?: number }) 
   return (
     <div className="flex flex-wrap items-center gap-3">
       <h1 className="text-xl font-semibold tracking-tight">Review queue</h1>
-      <span className="rounded-full bg-accent px-2.5 py-0.5 text-[11px] font-medium uppercase tracking-wide text-accent-foreground">
-        Phase 1B · Day 4
-      </span>
       {position !== undefined && total !== undefined ? (
         <span className="text-sm text-muted-foreground">
           Document {position} of {total}

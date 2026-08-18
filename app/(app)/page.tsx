@@ -124,9 +124,6 @@ export default async function DashboardPage() {
       <div>
         <div className="flex flex-wrap items-center gap-3">
           <h1 className="text-xl font-semibold tracking-tight">Dashboard</h1>
-          <span className="rounded-full bg-accent px-2.5 py-0.5 text-[11px] font-medium uppercase tracking-wide text-accent-foreground">
-            Phase 1A · Day 6
-          </span>
         </div>
         <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
           Review queue depth, open exceptions by ₹ at risk, budget burn, today&apos;s imports, and
@@ -140,7 +137,7 @@ export default async function DashboardPage() {
           value={formatNumber(data.reviewQueueDepth)}
           hint={
             data.reviewQueueDepth === 0
-              ? 'Empty until Phase 1B ships extraction'
+              ? 'Nothing waiting on review yet'
               : 'Unverified extractions waiting'
           }
           href="/review"

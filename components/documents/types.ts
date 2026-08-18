@@ -1,6 +1,7 @@
 /** Shared types for the /documents inbox (MASTER-PLAN §5 row 6, §11.2 Day 3). */
 
 export interface DocumentExtractionSummary {
+  id: number
   vendorNameOcr: string | null
   invoiceDateOcr: string | null
   invoiceNumberOcr: string | null
@@ -27,4 +28,6 @@ export interface InboxDocumentView {
   pageCount: number | null
   extraction: DocumentExtractionSummary | null
   candidates: CandidateEntryView[]
+  /** Latest `ocr_extraction_run.error_message` for this document — populated only when `uploadStatus` is `'failed'`. */
+  failureReason: string | null
 }

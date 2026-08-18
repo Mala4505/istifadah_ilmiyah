@@ -171,9 +171,6 @@ export default async function ReconciliationPage() {
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center gap-3">
         <h1 className="text-xl font-semibold tracking-tight">Reconciliation</h1>
-        <span className="rounded-full bg-accent px-2.5 py-0.5 text-[11px] font-medium uppercase tracking-wide text-accent-foreground">
-          Phase 1A · Day 6
-        </span>
       </div>
       <p className="max-w-2xl text-sm text-muted-foreground">
         Entries missing a Main/Audit-side match, and allocation-sum mismatches — the report the org

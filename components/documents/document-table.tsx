@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { ChevronLeft, ChevronRight, Eye } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Dialog, DialogContent, DialogFooter, DialogTitle } from '@/components/ui/dialog'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { DocumentCard, DocumentStageTracker } from './document-card'
 import { formatDate, formatMoney } from './format'
@@ -159,9 +159,10 @@ export function DocumentTable({
         <DialogContent className="max-h-[85vh] max-w-2xl overflow-y-auto">
           {openDocument && (
             <>
-              <DialogHeader>
-                <DialogTitle className="break-all">{openDocument.originalFilename}</DialogTitle>
-              </DialogHeader>
+              {/* Visually hidden: Radix requires a DialogTitle for a11y, but
+                  DocumentCard's own header already shows the filename as the
+                  one visible title — showing it here too just repeats it. */}
+              <DialogTitle className="sr-only">{openDocument.originalFilename}</DialogTitle>
               <DocumentCard
                 document={openDocument}
                 canAct={canAct}
@@ -174,6 +175,11 @@ export function DocumentTable({
                   setOpenDocumentId(null)
                 }}
               />
+              <DialogFooter>
+                <Button variant="outline" size="sm" onClick={() => setOpenDocumentId(null)}>
+                  Close
+                </Button>
+              </DialogFooter>
             </>
           )}
         </DialogContent>
