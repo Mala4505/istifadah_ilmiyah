@@ -48,14 +48,15 @@ export type Legibility = z.infer<typeof legibilitySchema>
  * A text field whose "absent" value is an empty string on the wire, normalised
  * back to `null` here.
  *
- * A `strict: true` tool caps how many parameters may be union-typed
- * (nullable counts as a union): more than 16 and the request is rejected with
- *   400 invalid_request_error: "Schemas contains too many parameters with
- *   union types (21 parameters with type arrays or anyOf) ... limit: 16"
- * This schema legitimately needs ~21 optional fields, so the text ones give up
- * their `| null` on the wire and use `""` for "illegible or genuinely absent"
- * instead. Numbers keep `| null`, because 0 is a real invoice value and there
- * is no safe numeric sentinel.
+ * Originally a `strict: true` workaround — a strict tool caps how many
+ * parameters may be union-typed (nullable counts as a union) at 16, and this
+ * schema legitimately needs ~21 optional fields, so the text ones gave up
+ * their `| null` on the wire in favor of `""` for "illegible or genuinely
+ * absent". Kept even after strict mode was dropped entirely (see the comment
+ * above `buildExtractionTool` below for why): it already works, every
+ * consumer of `ExtractionResponse` already expects it, and reverting it back
+ * to `| null` would be pure churn. Numbers keep `| null`, because 0 is a real
+ * invoice value and there is no safe numeric sentinel.
  *
  * The transform means no consumer ever sees `""`: `document_extraction` and
  * `document_extraction_line_item` receive SQL NULL exactly as before, so the
@@ -259,21 +260,17 @@ const nullableNumber = { anyOf: [{ type: 'number' }, { type: 'null' }] } as cons
 /**
  * NOTE — no `minimum` / `maximum` / `minItems` anywhere below.
  *
- * A `strict: true` tool compiles its `input_schema` into a constrained decoder,
- * and that decoder supports only a subset of JSON Schema: numerical
- * constraints (`minimum`, `maximum`, `multipleOf`), string-length constraints,
- * and complex array constraints are all rejected. Sending them is not ignored
- * — the request fails outright with
+ * Originally required because a `strict: true` tool's constrained decoder
+ * supports only a subset of JSON Schema — numerical constraints (`minimum`,
+ * `maximum`, `multipleOf`), string-length constraints, and complex array
+ * constraints were all rejected outright:
  *   400 invalid_request_error: "tools.0.custom: For 'integer' type, property
  *   'minimum' is not supported"
- * which is what every extraction call did until this was stripped.
- *
- * Nothing is lost: the bounds still exist on the Zod schema above, which is
- * what actually validates the model's output in `extractDocument`. Range
- * checking simply happens on our side of the wire instead of the model's.
- * (This is exactly what the Python/TS SDK helpers do automatically when they
- * convert a Pydantic/Zod schema; this schema is hand-written, so it is done
- * by hand.)
+ * Kept even after strict mode was dropped (see the comment above
+ * `buildExtractionTool` below): the bounds still exist on the Zod schema
+ * above, which is what actually validates the model's output in
+ * `extractDocument`, so there is nothing to gain by adding them back to a
+ * schema the API no longer compiles into a decoder anyway.
  */
 export const extractionToolInputSchema = {
   type: 'object',
@@ -416,20 +413,38 @@ export const EXTRACTION_TOOL_DESCRIPTION =
   'by component — cgst_amount, sgst_amount, and igst_amount — instead of only a combined tax_amount, ' +
   'and capture round_off when the invoice prints an explicit rounding line.'
 
-/** The exact shape `messages.create({ tools: [...] })` expects, with `strict: true`. */
-export interface AnthropicStrictTool {
+/**
+ * The exact shape `messages.create({ tools: [...] })` expects.
+ *
+ * Deliberately NOT `strict: true`. A strict tool compiles `input_schema` into
+ * a constrained decoder, and once Phase 2 nested `line_items[]` inside
+ * `bills[]` (each level with ~20 required fields and `additionalProperties:
+ * false`), that compiled grammar grew past Anthropic's size ceiling — every
+ * call started failing outright with
+ *   400 invalid_request_error: "The compiled grammar is too large, which
+ *   would cause performance issues. Simplify your tool schemas or reduce the
+ *   number of strict tools."
+ * Un-nesting bills/line-items to fit back under that ceiling would be a much
+ * bigger schema/data-model change for no real safety gain: strict mode's only
+ * guarantee is that the tool_use input *parses* against the schema, and
+ * `extractionResponseSchema.parse(...)` in lib/claude-client.ts already does
+ * that (plus the range/enum/date checks strict mode can't express at all —
+ * see the NOTE above extractionToolInputSchema). Every other defense in this
+ * file (filterNonFinancialLineItems, sanitizeExtractionResponse, the
+ * own-GSTIN exclusion in lib/jobs/handlers/extract.ts) already assumed the
+ * model's output needs checking regardless of what the API guarantees.
+ */
+export interface AnthropicExtractionTool {
   name: string
   description: string
   input_schema: typeof extractionToolInputSchema
-  strict: true
 }
 
-export function buildExtractionTool(): AnthropicStrictTool {
+export function buildExtractionTool(): AnthropicExtractionTool {
   return {
     name: EXTRACTION_TOOL_NAME,
     description: EXTRACTION_TOOL_DESCRIPTION,
     input_schema: extractionToolInputSchema,
-    strict: true,
   }
 }
 

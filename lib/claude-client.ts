@@ -56,12 +56,12 @@ export interface DocumentPdfInput {
 /**
  * Raised when the model ran out of output budget mid-tool-call.
  *
- * `strict: true` guarantees the tool input *validates* — it cannot guarantee
- * the model gets to finish writing it. When `max_tokens` is hit partway
- * through, the partial JSON arrives with required fields simply missing, which
- * otherwise surfaces as a baffling Zod "line_items: Required" error a long way
- * from the actual cause. The pipeline catches this and retries with a larger
- * budget (lib/extraction.ts).
+ * When `max_tokens` is hit partway through, the partial JSON arrives with
+ * required fields simply missing, which otherwise surfaces as a baffling Zod
+ * "line_items: Required" error a long way from the actual cause —
+ * `parseExtractionMessage` below checks `stop_reason` before ever handing the
+ * input to Zod, specifically to turn that into a clear signal instead. The
+ * pipeline catches this and retries with a larger budget (lib/extraction.ts).
  */
 export class ExtractionTruncatedError extends Error {
   constructor(

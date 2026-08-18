@@ -215,10 +215,10 @@ export async function persistExtractionPipelineResult(
   const final = pipeline.final
   // Leaked tool-call tag syntax backstop (§3b, hub-refinements-plan.md): the
   // system prompt (buildSystemPrompt in lib/claude-client.ts) already asks
-  // the model not to do this, but `strict: true` tool calling only
-  // guarantees the JSON *structure* is valid, not what text ends up
-  // *inside* a string field — same "never trust the model alone" posture
-  // as filterNonFinancialLineItems and the own-org GSTIN exclusion below.
+  // the model not to do this, but nothing constrains what text ends up
+  // *inside* a string field (Zod validates structure, not content) — same
+  // "never trust the model alone" posture as filterNonFinancialLineItems and
+  // the own-org GSTIN exclusion below.
   // Every downstream use of `extraction` (document_extraction upsert, line
   // item insert, tally checks) reads the sanitized copy from here on.
   const { cleaned: extraction, blankedFields: leakedTagFields } = sanitizeExtractionResponse(final.extraction)
