@@ -1,61 +1,29 @@
 import { NextRequest, NextResponse } from 'next/server'
 import * as Sentry from '@sentry/nextjs'
 import { serverEnv } from '@/lib/env.server'
-import { claimNextJob, failJob, sweepJobQueue, type JobQueueRow } from '@/lib/jobs/queue'
+import { drainJobQueue } from '@/lib/jobs/drain'
 import { getStaffContext } from '@/lib/export/auth'
 
 /**
- * The Vercel-side caller of the one worker loop (MASTER-PLAN §3.11).
+ * The Vercel-side caller of the shared drain loop (MASTER-PLAN §3.11,
+ * lib/jobs/drain.ts).
  *
- * A Cron entry calls this every minute; it drains the queue for ~50 seconds
- * and returns, staying inside Vercel Pro's function limit. worker/index.ts is
- * the other caller — an infinite loop instead of a bounded drain — and both
- * dispatch to the *same* handler code in lib/jobs/handlers/, which is the
- * whole point of having a queue (§3.11's closing line).
- *
- * The dispatch table below mirrors worker/index.ts exactly; if a job type
- * gains a handler there, add it here too.
+ * On Hobby, Vercel Cron fires this at most once/day (the plan's own cap), so
+ * this is a safety net, not the primary trigger — extraction normally starts
+ * the moment a document is uploaded, via the after() callback in
+ * app/api/documents/ingest/route.ts. This route exists to catch anything
+ * that trigger missed (a job that failed and needs a retry pickup, a stale
+ * lock the sweep should reclaim, etc.). worker/index.ts is a third caller —
+ * an infinite loop instead of a bounded drain — and all three dispatch to the
+ * *same* handler code in lib/jobs/handlers/, which is the whole point of
+ * having a queue (§3.11's closing line).
  */
 
 export const runtime = 'nodejs'
 export const maxDuration = 60
 
-type JobHandler = (job: JobQueueRow) => Promise<void>
-
 /** Leave headroom under maxDuration so the response still gets sent. */
 const DRAIN_BUDGET_MS = 50_000
-
-async function dispatch(job: JobQueueRow): Promise<'handled' | 'skipped'> {
-  switch (job.job_type) {
-    case 'extract_document': {
-      const { default: handler } = (await import('@/lib/jobs/handlers/extract')) as {
-        default: JobHandler
-      }
-      await handler(job)
-      return 'handled'
-    }
-    case 'poll_batch': {
-      const { default: handler } = (await import('@/lib/jobs/handlers/batch-poll')) as {
-        default: JobHandler
-      }
-      await handler(job)
-      return 'handled'
-    }
-    case 'flags_run': {
-      const { default: handler } = (await import('@/lib/jobs/handlers/flags-run')) as {
-        default: JobHandler
-      }
-      await handler(job)
-      return 'handled'
-    }
-    default:
-      // No handler wired yet (generate_export, rasterize_retry). Marking the
-      // job failed would be a lie about a handler that was never attempted,
-      // so it is left running for sweepJobQueue() to reclaim (plan.md Phase
-      // 3 I15, 20260817000007_sweep_job_queue.sql) once it goes stale.
-      return 'skipped'
-  }
-}
 
 /**
  * Cron secret when one is configured, otherwise an admin session. Vercel Cron
@@ -85,61 +53,10 @@ async function drain(request: NextRequest) {
     return NextResponse.json({ error: gate.error }, { status: gate.status })
   }
 
-  const deadline = Date.now() + DRAIN_BUDGET_MS
   const workerId = `${serverEnv.WORKER_ID}-tick`
+  const result = await drainJobQueue(workerId, DRAIN_BUDGET_MS, /* runSweep */ true)
 
-  let claimed = 0
-  let handled = 0
-  let skipped = 0
-  const errors: string[] = []
-
-  // Vercel Cron already runs this route on a schedule, and this repo has no
-  // separate cron config to add a new schedule to — piggyback the sweep here
-  // (plan.md Phase 3 I15) rather than invent one. Run once per tick, before
-  // the claim loop, so a job the sweep just reclaimed can be picked up by
-  // this same drain instead of waiting for the next cron invocation.
-  let sweep: { reclaimedCount: number; deadenedCount: number; purgedCount: number } | null = null
-  try {
-    sweep = await sweepJobQueue()
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
-    errors.push(`sweep: ${message}`)
-    Sentry.captureException(err, { tags: { job_type: 'tick', phase: 'sweep' } })
-  }
-
-  while (Date.now() < deadline) {
-    let job: JobQueueRow | null
-    try {
-      job = await claimNextJob(workerId)
-    } catch (err) {
-      errors.push(err instanceof Error ? err.message : String(err))
-      Sentry.captureException(err, { tags: { job_type: 'tick', phase: 'claim' } })
-      break
-    }
-    if (!job) break
-
-    claimed++
-    try {
-      const outcome = await dispatch(job)
-      if (outcome === 'handled') handled++
-      else skipped++
-    } catch (err) {
-      // Handlers record their own failure state; this catch only exists so one
-      // bad job can't abort the whole drain.
-      const message = err instanceof Error ? err.message : String(err)
-      errors.push(`job ${job.id}: ${message}`)
-      Sentry.captureException(err, {
-        tags: { job_type: job.job_type, job_id: String(job.id) },
-      })
-      try {
-        await failJob(job.id, message.slice(0, 2000))
-      } catch {
-        // Already logged above; nothing further to do.
-      }
-    }
-  }
-
-  return NextResponse.json({ ok: true, workerId, sweep, claimed, handled, skipped, errors })
+  return NextResponse.json({ ok: true, workerId, ...result })
 }
 
 export const POST = drain

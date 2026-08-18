@@ -1,9 +1,11 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse, after } from 'next/server'
 import { withApiLogging } from '@/lib/api-log'
 import { getStaffContext } from '@/lib/export/auth'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { putDocument } from '@/lib/storage'
 import { getPdfPageCount, looksLikePdf, sha256Hex } from '@/lib/pdf'
+import { drainJobQueue } from '@/lib/jobs/drain'
+import { serverEnv } from '@/lib/env.server'
 
 /**
  * `documents-ingest` (MASTER-PLAN §8 point 2, §3.8, §11.2 Day 1).
@@ -18,7 +20,11 @@ import { getPdfPageCount, looksLikePdf, sha256Hex } from '@/lib/pdf'
  *
  * Creates `source_document` + one `document_page` per page, stores the
  * original in the private `invoice-documents` bucket, and queues an
- * `extract_document` job. Returns the new document id.
+ * `extract_document` job. Returns the new document id. An after() callback
+ * (below) drains that job — and any backlog — right after the response is
+ * sent, so extraction starts on upload rather than waiting for the next
+ * Vercel Cron tick (app/api/jobs/tick/route.ts, a once/day safety net on
+ * Hobby).
  *
  * ── Contract note for the Day 3 inbox agent ────────────────────────────────
  * This route takes the **raw PDF**, not pre-rendered page images. §8 point 1
@@ -30,8 +36,18 @@ import { getPdfPageCount, looksLikePdf, sha256Hex } from '@/lib/pdf'
  */
 
 export const runtime = 'nodejs'
+export const maxDuration = 60
 
 const MAX_UPLOAD_BYTES = 32 * 1024 * 1024 // Claude's document-block ceiling (§8).
+
+// Extraction starts the moment this route enqueues the job (via after(),
+// below) instead of waiting for the next Vercel Cron tick — on Hobby that
+// tick fires at most once/day, which would otherwise pile up the whole day's
+// documents into one memory-heavy drain (the actual cause of the
+// RangeError/ERR_MEMORY_ALLOCATION_FAILED crashes this was added to fix).
+// Budget stays comfortably under maxDuration so the response has already
+// been sent by the time this runs and a slow extraction can't threaten it.
+const POST_UPLOAD_DRAIN_BUDGET_MS = 45_000
 
 function safeFilename(name: string): string {
   const base = name.split(/[\\/]/).pop() ?? 'document.pdf'
@@ -213,6 +229,19 @@ async function handlePOST(request: NextRequest) {
       { status: 500 }
     )
   }
+
+  // Runs after the response below has been sent — the browser sees "Queued
+  // for extraction" immediately, not after however long the Claude call
+  // takes. Same claim_next_job RPC as the cron tick (lib/jobs/drain.ts), so
+  // concurrent uploads can't double-claim a row; this may also pick up and
+  // clear older backlog while it's here, not just this document's own job.
+  after(async () => {
+    try {
+      await drainJobQueue(`${serverEnv.WORKER_ID}-upload`, POST_UPLOAD_DRAIN_BUDGET_MS, false)
+    } catch (err) {
+      console.error(`[ingest] post-upload drain failed for document ${documentId}:`, err)
+    }
+  })
 
   return NextResponse.json({
     ok: true,
