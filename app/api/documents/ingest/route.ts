@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse, after } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { withApiLogging } from '@/lib/api-log'
 import { getStaffContext } from '@/lib/export/auth'
 import { createAdminClient } from '@/lib/supabase/admin'
@@ -20,11 +20,14 @@ import { serverEnv } from '@/lib/env.server'
  *
  * Creates `source_document` + one `document_page` per page, stores the
  * original in the private `invoice-documents` bucket, and queues an
- * `extract_document` job. Returns the new document id. An after() callback
- * (below) drains that job — and any backlog — right after the response is
- * sent, so extraction starts on upload rather than waiting for the next
- * Vercel Cron tick (app/api/jobs/tick/route.ts, a once/day safety net on
- * Hobby).
+ * `extract_document` job. Before responding, this route also drains that job
+ * — and any backlog — itself (see the awaited drainJobQueue call below), so
+ * extraction is attempted on upload rather than waiting for the next Vercel
+ * Cron tick (app/api/jobs/tick/route.ts, a once/day safety net on Hobby).
+ * Deliberately awaited rather than fired via next/server's after(): after()
+ * did not reliably run to completion on this project's Vercel deployment in
+ * practice, so the response now simply waits instead of trusting it. Returns
+ * the new document id.
  *
  * ── Contract note for the Day 3 inbox agent ────────────────────────────────
  * This route takes the **raw PDF**, not pre-rendered page images. §8 point 1
@@ -40,13 +43,12 @@ export const maxDuration = 60
 
 const MAX_UPLOAD_BYTES = 32 * 1024 * 1024 // Claude's document-block ceiling (§8).
 
-// Extraction starts the moment this route enqueues the job (via after(),
-// below) instead of waiting for the next Vercel Cron tick — on Hobby that
-// tick fires at most once/day, which would otherwise pile up the whole day's
-// documents into one memory-heavy drain (the actual cause of the
-// RangeError/ERR_MEMORY_ALLOCATION_FAILED crashes this was added to fix).
-// Budget stays comfortably under maxDuration so the response has already
-// been sent by the time this runs and a slow extraction can't threaten it.
+// Extraction is attempted before this route responds, instead of waiting for
+// the next Vercel Cron tick — on Hobby that tick fires at most once/day,
+// which would otherwise pile up the whole day's documents into one
+// memory-heavy drain (the actual cause of the RangeError/
+// ERR_MEMORY_ALLOCATION_FAILED crashes this was added to fix). Budget stays
+// under maxDuration above, leaving headroom for the DB writes still to come.
 const POST_UPLOAD_DRAIN_BUDGET_MS = 45_000
 
 function safeFilename(name: string): string {
@@ -230,18 +232,22 @@ async function handlePOST(request: NextRequest) {
     )
   }
 
-  // Runs after the response below has been sent — the browser sees "Queued
-  // for extraction" immediately, not after however long the Claude call
-  // takes. Same claim_next_job RPC as the cron tick (lib/jobs/drain.ts), so
-  // concurrent uploads can't double-claim a row; this may also pick up and
-  // clear older backlog while it's here, not just this document's own job.
-  after(async () => {
-    try {
-      await drainJobQueue(`${serverEnv.WORKER_ID}-upload`, POST_UPLOAD_DRAIN_BUDGET_MS, false)
-    } catch (err) {
-      console.error(`[ingest] post-upload drain failed for document ${documentId}:`, err)
-    }
-  })
+  // Awaited, not fired via after(): after() turned out not to reliably run
+  // to completion on this Vercel deployment (confirmed by hand — a document
+  // stayed 'uploaded' indefinitely until /api/jobs/tick was hit manually,
+  // even though that route runs this exact same drainJobQueue call). Rather
+  // than keep chasing an unverified background-task platform behavior, the
+  // response simply waits for it: if this HTTP call succeeds, extraction has
+  // been attempted, no exceptions. Same claim_next_job RPC as the cron tick
+  // (lib/jobs/drain.ts), so a burst of concurrent uploads can't double-claim
+  // a row; this may also pick up and clear older backlog while it's here,
+  // not just this document's own job. maxDuration=60 above leaves headroom
+  // beyond this budget for the DB writes still to come.
+  try {
+    await drainJobQueue(`${serverEnv.WORKER_ID}-upload`, POST_UPLOAD_DRAIN_BUDGET_MS, false)
+  } catch (err) {
+    console.error(`[ingest] post-upload drain failed for document ${documentId}:`, err)
+  }
 
   return NextResponse.json({
     ok: true,

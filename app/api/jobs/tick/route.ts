@@ -9,11 +9,11 @@ import { getStaffContext } from '@/lib/export/auth'
  * lib/jobs/drain.ts).
  *
  * On Hobby, Vercel Cron fires this at most once/day (the plan's own cap), so
- * this is a safety net, not the primary trigger — extraction normally starts
- * the moment a document is uploaded, via the after() callback in
- * app/api/documents/ingest/route.ts. This route exists to catch anything
- * that trigger missed (a job that failed and needs a retry pickup, a stale
- * lock the sweep should reclaim, etc.). worker/index.ts is a third caller —
+ * this is a safety net, not the primary trigger — extraction is normally
+ * attempted synchronously by app/api/documents/ingest/route.ts before it
+ * responds to the upload. This route exists to catch anything that missed
+ * (a job that failed and needs a retry pickup, a stale lock the sweep should
+ * reclaim, etc.). worker/index.ts is a third caller —
  * an infinite loop instead of a bounded drain — and all three dispatch to the
  * *same* handler code in lib/jobs/handlers/, which is the whole point of
  * having a queue (§3.11's closing line).
