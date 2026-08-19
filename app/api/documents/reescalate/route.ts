@@ -3,6 +3,7 @@ import { withApiLogging } from '@/lib/api-log'
 import { getStaffContext } from '@/lib/export/auth'
 import { extractAndPersist } from '@/lib/jobs/handlers/extract'
 import { MODELS } from '@/lib/claude-client'
+import { isAdminOrAbove } from '@/lib/auth/roles'
 
 /**
  * `documents-reescalate` — the manual "re-run with Sonnet" button
@@ -34,9 +35,9 @@ async function handlePOST(request: NextRequest) {
   if (!staff.isActive) {
     return NextResponse.json({ error: 'Your account is pending activation.' }, { status: 403 })
   }
-  if (staff.role === 'viewer') {
+  if (!isAdminOrAbove(staff.role)) {
     return NextResponse.json(
-      { error: 'Re-running extraction is a reviewer or admin action.' },
+      { error: 'Re-running extraction is an admin action.' },
       { status: 403 }
     )
   }

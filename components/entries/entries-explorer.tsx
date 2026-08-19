@@ -18,6 +18,7 @@ import { fetchEntriesPage, type PageCursor } from './query'
 import { ALL_COLUMNS, DEFAULT_SORT, PAGE_SIZE } from './types'
 import type { ColumnKey, EntriesFilters, EntriesSort, EntryEnriched, FilterOptions, SortColumn, SortDirection } from './types'
 import { NewEntryDialog } from './new-entry-dialog'
+import { isAdminOrAbove, type StaffRole } from '@/lib/auth/roles'
 
 const EMPTY_OPTIONS: FilterOptions = {
   departments: [],
@@ -100,9 +101,9 @@ export function EntriesExplorer() {
   const [sort, setSort] = useState<EntriesSort>(() => searchParamsToSort(searchParams))
   const [options, setOptions] = useState<FilterOptions>(EMPTY_OPTIONS)
   const [optionsLoaded, setOptionsLoaded] = useState(false)
-  const [role, setRole] = useState<'admin' | 'reviewer' | 'viewer' | null>(null)
-  // null once loaded = an all-departments account; the New-entry form then has to ask which department.
-  const [ownDepartmentId, setOwnDepartmentId] = useState<number | null>(null)
+  const [role, setRole] = useState<StaffRole | null>(null)
+  // Empty once loaded = an all-departments account; the New-entry form then has to ask which department.
+  const [ownDepartmentIds, setOwnDepartmentIds] = useState<number[]>([])
 
   const [pages, setPages] = useState<EntryEnriched[][]>([])
   const [hasMoreFlags, setHasMoreFlags] = useState<boolean[]>([])
@@ -163,12 +164,18 @@ export function EntriesExplorer() {
       if (user) {
         const { data: profile } = await supabase
           .from('staff_profile')
-          .select('role, department_id')
+          .select('role')
           .eq('id', user.id)
           .maybeSingle()
+        // department_id no longer lives on staff_profile (20260819000003) — a
+        // dept account may now hold several departments via staff_department.
+        const { data: deptRows } =
+          profile?.role === 'dept'
+            ? await supabase.from('staff_department').select('department_id').eq('staff_id', user.id)
+            : { data: [] as { department_id: number }[] }
         if (!cancelled) {
           setRole((profile?.role as typeof role) ?? null)
-          setOwnDepartmentId((profile?.department_id as number | null) ?? null)
+          setOwnDepartmentIds((deptRows ?? []).map((d) => d.department_id as number))
         }
       }
     }
@@ -316,7 +323,7 @@ export function EntriesExplorer() {
     }
   }
 
-  const canBulkEdit = role === 'admin' || role === 'reviewer'
+  const canBulkEdit = isAdminOrAbove(role)
   const noDepartmentAccess = optionsLoaded && options.departments.length === 0
   const isFirstPage = pageIndex === 0
   const isLastPage = pageIndex === pages.length - 1 && !hasMoreFlags[pageIndex]
@@ -326,14 +333,16 @@ export function EntriesExplorer() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-xl font-semibold tracking-tight">Entries</h1>
         <div className="flex items-center gap-2">
-          {/* Typing an entry is a reviewer/admin action (entries_insert,
-              20260819000002) — a viewer sees no button rather than a button
-              that always fails. */}
-          {(role === 'admin' || role === 'reviewer') && (
+          {/* Typing an entry is a dept/admin/superadmin action (entries_insert,
+              20260819000002/20260819000003 — is_staff() gated, department-scoped
+              via can_see_department) — dept keeps entry creation under the new
+              model, so this only needs a loaded, non-null role rather than
+              isAdminOrAbove. */}
+          {role !== null && (
             <NewEntryDialog
               departments={options.departments}
               budgetHeads={options.budgetHeads}
-              ownDepartmentId={ownDepartmentId}
+              ownDepartmentIds={ownDepartmentIds}
               onCreated={() => void loadFirstPage(filters, sort)}
             />
           )}

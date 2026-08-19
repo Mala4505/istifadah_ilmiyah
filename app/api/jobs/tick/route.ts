@@ -3,6 +3,7 @@ import * as Sentry from '@sentry/nextjs'
 import { serverEnv } from '@/lib/env.server'
 import { drainJobQueue } from '@/lib/jobs/drain'
 import { getStaffContext } from '@/lib/export/auth'
+import { isAdminOrAbove } from '@/lib/auth/roles'
 
 /**
  * The Vercel-side caller of the shared drain loop (MASTER-PLAN §3.11,
@@ -41,7 +42,7 @@ async function authorize(request: NextRequest): Promise<{ ok: true } | { ok: fal
   const staff = await getStaffContext()
   if (!staff) return { ok: false, status: 401, error: 'You must be signed in.' }
   if (!staff.isActive) return { ok: false, status: 403, error: 'Your account is pending activation.' }
-  if (staff.role !== 'admin') {
+  if (!isAdminOrAbove(staff.role)) {
     return { ok: false, status: 403, error: 'Draining the job queue is an admin-only action.' }
   }
   return { ok: true }

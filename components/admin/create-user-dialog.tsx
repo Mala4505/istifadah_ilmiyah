@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Checkbox } from '@/components/ui/checkbox'
 import {
   Dialog,
   DialogContent,
@@ -17,8 +18,6 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog'
 import { createStaffUser } from '@/lib/actions/admin'
-
-const NO_DEPARTMENT_VALUE = 'none'
 
 /** Random, readable-enough temporary password — the admin hands it to the new user out of band. */
 function generatePassword(): string {
@@ -32,8 +31,8 @@ export function CreateUserDialog({ departments }: { departments: { id: number; n
   const [itsNumber, setItsNumber] = useState('')
   const [displayName, setDisplayName] = useState('')
   const [contactEmail, setContactEmail] = useState('')
-  const [role, setRole] = useState<'admin' | 'reviewer' | 'viewer'>('viewer')
-  const [departmentId, setDepartmentId] = useState<number | null>(null)
+  const [role, setRole] = useState<'superadmin' | 'admin' | 'dept'>('dept')
+  const [departmentIds, setDepartmentIds] = useState<number[]>([])
   const [password, setPassword] = useState('')
   const [isPending, startTransition] = useTransition()
 
@@ -41,14 +40,20 @@ export function CreateUserDialog({ departments }: { departments: { id: number; n
     setItsNumber('')
     setDisplayName('')
     setContactEmail('')
-    setRole('viewer')
-    setDepartmentId(null)
+    setRole('dept')
+    setDepartmentIds([])
     setPassword('')
+  }
+
+  function toggleDepartment(departmentId: number, checked: boolean) {
+    setDepartmentIds((current) =>
+      checked ? [...current, departmentId] : current.filter((id) => id !== departmentId)
+    )
   }
 
   function handleSubmit() {
     startTransition(async () => {
-      const result = await createStaffUser({ itsNumber, displayName, contactEmail, role, departmentId, password })
+      const result = await createStaffUser({ itsNumber, displayName, contactEmail, role, departmentIds, password })
       if (result.ok) {
         toast.success(`Account created for ITS ${itsNumber}. Share the password with them directly.`)
         resetForm()
@@ -111,31 +116,28 @@ export function CreateUserDialog({ departments }: { departments: { id: number; n
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
+                  <SelectItem value="superadmin">Superadmin</SelectItem>
                   <SelectItem value="admin">Admin</SelectItem>
-                  <SelectItem value="reviewer">Reviewer</SelectItem>
-                  <SelectItem value="viewer">Viewer</SelectItem>
+                  <SelectItem value="dept">Dept</SelectItem>
                 </SelectContent>
               </Select>
             </div>
-            <div className="flex flex-col gap-2">
-              <Label>Department</Label>
-              <Select
-                value={departmentId === null ? NO_DEPARTMENT_VALUE : String(departmentId)}
-                onValueChange={(value) => setDepartmentId(value === NO_DEPARTMENT_VALUE ? null : Number(value))}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={NO_DEPARTMENT_VALUE}>All departments</SelectItem>
+            {role === 'dept' && (
+              <div className="flex flex-col gap-2">
+                <Label>Departments</Label>
+                <div className="flex flex-col gap-2 rounded-md border p-3">
                   {departments.map((department) => (
-                    <SelectItem key={department.id} value={String(department.id)}>
+                    <label key={department.id} className="flex items-center gap-2 text-sm">
+                      <Checkbox
+                        checked={departmentIds.includes(department.id)}
+                        onCheckedChange={(value) => toggleDepartment(department.id, value === true)}
+                      />
                       {department.name}
-                    </SelectItem>
+                    </label>
                   ))}
-                </SelectContent>
-              </Select>
-            </div>
+                </div>
+              </div>
+            )}
           </div>
           <div className="flex flex-col gap-2">
             <Label htmlFor="new-password">Password</Label>

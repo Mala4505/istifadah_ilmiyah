@@ -4,7 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { z } from 'zod'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { requireAdmin } from '@/lib/export/auth'
+import { requireSuperadmin } from '@/lib/export/auth'
 import { itsNumberSchema, itsNumberToLoginEmail } from '@/lib/auth/its'
 import { logRawError } from '@/lib/friendly-error'
 
@@ -14,40 +14,42 @@ const createStaffUserSchema = z.object({
   itsNumber: itsNumberSchema,
   displayName: z.string().trim().min(1, 'Name is required.'),
   contactEmail: z.union([z.string().trim().email('Enter a valid email address.'), z.literal('')]),
-  role: z.enum(['admin', 'reviewer', 'viewer']),
-  departmentId: z.number().int().nullable(),
+  role: z.enum(['superadmin', 'admin', 'dept']),
+  departmentIds: z.array(z.number().int().positive()),
   password: z.string().min(10, 'Password must be at least 10 characters.'),
 })
 
 /**
- * Admin-provisioned account creation — the only way a staff account is
+ * Superadmin-provisioned account creation — the only way a staff account is
  * created now (§4.4c: nobody self-serves into access). Writes through the
- * service-role admin client, which bypasses RLS entirely, so the admin gate
- * here is the only thing standing in front of it — checked with the
+ * service-role admin client, which bypasses RLS entirely, so the superadmin
+ * gate here is the only thing standing in front of it — checked with the
  * session-bound client FIRST, same pattern as app/api/import/route.ts.
  * ITS number becomes Supabase Auth's internal login identifier
- * (lib/auth/its.ts); the account lands active immediately, since an admin
- * explicitly provisioning it is a stronger signal than the self-signup
- * trigger's inactive-by-default fallback (20260810000001).
+ * (lib/auth/its.ts); the account lands active immediately, since a
+ * superadmin explicitly provisioning it is a stronger signal than the
+ * self-signup trigger's inactive-by-default fallback (20260810000001).
+ *
+ * Creating staff accounts is a superadmin-only action.
  */
 export async function createStaffUser(input: {
   itsNumber: string
   displayName: string
   contactEmail: string
-  role: 'admin' | 'reviewer' | 'viewer'
-  departmentId: number | null
+  role: 'superadmin' | 'admin' | 'dept'
+  departmentIds: number[]
   password: string
 }): Promise<ActionResult> {
-  const gate = await requireAdmin()
+  const gate = await requireSuperadmin()
   if (!gate.ok) {
-    return { ok: false, error: 'Creating staff accounts is an admin-only action.' }
+    return { ok: false, error: 'Creating staff accounts is a superadmin-only action.' }
   }
 
   const parsed = createStaffUserSchema.safeParse(input)
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]!.message }
   }
-  const { itsNumber, displayName, contactEmail, role, departmentId, password } = parsed.data
+  const { itsNumber, displayName, contactEmail, role, departmentIds, password } = parsed.data
 
   const admin = createAdminClient()
 
@@ -68,7 +70,7 @@ export async function createStaffUser(input: {
       its_number: itsNumber,
       full_name: displayName,
       role,
-      department_id: departmentId === null ? '' : String(departmentId),
+      department_ids: departmentIds,
       is_active: true,
       contact_email: contactEmail || null,
     },
@@ -85,26 +87,53 @@ export async function createStaffUser(input: {
 }
 
 /**
- * Updates a staff member's role, department, or active flag (§4.4c —
- * "Manage users, roles, department assignment" is admin-only). RLS
- * (staff_profile_update, 20260808000026) already locks those three columns
- * to admin writers; this action relies on the database to enforce that and
- * surfaces its error rather than re-checking the role here.
+ * Updates a staff member's role, department assignment(s), or active flag
+ * (§4.4c — "Manage users, roles, department assignment" is superadmin-only).
+ * RLS (staff_profile_update, staff_department_insert/update/delete —
+ * 20260819000003) already pins those writes to `is_superadmin()`, but this
+ * action also has to sync the separate `staff_department` junction table,
+ * which RLS on `staff_profile` alone doesn't protect end-to-end from the
+ * app's perspective — so an explicit gate is added here, same pattern as
+ * `createStaffUser`.
  */
 export async function updateStaffProfile(input: {
   id: string
-  role: 'admin' | 'reviewer' | 'viewer'
-  departmentId: number | null
+  role: 'superadmin' | 'admin' | 'dept'
+  departmentIds: number[]
   isActive: boolean
 }): Promise<ActionResult> {
+  const gate = await requireSuperadmin()
+  if (!gate.ok) {
+    return { ok: false, error: 'Managing staff accounts is a superadmin-only action.' }
+  }
+
   const supabase = await createClient()
 
   const { error } = await supabase
     .from('staff_profile')
-    .update({ role: input.role, department_id: input.departmentId, is_active: input.isActive })
+    .update({ role: input.role, is_active: input.isActive })
     .eq('id', input.id)
 
-  if (error) return { ok: false, error: logRawError('admin.updateStaffProfile', error.message) }
+  if (error) return { ok: false, error: logRawError('admin.updateStaffProfile:profile', error.message) }
+
+  const { error: deleteError } = await supabase
+    .from('staff_department')
+    .delete()
+    .eq('staff_id', input.id)
+
+  if (deleteError) {
+    return { ok: false, error: logRawError('admin.updateStaffProfile:departments:clear', deleteError.message) }
+  }
+
+  if (input.role === 'dept' && input.departmentIds.length > 0) {
+    const { error: insertError } = await supabase
+      .from('staff_department')
+      .insert(input.departmentIds.map((departmentId) => ({ staff_id: input.id, department_id: departmentId })))
+
+    if (insertError) {
+      return { ok: false, error: logRawError('admin.updateStaffProfile:departments:insert', insertError.message) }
+    }
+  }
 
   revalidatePath('/admin')
   return { ok: true }

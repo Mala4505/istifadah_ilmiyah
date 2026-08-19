@@ -9,9 +9,9 @@ import { logRawError } from '@/lib/friendly-error'
  * Typed entries — the path a department-scoped account uses instead of an
  * import (confirmed 2026-08-19). Everything here runs on the SESSION-bound
  * client, never the admin client: `entries_insert`
- * (20260819000002_manual_entries.sql) is the real gate, so a viewer, or a
- * reviewer aiming at somebody else's department, is stopped by the database
- * rather than by a check in this file that could drift out of step with it.
+ * (20260819000002_manual_entries.sql) is the real gate, so a dept user
+ * aiming at somebody else's department is stopped by the database rather
+ * than by a check in this file that could drift out of step with it.
  *
  * The department is resolved from the caller's own `staff_profile` rather
  * than taken from the form whenever that profile is scoped to one — a scoped
@@ -67,7 +67,7 @@ export async function createManualEntry(input: CreateManualEntryInput): Promise<
 
   const { data: profile, error: profileError } = await supabase
     .from('staff_profile')
-    .select('role, department_id, is_active')
+    .select('role, is_active')
     .eq('id', user.id)
     .maybeSingle()
 
@@ -77,15 +77,34 @@ export async function createManualEntry(input: CreateManualEntryInput): Promise<
   if (!profile || !profile.is_active) {
     return { ok: false, error: 'Your account is not active yet. Ask an administrator to activate it.' }
   }
-  if (profile.role === 'viewer') {
-    return { ok: false, error: 'Adding entries needs a reviewer or admin account. Yours is view-only.' }
-  }
 
-  // A scoped profile files against its own department, full stop. An
-  // all-departments profile has to say which one — there is no sensible
-  // default, and a null department would be visible to everybody (the
-  // `department_id is not null` half of the insert policy rejects it anyway).
-  const departmentId = profile.department_id ?? fields.departmentId
+  // A dept profile files against one of its own department(s) — resolved
+  // automatically when it has exactly one, otherwise the form has to say
+  // which. An admin/superadmin profile has to say which one regardless —
+  // there is no sensible default across every department, and a null
+  // department would be visible to everybody (the `department_id is not
+  // null` half of the insert policy rejects it anyway).
+  let departmentId: number | null
+  if (profile.role === 'dept') {
+    const { data: depts, error: deptsError } = await supabase
+      .from('staff_department')
+      .select('department_id')
+      .eq('staff_id', user.id)
+    if (deptsError) {
+      return { ok: false, error: logRawError('entries.createManualEntry:departments', deptsError.message) }
+    }
+    const ids = (depts ?? []).map((d) => d.department_id as number)
+    if (ids.length === 1) {
+      departmentId = ids[0]!
+    } else if (fields.departmentId !== null && ids.includes(fields.departmentId)) {
+      departmentId = fields.departmentId
+    } else {
+      return { ok: false, error: 'Choose which of your departments this entry belongs to.' }
+    }
+  } else {
+    // admin / superadmin: still take it from the form, no sensible default across every department.
+    departmentId = fields.departmentId
+  }
   if (departmentId === null || departmentId === undefined) {
     return { ok: false, error: 'Choose which department this entry belongs to.' }
   }
@@ -156,6 +175,12 @@ const realUbblNumberSchema = z
  * (20260808000017) apply unchanged: the swap lands in `entry_change_log` with
  * both the old and new number, which is what makes it auditable rather than a
  * silent rewrite of an identifier other systems may already have seen.
+ *
+ * `entries_update` now requires `is_admin_or_above()` (20260819000003), so a
+ * dept user's update attempt matches zero rows and falls into the
+ * `!data || data.length === 0` branch below — even for their OWN
+ * department's entry, not just another department's. Only admin/superadmin
+ * can complete this swap from here on.
  */
 export async function replaceProvisionalUbblNumber(input: {
   entryId: number

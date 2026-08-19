@@ -1,5 +1,6 @@
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
+import { isAdminOrAbove, isSuperadmin } from '@/lib/auth/roles'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Badge } from '@/components/ui/badge'
@@ -18,6 +19,17 @@ function extractDepartmentName(value: unknown): string | null {
     return first?.name ?? null
   }
   return (value as { name?: string } | null)?.name ?? null
+}
+
+/** A to-many junction embed (staff_department(department_id)) comes back from
+ * supabase-js as an array of rows shaped like the selected columns — here
+ * `{ department_id: number }[]` — one entry per membership row. Defensive
+ * against a null/undefined embed the same way extractDepartmentName is. */
+function extractDepartmentIds(value: unknown): number[] {
+  if (!Array.isArray(value)) return []
+  return value
+    .map((entry) => (entry as { department_id?: number | null } | null)?.department_id)
+    .filter((id): id is number => typeof id === 'number')
 }
 
 function PageHeader() {
@@ -45,7 +57,7 @@ export default async function AdminPage() {
     .eq('id', user.id)
     .single()
 
-  if (!profile || profile.role !== 'admin' || !profile.is_active) {
+  if (!profile || !isAdminOrAbove(profile.role) || !profile.is_active) {
     return (
       <div className="flex flex-col gap-4">
         <PageHeader />
@@ -54,14 +66,16 @@ export default async function AdminPage() {
             <CardTitle>Admin access required</CardTitle>
             <CardDescription>
               This screen manages staff roles, budget-head mapping, vendor identity merges, and Hub
-              master data. It is restricted to active admins — your account does not currently have
-              that role, so there is nothing further to show here.
+              master data. It is restricted to active admins and superadmins — your account does not
+              currently have that role, so there is nothing further to show here.
             </CardDescription>
           </CardHeader>
         </Card>
       </div>
     )
   }
+
+  const viewerIsSuperadmin = isSuperadmin(profile.role)
 
   const [
     { data: departmentsData },
@@ -75,7 +89,7 @@ export default async function AdminPage() {
     supabase.from('department').select('id, name').order('name'),
     supabase
       .from('staff_profile')
-      .select('id, display_name, role, department_id, is_active, its_number, contact_email')
+      .select('id, display_name, role, is_active, its_number, contact_email, staff_department(department_id)')
       .order('display_name'),
     supabase
       .from('budget_head')
@@ -108,7 +122,7 @@ export default async function AdminPage() {
     itsNumber: row.its_number as string | null,
     contactEmail: row.contact_email as string | null,
     role: row.role as StaffRow['role'],
-    departmentId: row.department_id as number | null,
+    departmentIds: extractDepartmentIds(row.staff_department),
     isActive: row.is_active as boolean,
   }))
 
@@ -184,13 +198,18 @@ export default async function AdminPage() {
                   role and department set below.
                 </CardDescription>
               </div>
-              <CreateUserDialog departments={departments} />
+              {viewerIsSuperadmin && <CreateUserDialog departments={departments} />}
             </CardHeader>
             <CardContent>
               {staff.length === 0 ? (
                 <p className="text-sm text-muted-foreground">No staff accounts yet.</p>
               ) : (
-                <UsersTable staff={staff} departments={departments} currentUserId={user.id} />
+                <UsersTable
+                  staff={staff}
+                  departments={departments}
+                  currentUserId={user.id}
+                  canEdit={viewerIsSuperadmin}
+                />
               )}
             </CardContent>
           </Card>

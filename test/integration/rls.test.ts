@@ -1,5 +1,6 @@
 /**
- * Live RLS suite — MASTER-PLAN §11.1 Day 7 exit ("RLS suite as three users"), §4.1–§4.4c.
+ * Live RLS suite — MASTER-PLAN §11.1 Day 7 exit ("RLS suite as three users"), §4.1–§4.4c,
+ * updated for the superadmin/admin/dept role model (20260819000003_role_rbac_v2.sql).
  *
  * This runs against the REAL Supabase project (there is only one, dev + prod, §2), so
  * every rule below is a safety rule, not a style preference:
@@ -12,19 +13,27 @@
  *   3. Pre-existing `entries`, `staff_profile`, `department`, `vendor` and `auth.users`
  *      rows are read-only here, and are never even matched: assertions filter by the
  *      fixture ids/department ids created in the same test.
- *   4. Fixture departments are brand new, so a "reviewer scoped to department A" in this
+ *   4. Fixture departments are brand new, so a "dept user scoped to department A" in this
  *      suite can see no production data at all, whatever the policies say.
  *
- * The three users of the day-7 exit criterion are `admin`, `reviewer` (scoped to
- * department A) and `viewer` (scoped to department A). A fourth, deactivated staff user
- * is created only by the storage test that needs it (§4.3 "inactive-staff request is
- * rejected").
+ * The three roles under the current model are `superadmin` (full access, including user
+ * management), `admin` (every cross-department action EXCEPT user management — genuinely
+ * new/distinct capability vs. the old model, where only the single top role had breadth),
+ * and `dept` (create + view entries in one or more assigned departments only; every
+ * verify/attach/resolve/bulk-edit capability the old `reviewer` role additionally had is
+ * now admin/superadmin-only). `staff_department` is a new junction table: a `dept` user
+ * may hold zero, one, or multiple department rows simultaneously; `admin`/`superadmin`
+ * hold none — their breadth comes from the role itself via `private.is_admin_or_above()`.
+ * A fourth, deactivated staff user (role `dept`) is created only by the tests that need
+ * one.
  *
  * Source of truth for expected behaviour is the migrations, not the plan's snippets:
  *   supabase/migrations/20260808000026_rls_policies.sql   (table policies + grants)
  *   supabase/migrations/20260808000027_storage_policies.sql
  *   supabase/migrations/20260811000003_entries_restructure.sql (current `entries` shape)
  *   supabase/migrations/20260811000004_reporting_views_update.sql (security_invoker views)
+ *   supabase/migrations/20260819000002_manual_entries.sql (entries_insert)
+ *   supabase/migrations/20260819000003_role_rbac_v2.sql (the superadmin/admin/dept split)
  */
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import { afterAll, describe, expect, it } from 'vitest'
@@ -84,9 +93,9 @@ type Fixture = {
   deptB: number
   entryA: number
   entryB: number
+  superadminUser: FixtureUser
   adminUser: FixtureUser
-  reviewerA: FixtureUser
-  viewerA: FixtureUser
+  deptUser: FixtureUser
   inactive?: FixtureUser
   /** Storage paths created during the test, removed on cleanup. */
   objects: string[]
@@ -98,8 +107,8 @@ type FixtureUser = { id: string; email: string; client: SupabaseClient }
 async function makeUser(
   suffix: string,
   label: string,
-  role: 'admin' | 'reviewer' | 'viewer',
-  departmentId: number | null,
+  role: 'superadmin' | 'admin' | 'dept',
+  departmentIds: number[],
   isActive: boolean
 ): Promise<FixtureUser> {
   const email = `${TAG}-${label}-${suffix}@rls-test.example.com`
@@ -115,16 +124,26 @@ async function makeUser(
   const id = data.user.id
   LEDGER.users.push(id)
 
-  // `private.handle_new_user()` lands the profile as viewer/inactive by default
-  // (20260810000001_its_login.sql). Set the role/department/active state explicitly by
-  // exact id rather than relying on user_metadata plumbing, so the test's premise is
-  // never in doubt. its_number is deliberately left NULL — the 8-digit ITS namespace is
-  // real identity data and this suite must not squat on a value in it.
+  // `private.handle_new_user()` lands the profile as dept/inactive by default
+  // (20260819000003_role_rbac_v2.sql §5). Set the role/active state explicitly by exact
+  // id rather than relying on user_metadata plumbing, so the test's premise is never in
+  // doubt. its_number is deliberately left NULL — the 8-digit ITS namespace is real
+  // identity data and this suite must not squat on a value in it.
   const { error: upErr } = await svc
     .from('staff_profile')
-    .update({ role, department_id: departmentId, is_active: isActive })
+    .update({ role, is_active: isActive })
     .eq('id', id)
   if (upErr) throw new Error(`staff_profile setup(${label}): ${upErr.message}`)
+
+  // department_id no longer lives on staff_profile — department membership is now the
+  // staff_department junction table, and a dept user may hold zero, one, or several rows.
+  // Written via the service-role client (bypasses RLS), same as the rest of fixture setup.
+  if (departmentIds.length > 0) {
+    const { error: sdErr } = await svc
+      .from('staff_department')
+      .insert(departmentIds.map((department_id) => ({ staff_id: id, department_id })))
+    if (sdErr) throw new Error(`staff_department setup(${label}): ${sdErr.message}`)
+  }
 
   const client = createClient(SUPABASE_URL, PUBLISHABLE_KEY, {
     auth: { autoRefreshToken: false, persistSession: false },
@@ -135,7 +154,7 @@ async function makeUser(
   return { id, email, client }
 }
 
-async function insertDepartment(suffix: string, letter: 'a' | 'b'): Promise<number> {
+async function insertDepartment(suffix: string, letter: string): Promise<number> {
   const { data, error } = await svc
     .from('department')
     .insert({ name: `${TAG}-dept-${letter}-${suffix}`, external_code: `${TAG}-${letter}-${suffix}` })
@@ -146,7 +165,7 @@ async function insertDepartment(suffix: string, letter: 'a' | 'b'): Promise<numb
   return data.id
 }
 
-async function insertEntry(suffix: string, letter: 'a' | 'b', departmentId: number): Promise<number> {
+async function insertEntry(suffix: string, letter: string, departmentId: number): Promise<number> {
   const { data, error } = await svc
     .from('entries')
     .insert({
@@ -189,7 +208,10 @@ async function withFixture(
     const problems: string[] = []
     // Order matters: storage objects, then entries (entry_change_log cascades and
     // entries.updated_by references auth.users), then staff_profile, then auth users,
-    // then the now-unreferenced departments.
+    // then the now-unreferenced departments. staff_department rows are NOT deleted
+    // explicitly here — the table's staff_id FK is `references staff_profile(id) on
+    // delete cascade` (20260819000003 §1), so deleting the staff_profile row below
+    // cascades them away automatically; adding an explicit delete step would be redundant.
     if (objects.length > 0) {
       const { error } = await svc.storage.from(BUCKET).remove(objects)
       if (error) problems.push(`storage: ${error.message}`)
@@ -229,16 +251,16 @@ async function withFixture(
     const entryB = await insertEntry(suffix, 'b', deptB)
     created.entries.push(entryB)
 
-    const adminUser = await makeUser(suffix, 'admin', 'admin', null, true)
+    const superadminUser = await makeUser(suffix, 'superadmin', 'superadmin', [], true)
+    created.users.push(superadminUser.id)
+    const adminUser = await makeUser(suffix, 'admin', 'admin', [], true)
     created.users.push(adminUser.id)
-    const reviewerA = await makeUser(suffix, 'reviewer', 'reviewer', deptA, true)
-    created.users.push(reviewerA.id)
-    const viewerA = await makeUser(suffix, 'viewer', 'viewer', deptA, true)
-    created.users.push(viewerA.id)
+    const deptUser = await makeUser(suffix, 'dept', 'dept', [deptA], true)
+    created.users.push(deptUser.id)
 
     let inactive: FixtureUser | undefined
     if (opts.inactive) {
-      inactive = await makeUser(suffix, 'inactive', 'reviewer', deptA, false)
+      inactive = await makeUser(suffix, 'inactive', 'dept', [deptA], false)
       created.users.push(inactive.id)
     }
 
@@ -248,9 +270,9 @@ async function withFixture(
       deptB,
       entryA,
       entryB,
+      superadminUser,
       adminUser,
-      reviewerA,
-      viewerA,
+      deptUser,
       inactive,
       objects,
       cleanup,
@@ -258,7 +280,7 @@ async function withFixture(
     await run(fx)
   } finally {
     // Sign out every session before the accounts disappear.
-    for (const u of [fx?.adminUser, fx?.reviewerA, fx?.viewerA, fx?.inactive]) {
+    for (const u of [fx?.superadminUser, fx?.adminUser, fx?.deptUser, fx?.inactive]) {
       if (u) await u.client.auth.signOut().catch(() => {})
     }
     await cleanup()
@@ -280,72 +302,101 @@ async function readEntry(id: number) {
 const ids = (rows: Array<{ id: number }> | null) => (rows ?? []).map((r) => r.id).sort()
 
 // ===========================================================================
-describe('RLS as three users (admin / reviewer / viewer)', () => {
+describe('RLS as three users (superadmin / admin / dept)', () => {
   // -------------------------------------------------------------------------
-  // 1. Department scoping on `entries` — §4.2 entries_select
+  // 1. Department scoping on `entries` — §4.2 entries_select, updated by role_rbac_v2
   // -------------------------------------------------------------------------
-  it('scopes entries SELECT to the caller department; admin sees across departments', async () => {
+  it('scopes entries SELECT to the caller department; admin/superadmin see across departments', async () => {
     await withFixture({}, async (fx) => {
       const scope = (c: SupabaseClient) =>
         c.from('entries').select('id,department_id').in('department_id', [fx.deptA, fx.deptB])
 
-      const reviewer = await scope(fx.reviewerA.client)
-      expect(reviewer.error).toBeNull()
-      expect(ids(reviewer.data)).toEqual([fx.entryA])
+      const dept = await scope(fx.deptUser.client)
+      expect(dept.error).toBeNull()
+      expect(ids(dept.data)).toEqual([fx.entryA])
 
-      const viewer = await scope(fx.viewerA.client)
-      expect(viewer.error).toBeNull()
-      expect(ids(viewer.data)).toEqual([fx.entryA])
-
-      // department_id null on the profile = every department (§4.1 can_see_department)
+      // admin/superadmin breadth now comes from the role itself, via
+      // private.is_admin_or_above() short-circuiting can_see_department() — not from a
+      // null department_id (that column is gone) or an "all departments" row.
       const admin = await scope(fx.adminUser.client)
       expect(admin.error).toBeNull()
       expect(ids(admin.data)).toEqual([fx.entryA, fx.entryB].sort())
 
+      const superadmin = await scope(fx.superadminUser.client)
+      expect(superadmin.error).toBeNull()
+      expect(ids(superadmin.data)).toEqual([fx.entryA, fx.entryB].sort())
+
       // Targeting department B's row directly must also return nothing, not an error —
       // a filtered-out row is indistinguishable from a non-existent one.
-      const direct = await fx.reviewerA.client.from('entries').select('id').eq('id', fx.entryB)
+      const direct = await fx.deptUser.client.from('entries').select('id').eq('id', fx.entryB)
       expect(direct.error).toBeNull()
       expect(direct.data).toEqual([])
     })
   })
 
-  // -------------------------------------------------------------------------
-  // 2. Role enforcement on writes — §4.2 entries_update, §4.4c
-  // -------------------------------------------------------------------------
-  it('enforces role and department on entries UPDATE', async () => {
+  it('lets a dept user assigned to multiple departments see rows in both, but not a third', async () => {
     await withFixture({}, async (fx) => {
-      // viewer: role not in (admin, reviewer) -> USING fails -> zero rows matched.
-      const viewerUpd = await fx.viewerA.client
+      // Standalone department + entry + user, built and torn down within this test only
+      // (same one-off-row pattern the vendor/zone/job_queue tests below use), since a
+      // multi-department dept user has no place in the standard three-user fixture.
+      const deptC = await insertDepartment(fx.suffix, 'c')
+      const entryC = await insertEntry(fx.suffix, 'c', deptC)
+      const deptAB = await makeUser(fx.suffix, 'dept-ab', 'dept', [fx.deptA, fx.deptB], true)
+
+      try {
+        const seen = await deptAB.client
+          .from('entries')
+          .select('id,department_id')
+          .in('department_id', [fx.deptA, fx.deptB, deptC])
+        expect(seen.error).toBeNull()
+        expect(ids(seen.data)).toEqual([fx.entryA, fx.entryB].sort())
+
+        // Direct lookup on the third department's row confirms it, not a coincidence of
+        // the .in() filter.
+        const direct = await deptAB.client.from('entries').select('id').eq('id', entryC)
+        expect(direct.error).toBeNull()
+        expect(direct.data).toEqual([])
+      } finally {
+        await deptAB.client.auth.signOut().catch(() => {})
+        await del('entries', [entryC])
+        LEDGER.entries = LEDGER.entries.filter((e) => e !== entryC)
+        await svc.from('staff_profile').delete().eq('id', deptAB.id)
+        await svc.auth.admin.deleteUser(deptAB.id)
+        LEDGER.users = LEDGER.users.filter((u) => u !== deptAB.id)
+        await del('department', [deptC])
+        LEDGER.departments = LEDGER.departments.filter((d) => d !== deptC)
+      }
+    })
+  })
+
+  // -------------------------------------------------------------------------
+  // 2. Role enforcement on writes — §4.2 entries_update, updated by role_rbac_v2 §6b
+  // -------------------------------------------------------------------------
+  it('enforces role on entries UPDATE: dept has none, admin and superadmin have both', async () => {
+    await withFixture({}, async (fx) => {
+      // dept: is_admin_or_above() fails -> USING fails -> zero rows matched, even for
+      // its own department. This is the confirmed "view + create only" restriction —
+      // dept behaves like the OLD viewer did, for every department including its own.
+      const deptOwn = await fx.deptUser.client
         .from('entries')
-        .update({ remark: 'viewer-should-not-land' })
+        .update({ remark: 'dept-should-not-land' })
         .eq('id', fx.entryA)
         .select('id')
-      expect(viewerUpd.error).toBeNull()
-      expect(viewerUpd.data).toEqual([])
+      expect(deptOwn.error).toBeNull()
+      expect(deptOwn.data).toEqual([])
       expect((await readEntry(fx.entryA))?.remark).toBeNull()
 
-      // reviewer, own department: allowed.
-      const revOwn = await fx.reviewerA.client
+      const deptOther = await fx.deptUser.client
         .from('entries')
-        .update({ remark: `${TAG}-reviewer-ok` })
-        .eq('id', fx.entryA)
-        .select('id')
-      expect(revOwn.error).toBeNull()
-      expect(ids(revOwn.data)).toEqual([fx.entryA])
-      expect((await readEntry(fx.entryA))?.remark).toBe(`${TAG}-reviewer-ok`)
-
-      // reviewer, other department: invisible, so nothing to update.
-      const revOther = await fx.reviewerA.client
-        .from('entries')
-        .update({ remark: 'cross-department-should-not-land' })
+        .update({ remark: 'dept-cross-department-should-not-land' })
         .eq('id', fx.entryB)
         .select('id')
-      expect(revOther.error).toBeNull()
-      expect(revOther.data).toEqual([])
+      expect(deptOther.error).toBeNull()
+      expect(deptOther.data).toEqual([])
       expect((await readEntry(fx.entryB))?.remark).toBeNull()
 
-      // admin: across departments.
+      // admin: across departments — genuinely new/different from the old model, where
+      // only the single top role had this.
       const adminA = await fx.adminUser.client
         .from('entries')
         .update({ remark: `${TAG}-admin-a` })
@@ -353,6 +404,7 @@ describe('RLS as three users (admin / reviewer / viewer)', () => {
         .select('id')
       expect(adminA.error).toBeNull()
       expect(ids(adminA.data)).toEqual([fx.entryA])
+      expect((await readEntry(fx.entryA))?.remark).toBe(`${TAG}-admin-a`)
 
       const adminB = await fx.adminUser.client
         .from('entries')
@@ -361,20 +413,57 @@ describe('RLS as three users (admin / reviewer / viewer)', () => {
         .select('id')
       expect(adminB.error).toBeNull()
       expect(ids(adminB.data)).toEqual([fx.entryB])
-      expect((await readEntry(fx.entryB))?.remark).toBe(`${TAG}-admin-b`)
+
+      // superadmin: across departments too.
+      const superA = await fx.superadminUser.client
+        .from('entries')
+        .update({ remark: `${TAG}-superadmin-a` })
+        .eq('id', fx.entryA)
+        .select('id')
+      expect(superA.error).toBeNull()
+      expect(ids(superA.data)).toEqual([fx.entryA])
+      expect((await readEntry(fx.entryA))?.remark).toBe(`${TAG}-superadmin-a`)
+
+      const superB = await fx.superadminUser.client
+        .from('entries')
+        .update({ remark: `${TAG}-superadmin-b` })
+        .eq('id', fx.entryB)
+        .select('id')
+      expect(superB.error).toBeNull()
+      expect(ids(superB.data)).toEqual([fx.entryB])
+      expect((await readEntry(fx.entryB))?.remark).toBe(`${TAG}-superadmin-b`)
     })
   })
 
-  it("blocks a reviewer from moving a row out of their department (entries_update WITH CHECK)", async () => {
+  // NOTE on the old "blocks a reviewer from moving a row out of their department"
+  // (entries_update WITH CHECK) test: under the new model there is no actor left for
+  // whom that scenario is even reachable. can_see_department(dept_id) for admin/superadmin
+  // short-circuits true via is_admin_or_above() *for any dept_id* — their department
+  // reach is role-wide, not scoped — while the one role that IS department-scoped
+  // (dept) has zero entries_update access at all (blocked by USING before WITH CHECK is
+  // ever evaluated, per the test above). So there is no role that both (a) can update a
+  // row and (b) is restricted to a specific department by can_see_department. The WITH
+  // CHECK clause still runs, it just never actually restricts anyone under this model.
+  // This test documents that resulting (confirmed, intentional) behaviour instead of an
+  // anti-escalation boundary, since the boundary itself no longer has a subject.
+  it('lets admin and superadmin move an entries row across departments (their reach is role-wide, not department-scoped)', async () => {
     await withFixture({}, async (fx) => {
-      const moved = await fx.reviewerA.client
+      const movedByAdmin = await fx.adminUser.client
         .from('entries')
         .update({ department_id: fx.deptB })
         .eq('id', fx.entryA)
         .select('id')
-      // USING passes (row is in department A) but WITH CHECK evaluates the NEW row.
-      expect(moved.error).not.toBeNull()
-      expect(moved.error?.code).toBe('42501')
+      expect(movedByAdmin.error).toBeNull()
+      expect(ids(movedByAdmin.data)).toEqual([fx.entryA])
+      expect((await readEntry(fx.entryA))?.department_id).toBe(fx.deptB)
+
+      const movedBack = await fx.superadminUser.client
+        .from('entries')
+        .update({ department_id: fx.deptA })
+        .eq('id', fx.entryA)
+        .select('id')
+      expect(movedBack.error).toBeNull()
+      expect(ids(movedBack.data)).toEqual([fx.entryA])
       expect((await readEntry(fx.entryA))?.department_id).toBe(fx.deptA)
     })
   })
@@ -385,9 +474,9 @@ describe('RLS as three users (admin / reviewer / viewer)', () => {
   it('rejects entries DELETE for every role — loudly, not as a silent no-op', async () => {
     await withFixture({}, async (fx) => {
       for (const [label, user] of [
-        ['viewer', fx.viewerA],
-        ['reviewer', fx.reviewerA],
+        ['dept', fx.deptUser],
         ['admin', fx.adminUser],
+        ['superadmin', fx.superadminUser],
       ] as const) {
         const res = await user.client.from('entries').delete().eq('id', fx.entryA).select('id')
         // `revoke delete on all tables ... from authenticated` (end of
@@ -402,36 +491,90 @@ describe('RLS as three users (admin / reviewer / viewer)', () => {
     })
   })
 
-  it('grants no INSERT on entries to any authenticated role (importers are service_role)', async () => {
+  // -------------------------------------------------------------------------
+  // entries_insert — role_rbac_v2 §6a repoints this at is_staff(), so dept/admin/
+  // superadmin can all insert, scoped by can_see_department.
+  // -------------------------------------------------------------------------
+  it('lets dept/admin/superadmin insert manual entries scoped to a department they can see', async () => {
     await withFixture({}, async (fx) => {
-      for (const [label, user] of [
-        ['reviewer', fx.reviewerA],
-        ['admin', fx.adminUser],
-      ] as const) {
-        const res = await user.client
+      const inserted: number[] = []
+      const track = (id: number) => {
+        inserted.push(id)
+        LEDGER.entries.push(id)
+      }
+
+      try {
+        const deptIns = await fx.deptUser.client
           .from('entries')
           .insert({
-            ubbl_number: `${TAG}-${fx.suffix}-insert-${label}`,
+            ubbl_number: `${TAG}-${fx.suffix}-insert-dept`,
             department_id: fx.deptA,
+            source: 'manual',
             amount: '1.00',
           })
           .select('id')
-        expect(res.error, `${label} insert should error`).not.toBeNull()
-        expect(res.error?.code, `${label} insert code`).toBe('42501')
+        expect(deptIns.error).toBeNull()
+        expect((deptIns.data ?? []).length).toBe(1)
+        if (deptIns.data?.[0]) track(deptIns.data[0].id)
+
+        const adminIns = await fx.adminUser.client
+          .from('entries')
+          .insert({
+            ubbl_number: `${TAG}-${fx.suffix}-insert-admin`,
+            department_id: fx.deptB,
+            source: 'manual',
+            amount: '1.00',
+          })
+          .select('id')
+        expect(adminIns.error).toBeNull()
+        expect((adminIns.data ?? []).length).toBe(1)
+        if (adminIns.data?.[0]) track(adminIns.data[0].id)
+
+        const superIns = await fx.superadminUser.client
+          .from('entries')
+          .insert({
+            ubbl_number: `${TAG}-${fx.suffix}-insert-superadmin`,
+            department_id: fx.deptA,
+            source: 'manual',
+            amount: '1.00',
+          })
+          .select('id')
+        expect(superIns.error).toBeNull()
+        expect((superIns.data ?? []).length).toBe(1)
+        if (superIns.data?.[0]) track(superIns.data[0].id)
+      } finally {
+        await del('entries', inserted)
+        LEDGER.entries = LEDGER.entries.filter((e) => !inserted.includes(e))
       }
-      // Nothing leaked in despite the errors.
+    })
+  })
+
+  it('blocks a dept user from inserting into a department they are not assigned to (can_see_department)', async () => {
+    await withFixture({}, async (fx) => {
+      const res = await fx.deptUser.client
+        .from('entries')
+        .insert({
+          ubbl_number: `${TAG}-${fx.suffix}-insert-dept-other`,
+          department_id: fx.deptB,
+          source: 'manual',
+          amount: '1.00',
+        })
+        .select('id')
+      expect(res.error).not.toBeNull()
+      expect(res.error?.code).toBe('42501')
+
       const { data } = await svc
         .from('entries')
         .select('id')
-        .like('ubbl_number', `${TAG}-${fx.suffix}-insert-%`)
+        .like('ubbl_number', `${TAG}-${fx.suffix}-insert-dept-other%`)
       expect(data).toEqual([])
     })
   })
 
   // -------------------------------------------------------------------------
-  // 4. Storage bucket policies — §4.3
+  // 4. Storage bucket policies — §4.3, delete widened to admin-or-above by role_rbac_v2
   // -------------------------------------------------------------------------
-  it('applies invoice-documents bucket policies: staff read/upload/replace, admin-only delete', async () => {
+  it('applies invoice-documents bucket policies: staff read/upload/replace, admin-or-above delete', async () => {
     await withFixture({ inactive: true }, async (fx) => {
       const path = `${TAG}/${fx.suffix}/invoice.txt`
       fx.objects.push(path)
@@ -439,19 +582,19 @@ describe('RLS as three users (admin / reviewer / viewer)', () => {
 
       const store = (c: SupabaseClient) => c.storage.from(BUCKET)
 
-      // viewer (active staff, lowest role) can upload — is_staff(), not a role check.
-      const up = await store(fx.viewerA.client).upload(path, new Blob([`${TAG} v1`]), {
+      // dept (active staff, lowest role) can upload — is_staff(), not a role check.
+      const up = await store(fx.deptUser.client).upload(path, new Blob([`${TAG} v1`]), {
         contentType: 'text/plain',
       })
-      expect(up.error, `viewer upload: ${up.error?.message}`).toBeNull()
+      expect(up.error, `dept upload: ${up.error?.message}`).toBeNull()
 
       // ...and read it back.
-      const down = await store(fx.viewerA.client).download(path)
+      const down = await store(fx.deptUser.client).download(path)
       expect(down.error).toBeNull()
       expect(await down.data?.text()).toBe(`${TAG} v1`)
 
       // ...and replace it (upsert needs INSERT + SELECT + UPDATE together, §4.3).
-      const replace = await store(fx.reviewerA.client).upload(path, new Blob([`${TAG} v2`]), {
+      const replace = await store(fx.deptUser.client).upload(path, new Blob([`${TAG} v2`]), {
         contentType: 'text/plain',
         upsert: true,
       })
@@ -478,19 +621,43 @@ describe('RLS as three users (admin / reviewer / viewer)', () => {
         .upload(`${TAG}/${fx.suffix}/inactive.txt`, new Blob(['nope']))
       expect(deadUp.error).not.toBeNull()
 
-      // Delete is admin-only. The storage API answers a blocked remove with an empty
-      // result rather than an error, so the real assertion is that the object survives.
-      await store(fx.reviewerA.client).remove([path])
+      // Delete is admin-or-above (the "admins delete documents" policy calls the now-
+      // widened is_admin() alias). The storage API answers a blocked remove with an
+      // empty result rather than an error, so the real assertion is that the object
+      // survives.
+      await store(fx.deptUser.client).remove([path])
       expect(
         (await svc.storage.from(BUCKET).download(path)).error,
-        'reviewer must not be able to delete a document'
+        'dept user must not be able to delete a document'
       ).toBeNull()
 
+      // admin (not just superadmin) CAN delete — a widened capability vs. the old model,
+      // where only the single top role could.
       const adminRemove = await store(fx.adminUser.client).remove([path])
       expect(adminRemove.error).toBeNull()
       expect((await svc.storage.from(BUCKET).download(path)).error).not.toBeNull()
 
-      // Nothing left for cleanup to chase, but the path stays registered anyway.
+      // Second document: confirm dept is blocked here too (not a one-off on the first
+      // path) and that superadmin also retains delete.
+      const path2 = `${TAG}/${fx.suffix}/invoice-2.txt`
+      fx.objects.push(path2)
+      LEDGER.objects.push(path2)
+      const up2 = await store(fx.deptUser.client).upload(path2, new Blob([`${TAG} v1`]), {
+        contentType: 'text/plain',
+      })
+      expect(up2.error).toBeNull()
+
+      await store(fx.deptUser.client).remove([path2])
+      expect(
+        (await svc.storage.from(BUCKET).download(path2)).error,
+        'dept user must not be able to delete a document (second check)'
+      ).toBeNull()
+
+      const superadminRemove = await store(fx.superadminUser.client).remove([path2])
+      expect(superadminRemove.error).toBeNull()
+      expect((await svc.storage.from(BUCKET).download(path2)).error).not.toBeNull()
+
+      // Nothing left for cleanup to chase, but the paths stay registered anyway.
       const stray = await svc.storage.from(BUCKET).list(`${TAG}/${fx.suffix}`)
       expect(stray.data ?? []).toEqual([])
     })
@@ -499,10 +666,10 @@ describe('RLS as three users (admin / reviewer / viewer)', () => {
   // -------------------------------------------------------------------------
   // 5. security_invoker reporting views — §4.4
   // -------------------------------------------------------------------------
-  it('keeps security_invoker reporting views department-scoped for a reviewer', async () => {
+  it('keeps security_invoker reporting views department-scoped for a dept user', async () => {
     await withFixture({}, async (fx) => {
       // v_entry_enriched — the join every other view builds on.
-      const enriched = await fx.reviewerA.client
+      const enriched = await fx.deptUser.client
         .from('v_entry_enriched')
         .select('id,department_id')
         .in('department_id', [fx.deptA, fx.deptB])
@@ -511,63 +678,71 @@ describe('RLS as three users (admin / reviewer / viewer)', () => {
 
       // v_department_audit_variance — both fixture entries qualify (main_number null,
       // not void), so anything other than [entryA] here is a genuine leak.
-      const variance = await fx.reviewerA.client
+      const variance = await fx.deptUser.client
         .from('v_department_audit_variance')
         .select('entry_id,department_id')
         .in('department_id', [fx.deptA, fx.deptB])
       expect(variance.error).toBeNull()
       expect((variance.data ?? []).map((r) => r.entry_id).sort()).toEqual([fx.entryA])
 
-      // The viewer role reads reports too (§4.4c) — same scoping.
-      const viewerView = await fx.viewerA.client
-        .from('v_entry_enriched')
-        .select('id,department_id')
-        .in('department_id', [fx.deptA, fx.deptB])
-      expect(ids(viewerView.data)).toEqual([fx.entryA])
-
-      // Admin sees both through the same view.
+      // Admin and superadmin see both through the same view.
       const adminView = await fx.adminUser.client
         .from('v_entry_enriched')
         .select('id,department_id')
         .in('department_id', [fx.deptA, fx.deptB])
       expect(ids(adminView.data)).toEqual([fx.entryA, fx.entryB].sort())
+
+      const superadminView = await fx.superadminUser.client
+        .from('v_entry_enriched')
+        .select('id,department_id')
+        .in('department_id', [fx.deptA, fx.deptB])
+      expect(ids(superadminView.data)).toEqual([fx.entryA, fx.entryB].sort())
     })
   })
 
   // -------------------------------------------------------------------------
   // 6. Everything else in 20260808000026 that the brief did not name
   // -------------------------------------------------------------------------
-  it('lets staff read only their own staff_profile and blocks privilege escalation', async () => {
+  it('lets staff read only their own staff_profile and blocks a dept user from escalating role/is_active', async () => {
     await withFixture({}, async (fx) => {
-      const all = [fx.adminUser.id, fx.reviewerA.id, fx.viewerA.id]
+      const all = [fx.superadminUser.id, fx.adminUser.id, fx.deptUser.id]
 
-      const own = await fx.viewerA.client.from('staff_profile').select('id,role').in('id', all)
+      const own = await fx.deptUser.client.from('staff_profile').select('id,role').in('id', all)
       expect(own.error).toBeNull()
-      expect((own.data ?? []).map((r) => r.id)).toEqual([fx.viewerA.id])
+      expect((own.data ?? []).map((r) => r.id)).toEqual([fx.deptUser.id])
 
       const asAdmin = await fx.adminUser.client.from('staff_profile').select('id').in('id', all)
       expect((asAdmin.data ?? []).map((r) => r.id).sort()).toEqual([...all].sort())
 
-      // A non-admin may edit their own row...
-      const rename = await fx.viewerA.client
+      const asSuperadmin = await fx.superadminUser.client
+        .from('staff_profile')
+        .select('id')
+        .in('id', all)
+      expect((asSuperadmin.data ?? []).map((r) => r.id).sort()).toEqual([...all].sort())
+
+      // A dept user may edit their own row...
+      const rename = await fx.deptUser.client
         .from('staff_profile')
         .update({ display_name: `${TAG}-renamed` })
-        .eq('id', fx.viewerA.id)
+        .eq('id', fx.deptUser.id)
         .select('id')
       expect(rename.error).toBeNull()
       expect((rename.data ?? []).length).toBe(1)
 
-      // ...but not the locked columns. This is §4.4c ("manage users, roles, department
-      // assignment" is admin-only) enforced in the database, not just hidden in the UI.
+      // ...but not the locked columns. staff_profile.department_id is gone entirely —
+      // the locked set is now just (role, is_active). This is §4.4c ("manage users,
+      // roles, department assignment" is admin-only) enforced in the database, not just
+      // hidden in the UI.
       for (const patch of [
         { role: 'admin' },
-        { department_id: null },
-        { is_active: true, role: 'reviewer' },
+        { role: 'superadmin' },
+        { is_active: false },
+        { is_active: true, role: 'admin' },
       ]) {
-        const esc = await fx.viewerA.client
+        const esc = await fx.deptUser.client
           .from('staff_profile')
           .update(patch)
-          .eq('id', fx.viewerA.id)
+          .eq('id', fx.deptUser.id)
           .select('id')
         expect(esc.error, `escalation via ${JSON.stringify(patch)} must fail`).not.toBeNull()
         expect(esc.error?.code).toBe('42501')
@@ -575,14 +750,200 @@ describe('RLS as three users (admin / reviewer / viewer)', () => {
 
       const { data: stored } = await svc
         .from('staff_profile')
-        .select('role,department_id,is_active')
-        .eq('id', fx.viewerA.id)
+        .select('role,is_active')
+        .eq('id', fx.deptUser.id)
         .single()
-      expect(stored).toMatchObject({ role: 'viewer', department_id: fx.deptA, is_active: true })
+      expect(stored).toMatchObject({ role: 'dept', is_active: true })
     })
   })
 
-  it('restricts vendor merges to admin (vendor_update_admin) while all staff can read vendors', async () => {
+  // This is the core new boundary the whole migration exists to enforce, so it gets its
+  // own dedicated test rather than living inline in the escalation test above.
+  it('blocks admin from escalating itself to superadmin and from editing any other staff row at all', async () => {
+    await withFixture({}, async (fx) => {
+      // admin cannot promote itself.
+      const selfEscalate = await fx.adminUser.client
+        .from('staff_profile')
+        .update({ role: 'superadmin' })
+        .eq('id', fx.adminUser.id)
+        .select('id')
+      expect(selfEscalate.error).not.toBeNull()
+      expect(selfEscalate.error?.code).toBe('42501')
+
+      // admin can still rename itself (a non-locked field) — same shape as any staff
+      // member editing their own row.
+      const selfRename = await fx.adminUser.client
+        .from('staff_profile')
+        .update({ display_name: `${TAG}-admin-renamed` })
+        .eq('id', fx.adminUser.id)
+        .select('id')
+      expect(selfRename.error).toBeNull()
+      expect((selfRename.data ?? []).length).toBe(1)
+
+      // admin cannot touch another user's row at all — not even a non-role field.
+      // staff_profile_update's USING clause is `id = auth.uid() or is_superadmin()`
+      // (pinned, NOT the widened is_admin() alias); admin is neither for someone else's
+      // row, so zero rows match — this is a USING-level exclusion, not just the
+      // locked-field WITH CHECK failing.
+      const otherRename = await fx.adminUser.client
+        .from('staff_profile')
+        .update({ display_name: `${TAG}-should-not-land` })
+        .eq('id', fx.deptUser.id)
+        .select('id')
+      expect(otherRename.error).toBeNull()
+      expect(otherRename.data).toEqual([])
+      const { data: deptStored } = await svc
+        .from('staff_profile')
+        .select('display_name')
+        .eq('id', fx.deptUser.id)
+        .single()
+      expect(deptStored?.display_name).not.toBe(`${TAG}-should-not-land`)
+
+      const otherEscalate = await fx.adminUser.client
+        .from('staff_profile')
+        .update({ role: 'superadmin', is_active: false })
+        .eq('id', fx.deptUser.id)
+        .select('id')
+      expect(otherEscalate.error).toBeNull()
+      expect(otherEscalate.data).toEqual([])
+
+      // superadmin CAN edit another user's role/is_active — the actual, intended
+      // user-management capability.
+      const superEdits = await fx.superadminUser.client
+        .from('staff_profile')
+        .update({ role: 'admin', is_active: false })
+        .eq('id', fx.deptUser.id)
+        .select('id')
+      expect(superEdits.error).toBeNull()
+      expect((superEdits.data ?? []).map((r) => r.id)).toEqual([fx.deptUser.id])
+      const { data: afterSuper } = await svc
+        .from('staff_profile')
+        .select('role,is_active')
+        .eq('id', fx.deptUser.id)
+        .single()
+      expect(afterSuper).toMatchObject({ role: 'admin', is_active: false })
+    })
+  })
+
+  // -------------------------------------------------------------------------
+  // staff_department — new junction table, no equivalent in the old suite.
+  // -------------------------------------------------------------------------
+  it('exposes staff_department correctly: staff read own rows, admin/superadmin read all, only superadmin writes', async () => {
+    await withFixture({}, async (fx) => {
+      // fx.deptUser already has exactly one staff_department row (deptA). Build a second
+      // dept user scoped to deptB so there is "another user's" row to prove invisible.
+      const dept2 = await makeUser(fx.suffix, 'dept2', 'dept', [fx.deptB], true)
+      LEDGER.users.push(dept2.id)
+
+      try {
+        const own = await fx.deptUser.client
+          .from('staff_department')
+          .select('staff_id,department_id')
+          .in('staff_id', [fx.deptUser.id, dept2.id])
+        expect(own.error).toBeNull()
+        expect((own.data ?? []).map((r) => r.staff_id)).toEqual([fx.deptUser.id])
+
+        const asAdmin = await fx.adminUser.client
+          .from('staff_department')
+          .select('staff_id,department_id')
+          .in('staff_id', [fx.deptUser.id, dept2.id])
+        expect((asAdmin.data ?? []).map((r) => r.staff_id).sort()).toEqual(
+          [fx.deptUser.id, dept2.id].sort()
+        )
+
+        const asSuperadmin = await fx.superadminUser.client
+          .from('staff_department')
+          .select('staff_id,department_id')
+          .in('staff_id', [fx.deptUser.id, dept2.id])
+        expect((asSuperadmin.data ?? []).map((r) => r.staff_id).sort()).toEqual(
+          [fx.deptUser.id, dept2.id].sort()
+        )
+
+        // dept and admin both fail to write staff_department — even their own row.
+        // NOTE: INSERT's WITH CHECK evaluates the specific new row being inserted, so a
+        // failing check is a hard 42501 error. UPDATE/DELETE's USING clause instead acts
+        // as a row filter over EXISTING rows — a uniformly-false is_superadmin() gate
+        // just matches zero rows, with no error, mirroring the dept/viewer
+        // entries_update precedent earlier in this file. Grants exist at the table level
+        // for all four verbs (role_rbac_v2 §1's explicit `grant ... update, delete`), so
+        // it is RLS alone drawing this distinction, not a revoked privilege.
+        for (const [label, user] of [
+          ['dept', fx.deptUser],
+          ['admin', fx.adminUser],
+        ] as const) {
+          const insertAttempt = await user.client
+            .from('staff_department')
+            .insert({ staff_id: user.id, department_id: fx.deptB })
+            .select()
+          expect(insertAttempt.error, `${label} insert should error`).not.toBeNull()
+          expect(insertAttempt.error?.code).toBe('42501')
+
+          const updateAttempt = await user.client
+            .from('staff_department')
+            .update({ department_id: fx.deptB })
+            .eq('staff_id', user.id)
+            .select()
+          expect(updateAttempt.error, `${label} update should not error`).toBeNull()
+          expect(updateAttempt.data, `${label} update should match zero rows`).toEqual([])
+
+          const deleteAttempt = await user.client
+            .from('staff_department')
+            .delete()
+            .eq('staff_id', user.id)
+            .select()
+          expect(deleteAttempt.error, `${label} delete should not error`).toBeNull()
+          expect(deleteAttempt.data, `${label} delete should match zero rows`).toEqual([])
+        }
+
+        // The dept user's real row must have survived every rejected attempt.
+        const { data: survives } = await svc
+          .from('staff_department')
+          .select('staff_id,department_id')
+          .eq('staff_id', fx.deptUser.id)
+        expect(survives).toEqual([{ staff_id: fx.deptUser.id, department_id: fx.deptA }])
+
+        // superadmin CAN insert/update/delete. Uses a fresh department to avoid a
+        // primary-key collision with dept2's existing (dept2, deptB) row, since the
+        // table's only columns are the composite primary key.
+        const deptC = await insertDepartment(fx.suffix, 'c')
+
+        const superInsert = await fx.superadminUser.client
+          .from('staff_department')
+          .insert({ staff_id: dept2.id, department_id: deptC })
+          .select()
+        expect(superInsert.error).toBeNull()
+        expect((superInsert.data ?? []).length).toBe(1)
+
+        const superUpdate = await fx.superadminUser.client
+          .from('staff_department')
+          .update({ department_id: fx.deptA })
+          .eq('staff_id', dept2.id)
+          .eq('department_id', deptC)
+          .select()
+        expect(superUpdate.error).toBeNull()
+        expect((superUpdate.data ?? []).length).toBe(1)
+
+        const superDelete = await fx.superadminUser.client
+          .from('staff_department')
+          .delete()
+          .eq('staff_id', dept2.id)
+          .eq('department_id', fx.deptA)
+          .select()
+        expect(superDelete.error).toBeNull()
+        expect((superDelete.data ?? []).length).toBe(1)
+
+        await del('department', [deptC])
+        LEDGER.departments = LEDGER.departments.filter((d) => d !== deptC)
+      } finally {
+        await dept2.client.auth.signOut().catch(() => {})
+        await svc.from('staff_profile').delete().eq('id', dept2.id)
+        await svc.auth.admin.deleteUser(dept2.id)
+        LEDGER.users = LEDGER.users.filter((u) => u !== dept2.id)
+      }
+    })
+  })
+
+  it('restricts vendor merges to admin-or-above (vendor_update_admin) while all staff can read vendors', async () => {
     await withFixture({}, async (fx) => {
       const { data: vendor, error: vErr } = await svc
         .from('vendor')
@@ -597,16 +958,16 @@ describe('RLS as three users (admin / reviewer / viewer)', () => {
 
       try {
         // vendor has no department_id and deliberately spans departments (§3.2).
-        const read = await fx.reviewerA.client.from('vendor').select('id').eq('id', vendor.id)
+        const read = await fx.deptUser.client.from('vendor').select('id').eq('id', vendor.id)
         expect(ids(read.data)).toEqual([vendor.id])
 
-        const revUpd = await fx.reviewerA.client
+        const deptUpd = await fx.deptUser.client
           .from('vendor')
           .update({ is_confirmed: true })
           .eq('id', vendor.id)
           .select('id')
-        expect(revUpd.error).toBeNull()
-        expect(revUpd.data).toEqual([])
+        expect(deptUpd.error).toBeNull()
+        expect(deptUpd.data).toEqual([])
 
         const adminUpd = await fx.adminUser.client
           .from('vendor')
@@ -615,6 +976,15 @@ describe('RLS as three users (admin / reviewer / viewer)', () => {
           .select('id')
         expect(adminUpd.error).toBeNull()
         expect(ids(adminUpd.data)).toEqual([vendor.id])
+
+        // superadmin retains the same capability admin now shares.
+        const superUpd = await fx.superadminUser.client
+          .from('vendor')
+          .update({ is_confirmed: false })
+          .eq('id', vendor.id)
+          .select('id')
+        expect(superUpd.error).toBeNull()
+        expect(ids(superUpd.data)).toEqual([vendor.id])
       } finally {
         await del('vendor', [vendor.id])
         LEDGER.vendors = LEDGER.vendors.filter((v) => v !== vendor.id)
@@ -634,7 +1004,7 @@ describe('RLS as three users (admin / reviewer / viewer)', () => {
       const zoneA = zones.find((z) => z.department_id === fx.deptA)!.id
 
       try {
-        const seen = await fx.reviewerA.client
+        const seen = await fx.deptUser.client
           .from('zone')
           .select('id,department_id')
           .in('department_id', [fx.deptA, fx.deptB])
@@ -645,7 +1015,7 @@ describe('RLS as three users (admin / reviewer / viewer)', () => {
         // 20260808000026): all active staff read the full department list, because
         // scoping the dimension table would be circular. Asserted so the exception is
         // recorded behaviour rather than an accident.
-        const depts = await fx.reviewerA.client
+        const depts = await fx.deptUser.client
           .from('department')
           .select('id')
           .in('id', [fx.deptA, fx.deptB])
@@ -657,7 +1027,7 @@ describe('RLS as three users (admin / reviewer / viewer)', () => {
     })
   })
 
-  it('exposes job_queue to admins only (job_queue_select_admin)', async () => {
+  it('exposes job_queue to admin-or-above only (job_queue_select_admin)', async () => {
     await withFixture({}, async (fx) => {
       // status 'dead' is terminal, so no worker will ever claim this fixture row.
       const { data: job, error: jErr } = await svc
@@ -674,14 +1044,17 @@ describe('RLS as three users (admin / reviewer / viewer)', () => {
       LEDGER.jobs.push(job.id)
 
       try {
-        for (const user of [fx.viewerA, fx.reviewerA]) {
-          const res = await user.client.from('job_queue').select('id').eq('id', job.id)
-          expect(res.error).toBeNull()
-          expect(res.data).toEqual([])
-        }
+        const asDept = await fx.deptUser.client.from('job_queue').select('id').eq('id', job.id)
+        expect(asDept.error).toBeNull()
+        expect(asDept.data).toEqual([])
+
         const asAdmin = await fx.adminUser.client.from('job_queue').select('id').eq('id', job.id)
         expect(asAdmin.error).toBeNull()
         expect(ids(asAdmin.data)).toEqual([job.id])
+
+        const asSuperadmin = await fx.superadminUser.client.from('job_queue').select('id').eq('id', job.id)
+        expect(asSuperadmin.error).toBeNull()
+        expect(ids(asSuperadmin.data)).toEqual([job.id])
       } finally {
         await del('job_queue', [job.id])
         LEDGER.jobs = LEDGER.jobs.filter((j) => j !== job.id)
@@ -707,11 +1080,22 @@ describe('RLS as three users (admin / reviewer / viewer)', () => {
       expect(deadView.data).toEqual([])
 
       // The deactivated user can still see their own staff_profile row — that policy
-      // is `id = auth.uid() or is_admin()`, deliberately not gated on is_active, so an
-      // admin can reactivate them and they can see their own status meanwhile.
+      // is `id = auth.uid() or is_admin_or_above()`, deliberately not gated on
+      // is_active, so a superadmin can reactivate them and they can see their own
+      // status meanwhile.
       const ownProfile = await dead.from('staff_profile').select('id,is_active').eq('id', fx.inactive!.id)
       expect(ownProfile.error).toBeNull()
       expect(ownProfile.data).toEqual([{ id: fx.inactive!.id, is_active: false }])
+
+      // Same non-gating-on-is_active property holds for staff_department_select
+      // (`staff_id = auth.uid() or is_admin_or_above()`) — the deactivated account can
+      // still see its own department assignment.
+      const deadOwnDept = await dead
+        .from('staff_department')
+        .select('staff_id,department_id')
+        .eq('staff_id', fx.inactive!.id)
+      expect(deadOwnDept.error).toBeNull()
+      expect(deadOwnDept.data).toEqual([{ staff_id: fx.inactive!.id, department_id: fx.deptA }])
 
       const anon = createClient(SUPABASE_URL, PUBLISHABLE_KEY, {
         auth: { autoRefreshToken: false, persistSession: false },
@@ -752,6 +1136,10 @@ afterAll(async () => {
   await sweep('vendor', LEDGER.vendors)
   await sweep('job_queue', LEDGER.jobs)
   await sweep('staff_profile', LEDGER.users)
+  // staff_department rows cascade-delete with their staff_profile row (on delete
+  // cascade, role_rbac_v2 §1), so once staff_profile sweep above confirms every fixture
+  // user is gone, their staff_department rows are provably gone too — no separate
+  // ledger/sweep entry needed for that table.
   for (const id of LEDGER.users) {
     const { data } = await svc.auth.admin.getUserById(id)
     if (data?.user) {

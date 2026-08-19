@@ -30,9 +30,11 @@ import type { LookupOption } from './types'
  * there is no separate "manual entry" lifecycle to learn.
  *
  * The department is shown but not editable when the signed-in account is
- * scoped to one: that account has exactly one legitimate answer, and the
- * server resolves it from `staff_profile` regardless of what this form sends.
- * An all-departments account gets a real picker, since it has to choose.
+ * scoped to exactly one: that account has exactly one legitimate answer, and
+ * the server resolves it from `staff_department` regardless of what this
+ * form sends. A `dept` account assigned several departments (confirmed
+ * 2026-08-19: a dept user may hold multiple) picks among just its own; an
+ * all-departments account (admin/superadmin) gets the full picker.
  */
 const ENTRY_TYPES = [
   { value: 'invoice', label: 'Invoice' },
@@ -43,20 +45,22 @@ const ENTRY_TYPES = [
 export function NewEntryDialog({
   departments,
   budgetHeads,
-  ownDepartmentId,
+  ownDepartmentIds,
   onCreated,
 }: {
   departments: LookupOption[]
   budgetHeads: LookupOption[]
-  /** null = an all-departments account, which must pick a department itself. */
-  ownDepartmentId: number | null
+  /** Empty = an all-departments account, which must pick a department itself.
+   *  Exactly one = locked to that department. More than one = must pick among just those. */
+  ownDepartmentIds: number[]
   onCreated: () => void
 }) {
   const router = useRouter()
   const [open, setOpen] = useState(false)
   const [pending, setPending] = useState(false)
 
-  const [departmentId, setDepartmentId] = useState<number | null>(ownDepartmentId)
+  const lockedDepartmentId = ownDepartmentIds.length === 1 ? ownDepartmentIds[0]! : null
+  const [departmentId, setDepartmentId] = useState<number | null>(lockedDepartmentId)
   const [type, setType] = useState<(typeof ENTRY_TYPES)[number]['value']>('invoice')
   const [vendorName, setVendorName] = useState('')
   const [invoiceNumber, setInvoiceNumber] = useState('')
@@ -65,10 +69,16 @@ export function NewEntryDialog({
   const [budgetHeadId, setBudgetHeadId] = useState<number | null>(null)
   const [remark, setRemark] = useState('')
 
-  const effectiveDepartmentId = ownDepartmentId ?? departmentId
-  const ownDepartmentName = useMemo(
-    () => departments.find((d) => d.id === ownDepartmentId)?.label ?? null,
-    [departments, ownDepartmentId]
+  const effectiveDepartmentId = lockedDepartmentId ?? departmentId
+  const lockedDepartmentName = useMemo(
+    () => (lockedDepartmentId === null ? null : (departments.find((d) => d.id === lockedDepartmentId)?.label ?? null)),
+    [departments, lockedDepartmentId]
+  )
+  // A multi-department dept user picks among just their own departments; an
+  // admin/superadmin (ownDepartmentIds empty) picks from every department.
+  const selectableDepartments = useMemo(
+    () => (ownDepartmentIds.length > 1 ? departments.filter((d) => ownDepartmentIds.includes(d.id)) : departments),
+    [departments, ownDepartmentIds]
   )
 
   // Budget heads are department-scoped (some are org-wide, with a null
@@ -86,7 +96,7 @@ export function NewEntryDialog({
   )
 
   function resetForm() {
-    setDepartmentId(ownDepartmentId)
+    setDepartmentId(lockedDepartmentId)
     setType('invoice')
     setVendorName('')
     setInvoiceNumber('')
@@ -165,21 +175,21 @@ export function NewEntryDialog({
           <div className="grid grid-cols-2 gap-3">
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="new-entry-department">Department</Label>
-              {ownDepartmentId === null ? (
+              {lockedDepartmentId === null ? (
                 <SelectNative
                   id="new-entry-department"
                   value={departmentId === null ? '' : String(departmentId)}
                   onChange={(e) => setDepartmentId(e.target.value ? Number(e.target.value) : null)}
                 >
                   <option value="">Select a department…</option>
-                  {departments.map((d) => (
+                  {selectableDepartments.map((d) => (
                     <option key={d.id} value={String(d.id)}>
                       {d.label}
                     </option>
                   ))}
                 </SelectNative>
               ) : (
-                <Input id="new-entry-department" value={ownDepartmentName ?? 'Your department'} readOnly disabled />
+                <Input id="new-entry-department" value={lockedDepartmentName ?? 'Your department'} readOnly disabled />
               )}
             </div>
             <div className="flex flex-col gap-1.5">

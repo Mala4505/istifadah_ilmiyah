@@ -4,6 +4,7 @@ import { createClient } from '@/lib/supabase/server'
 import { withApiLogging } from '@/lib/api-log'
 import { canonicalPayloadHash, runPortalImport, type ScrapePayload } from '@/lib/import/run-portal-import'
 import { recordScrapeTokenUse, verifyScrapeToken } from '@/lib/scrape-token'
+import { isAdminOrAbove } from '@/lib/auth/roles'
 
 export const runtime = 'nodejs'
 
@@ -148,7 +149,7 @@ async function handlePOST(request: NextRequest) {
     if (profileError) {
       return json(request, { error: 'Could not verify staff role.' }, 500)
     }
-    if (!profile || !profile.is_active || profile.role !== 'admin') {
+    if (!profile || !profile.is_active || !isAdminOrAbove(profile.role)) {
       return json(
         request,
         { error: 'Only an active admin may run an import.' },

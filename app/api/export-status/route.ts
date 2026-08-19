@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { requireAdmin, getStaffContext } from '@/lib/export/auth'
+import { requireAdminOrAbove, getStaffContext } from '@/lib/export/auth'
 import { withApiLogging } from '@/lib/api-log'
 import {
   generateStatusExportBatch,
@@ -30,7 +30,7 @@ import { getExportBatchRows } from '@/lib/export/queries'
 const VALID_TARGET_SYSTEMS: ExportTargetSystem[] = ['departmental', 'audit', 'both']
 
 async function handlePOST(request: NextRequest) {
-  const gate = await requireAdmin()
+  const gate = await requireAdminOrAbove()
   if (!gate.ok) {
     return NextResponse.json({ error: adminGateMessage(gate.reason) }, { status: gate.reason === 'signed_out' ? 401 : 403 })
   }
@@ -65,7 +65,7 @@ async function handlePOST(request: NextRequest) {
 }
 
 async function handlePATCH(request: NextRequest) {
-  const gate = await requireAdmin()
+  const gate = await requireAdminOrAbove()
   if (!gate.ok) {
     return NextResponse.json({ error: adminGateMessage(gate.reason) }, { status: gate.reason === 'signed_out' ? 401 : 403 })
   }

@@ -3,6 +3,7 @@ import path from 'node:path'
 import { createClient } from '@/lib/supabase/server'
 import { publicEnv } from '@/lib/env'
 import { ImportPageClient } from '@/components/import/import-page-client'
+import { isAdminOrAbove } from '@/lib/auth/roles'
 
 /**
  * /import (MASTER-PLAN §5 screen 5, §11.1 day 2; Portal Reader merged in here
@@ -30,7 +31,7 @@ export default async function ImportPage() {
       .select('role, is_active')
       .eq('id', user.id)
       .maybeSingle()
-    isAdmin = Boolean(profile?.is_active && profile.role === 'admin')
+    isAdmin = Boolean(profile?.is_active && isAdminOrAbove(profile.role))
   }
 
   // Read from disk rather than imported, so public/bookmarklet/read-portal.js

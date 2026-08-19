@@ -24,11 +24,13 @@ export interface EntryActionResult {
  * excludes these columns by construction) — this is the only writer.
  *
  * Uses the session-bound client (`lib/supabase/server.ts`), so
- * `entries_update` RLS (role in ('admin','reviewer'), department-scoped,
- * 20260808000026_rls_policies.sql) is the actual gate. A `viewer` role's
- * write matches 0 rows under RLS rather than erroring — that is turned into
- * an explicit `error` here for the caller to toast, per the task brief:
- * "surface that as a toast error rather than hiding the fields."
+ * `entries_update` RLS (private.is_admin_or_above(), department-scoped via
+ * can_see_department(), 20260819000003_role_rbac_v2.sql) is the actual gate
+ * — `dept` has no UPDATE access at all under the current model, not even
+ * within its own department. A `dept` role's write matches 0 rows under RLS
+ * rather than erroring — that is turned into an explicit `error` here for
+ * the caller to toast, per the task brief: "surface that as a toast error
+ * rather than hiding the fields."
  */
 export async function saveEntryEnrichment(
   input: SaveEntryEnrichmentInput
@@ -60,7 +62,7 @@ export async function saveEntryEnrichment(
     return {
       success: false,
       error:
-        'Nothing was saved. This usually means a viewer role (reviewer/admin required to edit enrichment fields), or the entry is outside your assigned department.',
+        'Nothing was saved. This usually means a dept role (admin or above is required to edit enrichment fields), or the entry is outside your assigned department.',
     }
   }
 
@@ -92,8 +94,8 @@ export interface BulkEntryActionResult {
  * §5/§6: bulk assignment "in addition to" the single-entry form above, which
  * keeps working unchanged). Mirrors `setHubStatus`'s (lib/actions/hub-status.ts)
  * bulk-update-with-count pattern: this runs on the session-bound client, so
- * `entries_update` RLS (role in ('admin','reviewer'), department-scoped) is the
- * actual gate, and a row outside the caller's access silently isn't updated
+ * `entries_update` RLS (private.is_admin_or_above(), department-scoped via
+ * can_see_department()) is the actual gate, and a row outside the caller's access silently isn't updated
  * rather than erroring. This turns that into a countable partial-success
  * result (`updatedCount < requestedCount`) for the caller to toast, exactly
  * like the bulk Hub-status action.
@@ -148,7 +150,7 @@ export async function bulkSaveEntryEnrichment(
       updatedCount: 0,
       requestedCount,
       error:
-        'No entries were updated. This usually means a viewer role (reviewer/admin required to edit enrichment fields), or the entries are outside your assigned department.',
+        'No entries were updated. This usually means a dept role (admin or above is required to edit enrichment fields), or the entries are outside your assigned department.',
     }
   }
 
@@ -206,7 +208,7 @@ export async function setSettlesEntry(
     return {
       success: false,
       error:
-        'Nothing was saved. This usually means a viewer role (reviewer/admin required), or the entry is outside your assigned department.',
+        'Nothing was saved. This usually means a dept role (admin or above is required), or the entry is outside your assigned department.',
     }
   }
 

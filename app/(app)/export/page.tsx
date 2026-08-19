@@ -1,5 +1,5 @@
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
-import { requireAdmin, type AdminGate } from '@/lib/export/auth'
+import { requireAdminOrAbove, type AdminGate } from '@/lib/export/auth'
 import { getPendingExportQueue, getExportBatchHistory } from '@/lib/export/queries'
 import { GenerateBatchForm } from '@/components/export/generate-batch-form'
 import { PendingQueueTable } from '@/components/export/pending-queue-table'
@@ -7,12 +7,12 @@ import { BatchHistory } from '@/components/export/batch-history'
 
 /**
  * /export — the outward path (MASTER-PLAN §3.7, §5 row 11, §11.1 Day 5).
- * Admin-only (§4.4c). Gated with the session-bound client via
- * `requireAdmin()` BEFORE any admin-client (RLS-bypassing) query runs —
+ * Admin-or-above (§4.4c). Gated with the session-bound client via
+ * `requireAdminOrAbove()` BEFORE any admin-client (RLS-bypassing) query runs —
  * see lib/export/auth.ts for why that ordering matters here specifically.
  */
 export default async function ExportPage() {
-  const gate = await requireAdmin()
+  const gate = await requireAdminOrAbove()
   if (!gate.ok) {
     return <PermissionDeniedState reason={gate.reason} />
   }

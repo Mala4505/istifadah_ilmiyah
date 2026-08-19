@@ -9,6 +9,7 @@ import { ImportWorkspace } from '@/components/import/import-workspace'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { formatINRCompact, formatNumber } from '@/lib/reports/format'
+import { isAdminOrAbove } from '@/lib/auth/roles'
 
 // Screen 2 — Dashboard (MASTER-PLAN §5, day 6). Reads from the §10.2
 // reporting views (RLS-scoped via security_invoker) rather than assembling
@@ -73,7 +74,7 @@ async function loadDashboardData() {
   const openIssues = openIssuesRes.data ?? []
   const budgetRows = budgetRes.data ?? []
   const importBatches = importsRes.data ?? []
-  const isAdmin = Boolean(profileRes.data?.is_active && profileRes.data.role === 'admin')
+  const isAdmin = Boolean(profileRes.data?.is_active && isAdminOrAbove(profileRes.data.role))
 
   // Status-count summary (Hub Refinements plan §0 item 3) -- v_entry_status_counts
   // (20260817000001) returns one row per (dimension, status value); split it back

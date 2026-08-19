@@ -961,27 +961,30 @@ export const config = {
 
 ### 4.4c Roles and permissions
 
-Three roles, set on `staff_profile.role`. `department_id` null means all departments; otherwise the user sees only their own (§4.2).
+Three roles, set on `staff_profile.role` (revised 2026-08-19 — see `20260819000003_role_rbac_v2.sql`). A `dept` user is assigned one or more specific departments via the `staff_department` junction table; `admin` and `superadmin` see every department (there is no "all departments" row in `staff_department` — that breadth comes from the role itself, via `private.is_admin_or_above()`).
 
-| Capability | `viewer` | `reviewer` | `admin` |
+| Capability | `dept` | `admin` | `superadmin` |
 |---|:--:|:--:|:--:|
-| See entries, documents, reports (own department) | ✓ | ✓ | ✓ |
-| Export CSV from any list | ✓ | ✓ | ✓ |
+| See entries in own assigned department(s) | ✓ | ✓ | ✓ |
+| Create manual entries in own assigned department(s) | ✓ | ✓ | ✓ |
+| See entries, documents, reports (all departments) | — | ✓ | ✓ |
+| Export CSV from any list | — | ✓ | ✓ |
 | Edit enrichment (`admin_head_id`, `zone_id`, `cost_center_id`) | — | ✓ | ✓ |
 | Verify document extractions | — | ✓ | ✓ |
 | Set Hub status (awaiting verification / validation) | — | ✓ | ✓ |
 | Resolve or dismiss exceptions | — | ✓ | ✓ |
 | Attach documents to entries / manage the inbox | — | ✓ | ✓ |
-| Run an import (dry-run **or** commit) | — | — | ✓ |
-| Generate a status export batch | — | — | ✓ |
-| Void an entry | — | — | ✓ |
-| Manage users, roles, department assignment | — | — | ✓ |
-| Map budget heads → heads; merge vendors | — | — | ✓ |
-| See all departments | — | — | ✓ |
+| Update an entry (incl. replacing a provisional `M-` number) | — | ✓ | ✓ |
+| Run an import (dry-run **or** commit) | — | ✓ | ✓ |
+| Generate a status export batch | — | ✓ | ✓ |
+| Void an entry | — | ✓ | ✓ |
+| Map budget heads → heads; merge vendors | — | ✓ | ✓ |
+| View the user roster (read-only) | — | ✓ | ✓ |
+| Create or manage user accounts, roles, department assignment | — | — | ✓ |
 
-**New users land as `viewer` with `is_active = false`** (the `handle_new_user` trigger, §3.8). An admin activates and assigns. Nobody self-serves into access — deliberate, because this is financial data.
+**New users land as `dept` with `is_active = false`** (the `handle_new_user` trigger, §3.8, driven off `raw_user_meta_data`). A superadmin activates, assigns role and department(s), and is the only one who can — `admin` can view the roster but cannot edit anyone's role, department assignment, or active flag, including its own (that boundary is enforced in RLS by `staff_profile_update` and `staff_department`'s write policies, both pinned to `private.is_superadmin()`, not just hidden in the UI).
 
-`viewer` exists for the finance head and auditors who need to read everything and change nothing. It is enforced in RLS, not just hidden in the UI: `entries_update` requires `role in ('admin','reviewer')`.
+`dept` is scoped strictly to creating manual entries and viewing entries in its own department(s) — no verifying extractions, attaching documents, resolving exceptions, bulk-editing, or updating entries at all (`entries_update` requires `private.is_admin_or_above()`). One consequence: the two-step manual-entry flow (a `dept` user types a provisional `M-` number, then swaps in the real UBBL number once paperwork arrives, `lib/actions/entries.ts`) cannot be completed by the `dept` user who started it — an `admin`/`superadmin` has to finish the swap, since `dept` has no UPDATE access to `entries`.
 
 ### 4.4d Data retention
 
@@ -1811,7 +1814,7 @@ None of these block the seven days. Each one improves something specific.
 12. **Vendor master — CONCEPT CONFIRMED 2026-08-12.** You confirmed each vendor keeps its own data — GSTIN, bank details, etc. stored per vendor, not shared/global — which matches how `vendor`/`vendor_alias` already model identity (§3.2), so no schema rethink needed. Exact source file still open but non-blocking; ask again once Phase 3 vendor wiring becomes active work.
 13. **TDS — explained 2026-08-12, CONFIRMED PARKED, no dashboard changes.** TDS (Tax Deducted at Source) is an Indian rule where, when you pay certain vendors, you're required to hold back a percentage as tax and deposit it directly with the government under the vendor's name, instead of paying them the full billed amount — the vendor then gets credit for that against their own taxes, and you'd normally issue them a certificate showing it was deducted. It matters here only if it changes what "amount paid" means: if TDS is deducted, the invoice's billed total and what actually left your account are two different numbers, and the system would need to know which one it's looking at to reconcile correctly. A credit note is unrelated — just a vendor-issued correction reducing what's owed (e.g. a return or billing error). **You confirmed 2026-08-12: nothing gets added to the dashboard for this now.** No schema, no reports, no fields — fully parked, not just deprioritized. Revisit only if you bring it up again.
 14. **Zones for other departments — RESOLVED 2026-08-11.** Confirmed: zoning stays your team's responsibility — staff assign a zone to each invoice by hand, same as the current Venue-Setup-only design. No schema or workflow change needed.
-15. **Users — RESOLVED 2026-08-11.** Confirmed: admins see every department; department-scoped users see and enter invoices only for their own department. This already matches the built RLS model (`staff_profile.role`, `department_id` null = all-departments, §4.2/§4.4) — no change needed. Exact headcount per role not given; not a blocker.
+15. **Users — RESOLVED 2026-08-11, role model revised 2026-08-19.** Confirmed: admin-or-above sees every department; department-scoped (`dept`) users see and enter invoices only for their own assigned department(s). Superseded by the three-tier `superadmin`/`admin`/`dept` split (§4.4c, `20260819000003_role_rbac_v2.sql`) — `dept` may now hold multiple departments via `staff_department`, and department assignment is a superadmin-only action, not an admin one. Exact headcount per role not given; not a blocker.
 16. **Hijri dates — RESOLVED 2026-08-12.** Confirmed: no. Gregorian only, nothing to add.
 17. **RESOLVED 2026-08-11 — `budget_category` renamed to `cost_center`.** These are cost centers in the Tally sense, not a separate "category" concept — use this term from now on. Table, `entries.budget_category_id` → `cost_center_id`, indexes, policies, and `v_entry_enriched`'s `budget_category_name` → `cost_center_name` all renamed (§3.1, §3.4). Migration `20260813000004_cost_center_rename.sql`. Concept unchanged: still the bracket half of labels like `"Dummas (AVIT)"`, still hand-assigned per entry, still no FK to `budget_head`/`admin_head`.
 18. **What is Sentry, and how do I confirm it's working? — test run 2026-08-12, one step left.** You ran the test (`throw new Error('sentry test')` in the browser console on `/admin`) — the console showed `Uncaught Error: sentry test`, which confirms the error fired, but that's the browser's own console echoing it, not proof Sentry caught it. **Last step: log into sentry.io, open this project's Issues page, and check the test error actually appears there** (may take a minute or two to show up). If it's there, this is fully done — nothing left to explain or configure. If it's *not* there, tell me and I'll check the wiring (most likely cause: `NEXT_PUBLIC_SENTRY_DSN` not set in the live environment). Separately, "uptime check" just means some external service pings your site every few minutes and alerts you if it stops responding (e.g. UptimeRobot, or Vercel's own monitoring) — not yet set up, low priority, no rush.

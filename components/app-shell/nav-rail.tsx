@@ -24,6 +24,7 @@ import { ThemeToggle } from '@/components/app-shell/theme-toggle'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { signOut } from '@/lib/actions/auth'
+import { isAdminOrAbove } from '@/lib/auth/roles'
 
 const COLLAPSE_STORAGE_KEY = 'nav-rail-collapsed'
 
@@ -67,7 +68,7 @@ export function NavRail({
   const pathname = usePathname()
   const [collapsed, setCollapsed] = useState(false)
 
-  const isAdmin = user.role === 'admin'
+  const isAdmin = isAdminOrAbove(user.role)
   const navItems = NAV_ITEMS.filter((item) => isAdmin || !('adminOnly' in item && item.adminOnly))
 
   // Per-visit override: true once the user manually re-expands the rail

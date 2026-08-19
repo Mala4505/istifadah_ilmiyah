@@ -15,29 +15,41 @@ export type StaffRow = {
   displayName: string
   itsNumber: string | null
   contactEmail: string | null
-  role: 'admin' | 'reviewer' | 'viewer'
-  departmentId: number | null
+  role: 'superadmin' | 'admin' | 'dept'
+  departmentIds: number[]
   isActive: boolean
 }
 
-const NO_DEPARTMENT_VALUE = 'none'
-
-function departmentIdToValue(departmentId: number | null): string {
-  return departmentId === null ? NO_DEPARTMENT_VALUE : String(departmentId)
+const ROLE_LABELS: Record<StaffRow['role'], string> = {
+  superadmin: 'Superadmin',
+  admin: 'Admin',
+  dept: 'Dept',
 }
 
-function valueToDepartmentId(value: string): number | null {
-  return value === NO_DEPARTMENT_VALUE ? null : Number(value)
+/** Order-independent comparison — the checkbox list can toggle ids in any order. */
+function sameDepartmentIds(a: number[], b: number[]): boolean {
+  if (a.length !== b.length) return false
+  const sortedA = [...a].sort((x, y) => x - y)
+  const sortedB = [...b].sort((x, y) => x - y)
+  return sortedA.every((id, index) => id === sortedB[index])
+}
+
+function departmentNames(departmentIds: number[], departments: { id: number; name: string }[]): string {
+  if (departmentIds.length === 0) return '—'
+  const byId = new Map(departments.map((department) => [department.id, department.name]))
+  return departmentIds.map((id) => byId.get(id) ?? `#${id}`).join(', ')
 }
 
 export function UsersTable({
   staff,
   departments,
   currentUserId,
+  canEdit,
 }: {
   staff: StaffRow[]
   departments: { id: number; name: string }[]
   currentUserId: string
+  canEdit: boolean
 }) {
   return (
     <Table>
@@ -54,7 +66,13 @@ export function UsersTable({
       </TableHeader>
       <TableBody>
         {staff.map((row) => (
-          <UserRow key={row.id} row={row} departments={departments} isCurrentUser={row.id === currentUserId} />
+          <UserRow
+            key={row.id}
+            row={row}
+            departments={departments}
+            isCurrentUser={row.id === currentUserId}
+            canEdit={canEdit}
+          />
         ))}
       </TableBody>
     </Table>
@@ -65,24 +83,33 @@ function UserRow({
   row,
   departments,
   isCurrentUser,
+  canEdit,
 }: {
   row: StaffRow
   departments: { id: number; name: string }[]
   isCurrentUser: boolean
+  canEdit: boolean
 }) {
   const [role, setRole] = useState(row.role)
-  const [departmentId, setDepartmentId] = useState(row.departmentId)
+  const [departmentIds, setDepartmentIds] = useState(row.departmentIds)
   const [isActive, setIsActive] = useState(row.isActive)
   const [isPending, startTransition] = useTransition()
 
-  const isDirty = role !== row.role || departmentId !== row.departmentId || isActive !== row.isActive
+  const isDirty =
+    role !== row.role || !sameDepartmentIds(departmentIds, row.departmentIds) || isActive !== row.isActive
+
+  function toggleDepartment(departmentId: number, checked: boolean) {
+    setDepartmentIds((current) =>
+      checked ? [...current, departmentId] : current.filter((id) => id !== departmentId)
+    )
+  }
 
   function handleSave() {
     startTransition(async () => {
       const result = await updateStaffProfile({
         id: row.id,
         role,
-        departmentId,
+        departmentIds,
         isActive,
       })
       if (result.ok) {
@@ -91,6 +118,26 @@ function UserRow({
         toastError(result.error, { context: 'users-table' })
       }
     })
+  }
+
+  if (!canEdit) {
+    return (
+      <TableRow>
+        <TableCell>
+          <div className="flex items-center gap-2">
+            <span>{row.displayName}</span>
+            {isCurrentUser && <Badge variant="outline">You</Badge>}
+            {!row.isActive && <Badge variant="warning">Pending activation</Badge>}
+          </div>
+        </TableCell>
+        <TableCell className="font-mono text-sm">{row.itsNumber ?? '—'}</TableCell>
+        <TableCell>{row.contactEmail ?? '—'}</TableCell>
+        <TableCell>{departmentNames(row.departmentIds, departments)}</TableCell>
+        <TableCell>{ROLE_LABELS[row.role]}</TableCell>
+        <TableCell>{row.isActive ? 'Yes' : 'No'}</TableCell>
+        <TableCell className="text-right" />
+      </TableRow>
+    )
   }
 
   return (
@@ -105,19 +152,21 @@ function UserRow({
       <TableCell className="font-mono text-sm">{row.itsNumber ?? '—'}</TableCell>
       <TableCell>{row.contactEmail ?? '—'}</TableCell>
       <TableCell>
-        <Select value={departmentIdToValue(departmentId)} onValueChange={(value) => setDepartmentId(valueToDepartmentId(value))}>
-          <SelectTrigger className="w-[180px]">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value={NO_DEPARTMENT_VALUE}>All departments</SelectItem>
+        {role === 'dept' ? (
+          <div className="flex w-[220px] flex-col gap-1 rounded-md border p-2">
             {departments.map((department) => (
-              <SelectItem key={department.id} value={String(department.id)}>
+              <label key={department.id} className="flex items-center gap-2 text-sm">
+                <Checkbox
+                  checked={departmentIds.includes(department.id)}
+                  onCheckedChange={(value) => toggleDepartment(department.id, value === true)}
+                />
                 {department.name}
-              </SelectItem>
+              </label>
             ))}
-          </SelectContent>
-        </Select>
+          </div>
+        ) : (
+          <span className="text-sm text-muted-foreground">—</span>
+        )}
       </TableCell>
       <TableCell>
         <Select value={role} onValueChange={(value) => setRole(value as StaffRow['role'])}>
@@ -125,9 +174,9 @@ function UserRow({
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
+            <SelectItem value="superadmin">Superadmin</SelectItem>
             <SelectItem value="admin">Admin</SelectItem>
-            <SelectItem value="reviewer">Reviewer</SelectItem>
-            <SelectItem value="viewer">Viewer</SelectItem>
+            <SelectItem value="dept">Dept</SelectItem>
           </SelectContent>
         </Select>
       </TableCell>

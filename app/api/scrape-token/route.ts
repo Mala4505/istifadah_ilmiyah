@@ -8,6 +8,7 @@ import {
   mintScrapeToken,
   revokeScrapeToken,
 } from '@/lib/scrape-token'
+import { isAdminOrAbove } from '@/lib/auth/roles'
 
 export const runtime = 'nodejs'
 
@@ -53,7 +54,7 @@ async function requireAdmin(): Promise<
       response: NextResponse.json({ error: 'Could not verify staff role.' }, { status: 500 }),
     }
   }
-  if (!profile || !profile.is_active || profile.role !== 'admin') {
+  if (!profile || !profile.is_active || !isAdminOrAbove(profile.role)) {
     return {
       ok: false,
       response: NextResponse.json(

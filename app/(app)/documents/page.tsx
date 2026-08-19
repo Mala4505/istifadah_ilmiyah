@@ -5,6 +5,7 @@ import { getStaffContext } from '@/lib/export/auth'
 import { rankCandidates, type MatchableEntry } from '@/lib/matching'
 import { DocumentInbox } from '@/components/documents/document-inbox'
 import type { CandidateEntryView, InboxDocumentView } from '@/components/documents/types'
+import { isAdminOrAbove } from '@/lib/auth/roles'
 
 /**
  * /documents — the document inbox (MASTER-PLAN §5 row 6, §11.2 Day 3):
@@ -19,9 +20,10 @@ import type { CandidateEntryView, InboxDocumentView } from '@/components/documen
  * (`entry_id is null`) are visible to all staff by design
  * (source_document_select RLS, 20260808000026, comment: "that visibility is
  * exactly what the inbox/matching workflow requires"). Attach / bulk-attach
- * / no-entry-expected stay reviewer/admin — enforced by RLS
- * (private.is_reviewer_or_admin()) in lib/actions/documents.ts, and hidden
- * here for a viewer as a courtesy, not as the actual gate.
+ * / no-entry-expected stay admin-or-above — enforced by RLS
+ * (private.is_admin_or_above(), 20260819000003 — dept lost this along with
+ * every other reviewer capability) in lib/actions/documents.ts, and hidden
+ * here for a dept account as a courtesy, not as the actual gate.
  */
 export default async function DocumentsPage() {
   const staff = await getStaffContext()
@@ -51,7 +53,7 @@ export default async function DocumentsPage() {
     )
   }
 
-  const canAct = staff.role === 'admin' || staff.role === 'reviewer'
+  const canAct = isAdminOrAbove(staff.role)
   const supabase = await createClient()
 
   const { data: docsData, error: docsError } = await supabase

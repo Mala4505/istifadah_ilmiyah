@@ -5,6 +5,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { ReviewWorkspace } from '@/components/review/review-workspace'
 import type { LineItemDetail, OpenExceptionSummary, PageStatus, QueueEntry, ReviewDocumentDetail } from '@/lib/review/types'
 import { friendlyErrorMessage } from '@/lib/friendly-error'
+import { isAdminOrAbove } from '@/lib/auth/roles'
 
 /**
  * /review -- Screen 7, the throughput screen (MASTER-PLAN §5 row 7, §7,
@@ -35,11 +36,11 @@ export default async function ReviewPage({
       />
     )
   }
-  if (staff.role === 'viewer') {
+  if (!isAdminOrAbove(staff.role)) {
     return (
       <GatedState
-        title="Reviewers and admins only"
-        body="Verifying document extractions requires the reviewer or admin role."
+        title="Admins only"
+        body="Verifying document extractions requires the admin role."
       />
     )
   }

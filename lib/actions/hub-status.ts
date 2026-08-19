@@ -28,9 +28,11 @@ export interface SetHubStatusResult {
  * - A note is required. "Resolved with no reason is not an audit trail"
  *   (§5) applies just as much to a status change as to an exception.
  * - Runs on the session-bound client (`lib/supabase/server.ts`), so RLS
- *   (`entries_update`: role in ('admin','reviewer'), department-scoped) is
- *   the actual gate — not this function. A `viewer`, or a reviewer outside
- *   the entry's department, simply updates 0 rows: Postgres RLS silently
+ *   (`entries_update`: private.is_admin_or_above(), department-scoped via
+ *   can_see_department()) is the actual gate — not this function. A `dept`
+ *   role has no UPDATE access at all now, regardless of department (admin
+ *   and superadmin always satisfy can_see_department(), since that helper
+ *   treats admin-or-above as seeing every department): Postgres RLS silently
  *   excludes rows that fail the policy's USING clause rather than raising
  *   an error. This function turns that silent exclusion into an explicit
  *   `error` string for the caller to toast, and reports partial success
@@ -111,7 +113,7 @@ export async function setHubStatus({
       updatedCount: 0,
       requestedCount,
       error:
-        'No entries were updated. This usually means a viewer role (reviewer/admin required to set Hub status), or the entry is outside your assigned department.',
+        'No entries were updated. This usually means a dept role (admin or above is required to set Hub status), or the entry is outside your assigned department.',
     }
   }
 

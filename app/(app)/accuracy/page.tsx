@@ -1,7 +1,7 @@
 import { friendlyDataError } from '@/lib/friendly-error'
 import { subDays, startOfISOWeek, format } from 'date-fns'
 import { Card, CardContent } from '@/components/ui/card'
-import { requireAdmin, type AdminGate } from '@/lib/export/auth'
+import { requireAdminOrAbove, type AdminGate } from '@/lib/export/auth'
 import { createClient } from '@/lib/supabase/server'
 import { ReportSection } from '@/components/reports/report-section'
 import { DataTable, type DataTableColumn } from '@/components/reports/data-table'
@@ -225,7 +225,7 @@ const SECTIONS = [
 ] as const
 
 export default async function AccuracyPage() {
-  const gate = await requireAdmin()
+  const gate = await requireAdminOrAbove()
   if (!gate.ok) {
     return <PermissionDeniedState reason={gate.reason} />
   }

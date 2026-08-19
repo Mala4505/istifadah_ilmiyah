@@ -4,6 +4,7 @@ import * as XLSX from 'xlsx'
 import { createClient } from '@/lib/supabase/server'
 import { runImport } from '@/lib/import/run-import'
 import { withApiLogging } from '@/lib/api-log'
+import { isAdminOrAbove } from '@/lib/auth/roles'
 
 export const runtime = 'nodejs'
 
@@ -46,7 +47,7 @@ async function handlePOST(request: NextRequest) {
   if (profileError) {
     return NextResponse.json({ error: 'Could not verify staff role.' }, { status: 500 })
   }
-  if (!profile || !profile.is_active || profile.role !== 'admin') {
+  if (!profile || !profile.is_active || !isAdminOrAbove(profile.role)) {
     return NextResponse.json(
       { error: 'Only an active admin may run an import.' },
       { status: 403 }

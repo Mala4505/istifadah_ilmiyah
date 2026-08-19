@@ -5,6 +5,7 @@ import { getStaffContext } from '@/lib/export/auth'
 import { severityRank } from '@/components/exceptions/labels'
 import { ExceptionsFilters } from '@/components/exceptions/exceptions-filters'
 import { ExceptionsTable, type ExceptionRow } from '@/components/exceptions/exceptions-table'
+import { isAdminOrAbove } from '@/lib/auth/roles'
 
 /**
  * /exceptions (MASTER-PLAN §3.10, §5 row 8, §11.1 Day 5). Sorted by
@@ -13,8 +14,9 @@ import { ExceptionsTable, type ExceptionRow } from '@/components/exceptions/exce
  * trail, per §3.10's resolution_note/resolved_by/resolved_at columns).
  *
  * Any active staff can view (reconciliation_exception_select RLS requires
- * only is_staff()); resolving requires reviewer/admin (§4.4c), enforced
- * both by hiding the action here and by RLS in lib/actions/exceptions.ts.
+ * only is_staff()); resolving requires admin or above (§4.4c,
+ * 20260819000003 — dept lost this), enforced both by hiding the action here
+ * and by RLS in lib/actions/exceptions.ts.
  */
 export default async function ExceptionsPage({
   searchParams,
@@ -67,7 +69,7 @@ export default async function ExceptionsPage({
 
   const { data, error } = await query
 
-  const canResolve = staff.role === 'admin' || staff.role === 'reviewer'
+  const canResolve = isAdminOrAbove(staff.role)
 
   return (
     <PageShell>
