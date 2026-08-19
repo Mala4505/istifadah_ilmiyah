@@ -1,3 +1,4 @@
+import { friendlyDataError } from '@/lib/friendly-error'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
 import { ReportSection } from '@/components/reports/report-section'
@@ -117,10 +118,10 @@ async function loadAnalyticsData() {
     familyRows: familyRes.data ?? [],
     benchmarkRows: benchmarkRes.data ?? [],
     errors: {
-      compliance: complianceRes.error?.message ?? null,
-      concentration: concentrationRes.error?.message ?? null,
-      family: familyRes.error?.message ?? null,
-      benchmark: benchmarkRes.error?.message ?? null,
+      compliance: friendlyDataError(complianceRes.error, 'analytics:complianceRes'),
+      concentration: friendlyDataError(concentrationRes.error, 'analytics:concentrationRes'),
+      family: friendlyDataError(familyRes.error, 'analytics:familyRes'),
+      benchmark: friendlyDataError(benchmarkRes.error, 'analytics:benchmarkRes'),
     },
   }
 }

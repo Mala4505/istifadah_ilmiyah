@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { toast } from 'sonner'
+import { toastError } from '@/components/ui/error-toast'
 import { FileText, ExternalLink } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -33,7 +34,7 @@ export function LinkedDocuments({ entryId, documents }: { entryId: number; docum
     void (async () => {
       const result = await getDocumentPreviewUrl(documentId)
       if (!result.ok) {
-        toast.error(result.error)
+        toastError(result.error, { context: 'linked-documents' })
         return
       }
       window.open(result.url, '_blank', 'noopener,noreferrer')
@@ -46,7 +47,7 @@ export function LinkedDocuments({ entryId, documents }: { entryId: number; docum
       const result = await detachDocumentFromEntry(documentId, entryId)
       setPendingId(null)
       if (!result.ok) {
-        toast.error(result.error)
+        toastError(result.error, { context: 'linked-documents' })
         return
       }
       toast.success('Document detached — it is back in the inbox.')

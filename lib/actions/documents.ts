@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 import { getSignedUrl } from '@/lib/storage'
 import { extractAndPersist } from '@/lib/jobs/handlers/extract'
+import { logRawError } from '@/lib/friendly-error'
 
 /**
  * Document-inbox actions (MASTER-PLAN §5 row 6, §11.2 Day 3): attach, bulk
@@ -40,7 +41,7 @@ export async function attachDocumentToEntry(input: {
     .eq('id', input.documentId)
     .select('id')
 
-  if (error) return { ok: false, error: error.message }
+  if (error) return { ok: false, error: logRawError('documents.attachDocumentToEntry', error.message) }
   if (!data || data.length === 0) {
     return { ok: false, error: `No document was updated. ${PERMISSION_HINT}` }
   }
@@ -77,7 +78,7 @@ export async function manualExtractNow(documentId: number): Promise<ActionResult
     .eq('id', documentId)
     .select('id')
 
-  if (error) return { ok: false, error: error.message }
+  if (error) return { ok: false, error: logRawError('documents.manualExtractNow', error.message) }
   if (!data || data.length === 0) {
     return { ok: false, error: `No document was updated. ${PERMISSION_HINT}` }
   }
@@ -199,7 +200,7 @@ export async function markNoEntryExpected(documentId: number): Promise<ActionRes
     .eq('id', documentId)
     .select('id')
 
-  if (error) return { ok: false, error: error.message }
+  if (error) return { ok: false, error: logRawError('documents.markNoEntryExpected', error.message) }
   if (!data || data.length === 0) {
     return { ok: false, error: `No document was updated. ${PERMISSION_HINT}` }
   }
@@ -228,7 +229,7 @@ export async function detachDocumentFromEntry(
     .eq('id', documentId)
     .select('id')
 
-  if (error) return { ok: false, error: error.message }
+  if (error) return { ok: false, error: logRawError('documents.detachDocumentFromEntry', error.message) }
   if (!data || data.length === 0) {
     return { ok: false, error: `No document was updated. ${PERMISSION_HINT}` }
   }
@@ -237,6 +238,81 @@ export async function detachDocumentFromEntry(
   revalidatePath('/entries')
   revalidatePath(`/entries/${entryId}`)
   return { ok: true }
+}
+
+export interface BulkCancelResult {
+  success: boolean
+  canceledCount: number
+  requestedCount: number
+  failedDocumentIds: number[]
+  error?: string
+}
+
+/**
+ * "Cancel tracking" (§ documents inbox): pulls one or more documents out of
+ * the inbox at any stage — still uploading server-side, queued, mid-
+ * extraction, or already failed/suggested — without deleting anything.
+ * Same non-destructive shape as markNoEntryExpected: `entry_id` is left
+ * alone and only `match_status` flips, this time to 'canceled'
+ * (20260819000001_source_document_canceled_status.sql). The inbox's own
+ * `.in('match_status', ['unmatched','suggested'])` filter then drops the
+ * document for free — no extra query needed. Per-row like
+ * bulkAttachDocuments, so one bad id (already matched, not visible, wrong
+ * role) doesn't block the rest of the selection.
+ */
+export async function cancelDocumentTracking(documentIds: number[]): Promise<BulkCancelResult> {
+  const cleanIds = documentIds.filter((id) => Number.isInteger(id) && id > 0)
+  const requestedCount = cleanIds.length
+
+  if (requestedCount === 0) {
+    return {
+      success: false,
+      canceledCount: 0,
+      requestedCount: 0,
+      failedDocumentIds: [],
+      error: 'No documents selected.',
+    }
+  }
+
+  const supabase = await createClient()
+  const failedDocumentIds: number[] = []
+  let canceledCount = 0
+
+  for (const documentId of cleanIds) {
+    const { data, error } = await supabase
+      .from('source_document')
+      .update({ match_status: 'canceled' })
+      .eq('id', documentId)
+      .select('id')
+
+    if (error || !data || data.length === 0) {
+      failedDocumentIds.push(documentId)
+    } else {
+      canceledCount++
+    }
+  }
+
+  revalidatePath('/documents')
+
+  if (canceledCount === 0) {
+    return {
+      success: false,
+      canceledCount,
+      requestedCount,
+      failedDocumentIds,
+      error: `No documents were canceled. ${PERMISSION_HINT}`,
+    }
+  }
+  if (canceledCount < requestedCount) {
+    return {
+      success: true,
+      canceledCount,
+      requestedCount,
+      failedDocumentIds,
+      error: `${requestedCount - canceledCount} of ${requestedCount} selected documents could not be canceled.`,
+    }
+  }
+  return { success: true, canceledCount, requestedCount, failedDocumentIds: [] }
 }
 
 export interface EntrySearchResult {
@@ -276,7 +352,7 @@ export async function searchEntriesForAttach(
     .order('date', { ascending: false })
     .limit(10)
 
-  if (error) return { ok: false, error: error.message }
+  if (error) return { ok: false, error: logRawError('documents.searchEntriesForAttach', error.message) }
 
   return {
     ok: true,

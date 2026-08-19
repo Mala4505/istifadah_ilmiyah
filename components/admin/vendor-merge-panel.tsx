@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState, useTransition } from 'react'
 import { toast } from 'sonner'
+import { toastError } from '@/components/ui/error-toast'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Button } from '@/components/ui/button'
@@ -66,7 +67,7 @@ export function VendorMergePanel({ vendors }: { vendors: VendorRow[] }) {
       const result = await setVendorConfirmed({ vendorId: vendor.id, isConfirmed })
       if (!result.ok) {
         setVendorList((current) => current.map((v) => (v.id === vendor.id ? { ...v, isConfirmed: previous } : v)))
-        toast.error(result.error)
+        toastError(result.error, { context: 'vendor-merge-panel' })
       }
     })()
   }
@@ -77,7 +78,7 @@ export function VendorMergePanel({ vendors }: { vendors: VendorRow[] }) {
       if (result.ok) {
         toast.success(`"${vendor.displayName}" is independent again.`)
       } else {
-        toast.error(result.error)
+        toastError(result.error, { context: 'vendor-merge-panel' })
       }
     })()
   }
@@ -191,7 +192,7 @@ function MergeDialog({
         setQuery('')
         onClose()
       } else {
-        toast.error(result.error)
+        toastError(result.error, { context: 'vendor-merge-panel' })
       }
     })
   }

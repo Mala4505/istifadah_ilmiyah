@@ -3,6 +3,7 @@
 import { useEffect, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
+import { toastError } from '@/components/ui/error-toast'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -60,7 +61,7 @@ export function AdvanceSettlementPicker({
     startTransition(async () => {
       const result = await setSettlesEntry(entryId, row.id)
       if (!result.success) {
-        toast.error(result.error ?? 'Could not link advance.')
+        toastError(result.error, { title: 'Could not link advance.', context: 'advance-settlement-picker' })
         return
       }
       setLinked({
@@ -81,7 +82,7 @@ export function AdvanceSettlementPicker({
     startTransition(async () => {
       const result = await setSettlesEntry(entryId, null)
       if (!result.success) {
-        toast.error(result.error ?? 'Could not clear the advance link.')
+        toastError(result.error, { title: 'Could not clear the advance link.', context: 'advance-settlement-picker' })
         return
       }
       setLinked(null)

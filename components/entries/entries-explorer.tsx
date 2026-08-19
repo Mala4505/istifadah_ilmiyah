@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { toast } from 'sonner'
+import { toastError } from '@/components/ui/error-toast'
 import { Building2, Download, RotateCcw, Tag } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
@@ -16,6 +17,7 @@ import { exportEntriesToCsv } from './csv-export'
 import { fetchEntriesPage, type PageCursor } from './query'
 import { ALL_COLUMNS, DEFAULT_SORT, PAGE_SIZE } from './types'
 import type { ColumnKey, EntriesFilters, EntriesSort, EntryEnriched, FilterOptions, SortColumn, SortDirection } from './types'
+import { NewEntryDialog } from './new-entry-dialog'
 
 const EMPTY_OPTIONS: FilterOptions = {
   departments: [],
@@ -99,6 +101,8 @@ export function EntriesExplorer() {
   const [options, setOptions] = useState<FilterOptions>(EMPTY_OPTIONS)
   const [optionsLoaded, setOptionsLoaded] = useState(false)
   const [role, setRole] = useState<'admin' | 'reviewer' | 'viewer' | null>(null)
+  // null once loaded = an all-departments account; the New-entry form then has to ask which department.
+  const [ownDepartmentId, setOwnDepartmentId] = useState<number | null>(null)
 
   const [pages, setPages] = useState<EntryEnriched[][]>([])
   const [hasMoreFlags, setHasMoreFlags] = useState<boolean[]>([])
@@ -157,8 +161,15 @@ export function EntriesExplorer() {
 
       const user = userRes.data.user
       if (user) {
-        const { data: profile } = await supabase.from('staff_profile').select('role').eq('id', user.id).maybeSingle()
-        if (!cancelled) setRole((profile?.role as typeof role) ?? null)
+        const { data: profile } = await supabase
+          .from('staff_profile')
+          .select('role, department_id')
+          .eq('id', user.id)
+          .maybeSingle()
+        if (!cancelled) {
+          setRole((profile?.role as typeof role) ?? null)
+          setOwnDepartmentId((profile?.department_id as number | null) ?? null)
+        }
       }
     }
     loadOptions().catch((err) => {
@@ -233,7 +244,7 @@ export function EntriesExplorer() {
       setCursors((prev) => [...prev, result.nextCursor])
       setPageIndex(pageIndex + 1)
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Could not load the next page.')
+      toastError(err instanceof Error ? err.message : null, { title: 'Could not load the next page.', context: 'entries-explorer' })
     } finally {
       setLoading(false)
     }
@@ -299,7 +310,7 @@ export function EntriesExplorer() {
         toast.success(`Exported ${rowCount} ${rowCount === 1 ? 'entry' : 'entries'}.`)
       }
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'CSV export failed.')
+      toastError(err instanceof Error ? err.message : null, { title: 'CSV export failed.', context: 'entries-explorer' })
     } finally {
       setExporting(false)
     }
@@ -315,6 +326,17 @@ export function EntriesExplorer() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-xl font-semibold tracking-tight">Entries</h1>
         <div className="flex items-center gap-2">
+          {/* Typing an entry is a reviewer/admin action (entries_insert,
+              20260819000002) — a viewer sees no button rather than a button
+              that always fails. */}
+          {(role === 'admin' || role === 'reviewer') && (
+            <NewEntryDialog
+              departments={options.departments}
+              budgetHeads={options.budgetHeads}
+              ownDepartmentId={ownDepartmentId}
+              onCreated={() => void loadFirstPage(filters, sort)}
+            />
+          )}
           <ColumnChooser visible={visibleColumns} onToggle={toggleColumn} />
           <Button variant="outline" size="sm" className="gap-1.5" onClick={handleExport} disabled={exporting}>
             <Download className="h-3.5 w-3.5" />

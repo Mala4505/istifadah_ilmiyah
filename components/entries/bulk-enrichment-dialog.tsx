@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { toast } from 'sonner'
+import { toastError } from '@/components/ui/error-toast'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import {
@@ -89,7 +90,7 @@ export function BulkEnrichmentDialog({
         costCenterId: resolve(costCenter),
       })
       if (!result.success) {
-        toast.error(result.error ?? 'Could not update entries.')
+        toastError(result.error, { title: 'Could not update entries.', context: 'bulk-enrichment-dialog' })
         return
       }
       if (result.updatedCount < result.requestedCount) {
@@ -103,7 +104,7 @@ export function BulkEnrichmentDialog({
       onOpenChange(false)
       onDone()
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Could not update entries.')
+      toastError(err instanceof Error ? err.message : null, { title: 'Could not update entries.', context: 'bulk-enrichment-dialog' })
     } finally {
       setPending(false)
     }

@@ -4,6 +4,7 @@
 
 import { useState, useTransition } from 'react'
 import { toast } from 'sonner'
+import { toastError } from '@/components/ui/error-toast'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Textarea } from '@/components/ui/textarea'
 import { Button } from '@/components/ui/button'
@@ -41,7 +42,7 @@ export function ExceptionDialog({
         note: trimmed,
       })
       if (!result.ok) {
-        toast.error(result.error)
+        toastError(result.error, { context: 'exception-dialog' })
         return
       }
       toast.success('Exception flagged.')

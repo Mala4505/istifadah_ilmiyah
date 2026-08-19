@@ -1,6 +1,7 @@
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
 import { FriendlyError } from '@/components/ui/friendly-error'
+import { ProvisionalNumberBanner } from '@/components/entries/detail/provisional-number-banner'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { AdvanceSettlementPicker } from '@/components/entries/detail/advance-settlement-picker'
 import { ChangeHistoryList } from '@/components/entries/detail/change-history-list'
@@ -205,6 +206,14 @@ export default async function EntryDetailPage({
         {entry.department_name && <Badge variant="secondary">{entry.department_name}</Badge>}
         {entry.is_void && <Badge variant="destructive">Void</Badge>}
       </div>
+
+      {/* Typed entries hold a provisional M-###### number until the real one
+          arrives (20260819000002_manual_entries.sql). The prompt to swap it
+          sits above the fields so it is the first thing seen, and disappears
+          on its own once the real number is in. */}
+      {entry.source === 'manual' && /^M-\d{6}$/.test(entry.ubbl_number) && (
+        <ProvisionalNumberBanner entryId={entry.id} provisionalNumber={entry.ubbl_number} />
+      )}
 
       <ImportFieldsPanel entry={entry} vendorConfirmed={vendorConfirmed} budgetHeadRaw={budgetHeadRaw} />
 

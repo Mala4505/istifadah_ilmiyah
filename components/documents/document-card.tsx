@@ -3,6 +3,7 @@
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
+import { toastError } from '@/components/ui/error-toast'
 import {
   Loader2,
   Search,
@@ -180,7 +181,7 @@ export function DocumentCard({
       const result = await manualExtractNow(document.id)
       setExtractPending(false)
       if (!result.ok) {
-        toast.error(result.error)
+        toastError(result.error, { context: 'document-card' })
         return
       }
       toast.success(`Extraction finished for "${document.originalFilename}".`)
@@ -196,7 +197,7 @@ export function DocumentCard({
     startTransition(async () => {
       const result = await attachDocumentToEntry({ documentId: document.id, entryId: chosenEntryId })
       if (!result.ok) {
-        toast.error(result.error)
+        toastError(result.error, { context: 'document-card' })
         return
       }
       toast.success(`Attached "${document.originalFilename}".`)
@@ -210,7 +211,7 @@ export function DocumentCard({
       const result = await markNoEntryExpected(document.id)
       setParkConfirming(false)
       if (!result.ok) {
-        toast.error(result.error)
+        toastError(result.error, { context: 'document-card' })
         return
       }
       toast.success(`Marked "${document.originalFilename}" as no entry expected.`)
@@ -235,7 +236,7 @@ export function DocumentCard({
       })
       setFlagPending(false)
       if (!result.ok) {
-        toast.error(result.error)
+        toastError(result.error, { context: 'document-card' })
         return
       }
       toast.success('Flagged for a closer look.')
@@ -255,7 +256,7 @@ export function DocumentCard({
       const result = await searchEntriesForAttach(trimmed)
       setSearchPending(false)
       if (!result.ok) {
-        toast.error(result.error)
+        toastError(result.error, { context: 'document-card' })
         return
       }
       setSearchResults(result.results)
@@ -268,7 +269,7 @@ export function DocumentCard({
       const result = await getDocumentPreviewUrl(document.id)
       setPreviewPending(false)
       if (!result.ok) {
-        toast.error(result.error)
+        toastError(result.error, { context: 'document-card' })
         return
       }
       window.open(result.url, '_blank', 'noopener,noreferrer')
@@ -295,8 +296,7 @@ export function DocumentCard({
             <Checkbox
               checked={selected}
               onCheckedChange={onToggleSelected}
-              disabled={chosenEntryId === null}
-              aria-label={`Select ${document.originalFilename} for bulk attach`}
+              aria-label={`Select ${document.originalFilename}`}
               className="mt-1"
             />
           )}
@@ -346,10 +346,23 @@ export function DocumentCard({
               <AlertTriangle className="h-3.5 w-3.5" aria-hidden="true" />
               Extraction failed
             </div>
-            <p className="rounded bg-background px-2.5 py-1.5 font-mono text-[11px] leading-relaxed text-foreground">
-              {document.failureReason ?? 'No error details were recorded for this attempt.'}
+            {/* Plain English first. The raw failure text is a provider/model
+                payload that regularly arrives as a JSON blob, so it never
+                leads here — it stays one click away for whoever is actually
+                debugging the pipeline. */}
+            <p className="text-sm leading-relaxed text-foreground">
+              {extractionFailureGuidance(document.failureReason)}
             </p>
-            <p className="text-xs text-muted-foreground">{extractionFailureGuidance(document.failureReason)}</p>
+            {document.failureReason && (
+              <details>
+                <summary className="cursor-pointer text-xs text-muted-foreground hover:text-foreground">
+                  Technical detail
+                </summary>
+                <p className="mt-1 break-all rounded bg-background px-2.5 py-1.5 font-mono text-[11px] leading-relaxed text-muted-foreground">
+                  {document.failureReason}
+                </p>
+              </details>
+            )}
           </div>
         ) : !hasExtraction ? (
           <p className="rounded-md border border-dashed border-border px-3 py-2 text-xs text-muted-foreground">

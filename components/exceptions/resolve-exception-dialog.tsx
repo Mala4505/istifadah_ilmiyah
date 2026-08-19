@@ -3,6 +3,7 @@
 import * as React from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
+import { toastError } from '@/components/ui/error-toast'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
@@ -45,7 +46,7 @@ export function ResolveExceptionDialog({
     try {
       const result = await resolveException({ exceptionId, outcome, note })
       if (!result.ok) {
-        toast.error('Could not update exception', { description: result.error })
+        toastError(result.error, { title: 'Could not update exception', context: 'resolve-exception-dialog' })
         return
       }
       toast.success(outcome === 'resolved' ? 'Exception resolved' : 'Exception dismissed')

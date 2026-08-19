@@ -1,3 +1,4 @@
+import { friendlyDataError } from '@/lib/friendly-error'
 import { subDays, startOfISOWeek, format } from 'date-fns'
 import { Card, CardContent } from '@/components/ui/card'
 import { requireAdmin, type AdminGate } from '@/lib/export/auth'
@@ -81,8 +82,8 @@ async function loadAccuracyData() {
     verifiedRows: verifiedRes.data ?? [],
     correctionRows: correctionRes.data ?? [],
     errors: {
-      verified: verifiedRes.error?.message ?? null,
-      correction: correctionRes.error?.message ?? null,
+      verified: friendlyDataError(verifiedRes.error, 'accuracy:verifiedRes'),
+      correction: friendlyDataError(correctionRes.error, 'accuracy:correctionRes'),
     },
   }
 }

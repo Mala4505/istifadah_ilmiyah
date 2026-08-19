@@ -2,6 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
+import { logRawError } from '@/lib/friendly-error'
 
 /**
  * Resolve/dismiss a reconciliation_exception (MASTER-PLAN §3.10, §5 row 8).
@@ -50,7 +51,7 @@ export async function resolveException(input: {
     .select('id')
 
   if (error) {
-    return { ok: false, error: error.message }
+    return { ok: false, error: logRawError('exceptions.resolveException', error.message) }
   }
   if (!data || data.length === 0) {
     return {

@@ -28,10 +28,17 @@ import { signOut } from '@/lib/actions/auth'
 const COLLAPSE_STORAGE_KEY = 'nav-rail-collapsed'
 
 // Persistent left rail (MASTER-PLAN §5 "Navigation"). Export and Admin are
-// admin-only per §4.4c's role table. Role-based hiding is not wired up yet
-// — `staff_profile.role` doesn't exist until the SQL migrations land — so
-// every item renders for now. RLS in the database is the real access
-// boundary regardless of what this nav shows.
+// admin-only per §4.4c's role table, and are now hidden outright
+// from anyone who isn't an active admin — each of those pages already blocks
+// non-admins server-side, so showing the link only ever produced a click that
+// led to a refusal. That mattered little while every account was an admin; it
+// matters now that departments have their own scoped accounts, for whom those
+// two links are pure noise. (/import has no rail entry at all — it is reached
+// from the dashboard's imports tile, which is gated the same way.)
+//
+// This is presentation only. RLS in the database, and each page's own
+// server-side gate, remain the real access boundary — a hidden link is not a
+// permission check, and nothing here is relied on as one.
 const NAV_ITEMS = [
   { label: 'Dashboard', href: '/', icon: LayoutDashboard },
   { label: 'Entries', href: '/entries', icon: ListChecks },
@@ -59,6 +66,9 @@ export function NavRail({
 }) {
   const pathname = usePathname()
   const [collapsed, setCollapsed] = useState(false)
+
+  const isAdmin = user.role === 'admin'
+  const navItems = NAV_ITEMS.filter((item) => isAdmin || !('adminOnly' in item && item.adminOnly))
 
   // Per-visit override: true once the user manually re-expands the rail
   // while on /review. Not persisted — a ref (not state) so it survives
@@ -139,7 +149,7 @@ export function NavRail({
           {toggleButton}
         </div>
         <ul className="flex-1 space-y-0.5 p-2">
-          {NAV_ITEMS.map((item) => {
+          {navItems.map((item) => {
             const isActive = item.href === '/' ? pathname === '/' : pathname.startsWith(item.href)
             const isAdminOnly = 'adminOnly' in item && item.adminOnly
             const Icon = item.icon

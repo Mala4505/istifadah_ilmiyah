@@ -3,6 +3,7 @@
 import * as React from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
+import { toastError } from '@/components/ui/error-toast'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Label } from '@/components/ui/label'
@@ -36,7 +37,7 @@ export function GenerateBatchForm({ pendingCount }: { pendingCount: number }) {
       })
       const body = await response.json()
       if (!response.ok) {
-        toast.error('Could not generate batch', { description: body.error ?? `HTTP ${response.status}` })
+        toastError(body.error ?? `HTTP ${response.status}`, { title: 'Could not generate batch', context: 'generate-batch-form' })
         return
       }
       if (body.batch === null) {
@@ -48,7 +49,7 @@ export function GenerateBatchForm({ pendingCount }: { pendingCount: number }) {
       })
       router.refresh()
     } catch (err) {
-      toast.error('Could not generate batch', { description: err instanceof Error ? err.message : String(err) })
+      toastError(err instanceof Error ? err.message : String(err), { title: 'Could not generate batch', context: 'generate-batch-form' })
     } finally {
       setIsSubmitting(false)
     }

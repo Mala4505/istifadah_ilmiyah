@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from 'react'
 import { toast } from 'sonner'
+import { toastError } from '@/components/ui/error-toast'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -87,7 +88,7 @@ function UserRow({
       if (result.ok) {
         toast.success('Staff profile updated.')
       } else {
-        toast.error(result.error)
+        toastError(result.error, { context: 'users-table' })
       }
     })
   }

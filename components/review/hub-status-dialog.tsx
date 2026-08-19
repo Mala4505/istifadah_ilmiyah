@@ -12,6 +12,7 @@
 
 import { useState, useTransition } from 'react'
 import { toast } from 'sonner'
+import { toastError } from '@/components/ui/error-toast'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Textarea } from '@/components/ui/textarea'
 import { Button } from '@/components/ui/button'
@@ -47,7 +48,7 @@ export function HubStatusDialog({
     startTransition(async () => {
       const result = await setHubStatus({ entryIds: [entryId], hubStatusCode: code, note: trimmed })
       if (!result.success) {
-        toast.error(result.error ?? 'Could not update Hub status.')
+        toastError(result.error, { title: 'Could not update Hub status.', context: 'hub-status-dialog' })
         return
       }
       toast.success('Hub status updated.')

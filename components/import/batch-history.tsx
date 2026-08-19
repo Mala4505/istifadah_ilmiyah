@@ -2,6 +2,8 @@
 
 import { Fragment, useCallback, useEffect, useState } from 'react'
 import { toast } from 'sonner'
+import { toastError } from '@/components/ui/error-toast'
+import { FriendlyError } from '@/components/ui/friendly-error'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { BatchStatusBadge } from '@/components/import/row-log-badge'
@@ -84,7 +86,7 @@ export function BatchHistory({ isAdmin, refreshSignal }: { isAdmin: boolean; ref
       const res = await fetch(`/api/import?batchId=${batchId}`)
       const body = await res.json()
       if (!res.ok) {
-        toast.error(body.error ?? 'Could not load batch detail.')
+        toastError(body.error, { title: 'Could not load batch detail.', context: 'batch-history' })
         setSelectedBatchRows([])
         return
       }
@@ -162,7 +164,7 @@ export function BatchHistory({ isAdmin, refreshSignal }: { isAdmin: boolean; ref
                           {batchDetailLoading ? (
                             <Skeleton className="h-24 w-full" />
                           ) : b.error_message ? (
-                            <p className="text-sm text-destructive">{b.error_message}</p>
+                            <FriendlyError message={b.error_message} />
                           ) : (
                             <RowLogTable rows={selectedBatchRows ?? []} />
                           )}

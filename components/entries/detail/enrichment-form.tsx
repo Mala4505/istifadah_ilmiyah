@@ -3,6 +3,7 @@
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
+import { toastError } from '@/components/ui/error-toast'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Label } from '@/components/ui/label'
@@ -59,7 +60,7 @@ export function EnrichmentForm({
         remark: remark || null,
       })
       if (!result.success) {
-        toast.error(result.error ?? 'Could not save enrichment fields.')
+        toastError(result.error, { title: 'Could not save enrichment fields.', context: 'enrichment-form' })
         return
       }
       toast.success('Enrichment fields saved.')

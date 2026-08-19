@@ -1,3 +1,4 @@
+import { friendlyDataError } from '@/lib/friendly-error'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
 import { ReportSection } from '@/components/reports/report-section'
@@ -135,11 +136,11 @@ async function loadReportsData() {
     },
     issueRows: issuesRes.data ?? [],
     errors: {
-      budget: budgetRes.error?.message ?? null,
-      vendor: vendorRes.error?.message ?? null,
-      zone: zoneRes.error?.message ?? null,
-      ageing: ageingRes.error?.message ?? null,
-      issues: issuesRes.error?.message ?? null,
+      budget: friendlyDataError(budgetRes.error, 'reports:budgetRes'),
+      vendor: friendlyDataError(vendorRes.error, 'reports:vendorRes'),
+      zone: friendlyDataError(zoneRes.error, 'reports:zoneRes'),
+      ageing: friendlyDataError(ageingRes.error, 'reports:ageingRes'),
+      issues: friendlyDataError(issuesRes.error, 'reports:issuesRes'),
     },
   }
 }

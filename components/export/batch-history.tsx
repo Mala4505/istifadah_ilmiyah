@@ -3,6 +3,7 @@
 import * as React from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
+import { toastError } from '@/components/ui/error-toast'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -69,13 +70,13 @@ function BatchHistoryRow({ batch }: { batch: ExportBatchSummary }) {
       const response = await fetch(`/api/export-status?batchId=${batch.id}&download=1`)
       if (!response.ok) {
         const body = await response.json().catch(() => ({}))
-        toast.error('Could not get a download link', { description: body.error ?? `HTTP ${response.status}` })
+        toastError(body.error ?? `HTTP ${response.status}`, { title: 'Could not get a download link', context: 'batch-history' })
         return
       }
       const body = await response.json()
       window.open(body.url, '_blank', 'noopener,noreferrer')
     } catch (err) {
-      toast.error('Could not get a download link', { description: err instanceof Error ? err.message : String(err) })
+      toastError(err instanceof Error ? err.message : String(err), { title: 'Could not get a download link', context: 'batch-history' })
     } finally {
       setBusy(false)
     }
@@ -91,13 +92,13 @@ function BatchHistoryRow({ batch }: { batch: ExportBatchSummary }) {
       })
       const body = await response.json()
       if (!response.ok) {
-        toast.error(`Could not mark batch ${status}`, { description: body.error ?? `HTTP ${response.status}` })
+        toastError(body.error ?? `HTTP ${response.status}`, { title: `Could not mark batch ${status}`, context: 'batch-history' })
         return
       }
       toast.success(`Batch #${batch.id} marked ${status}`)
       router.refresh()
     } catch (err) {
-      toast.error(`Could not mark batch ${status}`, { description: err instanceof Error ? err.message : String(err) })
+      toastError(err instanceof Error ? err.message : String(err), { title: `Could not mark batch ${status}`, context: 'batch-history' })
     } finally {
       setBusy(false)
     }
@@ -112,13 +113,13 @@ function BatchHistoryRow({ batch }: { batch: ExportBatchSummary }) {
         const response = await fetch(`/api/export-status?batchId=${batch.id}`)
         const body = await response.json()
         if (!response.ok) {
-          toast.error('Could not load row detail', { description: body.error ?? `HTTP ${response.status}` })
+          toastError(body.error ?? `HTTP ${response.status}`, { title: 'Could not load row detail', context: 'batch-history' })
           setRows([])
         } else {
           setRows(body.rows as ExportBatchRow[])
         }
       } catch (err) {
-        toast.error('Could not load row detail', { description: err instanceof Error ? err.message : String(err) })
+        toastError(err instanceof Error ? err.message : String(err), { title: 'Could not load row detail', context: 'batch-history' })
         setRows([])
       } finally {
         setRowsLoading(false)

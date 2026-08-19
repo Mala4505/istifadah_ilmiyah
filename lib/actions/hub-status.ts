@@ -2,6 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
+import { logRawError } from '@/lib/friendly-error'
 
 export interface SetHubStatusInput {
   entryIds: number[]
@@ -99,7 +100,7 @@ export async function setHubStatus({
     .select('id')
 
   if (error) {
-    return { success: false, updatedCount: 0, requestedCount, error: error.message }
+    return { success: false, updatedCount: 0, requestedCount, error: logRawError('hub-status.setHubStatus', error.message) }
   }
 
   const updatedCount = data?.length ?? 0

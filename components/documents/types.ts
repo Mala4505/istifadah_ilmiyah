@@ -23,7 +23,7 @@ export interface InboxDocumentView {
   id: number
   originalFilename: string
   uploadStatus: 'uploaded' | 'processing' | 'processed' | 'failed'
-  matchStatus: 'unmatched' | 'suggested' | 'matched' | 'no_entry_expected'
+  matchStatus: 'unmatched' | 'suggested' | 'matched' | 'no_entry_expected' | 'canceled'
   uploadedAt: string
   pageCount: number | null
   extraction: DocumentExtractionSummary | null

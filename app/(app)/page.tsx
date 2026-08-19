@@ -1,3 +1,4 @@
+import { friendlyDataError } from '@/lib/friendly-error'
 import Link from 'next/link'
 import { ScanLine, TriangleAlert, Wallet, UploadCloud, FileScan, ArrowRight, ListChecks, ShieldCheck, Tag } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
@@ -88,29 +89,29 @@ async function loadDashboardData() {
 
   return {
     reviewQueueDepth: reviewQueueRes.count ?? 0,
-    reviewQueueError: reviewQueueRes.error?.message ?? null,
+    reviewQueueError: friendlyDataError(reviewQueueRes.error, 'dashboard:reviewQueueRes'),
 
     openIssuesCount: openIssues.length,
     openIssuesAtRisk: openIssues.reduce((sum, r) => sum + (r.amount_at_risk ?? 0), 0),
-    openIssuesError: openIssuesRes.error?.message ?? null,
+    openIssuesError: friendlyDataError(openIssuesRes.error, 'dashboard:openIssuesRes'),
 
     totalActualSpend: budgetRows.reduce((sum, r) => sum + (r.actual_amount ?? 0), 0),
     headsWithoutApprovedBudget: budgetRows.filter((r) => r.budget_status_note === 'no approved budget')
       .length,
     totalHeads: budgetRows.length,
-    budgetError: budgetRes.error?.message ?? null,
+    budgetError: friendlyDataError(budgetRes.error, 'dashboard:budgetRes'),
 
     importBatchCount: importBatches.length,
     importRowCount: importBatches.reduce((sum, r) => sum + (r.row_count ?? 0), 0),
-    importsError: importsRes.error?.message ?? null,
+    importsError: friendlyDataError(importsRes.error, 'dashboard:importsRes'),
 
     unmatchedDocsCount: unmatchedDocsRes.count ?? 0,
-    unmatchedDocsError: unmatchedDocsRes.error?.message ?? null,
+    unmatchedDocsError: friendlyDataError(unmatchedDocsRes.error, 'dashboard:unmatchedDocsRes'),
 
     statusCounts: toStatusCounts('status'),
     auditStatusCounts: toStatusCounts('audit_status'),
     hubStatusCounts: toStatusCounts('hub_status'),
-    statusCountsError: statusCountsRes.error?.message ?? null,
+    statusCountsError: friendlyDataError(statusCountsRes.error, 'dashboard:statusCountsRes'),
 
     isAdmin,
   }
@@ -172,18 +173,23 @@ export default async function DashboardPage() {
           tone={data.headsWithoutApprovedBudget > 0 ? 'warning' : 'default'}
           error={data.budgetError}
         />
-        <StatTile
-          label="Today's imports"
-          value={formatNumber(data.importBatchCount)}
-          hint={
-            data.importBatchCount === 0
-              ? 'No import batches started today'
-              : `${formatNumber(data.importRowCount)} rows across ${data.importBatchCount} batch${data.importBatchCount === 1 ? '' : 'es'}`
-          }
-          href="/import"
-          icon={UploadCloud}
-          error={data.importsError}
-        />
+        {/* Running an import is admin-only (§4.4c), and /import refuses
+            everyone else server-side — a department account was being shown a
+            tile whose only destination is a permission-denied page. */}
+        {data.isAdmin && (
+          <StatTile
+            label="Today's imports"
+            value={formatNumber(data.importBatchCount)}
+            hint={
+              data.importBatchCount === 0
+                ? 'No import batches started today'
+                : `${formatNumber(data.importRowCount)} rows across ${data.importBatchCount} batch${data.importBatchCount === 1 ? '' : 'es'}`
+            }
+            href="/import"
+            icon={UploadCloud}
+            error={data.importsError}
+          />
+        )}
         <StatTile
           label="Documents to match"
           value={formatNumber(data.unmatchedDocsCount)}

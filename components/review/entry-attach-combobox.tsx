@@ -16,6 +16,7 @@
 import { useEffect, useState } from 'react'
 import { Check, ChevronsUpDown } from 'lucide-react'
 import { toast } from 'sonner'
+import { toastError } from '@/components/ui/error-toast'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
@@ -67,7 +68,7 @@ export function EntryAttachCombobox({
     void attachExtractionToEntry({ documentExtractionId, entryId: entry.id }).then((result) => {
       setAttaching(null)
       if (!result.ok) {
-        toast.error(result.error)
+        toastError(result.error, { context: 'entry-attach-combobox' })
         return
       }
       toast.success(`Attached to ${entry.ubblNumber}.`)

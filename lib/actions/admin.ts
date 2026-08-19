@@ -6,6 +6,7 @@ import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { requireAdmin } from '@/lib/export/auth'
 import { itsNumberSchema, itsNumberToLoginEmail } from '@/lib/auth/its'
+import { logRawError } from '@/lib/friendly-error'
 
 type ActionResult = { ok: true } | { ok: false; error: string }
 
@@ -77,7 +78,7 @@ export async function createStaffUser(input: {
   // race with the pre-check above: a losing concurrent insert fails the
   // handle_new_user trigger with a unique_violation, which createUser
   // surfaces as an error here rather than silently landing a duplicate.
-  if (createError) return { ok: false, error: createError.message }
+  if (createError) return { ok: false, error: logRawError('admin.createStaffUser', createError.message) }
 
   revalidatePath('/admin')
   return { ok: true }
@@ -103,7 +104,7 @@ export async function updateStaffProfile(input: {
     .update({ role: input.role, department_id: input.departmentId, is_active: input.isActive })
     .eq('id', input.id)
 
-  if (error) return { ok: false, error: error.message }
+  if (error) return { ok: false, error: logRawError('admin.updateStaffProfile', error.message) }
 
   revalidatePath('/admin')
   return { ok: true }
@@ -125,7 +126,7 @@ export async function updateBudgetHeadMapping(input: {
     .update({ head_id: input.headId })
     .eq('id', input.budgetHeadId)
 
-  if (error) return { ok: false, error: error.message }
+  if (error) return { ok: false, error: logRawError('admin.updateBudgetHeadMapping', error.message) }
 
   revalidatePath('/admin')
   return { ok: true }
@@ -166,7 +167,7 @@ export async function mergeVendor(input: {
     .update({ cluster_group_id: input.targetVendorId, is_confirmed: true })
     .eq('id', input.vendorId)
 
-  if (error) return { ok: false, error: error.message }
+  if (error) return { ok: false, error: logRawError('admin.mergeVendor', error.message) }
 
   revalidatePath('/admin')
   return { ok: true }
@@ -181,7 +182,7 @@ export async function unmergeVendor(input: { vendorId: number }): Promise<Action
     .update({ cluster_group_id: null })
     .eq('id', input.vendorId)
 
-  if (error) return { ok: false, error: error.message }
+  if (error) return { ok: false, error: logRawError('admin.unmergeVendor', error.message) }
 
   revalidatePath('/admin')
   return { ok: true }
@@ -199,7 +200,7 @@ export async function setVendorConfirmed(input: {
     .update({ is_confirmed: input.isConfirmed })
     .eq('id', input.vendorId)
 
-  if (error) return { ok: false, error: error.message }
+  if (error) return { ok: false, error: logRawError('admin.setVendorConfirmed', error.message) }
 
   revalidatePath('/admin')
   return { ok: true }

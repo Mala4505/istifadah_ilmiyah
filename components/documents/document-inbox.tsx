@@ -3,8 +3,9 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
+import { toastError } from '@/components/ui/error-toast'
 import { Button } from '@/components/ui/button'
-import { bulkAttachDocuments } from '@/lib/actions/documents'
+import { bulkAttachDocuments, cancelDocumentTracking } from '@/lib/actions/documents'
 import { UploadDropzone } from './upload-dropzone'
 import { DocumentTable } from './document-table'
 import type { InboxDocumentView } from './types'
@@ -36,6 +37,7 @@ export function DocumentInbox({
   )
   const [selected, setSelected] = useState<Set<number>>(new Set())
   const [bulkPending, setBulkPending] = useState(false)
+  const [cancelPending, setCancelPending] = useState(false)
 
   useEffect(() => {
     setDocuments(initialDocuments)
@@ -115,7 +117,7 @@ export function DocumentInbox({
       const result = await bulkAttachDocuments(pairs)
       setBulkPending(false)
       if (!result.success) {
-        toast.error(result.error ?? 'Bulk attach failed.')
+        toastError(result.error, { title: 'Bulk attach failed.', context: 'document-inbox' })
         return
       }
       const attachedIds = new Set(pairs.map((p) => p.documentId).filter((id) => !result.failedDocumentIds.includes(id)))
@@ -130,6 +132,33 @@ export function DocumentInbox({
     })()
   }
 
+  function handleBulkCancel() {
+    const ids = [...selected]
+    if (ids.length === 0) {
+      toast.error('Select at least one document to cancel.')
+      return
+    }
+
+    setCancelPending(true)
+    void (async () => {
+      const result = await cancelDocumentTracking(ids)
+      setCancelPending(false)
+      if (!result.success) {
+        toastError(result.error, { title: 'Cancel failed.', context: 'document-inbox' })
+        return
+      }
+      const canceledIds = new Set(ids.filter((id) => !result.failedDocumentIds.includes(id)))
+      setDocuments((current) => current.filter((d) => !canceledIds.has(d.id)))
+      setSelected(new Set())
+      if (result.error) {
+        toast.warning(result.error)
+      } else {
+        toast.success(`Canceled tracking for ${result.canceledCount} document${result.canceledCount === 1 ? '' : 's'}.`)
+      }
+      router.refresh()
+    })()
+  }
+
   return (
     <div className="flex flex-col gap-6">
       <UploadDropzone onUploaded={() => router.refresh()} />
@@ -137,13 +166,21 @@ export function DocumentInbox({
       {canAct && selectedCount > 0 && (
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border bg-muted/30 px-4 py-2.5">
           <p className="text-sm">
-            {selectedCount} document{selectedCount === 1 ? '' : 's'} selected for bulk attach
+            {selectedCount} document{selectedCount === 1 ? '' : 's'} selected
           </p>
           <div className="flex items-center gap-2">
-            <Button variant="ghost" size="sm" onClick={() => setSelected(new Set())} disabled={bulkPending}>
+            <Button variant="ghost" size="sm" onClick={() => setSelected(new Set())} disabled={bulkPending || cancelPending}>
               Clear
             </Button>
-            <Button size="sm" onClick={handleBulkAttach} disabled={bulkPending}>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleBulkCancel}
+              disabled={bulkPending || cancelPending}
+            >
+              {cancelPending ? 'Canceling…' : `Cancel tracking (${selectedCount})`}
+            </Button>
+            <Button size="sm" onClick={handleBulkAttach} disabled={bulkPending || cancelPending}>
               {bulkPending ? 'Attaching…' : `Attach ${selectedCount} selected`}
             </Button>
           </div>

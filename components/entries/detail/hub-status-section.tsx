@@ -3,6 +3,7 @@
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
+import { toastError } from '@/components/ui/error-toast'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -64,7 +65,7 @@ export function HubStatusSection({
         note: trimmed,
       })
       if (!result.success) {
-        toast.error(result.error ?? 'Could not update Hub status.')
+        toastError(result.error, { title: 'Could not update Hub status.', context: 'hub-status-section' })
         return
       }
       if (result.error) {

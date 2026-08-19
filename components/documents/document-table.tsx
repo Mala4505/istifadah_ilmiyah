@@ -7,7 +7,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Dialog, DialogContent, DialogFooter, DialogTitle } from '@/components/ui/dialog'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { DocumentCard, DocumentStageTracker } from './document-card'
-import { formatDate, formatMoney } from './format'
+import { formatDateTime, formatMoney } from './format'
 import type { InboxDocumentView } from './types'
 
 const PAGE_SIZE = 20
@@ -74,7 +74,6 @@ export function DocumentTable({
           </TableHeader>
           <TableBody>
             {pageDocuments.map((doc) => {
-              const chosenEntryId = chosenByDocument.get(doc.id) ?? null
               return (
                 <TableRow key={doc.id}>
                   {canAct && (
@@ -82,8 +81,7 @@ export function DocumentTable({
                       <Checkbox
                         checked={selected.has(doc.id)}
                         onCheckedChange={() => onToggleSelected(doc.id)}
-                        disabled={chosenEntryId === null}
-                        aria-label={`Select ${doc.originalFilename} for bulk attach`}
+                        aria-label={`Select ${doc.originalFilename}`}
                       />
                     </TableCell>
                   )}
@@ -113,7 +111,7 @@ export function DocumentTable({
                     <DocumentStageTracker uploadStatus={doc.uploadStatus} uploadedAt={doc.uploadedAt} size="sm" />
                   </TableCell>
                   <TableCell>
-                    <span className="text-xs text-muted-foreground">{formatDate(doc.uploadedAt)}</span>
+                    <span className="text-xs text-muted-foreground">{formatDateTime(doc.uploadedAt)}</span>
                   </TableCell>
                   <TableCell className="text-right">
                     <Button variant="outline" size="sm" onClick={() => setOpenDocumentId(doc.id)}>

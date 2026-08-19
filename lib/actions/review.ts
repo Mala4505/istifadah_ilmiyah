@@ -12,6 +12,7 @@ import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { getSignedUrl } from '@/lib/storage'
+import { logRawError } from '@/lib/friendly-error'
 
 const CLAIM_STALE_AFTER_MS = 15 * 60 * 1000 // §7: "Claims expire after 15 minutes of inactivity"
 
@@ -83,7 +84,7 @@ export async function saveVerification(input: SaveVerificationInput): Promise<Sa
     .single()
 
   if (error) {
-    return { ok: false, error: error.message }
+    return { ok: false, error: logRawError('review.saveVerification', error.message) }
   }
 
   const result = data as {
@@ -151,7 +152,7 @@ export async function claimReviewDocument(
     .maybeSingle()
 
   if (readError) {
-    return { ok: false, error: readError.message }
+    return { ok: false, error: logRawError('review.claimReviewDocument', readError.message) }
   }
   if (!doc) {
     return { ok: false, error: 'Document not found, or you do not have visibility into it.' }
@@ -184,7 +185,7 @@ export async function claimReviewDocument(
     .eq('id', sourceDocumentId)
 
   if (updateError) {
-    return { ok: false, error: updateError.message }
+    return { ok: false, error: logRawError('review.claimReviewDocument', updateError.message) }
   }
 
   return { ok: true, claimedByMe: true }
@@ -208,7 +209,7 @@ export async function getReviewDocumentUrl(
     .maybeSingle()
 
   if (error) {
-    return { ok: false, error: error.message }
+    return { ok: false, error: logRawError('review.getReviewDocumentUrl', error.message) }
   }
   if (!doc) {
     return { ok: false, error: 'Document not found, or you do not have visibility into it.' }
@@ -257,7 +258,7 @@ export async function flagReviewException(input: {
   })
 
   if (error) {
-    return { ok: false, error: error.message }
+    return { ok: false, error: logRawError('review.flagReviewException', error.message) }
   }
 
   revalidatePath('/review')
@@ -288,7 +289,7 @@ export async function attachExtractionToEntry(input: {
     .eq('id', input.documentExtractionId)
     .select('id')
 
-  if (error) return { ok: false, error: error.message }
+  if (error) return { ok: false, error: logRawError('review.attachExtractionToEntry', error.message) }
   if (!data || data.length === 0) {
     return {
       ok: false,

@@ -19,6 +19,7 @@
 import { useEffect, useRef, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
+import { toastError } from '@/components/ui/error-toast'
 import { Button } from '@/components/ui/button'
 import { normalizeUnit } from '@/lib/normalize'
 import {
@@ -133,7 +134,7 @@ export function ReviewWorkspace({
       }
       // Transient error (network, etc.) -- fail open rather than locking the
       // reviewer out of a document they can otherwise see.
-      toast.error(result.error)
+      toastError(result.error, { context: 'review-workspace' })
       setClaimState('mine')
     })
     return () => {
@@ -157,7 +158,7 @@ export function ReviewWorkspace({
         setClaimState('mine')
         toast.success('Claim taken over.')
       } else if ('error' in result) {
-        toast.error(result.error)
+        toastError(result.error, { context: 'review-workspace' })
       }
     })
   }
@@ -208,7 +209,7 @@ export function ReviewWorkspace({
     startSaving(async () => {
       const result = await saveVerification(buildSavePayload())
       if (!result.ok) {
-        toast.error(result.error)
+        toastError(result.error, { context: 'review-workspace' })
         return
       }
       toast.success(
@@ -231,7 +232,7 @@ export function ReviewWorkspace({
       })
       const json = await res.json()
       if (!res.ok) {
-        toast.error(json.error ?? 'Re-extraction failed.')
+        toastError(json.error, { title: 'Re-extraction failed.', context: 'review-workspace' })
         return
       }
       toast.success(
@@ -239,7 +240,7 @@ export function ReviewWorkspace({
       )
       router.refresh()
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : String(err))
+      toastError(err instanceof Error ? err.message : String(err), { context: 'review-workspace' })
     } finally {
       setReExtracting(false)
     }

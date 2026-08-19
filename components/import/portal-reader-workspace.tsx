@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
+import { toastError } from '@/components/ui/error-toast'
 import { GripVertical } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -113,7 +114,7 @@ export function PortalReaderWorkspace({ isAdmin, source, hubUrl }: Props) {
       const res = await fetch('/api/scrape-token')
       const body = await res.json()
       if (!res.ok) {
-        toast.error(body.error ?? 'Could not load reader links.')
+        toastError(body.error, { title: 'Could not load reader links.', context: 'portal-reader-workspace' })
         return
       }
       // Revoked links are dead — showing them here would just be clutter.
@@ -139,7 +140,7 @@ export function PortalReaderWorkspace({ isAdmin, source, hubUrl }: Props) {
       })
       const body = await res.json()
       if (!res.ok) {
-        toast.error(body.error ?? 'Could not create a reader link.')
+        toastError(body.error, { title: 'Could not create a reader link.', context: 'portal-reader-workspace' })
         return
       }
       setMinted(body as MintedToken)
@@ -158,7 +159,7 @@ export function PortalReaderWorkspace({ isAdmin, source, hubUrl }: Props) {
         const res = await fetch(`/api/scrape-token?id=${id}`, { method: 'DELETE' })
         const body = await res.json()
         if (!res.ok) {
-          toast.error(body.error ?? 'Could not revoke.')
+          toastError(body.error, { title: 'Could not revoke.', context: 'portal-reader-workspace' })
           return
         }
         toast.success('Reader link revoked.')

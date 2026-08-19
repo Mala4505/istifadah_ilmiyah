@@ -2,6 +2,7 @@
 
 import { useMemo, useState, useTransition } from 'react'
 import { toast } from 'sonner'
+import { toastError } from '@/components/ui/error-toast'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Button } from '@/components/ui/button'
@@ -77,7 +78,7 @@ function BudgetHeadRowItem({ budgetHead, heads }: { budgetHead: BudgetHeadRow; h
       if (result.ok) {
         toast.success('Budget head mapping updated.')
       } else {
-        toast.error(result.error)
+        toastError(result.error, { context: 'budget-head-table' })
       }
     })
   }

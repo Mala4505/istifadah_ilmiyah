@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from 'react'
 import { toast } from 'sonner'
+import { toastError } from '@/components/ui/error-toast'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -53,7 +54,7 @@ export function CreateUserDialog({ departments }: { departments: { id: number; n
         resetForm()
         setOpen(false)
       } else {
-        toast.error(result.error)
+        toastError(result.error, { context: 'create-user-dialog' })
       }
     })
   }

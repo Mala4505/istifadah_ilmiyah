@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { toast } from 'sonner'
+import { toastError } from '@/components/ui/error-toast'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
@@ -54,7 +55,7 @@ export function BulkStatusDialog({
     try {
       const result = await setHubStatus({ entryIds, hubStatusCode: code, note })
       if (!result.success) {
-        toast.error(result.error)
+        toastError(result.error, { context: 'bulk-status-dialog' })
         return
       }
       if (result.updatedCount < result.requestedCount) {
@@ -69,7 +70,7 @@ export function BulkStatusDialog({
       onOpenChange(false)
       onDone()
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Could not update Hub status.')
+      toastError(err instanceof Error ? err.message : null, { title: 'Could not update Hub status.', context: 'bulk-status-dialog' })
     } finally {
       setPending(false)
     }

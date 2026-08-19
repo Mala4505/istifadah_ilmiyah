@@ -2,6 +2,7 @@
 
 import { useCallback, useRef, useState } from 'react'
 import { toast } from 'sonner'
+import { toastError } from '@/components/ui/error-toast'
 import { UploadCloud } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -89,7 +90,7 @@ export function ImportWorkspace({
       }
       setPreview(body)
       if (body.status === 'failed') {
-        toast.error(`Dry run failed: ${body.errorMessage ?? 'unknown error'}`)
+        toastError(body.errorMessage, { title: 'Dry run failed', context: 'import-workspace' })
       } else {
         toast.success(`Dry run complete — ${body.rowCount} rows parsed.`)
       }
@@ -112,7 +113,7 @@ export function ImportWorkspace({
       }
       setCommitted(body)
       if (body.status === 'failed') {
-        toast.error(`Import failed: ${body.errorMessage ?? 'unknown error'}`)
+        toastError(body.errorMessage, { title: 'Import failed', context: 'import-workspace' })
       } else {
         toast.success('Import committed.')
       }

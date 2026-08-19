@@ -1,3 +1,4 @@
+import { friendlyDataError } from '@/lib/friendly-error'
 import Link from 'next/link'
 import { CheckCircle2, GitCompareArrows } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
@@ -107,9 +108,9 @@ async function loadReconciliationData() {
     exceptionRows,
     computedAllocationMismatches,
     errors: {
-      variance: varianceRes.error?.message ?? null,
-      exceptions: exceptionRes.error?.message ?? null,
-      budgetVsActual: budgetVsActualRes.error?.message ?? null,
+      variance: friendlyDataError(varianceRes.error, 'reconciliation:varianceRes'),
+      exceptions: friendlyDataError(exceptionRes.error, 'reconciliation:exceptionRes'),
+      budgetVsActual: friendlyDataError(budgetVsActualRes.error, 'reconciliation:budgetVsActualRes'),
     },
   }
 }

@@ -2,6 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
+import { logRawError } from '@/lib/friendly-error'
 
 export interface SaveEntryEnrichmentInput {
   entryId: number
@@ -52,7 +53,7 @@ export async function saveEntryEnrichment(
     .select('id')
 
   if (error) {
-    return { success: false, error: error.message }
+    return { success: false, error: logRawError('entry-enrichment.saveEntryEnrichment', error.message) }
   }
 
   if (!data || data.length === 0) {
@@ -136,7 +137,7 @@ export async function bulkSaveEntryEnrichment(
   const { data, error } = await supabase.from('entries').update(patch).in('id', cleanIds).select('id')
 
   if (error) {
-    return { success: false, updatedCount: 0, requestedCount, error: error.message }
+    return { success: false, updatedCount: 0, requestedCount, error: logRawError('entry-enrichment.bulkSaveEntryEnrichment', error.message) }
   }
 
   const updatedCount = data?.length ?? 0
@@ -199,7 +200,7 @@ export async function setSettlesEntry(
     .select('id')
 
   if (error) {
-    return { success: false, error: error.message }
+    return { success: false, error: logRawError('entry-enrichment.setSettlesEntry', error.message) }
   }
   if (!data || data.length === 0) {
     return {
