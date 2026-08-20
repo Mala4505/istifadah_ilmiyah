@@ -81,6 +81,26 @@ const serverSchema = z.object({
     .optional()
     .default('false')
     .transform((v) => v === 'true'),
+  // Whether app/api/documents/ingest/route.ts runs extraction itself, inside
+  // the upload request, before responding.
+  //
+  // Default ON, because with no worker and no cron that inline drain is the
+  // ONLY thing that ever moves a job -- turning it off in that situation means
+  // nothing extracts, ever.
+  //
+  // Turn it OFF the moment a real worker is running (worker/index.ts, or a
+  // cron hitting /api/jobs/tick). Leaving it on then is actively harmful: the
+  // upload route claims its own job the instant it enqueues it, so it beats
+  // the worker's 2-second poll essentially every time, and the extraction runs
+  // right back inside the request budget the worker exists to escape. The
+  // upload then returns in seconds instead of sitting on a 60s platform
+  // timeout, and the worker -- which has no timeout at all -- picks the job up
+  // on its next poll.
+  INGEST_INLINE_EXTRACTION: z
+    .string()
+    .optional()
+    .default('true')
+    .transform((v) => v !== 'false'),
 })
 
 function readServerEnv() {
@@ -101,6 +121,7 @@ function readServerEnv() {
     COMMUNITY_GSTIN: process.env.COMMUNITY_GSTIN,
     OCR_AUTO_ESCALATION: process.env.OCR_AUTO_ESCALATION,
     OCR_USE_BATCH_API: process.env.OCR_USE_BATCH_API,
+    INGEST_INLINE_EXTRACTION: process.env.INGEST_INLINE_EXTRACTION,
   })
   if (!parsed.success) {
     throw new Error(

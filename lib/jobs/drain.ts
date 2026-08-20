@@ -18,7 +18,7 @@
 
 import 'server-only'
 import * as Sentry from '@sentry/nextjs'
-import { claimNextJob, failJob, sweepJobQueue, type JobQueueRow } from '@/lib/jobs/queue'
+import { claimJobById, claimNextJob, failJob, sweepJobQueue, type JobQueueRow } from '@/lib/jobs/queue'
 
 type JobHandler = (job: JobQueueRow) => Promise<void>
 
@@ -50,6 +50,51 @@ async function dispatch(job: JobQueueRow): Promise<'handled' | 'skipped'> {
       // running for sweepJobQueue() to reclaim once stale, same reasoning as
       // worker/index.ts's dispatch().
       return 'skipped'
+  }
+}
+
+/**
+ * Runs ONE known job to completion, ahead of any backlog — the post-upload
+ * path in app/api/documents/ingest/route.ts.
+ *
+ * Shares `dispatch` (and therefore the handler wiring) with `drainJobQueue`
+ * below; the only difference is which row gets claimed. See `claimJobById`
+ * (lib/jobs/queue.ts) for why the upload path must not go through
+ * `claim_next_job`'s oldest-first ordering.
+ *
+ * Returns what happened, for logging. Never throws: a handler that blows up
+ * records its own failure against the job row (the JobHandler contract in
+ * worker/index.ts), and this adds the same `failJob` backstop `drainJobQueue`
+ * uses, so one bad document can't turn a successful upload into a 500.
+ */
+export async function runJobById(
+  workerId: string,
+  jobId: number
+): Promise<'handled' | 'skipped' | 'unavailable' | 'failed'> {
+  let job: JobQueueRow | null
+  try {
+    job = await claimJobById(jobId, workerId)
+  } catch (err) {
+    Sentry.captureException(err, { tags: { job_type: 'drain', phase: 'claim_by_id' } })
+    return 'failed'
+  }
+  // Already claimed by a concurrent drain or the cron tick — not an error, and
+  // specifically not something to retry here: whoever holds it is running it.
+  if (!job) return 'unavailable'
+
+  try {
+    return await dispatch(job)
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    Sentry.captureException(err, {
+      tags: { job_type: job.job_type, job_id: String(job.id) },
+    })
+    try {
+      await failJob(job.id, message.slice(0, 2000))
+    } catch {
+      // Already reported above; nothing further to do.
+    }
+    return 'failed'
   }
 }
 

@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import {
   buildTaxBreakdown,
+  dropEmptyBills,
   extractionResponseSchema,
   extractionToolInputSchema,
   INSTRUMENT_TYPES,
+  remapExtractionToActualPage,
   sanitizeExtractionResponse,
   type ExtractionBill,
   type ExtractionResponse,
@@ -171,8 +173,13 @@ describe('extractionResponseSchema — new fields round-trip', () => {
     expect(parsed.bills[1]!.page_number_start).toBe(3)
   })
 
-  it('rejects an empty bills array', () => {
-    expect(() => extractionResponseSchema.parse(baseInput({ bills: [] }))).toThrow()
+  it('accepts an empty bills array — a page classified as non-financial has none', () => {
+    // Was "rejects" under the old whole-document design (bills: z.array(...).min(1)).
+    // Per-page extraction (lib/jobs/handlers/extract.ts) sends one page per call, and
+    // a page that's a cheque photo or a permission letter has zero bills by definition
+    // — see extractionResponseSchema's doc comment.
+    const parsed = extractionResponseSchema.parse(baseInput({ bills: [] }))
+    expect(parsed.bills).toEqual([])
   })
 })
 
@@ -426,5 +433,115 @@ describe('extractionToolInputSchema — union-type parameter budget', () => {
     // plain integers, none of which were ever union-typed.
     const count = countUnionTypedProperties(extractionToolInputSchema)
     expect(count).toBe(13)
+  })
+})
+
+describe('dropEmptyBills — per-page extraction phantom-bill backstop', () => {
+  function parsed(billOverrides: Record<string, unknown> = {}): ExtractionResponse {
+    return extractionResponseSchema.parse(baseInput({}, billOverrides))
+  }
+
+  it('keeps a bill with a real total_amount', () => {
+    const result = dropEmptyBills(parsed({ total_amount: 3540 }))
+    expect(result.bills).toHaveLength(1)
+  })
+
+  it('keeps a bill with no total_amount but a line item carrying an amount', () => {
+    const result = dropEmptyBills(
+      parsed({
+        total_amount: null,
+        line_items: [
+          {
+            page_number: 1,
+            line_order: 0,
+            description: 'Item',
+            hsn_sac_code: '',
+            quantity: null,
+            quantity_raw_text: '',
+            unit: '',
+            list_rate: null,
+            discount_pct: null,
+            discount_note: '',
+            net_rate: null,
+            line_amount: 500,
+          },
+        ],
+      })
+    )
+    expect(result.bills).toHaveLength(1)
+  })
+
+  it('drops a bill with a vendor name and invoice number but no amount anywhere', () => {
+    // The exact shape a misclassified non-financial page (a government ID
+    // card, a bank cheque) produced on the first real test of per-page
+    // extraction: a plausible-looking name lifted from printed text, no real
+    // charge behind it.
+    const result = dropEmptyBills(
+      parsed({
+        vendor_name: 'Income Tax Department',
+        invoice_number: 'IHBPS6933J',
+        total_amount: null,
+        line_items: [],
+      })
+    )
+    expect(result.bills).toHaveLength(0)
+  })
+
+  it('drops a bill with every field null and no line items', () => {
+    const result = dropEmptyBills(
+      parsed({
+        vendor_name: '',
+        invoice_number: '',
+        total_amount: null,
+        line_items: [],
+      })
+    )
+    expect(result.bills).toHaveLength(0)
+  })
+})
+
+describe('remapExtractionToActualPage — per-page extraction page-number correction', () => {
+  it('rewrites the page classification, bill page range, and line item page numbers all to the real page number', () => {
+    const extraction = extractionResponseSchema.parse(
+      baseInput(
+        {},
+        {
+          line_items: [
+            {
+              page_number: 1,
+              line_order: 0,
+              description: 'Item',
+              hsn_sac_code: '',
+              quantity: null,
+              quantity_raw_text: '',
+              unit: '',
+              list_rate: null,
+              discount_pct: null,
+              discount_note: '',
+              net_rate: null,
+              line_amount: 500,
+            },
+          ],
+        }
+      )
+    )
+    // Sanity check on the fixture itself: a split single-page PDF always
+    // reports page 1, regardless of which page of the original document it
+    // actually was.
+    expect(extraction.pages[0]!.page_number).toBe(1)
+
+    const remapped = remapExtractionToActualPage(extraction, 6)
+
+    expect(remapped.pages[0]!.page_number).toBe(6)
+    expect(remapped.bills[0]!.page_number_start).toBe(6)
+    expect(remapped.bills[0]!.page_number_end).toBe(6)
+    expect(remapped.bills[0]!.line_items[0]!.page_number).toBe(6)
+  })
+
+  it('does not mutate the input', () => {
+    const extraction = extractionResponseSchema.parse(baseInput())
+    remapExtractionToActualPage(extraction, 4)
+    expect(extraction.pages[0]!.page_number).toBe(1)
+    expect(extraction.bills[0]!.page_number_start).toBe(1)
   })
 })

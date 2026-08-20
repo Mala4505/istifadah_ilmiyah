@@ -131,6 +131,62 @@ export async function failJob(id: number, error: string): Promise<void> {
 }
 
 /**
+ * Claims ONE specific job by id, rather than whatever `claim_next_job` decides
+ * is next.
+ *
+ * `claim_next_job` orders by `priority, id` — oldest first — which is the right
+ * policy for a background worker draining a backlog, but the wrong one for the
+ * post-upload drain in app/api/documents/ingest/route.ts: there, the user is
+ * waiting on the response, and "oldest first" means their upload pays for every
+ * stale job ahead of it before its own document is ever touched. On a 60s
+ * function budget that reliably meant the request died before reaching the
+ * document it was actually uploaded for.
+ *
+ * Safe against double-claiming without `for update skip locked`: the `status`
+ * filter makes this a compare-and-swap. Two concurrent callers issue the same
+ * `update ... where id = ? and status = 'queued'`; Postgres serialises them on
+ * the row lock, and the loser re-evaluates its WHERE against the winner's
+ * committed `'running'`, matches nothing, and gets `null` back. `run_after` is
+ * deliberately NOT checked — the caller just enqueued this row and wants it run
+ * now, and a backoff set by the sweeper is irrelevant to a job nobody has
+ * attempted yet.
+ *
+ * Returns `null` when the row was already claimed by someone else, is no longer
+ * `'queued'`, or does not exist — all normal, none of them errors.
+ */
+export async function claimJobById(id: number, workerId: string): Promise<JobQueueRow | null> {
+  const client = getClient()
+  const { data, error } = await client
+    .from('job_queue')
+    .update({
+      status: 'running',
+      locked_by: workerId,
+      locked_at: new Date().toISOString(),
+    })
+    .eq('id', id)
+    .eq('status', 'queued')
+    .select()
+    .maybeSingle()
+
+  if (error) {
+    throw new Error(`claimJobById(${id}, ${workerId}) failed: ${error.message}`)
+  }
+
+  // `attempts` is incremented inside claim_next_job's SQL; this path has to do
+  // it itself, and does so as a separate statement rather than trying to
+  // express `attempts = attempts + 1` through PostgREST (which cannot reference
+  // a column on the right-hand side of an update). A crash between the two
+  // leaves the row 'running' with attempts unincremented — the sweeper reclaims
+  // it either way, it just gets one extra try, which is the safe direction to
+  // fail in.
+  if (!isJobQueueRow(data)) return null
+  const claimed = data as JobQueueRow
+  const attempts = claimed.attempts + 1
+  await client.from('job_queue').update({ attempts }).eq('id', id)
+  return { ...claimed, attempts }
+}
+
+/**
  * Releases a claimed job back to `'queued'` for a later `run_after`, without
  * treating this claim cycle as a failure (plan.md Phase 3 I16). Used by
  * `handlePollBatch` (lib/jobs/handlers/batch-poll.ts) when a Message Batch is

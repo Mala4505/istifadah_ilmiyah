@@ -6,8 +6,10 @@
  * and, per the JobHandler contract documented in worker/index.ts, this module
  * owns its own completion bookkeeping.
  *
- * What it does, in §8 order:
- *   3. one Claude call per document, Haiku first, all pages in that one call
+ * What it does, in §8 order (updated from the original one-call-per-document
+ * design — see `extractAndPersist`'s doc comment for why extraction now runs
+ * one Claude call per PAGE instead):
+ *   3. one Claude call per page, Haiku first, pages dispatched concurrently
  *      (classification-before-extraction is enforced in code by
  *      `filterNonFinancialLineItems`, not by asking the model nicely)
  *      → escalates to Sonnet on low confidence or non-Latin script
@@ -22,7 +24,7 @@ import { POLL_BACKOFF_BASE_MS } from '@/lib/jobs/poll-backoff'
 import { buildExtractionBatchCustomId } from '@/lib/jobs/batch-custom-id'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { getSignedUrl } from '@/lib/storage'
-import { toBase64 } from '@/lib/pdf'
+import { getPdfPageCount, splitPdfPage, toBase64 } from '@/lib/pdf'
 import { tallyWithinTolerance } from '@/lib/normalize'
 import {
   escalationReason,
@@ -31,10 +33,10 @@ import {
   type ExtractionAttempt,
   type ExtractionPipelineResult,
 } from '@/lib/extraction'
-import { buildTaxBreakdown, sanitizeExtractionResponse } from '@/lib/extraction-schema'
+import { buildTaxBreakdown, remapExtractionToActualPage, sanitizeExtractionResponse } from '@/lib/extraction-schema'
 import { EXTRACTION_MAX_TOKENS, MODELS, submitExtractionBatch, type ModelId } from '@/lib/claude-client'
 import { serverEnv } from '@/lib/env.server'
-import { isSameGstin } from '@/lib/analytics/gstin'
+import { isSameGstin, validateGstin } from '@/lib/analytics/gstin'
 
 export interface ExtractDocumentPayload {
   source_document_id: number
@@ -178,6 +180,32 @@ export interface PersistExtractionPipelineResultParams {
   doc: SourceDocumentForExtraction
   pipeline: ExtractionPipelineResult
   triggeredBy: string | null
+  /**
+   * `document_extraction.bill_index` numbering starts here rather than at 0.
+   * Needed because per-page extraction (extractAndPersist below) calls this
+   * function once per page, sequentially, for the same document — without an
+   * offset, every page's own bills[0] would collide on bill_index 0 and each
+   * page would silently overwrite the previous one's document_extraction row
+   * (the upsert's `onConflict: 'source_document_id,bill_index'` is exactly
+   * what makes that collision destructive rather than a duplicate-row error).
+   * Defaults to 0, which reproduces the original single-call-per-document
+   * behavior exactly — batch-poll.ts's one call per document never needs to
+   * pass this.
+   */
+  billIndexOffset?: number
+  /**
+   * Whether this call should also run the whole-document completion step —
+   * marking `source_document.upload_status = 'processed'`, writing its final
+   * `page_count`, and raising `page_count_mismatch` if the model classified
+   * fewer pages than ingest found. Defaults to true, matching every existing
+   * caller (batch-poll.ts, and the old single-call shape). Per-page extraction
+   * passes false on every page and calls `finalizeSourceDocumentExtraction`
+   * itself exactly once after the whole loop — calling it per page would let
+   * the LAST page processed silently overwrite page_count with "1" instead of
+   * the real total, and would fire a false page_count_mismatch exception on
+   * every page but the last.
+   */
+  finalizeDocument?: boolean
 }
 
 /**
@@ -204,6 +232,8 @@ export async function persistExtractionPipelineResult(
   params: PersistExtractionPipelineResultParams
 ): Promise<ExtractAndPersistResult> {
   const { sourceDocumentId, doc, pipeline, triggeredBy } = params
+  const billIndexOffset = params.billIndexOffset ?? 0
+  const finalizeDocument = params.finalizeDocument ?? true
 
   // ---- ocr_extraction_run: one row per attempt, prior runs never deleted (§8 point 7)
   const runIds: number[] = []
@@ -268,14 +298,29 @@ export async function persistExtractionPipelineResult(
     const isOwnOrgGstin =
       serverEnv.COMMUNITY_GSTIN !== '' && isSameGstin(bill.vendor_gstin, serverEnv.COMMUNITY_GSTIN)
 
+    // Checksum guard: a GSTIN's own last character is a check digit computed
+    // over the other fourteen (validateGstin, lib/analytics/gstin.ts — already
+    // written and unit-tested, previously wired only into the compliance
+    // analytics pass, never into what gets written here). Unlike the own-org
+    // exclusion above, this isn't a judgment call about which party a GSTIN
+    // belongs to — a failed checksum means the GSTIN is definitionally wrong,
+    // mis-typed on the document or mis-read by OCR, so there is no scenario
+    // where writing it as-is is the right move. Skipped when it's already
+    // null (nothing extracted — not this guard's concern) or already caught
+    // by the own-org check above (one wrong-value reason per bill, not two
+    // exceptions saying similar things).
+    const gstinChecksum =
+      !isOwnOrgGstin && bill.vendor_gstin !== null ? validateGstin(bill.vendor_gstin) : null
+    const isInvalidGstinChecksum = gstinChecksum !== null && !gstinChecksum.valid
+
     const upsertPayload: Record<string, unknown> = {
       source_document_id: sourceDocumentId,
-      bill_index: billIndex,
+      bill_index: billIndexOffset + billIndex,
       current_extraction_run_id: currentRunId,
       page_number_start: bill.page_number_start,
       page_number_end: bill.page_number_end,
       vendor_name_ocr: bill.vendor_name,
-      vendor_gstin_ocr: isOwnOrgGstin ? null : bill.vendor_gstin,
+      vendor_gstin_ocr: isOwnOrgGstin || isInvalidGstinChecksum ? null : bill.vendor_gstin,
       vendor_phone_ocr: bill.vendor_phone,
       vendor_email_ocr: bill.vendor_email,
       vendor_address_ocr: bill.vendor_address,
@@ -332,6 +377,23 @@ export async function persistExtractionPipelineResult(
             'certainly the recipient\'s GSTIN on the page, not the seller\'s. vendor_gstin_ocr was left ' +
             'blank rather than written with the wrong value; enter the real vendor GSTIN on review if legible.',
           dedup_key: `vendor_gstin_is_own_org:${documentExtractionId}:${currentRunId}:${billIndex}`,
+        },
+        { onConflict: 'dedup_key' }
+      )
+    }
+
+    if (isInvalidGstinChecksum) {
+      await admin.from('reconciliation_exception').upsert(
+        {
+          document_extraction_id: documentExtractionId,
+          exception_type: 'vendor_gstin_invalid_checksum',
+          severity: 'low',
+          description:
+            `Extracted vendor_gstin "${gstinChecksum!.gstin}" fails its own checksum ` +
+            `(${gstinChecksum!.message}) — mis-typed on the document or mis-read by OCR, never a valid ` +
+            'GSTIN. vendor_gstin_ocr was left blank rather than written with a value known to be wrong; ' +
+            'enter the correct GSTIN on review if legible.',
+          dedup_key: `vendor_gstin_invalid_checksum:${documentExtractionId}:${currentRunId}:${billIndex}`,
         },
         { onConflict: 'dedup_key' }
       )
@@ -431,34 +493,13 @@ export async function persistExtractionPipelineResult(
     allExceptionsRaised.push(...billExceptions)
   }
 
-  await admin
-    .from('source_document')
-    .update({
-      upload_status: 'processed',
-      page_count: doc.pageCount ?? extraction.pages.length,
+  if (finalizeDocument) {
+    await finalizeSourceDocumentExtraction(admin, {
+      sourceDocumentId,
+      doc,
+      classifiedPageCount: extraction.pages.length,
+      currentRunId,
     })
-    .eq('id', sourceDocumentId)
-
-  // I14: the ingest-time page count (ground truth once known — it comes from
-  // a server-side PDF parse, not the model) silently wins over
-  // extraction.pages.length above. When they disagree, pages the model
-  // omitted from pages[] keep a null classification with no warning — flag
-  // it so a human notices instead of assuming every page was classified.
-  const ingestPageCount = doc.pageCount
-  if (ingestPageCount !== null && ingestPageCount !== extraction.pages.length) {
-    await admin.from('reconciliation_exception').upsert(
-      {
-        exception_type: 'page_count_mismatch',
-        severity: 'low',
-        description:
-          `source_document ${sourceDocumentId} has ${ingestPageCount} page(s) at ingest, but ` +
-          `extraction run ${currentRunId} classified only ${extraction.pages.length} in pages[]. ` +
-          'The unclassified page(s) have no is_financial_document verdict and were not considered ' +
-          'for line items — confirm nothing was skipped.',
-        dedup_key: `page_count_mismatch:${sourceDocumentId}:${currentRunId}`,
-      },
-      { onConflict: 'dedup_key' }
-    )
   }
 
   return {
@@ -479,10 +520,367 @@ export async function persistExtractionPipelineResult(
   }
 }
 
+export interface FinalizeSourceDocumentExtractionParams {
+  sourceDocumentId: number
+  doc: SourceDocumentForExtraction
+  /**
+   * How many pages actually got a classification verdict. For the old
+   * single-call shape this is `extraction.pages.length` from that one
+   * response; for per-page extraction (extractAndPersist below) it's the
+   * count of pages that were successfully classified across the whole loop —
+   * a page whose own Claude call failed contributes 0 here, which is exactly
+   * what should make it show up as a mismatch below.
+   */
+  classifiedPageCount: number
+  /** Attributed to whichever run is "current" when this is called — the last one, for both callers. */
+  currentRunId: number
+}
+
 /**
- * Runs the pipeline for one `source_document` and writes every row it implies.
- * Exported separately from the job handler so the manual re-escalation route
- * (§8 point 7) reuses exactly this path instead of a parallel copy of it.
+ * The whole-document completion step, pulled out of
+ * `persistExtractionPipelineResult` so it can be called exactly once per
+ * document regardless of how many Claude calls that document took —
+ * `persistExtractionPipelineResult` itself now runs once per PAGE under
+ * per-page extraction (see `PersistExtractionPipelineResultParams.finalizeDocument`'s
+ * doc comment for why calling this once per page instead of once per document
+ * would corrupt `page_count` and spam false `page_count_mismatch` rows).
+ */
+export async function finalizeSourceDocumentExtraction(
+  admin: AdminClient,
+  params: FinalizeSourceDocumentExtractionParams
+): Promise<void> {
+  const { sourceDocumentId, doc, classifiedPageCount, currentRunId } = params
+
+  await admin
+    .from('source_document')
+    .update({
+      upload_status: 'processed',
+      page_count: doc.pageCount ?? classifiedPageCount,
+    })
+    .eq('id', sourceDocumentId)
+
+  // I14: the ingest-time page count (ground truth once known — it comes from
+  // a server-side PDF parse, not the model) silently wins over
+  // classifiedPageCount above. When they disagree, pages that were never
+  // classified (never in pages[], or a page whose own call failed under
+  // per-page extraction) keep a null classification with no warning — flag
+  // it so a human notices instead of assuming every page was handled.
+  const ingestPageCount = doc.pageCount
+  if (ingestPageCount !== null && ingestPageCount !== classifiedPageCount) {
+    await admin.from('reconciliation_exception').upsert(
+      {
+        exception_type: 'page_count_mismatch',
+        severity: 'low',
+        description:
+          `source_document ${sourceDocumentId} has ${ingestPageCount} page(s) at ingest, but only ` +
+          `${classifiedPageCount} were classified by extraction run ${currentRunId}. The unclassified ` +
+          'page(s) have no is_financial_document verdict and were not considered for line items — ' +
+          'confirm nothing was skipped.',
+        dedup_key: `page_count_mismatch:${sourceDocumentId}:${currentRunId}`,
+      },
+      { onConflict: 'dedup_key' }
+    )
+  }
+}
+
+/**
+ * How many pages' Claude calls run at once for one document.
+ *
+ * The two phases of per-page extraction are deliberately split: EXTRACTION
+ * (the Claude calls) runs concurrently, capped at this number; PERSISTENCE
+ * (the database writes) runs strictly afterward, sequentially, in page order
+ * — see `persistPagesInOrder` below for why that second phase cannot be
+ * concurrent (bill_index numbering has to stay deterministic).
+ *
+ * The cap exists for two reasons, not one: it bounds how many requests this
+ * process sends to Anthropic at once (a burst of concurrent calls risks a 429
+ * from Anthropic's own rate limits, which costs more time to recover from
+ * than sequencing would have saved), and it bounds wall-clock time on a route
+ * with a hard `maxDuration` — a 20-page document at 4 pages/batch is 5
+ * sequential batches of ~10-15s each (roughly a minute) rather than 20 pages
+ * fully sequential (several minutes, guaranteed to exceed every route's
+ * timeout). Tune this against Anthropic's actual per-minute rate limit for
+ * the account in use if extraction starts hitting 429s in practice.
+ */
+const PAGE_EXTRACTION_CONCURRENCY = 4
+
+/** One page's outcome from the concurrent extraction phase. */
+type PageExtractionOutcome =
+  | { pageNumber: number; status: 'ok'; pipeline: ExtractionPipelineResult }
+  | { pageNumber: number; status: 'error'; error: unknown }
+
+/**
+ * Splits `pdfBytes` into `totalPages` single-page PDFs and runs the extraction
+ * pipeline (`runExtractionPipeline`, lib/extraction.ts — unchanged; it has
+ * always been page-count-agnostic, since a "document" was always just
+ * whatever bytes it was handed) on each one, `PAGE_EXTRACTION_CONCURRENCY` at
+ * a time. One page's failure — a split error, a timeout, an API error — is
+ * caught right here and reported as that page's own outcome rather than
+ * thrown, so it can never abort the pages around it; the caller
+ * (`persistPagesInOrder`) is what turns a failed outcome into a
+ * `page_extraction_failed` exception instead of silently losing the page.
+ *
+ * Returns outcomes in page order regardless of which page's call happened to
+ * finish first — persistence needs that order for deterministic bill_index
+ * numbering, so it's guaranteed here rather than left for the caller to sort.
+ */
+async function extractAllPagesConcurrently(
+  pdfBytes: Uint8Array,
+  totalPages: number,
+  pipelineOptions: { model?: ModelId; runReason: 'initial' | 'manual_reescalation'; allowEscalation: boolean }
+): Promise<PageExtractionOutcome[]> {
+  const pageNumbers = Array.from({ length: totalPages }, (_, i) => i + 1)
+  const outcomes: PageExtractionOutcome[] = []
+
+  for (let i = 0; i < pageNumbers.length; i += PAGE_EXTRACTION_CONCURRENCY) {
+    const batch = pageNumbers.slice(i, i + PAGE_EXTRACTION_CONCURRENCY)
+    const batchOutcomes = await Promise.all(
+      batch.map(async (pageNumber): Promise<PageExtractionOutcome> => {
+        try {
+          const pageBytes = await splitPdfPage(pdfBytes, pageNumber)
+          const raw = await runExtractionPipeline(pageBytes, pipelineOptions)
+          // The model saw a standalone one-page PDF and reports page_number
+          // as 1 accordingly, on every attempt — remapExtractionToActualPage's
+          // doc comment (lib/extraction-schema.ts) has the full story. Every
+          // attempt is remapped, not just the final one, so nothing downstream
+          // that ever inspects an individual attempt's own extraction sees the
+          // wrong page number either.
+          const attempts = raw.attempts.map((attempt) => ({
+            ...attempt,
+            extraction: remapExtractionToActualPage(attempt.extraction, pageNumber),
+          }))
+          const pipeline: ExtractionPipelineResult = {
+            attempts,
+            final: attempts[attempts.length - 1]!,
+            escalated: raw.escalated,
+            totalCostUsd: raw.totalCostUsd,
+          }
+          return { pageNumber, status: 'ok', pipeline }
+        } catch (error) {
+          return { pageNumber, status: 'error', error }
+        }
+      })
+    )
+    outcomes.push(...batchOutcomes)
+  }
+
+  return outcomes
+}
+
+/**
+ * Records one page's failed extraction attempt without touching
+ * `source_document.upload_status` — the whole-document `recordExtractionFailure`
+ * above would mark the ENTIRE document failed, which is wrong here: the other
+ * pages in this same loop may well have succeeded. This is the per-page
+ * equivalent, scoped to a single page: an `ocr_extraction_run` row so the
+ * failed attempt isn't silently absent from the audit trail (§8 point 7,
+ * "prior runs never deleted" — a failed attempt is still an attempt), and a
+ * `page_extraction_failed` reconciliation_exception a reviewer will actually
+ * see, naming the page and the reason. No automatic retry is built for this —
+ * re-running extraction on the whole document (the existing "Re-extract with
+ * Sonnet" button, or simply re-uploading) will attempt the failed page again
+ * along with every other page, since bill_index restarts at 0 each run.
+ */
+async function recordPageExtractionFailure(
+  admin: AdminClient,
+  sourceDocumentId: number,
+  pageNumber: number,
+  model: ModelId,
+  runReason: ExtractAndPersistOptions['runReason'],
+  triggeredBy: string | null,
+  err: unknown
+): Promise<void> {
+  const message = err instanceof Error ? err.message : String(err)
+  // Both writes check `.error` explicitly and throw rather than continue
+  // silently — Supabase's client returns failures as data (`{ error }`), it
+  // does not throw, so skipping this check is how a failure here goes
+  // completely unnoticed (this is written the way it is because that
+  // happened once already while building this: the `page_extraction_failed`
+  // insert was silently rejected by a check constraint that hadn't been
+  // migrated yet, and nothing surfaced it until the database was queried by
+  // hand). This function exists specifically to make a failure visible; it
+  // must not itself have a way to fail invisibly.
+  const { error: runError } = await admin.from('ocr_extraction_run').insert({
+    source_document_id: sourceDocumentId,
+    model,
+    run_reason: runReason,
+    triggered_by: triggeredBy,
+    status: 'failed',
+    error_message: message.slice(0, 2000),
+    started_at: new Date().toISOString(),
+    completed_at: new Date().toISOString(),
+  })
+  if (runError) {
+    throw new Error(`recordPageExtractionFailure: ocr_extraction_run insert failed: ${runError.message}`)
+  }
+
+  const { error: exceptionError } = await admin.from('reconciliation_exception').upsert(
+    {
+      exception_type: 'page_extraction_failed',
+      severity: 'medium',
+      description:
+        `Page ${pageNumber} of source_document ${sourceDocumentId} failed to extract: ` +
+        `${message.slice(0, 500)}. The rest of the document was processed independently and is not ` +
+        'affected. Re-running extraction on this document will retry every page, including this one.',
+      dedup_key: `page_extraction_failed:${sourceDocumentId}:${pageNumber}`,
+    },
+    { onConflict: 'dedup_key' }
+  )
+  if (exceptionError) {
+    throw new Error(
+      `recordPageExtractionFailure: reconciliation_exception upsert failed: ${exceptionError.message}`
+    )
+  }
+}
+
+/**
+ * Persists every successful page's outcome, strictly in page order — the
+ * second, sequential phase of per-page extraction (see
+ * `PAGE_EXTRACTION_CONCURRENCY`'s doc comment for why the extraction phase
+ * itself runs concurrently but this one does not).
+ *
+ * Sequential is not a performance compromise here, it is a correctness
+ * requirement: `document_extraction.bill_index` has to be assigned without
+ * collisions across however many bills each page turned out to have, and
+ * `persistExtractionPipelineResult`'s upsert is keyed on
+ * `(source_document_id, bill_index)` — two pages persisted concurrently could
+ * both read the same "next" index and the second writer would silently
+ * overwrite the first's row instead of erroring. Database writes are fast
+ * relative to a Claude call, so doing this part sequentially after the
+ * concurrent extraction phase costs very little wall-clock time in exchange
+ * for that guarantee.
+ *
+ * A page classified as non-financial (`is_financial_document: false` — a
+ * cheque photo, a permission letter, blank paper) is not special-cased here
+ * at all: `persistExtractionPipelineResult` already writes that page's
+ * `document_page` classification row from its own `pages[]` entry regardless
+ * of whether any bills came with it, and an empty `bills[]` array simply
+ * means the loop inside it does zero `document_extraction` inserts. No bill
+ * is ever created for a skipped page, which is what keeps it out of the
+ * review queue and out of every other bill's data — see lib/pdf.ts's header
+ * comment and this function's caller (`extractAndPersist`) for the fuller
+ * explanation of why one call per page is what makes that guarantee possible
+ * in the first place.
+ */
+async function persistPagesInOrder(
+  admin: AdminClient,
+  params: {
+    sourceDocumentId: number
+    doc: SourceDocumentForExtraction
+    totalPages: number
+    outcomes: PageExtractionOutcome[]
+    model: ModelId
+    runReason: ExtractAndPersistOptions['runReason']
+    triggeredBy: string | null
+  }
+): Promise<ExtractAndPersistResult> {
+  const { sourceDocumentId, doc, totalPages, outcomes, model, runReason, triggeredBy } = params
+
+  let nextBillIndex = 0
+  let classifiedPageCount = 0
+  let lastRunId: number | null = null
+  const documentExtractionIds: number[] = []
+  const runIds: number[] = []
+  const exceptionsRaised: string[] = []
+  let billCount = 0
+  let lineItemCount = 0
+  let totalCostUsd = 0
+  let escalated = false
+  let escalatedBecause: string | null = null
+  let modelUsed: ModelId = model
+
+  for (const outcome of outcomes) {
+    if (outcome.status === 'error') {
+      await recordPageExtractionFailure(
+        admin,
+        sourceDocumentId,
+        outcome.pageNumber,
+        model,
+        runReason,
+        triggeredBy,
+        outcome.error
+      )
+      continue
+    }
+
+    const pageResult = await persistExtractionPipelineResult(admin, {
+      sourceDocumentId,
+      doc,
+      pipeline: outcome.pipeline,
+      triggeredBy,
+      billIndexOffset: nextBillIndex,
+      finalizeDocument: false,
+    })
+
+    nextBillIndex += pageResult.billCount
+    classifiedPageCount += 1
+    lastRunId = pageResult.currentRunId
+    documentExtractionIds.push(...pageResult.documentExtractionIds)
+    runIds.push(...pageResult.runIds)
+    exceptionsRaised.push(...pageResult.exceptionsRaised)
+    billCount += pageResult.billCount
+    lineItemCount += pageResult.lineItemCount
+    totalCostUsd += pageResult.totalCostUsd
+    if (pageResult.escalated) {
+      escalated = true
+      escalatedBecause ??= pageResult.escalatedBecause
+      modelUsed = pageResult.modelUsed
+    }
+  }
+
+  // Every single page failed — this is a whole-document failure, not a
+  // partial one. Thrown so extractAndPersist's own catch records it as such
+  // (recordExtractionFailure, marking upload_status 'failed') instead of
+  // silently "succeeding" with zero bills and upload_status 'processed'.
+  if (lastRunId === null) {
+    const firstFailure = outcomes.find(
+      (o): o is Extract<PageExtractionOutcome, { status: 'error' }> => o.status === 'error'
+    )
+    const reason = firstFailure ? String((firstFailure.error as Error)?.message ?? firstFailure.error) : 'unknown'
+    throw new Error(
+      `extractAndPersist: every page of source_document ${sourceDocumentId} failed (first failure: ${reason})`
+    )
+  }
+
+  await finalizeSourceDocumentExtraction(admin, {
+    sourceDocumentId,
+    doc,
+    classifiedPageCount,
+    currentRunId: lastRunId,
+  })
+
+  return {
+    sourceDocumentId,
+    documentExtractionIds,
+    billCount,
+    runIds,
+    currentRunId: lastRunId,
+    modelUsed,
+    escalated,
+    escalatedBecause,
+    totalCostUsd,
+    lineItemCount,
+    pageCount: totalPages,
+    exceptionsRaised,
+  }
+}
+
+/**
+ * Runs the pipeline for one `source_document` and writes every row it
+ * implies. Exported separately from the job handler so the manual
+ * re-escalation route (§8 point 7) reuses exactly this path instead of a
+ * parallel copy of it.
+ *
+ * One Claude call per PAGE, not one call per document — see lib/pdf.ts's
+ * `splitPdfPage` and this file's header comment. The original design sent
+ * every page of a document in a single request; splitting fixes three things
+ * that design ran into on real multi-page scans: a dense document truncating
+ * the tool call (and, worse, being re-sent whole a second time to retry it);
+ * one bad page losing the entire document instead of just that page; and the
+ * model occasionally reading a page's vendor/amount off a DIFFERENT page's
+ * summary table because it could see the whole document at once. Splitting
+ * means each page's own call can only read what's actually printed on that
+ * page.
  *
  * Always synchronous, regardless of `OCR_USE_BATCH_API` (lib/env.server.ts) —
  * that flag only changes what `handleExtractDocument` does for the
@@ -505,16 +903,29 @@ export async function extractAndPersist(
   try {
     const pdfBytes = await downloadDocumentPdf(doc.storagePath)
 
-    const pipeline = await runExtractionPipeline(pdfBytes, {
+    // Prefer the ingest-time page count (a real server-side PDF parse) but
+    // fall back to parsing these same bytes here when it's null. This is
+    // deliberately a second, independent attempt at the same parse ingest
+    // already tried — cheap insurance if that first attempt failed for an
+    // environment-specific reason (app/api/documents/ingest/route.ts logs
+    // that failure now instead of swallowing it, precisely so a pattern here
+    // becomes diagnosable rather than a silent permanent gap).
+    const totalPages = doc.pageCount ?? (await getPdfPageCount(pdfBytes))
+
+    const model = options.model ?? MODELS.haiku
+    const outcomes = await extractAllPagesConcurrently(pdfBytes, totalPages, {
       model: options.model,
       runReason,
-      allowEscalation: (options.model ?? MODELS.haiku) === MODELS.haiku,
+      allowEscalation: model === MODELS.haiku,
     })
 
-    return await persistExtractionPipelineResult(admin, {
+    return await persistPagesInOrder(admin, {
       sourceDocumentId,
       doc,
-      pipeline,
+      totalPages,
+      outcomes,
+      model,
+      runReason,
       triggeredBy: options.triggeredBy ?? null,
     })
   } catch (err) {

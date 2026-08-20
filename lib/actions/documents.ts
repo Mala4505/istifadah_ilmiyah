@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
-import { getSignedUrl } from '@/lib/storage'
+import { deleteDocument, getSignedUrl } from '@/lib/storage'
 import { extractAndPersist } from '@/lib/jobs/handlers/extract'
 import { logRawError } from '@/lib/friendly-error'
 
@@ -19,6 +19,10 @@ type ActionResult = { ok: true } | { ok: false; error: string }
 
 const PERMISSION_HINT =
   'This usually means a viewer role (reviewer/admin required), or the document is no longer visible to you.'
+
+/** Deletion is admin-only and refuses verified extractions, so its failures need their own hint. */
+const DELETE_PERMISSION_HINT =
+  'Deleting needs the admin role, and a document whose extraction has already been verified cannot be deleted — cancel it instead.'
 
 /**
  * Attaches one document to one entry: sets `entry_id` and flips
@@ -240,34 +244,54 @@ export async function detachDocumentFromEntry(
   return { ok: true }
 }
 
-export interface BulkCancelResult {
+export interface BulkDeleteResult {
   success: boolean
-  canceledCount: number
+  deletedCount: number
   requestedCount: number
   failedDocumentIds: number[]
   error?: string
 }
 
 /**
- * "Cancel tracking" (§ documents inbox): pulls one or more documents out of
- * the inbox at any stage — still uploading server-side, queued, mid-
- * extraction, or already failed/suggested — without deleting anything.
- * Same non-destructive shape as markNoEntryExpected: `entry_id` is left
- * alone and only `match_status` flips, this time to 'canceled'
- * (20260819000001_source_document_canceled_status.sql). The inbox's own
- * `.in('match_status', ['unmatched','suggested'])` filter then drops the
- * document for free — no extra query needed. Per-row like
- * bulkAttachDocuments, so one bad id (already matched, not visible, wrong
- * role) doesn't block the rest of the selection.
+ * The one removal action on the documents inbox: deletes the document,
+ * everything extracted from it, any queued extraction work, and the stored
+ * PDF itself.
+ *
+ * There used to be a separate non-destructive "cancel tracking" (flip
+ * match_status to 'canceled', keep every row) alongside this. Removed on
+ * direct instruction: a document that's hidden from the inbox but still sits
+ * in the database, still holds a queued `extract_document` job (job_queue has
+ * no foreign key to source_document, so nothing about flipping a status
+ * column ever touched it), and still gets extracted — and billed — the moment
+ * a worker reaches it, is not what "canceled" means to someone using this
+ * screen. If it's hidden, it should be gone. So there is one action now, and
+ * it does the real thing.
+ *
+ * Row deletion goes through the `delete_source_document` RPC
+ * (20260820000001) rather than `.delete()` from here, because delete is
+ * revoked on every table in `public` (20260808000026) and stays revoked — the
+ * RPC is the single gated entry point, and it enforces the admin check and the
+ * refusal to delete a verified extraction.
+ *
+ * Storage is cleaned up here rather than in SQL, since Postgres cannot reach
+ * the storage bucket. The RPC returns the `storage_path` it deleted precisely
+ * so this step has something to act on. Ordering is deliberate: the row goes
+ * first, and a failure to remove the file afterwards is logged but does not
+ * fail the action. An orphaned PDF in a private bucket is untidy; a
+ * source_document row pointing at a file that no longer exists is a broken
+ * review screen.
+ *
+ * Per-row like the other bulk actions, so one refusal (verified, or not
+ * visible to this user) doesn't block the rest of the selection.
  */
-export async function cancelDocumentTracking(documentIds: number[]): Promise<BulkCancelResult> {
+export async function deleteDocuments(documentIds: number[]): Promise<BulkDeleteResult> {
   const cleanIds = documentIds.filter((id) => Number.isInteger(id) && id > 0)
   const requestedCount = cleanIds.length
 
   if (requestedCount === 0) {
     return {
       success: false,
-      canceledCount: 0,
+      deletedCount: 0,
       requestedCount: 0,
       failedDocumentIds: [],
       error: 'No documents selected.',
@@ -276,43 +300,56 @@ export async function cancelDocumentTracking(documentIds: number[]): Promise<Bul
 
   const supabase = await createClient()
   const failedDocumentIds: number[] = []
-  let canceledCount = 0
+  const storagePaths: string[] = []
+  let deletedCount = 0
 
   for (const documentId of cleanIds) {
-    const { data, error } = await supabase
-      .from('source_document')
-      .update({ match_status: 'canceled' })
-      .eq('id', documentId)
-      .select('id')
+    const { data, error } = await supabase.rpc('delete_source_document', { p_id: documentId })
 
-    if (error || !data || data.length === 0) {
+    if (error) {
+      logRawError('documents.deleteDocuments', error.message)
       failedDocumentIds.push(documentId)
-    } else {
-      canceledCount++
+      continue
+    }
+    // null => no row matched (already gone). Counted as success so deleting
+    // the same selection twice is idempotent rather than a spurious failure.
+    if (typeof data === 'string' && data !== '') storagePaths.push(data)
+    deletedCount++
+  }
+
+  // Best-effort, and deliberately after the rows are gone — see the doc
+  // comment above on why a storage failure must not fail the action.
+  for (const path of storagePaths) {
+    try {
+      await deleteDocument(path)
+    } catch (err) {
+      logRawError('documents.deleteDocuments.storage', err instanceof Error ? err.message : String(err))
     }
   }
 
   revalidatePath('/documents')
+  revalidatePath('/review')
+  revalidatePath('/')
 
-  if (canceledCount === 0) {
+  if (deletedCount === 0) {
     return {
       success: false,
-      canceledCount,
+      deletedCount,
       requestedCount,
       failedDocumentIds,
-      error: `No documents were canceled. ${PERMISSION_HINT}`,
+      error: `No documents were deleted. ${DELETE_PERMISSION_HINT}`,
     }
   }
-  if (canceledCount < requestedCount) {
+  if (deletedCount < requestedCount) {
     return {
       success: true,
-      canceledCount,
+      deletedCount,
       requestedCount,
       failedDocumentIds,
-      error: `${requestedCount - canceledCount} of ${requestedCount} selected documents could not be canceled.`,
+      error: `${requestedCount - deletedCount} of ${requestedCount} selected documents could not be deleted. ${DELETE_PERMISSION_HINT}`,
     }
   }
-  return { success: true, canceledCount, requestedCount, failedDocumentIds: [] }
+  return { success: true, deletedCount, requestedCount, failedDocumentIds: [] }
 }
 
 export interface EntrySearchResult {

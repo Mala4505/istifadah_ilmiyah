@@ -1,0 +1,57 @@
+# Drives app/api/jobs/tick/route.ts on a schedule.
+#
+# Why this exists at all: nothing else does. There is no vercel.json, so
+# Vercel's own Cron was never configured, and until this workflow existed
+# NOTHING ever called /api/jobs/tick — a job that failed or got left
+# 'running' by a killed function (see EXTRACTION_CALL_TIMEOUT_MS's doc
+# comment, lib/claude-client.ts) had no way to ever be retried. This is the
+# free alternative to Vercel Cron: GitHub Actions' own scheduler, calling the
+# same route Vercel Cron would have, authenticated the same way Vercel Cron
+# authenticates (a bearer token matched against CRON_SECRET — see
+# app/api/jobs/tick/route.ts's authorize()).
+#
+# Setup (one-time):
+#   1. Vercel dashboard -> Settings -> Environment Variables -> add
+#      CRON_SECRET, any long random value (e.g. `openssl rand -hex 32`).
+#   2. GitHub repo -> Settings -> Secrets and variables -> Actions:
+#        - New repository secret CRON_SECRET, same value as step 1.
+#        - New repository variable SITE_URL, the deployed site's origin
+#          (e.g. https://your-project.vercel.app) — a *variable*, not a
+#          secret, since it isn't sensitive and variables are easier to read
+#          back if this ever needs debugging.
+#   3. Redeploy so Vercel picks up CRON_SECRET.
+#
+# `*/5 * * * *` — every 5 minutes. GitHub's own scheduler does not guarantee
+# exact timing (a queued workflow can start a few minutes late under load),
+# so this is "at least every ~5-10 minutes in practice," not a hard SLA —
+# fine for retrying a stuck job, not something to build a tighter guarantee
+# on top of.
+name: Job queue tick
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch: {} # manual "Run workflow" button, for testing this without waiting on the schedule
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call /api/jobs/tick
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          SITE_URL: ${{ vars.SITE_URL }}
+        run: |
+          if [ -z "$SITE_URL" ]; then
+            echo "::error::Repository variable SITE_URL is not set (Settings -> Secrets and variables -> Actions -> Variables). See this file's header comment."
+            exit 1
+          fi
+          if [ -z "$CRON_SECRET" ]; then
+            echo "::error::Repository secret CRON_SECRET is not set, or doesn't match the CRON_SECRET configured on Vercel. See this file's header comment."
+            exit 1
+          fi
+          curl --fail --silent --show-error \
+            --max-time 55 \
+            -X POST \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            "$SITE_URL/api/jobs/tick"

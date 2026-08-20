@@ -227,13 +227,27 @@ export const extractionBillSchema = z.object({
 export type ExtractionBill = z.infer<typeof extractionBillSchema>
 
 /**
- * The full extraction response for one document (all pages, one call —
- * §8 point 3). `pages[]`, `legibility`, `extraction_confidence`, and
- * `contains_non_latin_script` stay whole-document — page classification and
- * the escalation signal are not per-bill (Phase 2 explicitly keeps escalation
- * whole-document; see plan.md §3). `bills[]` holds one entry per distinct
- * bill Claude found in the document — the overwhelming majority of documents
- * produce exactly one.
+ * The full extraction response for one call (originally one whole document —
+ * §8 point 3 — now one page; see lib/jobs/handlers/extract.ts's header
+ * comment). `pages[]`, `legibility`, `extraction_confidence`, and
+ * `contains_non_latin_script` describe whatever was sent in this call —
+ * exactly one page, under per-page extraction. `bills[]` holds one entry per
+ * distinct bill Claude found in it.
+ *
+ * `bills[]` is deliberately allowed to be EMPTY. It was `.min(1)` under the
+ * old whole-document design, where a multi-page scan essentially always
+ * contained at least one real bill somewhere in it — but a single page, sent
+ * on its own, quite often has none: a cheque photo, a signed permission
+ * letter, a blank divider page. `pages[]` still classifies that page (that
+ * classification is a page's own required `is_financial_document`/
+ * `skip_reason` verdict, not optional), it is simply not a bill — and the
+ * tool's own input_schema (buildExtractionTool below) never constrained
+ * `bills` to a minimum in the first place, so this only brings the Zod layer
+ * in line with what the model was already permitted to return. Requiring at
+ * least one here made every legitimately-skippable page fail Zod validation
+ * with a confusing "bills: Array must contain at least 1 element(s)" instead
+ * of the clean "0 bills, page classified as non-financial" outcome it should
+ * have been.
  */
 export const extractionResponseSchema = z.object({
   pages: z.array(extractionPageSchema).min(1),
@@ -241,7 +255,7 @@ export const extractionResponseSchema = z.object({
   extraction_confidence: z.number().min(0).max(1),
   contains_non_latin_script: z.boolean(),
 
-  bills: z.array(extractionBillSchema).min(1),
+  bills: z.array(extractionBillSchema),
 })
 export type ExtractionResponse = z.infer<typeof extractionResponseSchema>
 
@@ -453,6 +467,47 @@ export function buildExtractionTool(): AnthropicExtractionTool {
 // ---------------------------------------------------------------------------
 
 /**
+ * Rewrites every `page_number` in a response — the page classification's own,
+ * each bill's `page_number_start`/`page_number_end`, and each line item's —
+ * to `actualPageNumber`.
+ *
+ * Exists because of what per-page extraction (lib/jobs/handlers/extract.ts,
+ * lib/pdf.ts's `splitPdfPage`) hands the model: a standalone one-page PDF, cut
+ * out of the original document. That PDF has exactly one page, and it is
+ * page 1 of it — the model has no way to know, and is never told, which page
+ * of the ORIGINAL document that was. Its response reports page_number as 1
+ * every single time, for every page of every document, regardless of where
+ * the page actually sat in the source file. Caught on the very first real
+ * test of per-page extraction: every bill in an 8-page document came back
+ * claiming `page_number_start: 1, page_number_end: 1`, and worse, EVERY
+ * page's `document_page` upsert collided on the same `page_number = 1` row
+ * (`onConflict: 'source_document_id,page_number'`), so only the last page
+ * processed left any classification behind at all.
+ *
+ * Called once, immediately after a page's own extraction call returns and
+ * before its result is persisted — see `extractAllPagesConcurrently` in
+ * lib/jobs/handlers/extract.ts. The model's page_number output for a
+ * single-page call is not meaningful data to preserve; it is always 1, so
+ * there is nothing lost by overwriting it with the number code already knows
+ * is correct.
+ */
+export function remapExtractionToActualPage(
+  extraction: ExtractionResponse,
+  actualPageNumber: number
+): ExtractionResponse {
+  return {
+    ...extraction,
+    pages: extraction.pages.map((page) => ({ ...page, page_number: actualPageNumber })),
+    bills: extraction.bills.map((bill) => ({
+      ...bill,
+      page_number_start: actualPageNumber,
+      page_number_end: actualPageNumber,
+      line_items: bill.line_items.map((item) => ({ ...item, page_number: actualPageNumber })),
+    })),
+  }
+}
+
+/**
  * Hard-drops line items whose source page was classified
  * `is_financial_document = false` (MASTER-PLAN §8 point 3:
  * "classification-before-extraction is a real gate rather than a prompt
@@ -470,6 +525,46 @@ export function filterNonFinancialLineItems(extraction: ExtractionResponse): Ext
       ...bill,
       line_items: bill.line_items.filter((item) => financialPageNumbers.has(item.page_number)),
     })),
+  }
+}
+
+/**
+ * Drops any bill with no real MONEY in it: no `total_amount`, and (after
+ * `filterNonFinancialLineItems` has already run) no line item carrying a
+ * `line_amount` either. A vendor name or invoice number alone is deliberately
+ * NOT enough to save a bill here — see below for why that's the line drawn.
+ *
+ * This exists specifically for the failure mode per-page extraction surfaced
+ * on its first real test: an isolated page containing a government ID photo,
+ * or a bank cheque, was itself misclassified `is_financial_document: true` —
+ * the classification gate got it wrong, not just the extraction — and the
+ * model then emitted a `bills[]` entry for it, often with a plausible-looking
+ * `vendor_name` lifted from whatever printed letterhead text was on the page
+ * (e.g. "Income Tax Department" off a PAN card) but no actual charge amount
+ * anywhere. A bill like that is not data the model actually read off an
+ * invoice — it is a phantom with a name attached, and persisting it creates a
+ * `document_extraction` row a reviewer can neither fill in (there was never a
+ * real transaction here) nor safely dismiss (it doesn't look obviously wrong
+ * at a glance). Requiring an actual amount is a much harder bar for a
+ * non-bill page to clear by accident than requiring merely a name — a real
+ * receipt without a legible total is rare, and the model is instructed to
+ * leave illegible amounts null rather than guess (buildSystemPrompt), so a
+ * genuine bill with every amount field null is itself already an edge case
+ * best surfaced to a reviewer as "no amount could be read" rather than kept
+ * as a normal-looking row.
+ *
+ * `filterNonFinancialLineItems` already established the "never trust a
+ * single self-report alone" posture for line items — this is the same
+ * posture applied to whole bills, and it must run strictly after that
+ * function so a bill's line items have already been filtered before this one
+ * asks whether any of them carry an amount.
+ */
+export function dropEmptyBills(extraction: ExtractionResponse): ExtractionResponse {
+  return {
+    ...extraction,
+    bills: extraction.bills.filter(
+      (bill) => bill.total_amount !== null || bill.line_items.some((item) => item.line_amount !== null)
+    ),
   }
 }
 

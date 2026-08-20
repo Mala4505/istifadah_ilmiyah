@@ -16,7 +16,8 @@
     "test:rls": "vitest run --config vitest.integration.config.ts",
     "score": "tsx --conditions=react-server test/score.ts",
     "gold:build": "tsx --conditions=react-server test/build-gold-from-corrections.ts",
-    "worker": "tsx watch --conditions=react-server worker/index.ts",
+    "worker": "tsx --env-file=.env --conditions=react-server worker/index.ts",
+    "worker:watch": "tsx watch --env-file=.env --conditions=react-server worker/index.ts",
     "db:push": "supabase db push",
     "db:diff": "supabase db diff",
     "db:reset": "supabase db reset"
@@ -43,6 +44,7 @@
     "date-fns": "^4.1.0",
     "lucide-react": "^0.469.0",
     "next": "^15.1.0",
+    "pdf-lib": "^1.17.1",
     "pdfjs-dist": "^4.9.155",
     "pg": "^8.13.1",
     "react": "^19.0.0",

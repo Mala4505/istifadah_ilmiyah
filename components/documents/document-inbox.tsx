@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { toastError } from '@/components/ui/error-toast'
 import { Button } from '@/components/ui/button'
-import { bulkAttachDocuments, cancelDocumentTracking } from '@/lib/actions/documents'
+import { bulkAttachDocuments, deleteDocuments } from '@/lib/actions/documents'
 import { UploadDropzone } from './upload-dropzone'
 import { DocumentTable } from './document-table'
 import type { InboxDocumentView } from './types'
@@ -37,7 +37,7 @@ export function DocumentInbox({
   )
   const [selected, setSelected] = useState<Set<number>>(new Set())
   const [bulkPending, setBulkPending] = useState(false)
-  const [cancelPending, setCancelPending] = useState(false)
+  const [deletePending, setDeletePending] = useState(false)
 
   useEffect(() => {
     setDocuments(initialDocuments)
@@ -132,32 +132,59 @@ export function DocumentInbox({
     })()
   }
 
-  function handleBulkCancel() {
+  /**
+   * The only removal action on this screen. There used to be a separate
+   * non-destructive "Cancel tracking" (flip match_status, keep every row)
+   * alongside this. Removed on direct instruction: a "hidden" document that
+   * still sits in the database, still holds a queued extraction job, and
+   * still costs money when a worker gets to it is not what "canceled" means
+   * to someone using this screen — if it's hidden, it should be gone. So
+   * there is one action now, and it does the real thing: removes the PDF
+   * from storage and every row derived from it, and drops any extraction
+   * still queued for it (lib/actions/documents.ts's deleteDocuments).
+   *
+   * Confirmed with a native confirm() rather than a dialog component:
+   * this is the one irreversible action on the screen and should not be one
+   * stray click away.
+   */
+  function handleBulkDelete() {
     const ids = [...selected]
     if (ids.length === 0) {
-      toast.error('Select at least one document to cancel.')
+      toast.error('Select at least one document to delete.')
+      return
+    }
+    const noun = ids.length === 1 ? 'document' : 'documents'
+    if (
+      !window.confirm(
+        `Permanently delete ${ids.length} ${noun}?\n\n` +
+          `This removes the uploaded PDF and everything extracted from it, and stops any extraction still queued for it. ` +
+          `It cannot be undone.`
+      )
+    ) {
       return
     }
 
-    setCancelPending(true)
+    setDeletePending(true)
     void (async () => {
-      const result = await cancelDocumentTracking(ids)
-      setCancelPending(false)
+      const result = await deleteDocuments(ids)
+      setDeletePending(false)
       if (!result.success) {
-        toastError(result.error, { title: 'Cancel failed.', context: 'document-inbox' })
+        toastError(result.error, { title: 'Delete failed.', context: 'document-inbox' })
         return
       }
-      const canceledIds = new Set(ids.filter((id) => !result.failedDocumentIds.includes(id)))
-      setDocuments((current) => current.filter((d) => !canceledIds.has(d.id)))
+      const deletedIds = new Set(ids.filter((id) => !result.failedDocumentIds.includes(id)))
+      setDocuments((current) => current.filter((d) => !deletedIds.has(d.id)))
       setSelected(new Set())
       if (result.error) {
         toast.warning(result.error)
       } else {
-        toast.success(`Canceled tracking for ${result.canceledCount} document${result.canceledCount === 1 ? '' : 's'}.`)
+        toast.success(`Deleted ${result.deletedCount} ${result.deletedCount === 1 ? 'document' : 'documents'}.`)
       }
       router.refresh()
     })()
   }
+
+  const anyPending = bulkPending || deletePending
 
   return (
     <div className="flex flex-col gap-6">
@@ -169,18 +196,19 @@ export function DocumentInbox({
             {selectedCount} document{selectedCount === 1 ? '' : 's'} selected
           </p>
           <div className="flex items-center gap-2">
-            <Button variant="ghost" size="sm" onClick={() => setSelected(new Set())} disabled={bulkPending || cancelPending}>
+            <Button variant="ghost" size="sm" onClick={() => setSelected(new Set())} disabled={anyPending}>
               Clear
             </Button>
             <Button
-              variant="outline"
+              variant="ghost"
               size="sm"
-              onClick={handleBulkCancel}
-              disabled={bulkPending || cancelPending}
+              onClick={handleBulkDelete}
+              disabled={anyPending}
+              className="text-destructive hover:bg-destructive/10 hover:text-destructive"
             >
-              {cancelPending ? 'Canceling…' : `Cancel tracking (${selectedCount})`}
+              {deletePending ? 'Deleting…' : `Delete (${selectedCount})`}
             </Button>
-            <Button size="sm" onClick={handleBulkAttach} disabled={bulkPending || cancelPending}>
+            <Button size="sm" onClick={handleBulkAttach} disabled={anyPending}>
               {bulkPending ? 'Attaching…' : `Attach ${selectedCount} selected`}
             </Button>
           </div>

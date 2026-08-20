@@ -14,6 +14,7 @@ import {
   buildExtractionTool,
   EXTRACTION_TOOL_NAME,
   extractionResponseSchema,
+  dropEmptyBills,
   filterNonFinancialLineItems,
   type ExtractionResponse,
 } from '@/lib/extraction-schema'
@@ -111,39 +112,57 @@ export interface ExtractDocumentResult {
 /**
  * Default output budget for one extraction call.
  *
- * §8 specifies 2,000, which fits a typical one-page bill's tool call with room
- * to spare — but it is a *false* economy at this size, for two reasons:
+ * `max_tokens` is a ceiling, not a reservation — nothing is billed for
+ * headroom that goes unused, so a bill that fits in 1,200 tokens costs
+ * exactly the same under an 8,000 cap as under a 2,000 one. There is no cost
+ * downside to raising it; the only downside is truncation, which is far more
+ * expensive: every time the cap IS hit, `runExtractionPipeline` retries the
+ * whole call at TRUNCATION_RETRY_MAX_TOKENS — re-billing the entire input a
+ * second time.
  *
- *  1. `max_tokens` is a ceiling, not a reservation. Nothing is billed for
- *     headroom that goes unused, so a bill that fits in 1,200 tokens costs
- *     exactly the same under a 4,000 cap as under a 2,000 one.
- *  2. Every time the cap *is* hit, `runExtractionPipeline` retries the whole
- *     call at TRUNCATION_RETRY_MAX_TOKENS — re-billing the entire PDF's input
- *     tokens, which on a multi-page scan dwarf the output side. A cap set
- *     just below what dense invoices need makes the expensive documents cost
- *     roughly double.
- *
- * 4,000 covers the densely itemised multi-page scans in the pilot corpus that
- * were previously landing in the retry path. It also leaves room for Sonnet's
- * adaptive thinking on the manual re-escalation path: `max_tokens` caps
- * thinking *and* response text together, and `claude-sonnet-5` runs adaptive
- * thinking by default when no `thinking` parameter is set. That parameter is
- * deliberately left unset rather than `{ type: 'disabled' }`: disabling
- * thinking on a Claude 5-generation model carries two documented failure
- * modes — tool calls occasionally emitted as plain assistant text instead of
- * a real tool_use block, and internal <thinking> content leaking into field
- * values (the leaked-tag syntax `sanitizeLeakedTagSyntax` guards against).
- * Raising max_tokens fixes the truncation without either risk. Under the old
- * 2,000 cap, Sonnet spent part of the budget thinking and then truncated the
- * tool call mid-JSON, which is why escalation so often returned partial data.
- * The retry at 8,000 stays as the backstop for genuine outliers.
+ * Since extraction moved to one call per PAGE (lib/jobs/handlers/extract.ts —
+ * see lib/pdf.ts's `splitPdfPage`), a single call's output is usually just one
+ * page's worth of line items, which rarely comes close to even the old 4,000
+ * cap. 8,000 is set anyway as a defensive margin for the rare densely
+ * itemised single page, and because it also leaves room for Sonnet's adaptive
+ * thinking on the manual re-escalation path: `max_tokens` caps thinking *and*
+ * response text together, and `claude-sonnet-5` runs adaptive thinking by
+ * default when no `thinking` parameter is set. That parameter is deliberately
+ * left unset rather than `{ type: 'disabled' }`: disabling thinking on a
+ * Claude 5-generation model carries two documented failure modes — tool calls
+ * occasionally emitted as plain assistant text instead of a real tool_use
+ * block, and internal <thinking> content leaking into field values (the
+ * leaked-tag syntax `sanitizeLeakedTagSyntax` guards against). Raising
+ * max_tokens fixes truncation without either risk.
  *
  * Exported (not just used internally) so the Batch API submission path
  * (plan.md Phase 3 I16, submitExtractionBatch below and
  * lib/jobs/handlers/extract.ts's submitExtractionBatchAndEnqueuePoll) uses
- * the exact same default rather than a second hard-coded copy of "4000".
+ * the exact same default rather than a second hard-coded copy.
  */
-export const EXTRACTION_MAX_TOKENS = 4000
+export const EXTRACTION_MAX_TOKENS = 8000
+
+/**
+ * How long a single extraction call is allowed to run before it's aborted.
+ *
+ * Exists because of what used to happen without it: a Vercel function has a
+ * hard wall-clock limit (`maxDuration`, currently 60s on every route that can
+ * trigger extraction), and when that limit hits mid-call, the platform kills
+ * the function outright — no exception is thrown, nothing is caught, and the
+ * job_queue row this call was working on stays `'running'` forever with
+ * nothing to notice or recover it. Aborting the call ourselves, comfortably
+ * before that wall, turns an invisible platform kill into an ordinary
+ * exception the caller already knows how to handle: `handleExtractDocument`
+ * catches it and marks the job `'failed'`, and `sweepJobQueue` (now running
+ * regularly via the GitHub Actions cron hitting /api/jobs/tick, see the repo
+ * root's .github/workflows/) requeues it with backoff shortly after — minutes,
+ * not the 10-minute staleness timeout a genuinely stuck lock would otherwise
+ * need. Now that extraction is one call per page rather than one call per
+ * whole document, no single call should ever legitimately need anywhere near
+ * this long; hitting this timeout means the call is genuinely hung, not just
+ * working through a big document.
+ */
+export const EXTRACTION_CALL_TIMEOUT_MS = 45_000
 
 /**
  * Builds the system prompt, optionally appending an own-GSTIN exclusion rule
@@ -157,14 +176,26 @@ function buildSystemPrompt(communityGstin: string | null): string {
   const base =
     'You are extracting structured data from a scanned financial document (invoice, chit, or receipt) ' +
     'submitted for expense reconciliation. The document may span multiple pages, and some pages may not ' +
-    'be financial documents at all (e.g. a bank cheque, a passbook page, or an unrelated scan caught in ' +
-    'the same batch) — classify every page first via the tool schema before extracting anything from it. ' +
+    'be financial documents at all (e.g. a bank cheque, a passbook page, a government ID card or photo ' +
+    'ID, or an unrelated scan caught in the same batch) — classify every page first via the tool schema ' +
+    'before extracting anything from it. ' +
     'A line-item table may continue across a page break, so treat continuation pages as part of the bill ' +
     'they belong to. Note that a batch scan may contain SEVERAL SEPARATE BILLS from different vendors: a ' +
     'new vendor header, invoice number, and total starting on a later page is a NEW bill — extract it as ' +
     'its own entry in `bills[]`, never folded into `notes` and never merged with the previous bill\'s ' +
     'line items. Give each bill entry the page_number_start/page_number_end its own header and totals ' +
-    'were read from. Never ' +
+    'were read from. ' +
+    'A page that is ITSELF an internal cover sheet, routing slip, or index/summary table LISTING several ' +
+    'other bills or vendor payments (rather than being one of those bills itself — e.g. a handwritten ' +
+    'table of vendor names and amounts used to tally a batch before scanning) is not a financial document ' +
+    'to extract: classify it is_financial_document=false and return zero entries in bills[] for it, even ' +
+    'though it contains names and amounts that superficially resemble a bill. Do not create one bill per ' +
+    'row of such a table — those rows describe OTHER pages, not charges of their own. When genuinely ' +
+    'unsure whether an isolated page is a real invoice versus an administrative page like this, prefer ' +
+    'classifying it as non-financial with zero bills over guessing; a missed real bill is a page a human ' +
+    'reviewer can revisit, but a fabricated bill entry with no real content behind it pollutes the review ' +
+    'queue with something that can never be corrected because there was never anything there to correct ' +
+    'it to. Never ' +
     'fabricate a value — for anything illegible or genuinely absent use an empty string in a text field ' +
     'and null in a numeric field, and reflect uncertainty via the confidence fields rather than guessing. ' +
     'Every field value must be plain text transcribed from the document — never emit tag-like syntax ' +
@@ -288,7 +319,10 @@ function parseExtractionMessage(
   }
 
   const parsed = extractionResponseSchema.parse(toolUseBlock.input)
-  const extraction = filterNonFinancialLineItems(parsed)
+  // Order matters: dropEmptyBills only correctly identifies a truly empty
+  // bill once filterNonFinancialLineItems has already stripped any line
+  // items that belonged to a non-financial page.
+  const extraction = dropEmptyBills(filterNonFinancialLineItems(parsed))
 
   return {
     extraction,
@@ -337,8 +371,14 @@ export async function extractDocument(params: ExtractDocumentParams): Promise<Ex
 
   const maxTokens = params.maxTokens ?? EXTRACTION_MAX_TOKENS
 
+  // `signal` is a per-request option (the SDK's second argument), not part of
+  // the request body — see EXTRACTION_CALL_TIMEOUT_MS's doc comment for why
+  // this exists. AbortSignal.timeout() (Node 18+) needs no manual cleanup: it
+  // fires once and is done, unlike a hand-rolled setTimeout + AbortController
+  // that would need a matching clearTimeout in every return/throw path.
   const response = await client.messages.create(
-    buildExtractionRequestParams({ sourceBlocks, model, maxTokens })
+    buildExtractionRequestParams({ sourceBlocks, model, maxTokens }),
+    { signal: AbortSignal.timeout(EXTRACTION_CALL_TIMEOUT_MS) }
   )
 
   return parseExtractionMessage(response, model, maxTokens, false)

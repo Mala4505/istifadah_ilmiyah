@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
+import * as Sentry from '@sentry/nextjs'
 import { withApiLogging } from '@/lib/api-log'
 import { getStaffContext } from '@/lib/export/auth'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { putDocument } from '@/lib/storage'
 import { getPdfPageCount, looksLikePdf, sha256Hex } from '@/lib/pdf'
-import { drainJobQueue } from '@/lib/jobs/drain'
+import { drainJobQueue, runJobById } from '@/lib/jobs/drain'
 import { serverEnv } from '@/lib/env.server'
 
 /**
@@ -111,7 +112,25 @@ async function handlePOST(request: NextRequest) {
   let pageCountUnresolved = false
   try {
     pageCount = await getPdfPageCount(bytes)
-  } catch {
+  } catch (err) {
+    // Do NOT swallow this. A bare `catch {}` here hid a parse failure that
+    // reproduces on every single upload in the deployed environment while
+    // working fine locally (verified against the same bytes through the same
+    // multipart path), which made it invisible for as long as it existed: the
+    // only trace was a low-severity page_count_unresolved row whose wording
+    // implies a bad PDF rather than a broken dependency. Since page_count
+    // drives whether any document_page rows get created at all, a silent
+    // failure here silently disables page classification. The reconciliation
+    // exception below stays user-facing and plain-English; the technical
+    // cause goes to the logs and Sentry, where it can actually be acted on.
+    console.error(
+      `[ingest] getPdfPageCount failed for "${file.name}" (${bytes.byteLength} bytes):`,
+      err
+    )
+    Sentry.captureException(err, {
+      tags: { route: 'documents-ingest', phase: 'get_pdf_page_count' },
+      extra: { filename: file.name, byteLength: bytes.byteLength, fileHash },
+    })
     const declared = Number(form.get('pageCount'))
     pageCount = Number.isInteger(declared) && declared > 0 ? declared : null
     // Neither the server-side parse nor a client-declared count worked. No
@@ -221,13 +240,17 @@ async function handlePOST(request: NextRequest) {
     })
   }
 
-  const { error: jobError } = await admin.from('job_queue').insert({
-    job_type: 'extract_document',
-    payload: { source_document_id: documentId },
-  })
-  if (jobError) {
+  const { data: insertedJob, error: jobError } = await admin
+    .from('job_queue')
+    .insert({
+      job_type: 'extract_document',
+      payload: { source_document_id: documentId },
+    })
+    .select('id')
+    .single()
+  if (jobError || !insertedJob) {
     return NextResponse.json(
-      { error: `job_queue insert failed: ${jobError.message}`, documentId },
+      { error: `job_queue insert failed: ${jobError?.message ?? 'no row returned'}`, documentId },
       { status: 500 }
     )
   }
@@ -243,10 +266,42 @@ async function handlePOST(request: NextRequest) {
   // a row; this may also pick up and clear older backlog while it's here,
   // not just this document's own job. maxDuration=60 above leaves headroom
   // beyond this budget for the DB writes still to come.
-  try {
-    await drainJobQueue(`${serverEnv.WORKER_ID}-upload`, POST_UPLOAD_DRAIN_BUDGET_MS, false)
-  } catch (err) {
-    console.error(`[ingest] post-upload drain failed for document ${documentId}:`, err)
+  //
+  // THIS document's own job runs first, by id, before any backlog. Going
+  // through drainJobQueue alone meant going through claim_next_job's
+  // `order by priority, id` — oldest first — so an upload spent its whole
+  // budget on stale jobs queued days earlier and was killed by the platform's
+  // function timeout before ever reaching the document the user was waiting
+  // on. Whatever budget survives that is then spent on the backlog, which is
+  // where oldest-first is the correct policy.
+  // ...but only when nothing better is available. With INGEST_INLINE_EXTRACTION
+  // off (set it off as soon as a worker or cron is running, see
+  // lib/env.server.ts), the job is left for that worker and the upload returns
+  // immediately — which is the whole point of having one, since the worker is
+  // not bounded by this route's maxDuration.
+  if (serverEnv.INGEST_INLINE_EXTRACTION) {
+    const workerId = `${serverEnv.WORKER_ID}-upload`
+    const drainStartedAt = Date.now()
+    try {
+      const outcome = await runJobById(workerId, insertedJob.id as number)
+      console.log(`[ingest] document ${documentId}: own extract job ${insertedJob.id} -> ${outcome}`)
+    } catch (err) {
+      console.error(`[ingest] post-upload extraction failed for document ${documentId}:`, err)
+    }
+
+    const backlogBudgetMs = POST_UPLOAD_DRAIN_BUDGET_MS - (Date.now() - drainStartedAt)
+    if (backlogBudgetMs > 0) {
+      try {
+        await drainJobQueue(workerId, backlogBudgetMs, false)
+      } catch (err) {
+        console.error(`[ingest] post-upload backlog drain failed after document ${documentId}:`, err)
+      }
+    }
+  } else {
+    console.log(
+      `[ingest] document ${documentId}: extract job ${insertedJob.id} left for the worker ` +
+        '(INGEST_INLINE_EXTRACTION=false)'
+    )
   }
 
   return NextResponse.json({
