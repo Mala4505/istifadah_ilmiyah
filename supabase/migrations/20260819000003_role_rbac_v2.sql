@@ -33,7 +33,25 @@
 -- from this migration onward.
 
 -- ============================================================================
--- 1. staff_department -- the junction table replacing department_id
+-- 1. Helpers that don't depend on staff_department -- defined FIRST because
+--    the table's own RLS policies (section 2) need to call them, and Postgres
+--    resolves function calls in a CREATE POLICY expression at creation time.
+-- ============================================================================
+
+create or replace function private.is_superadmin() returns boolean
+language sql security definer stable set search_path = '' as $$
+  select exists (select 1 from public.staff_profile sp
+                 where sp.id = (select auth.uid()) and sp.is_active and sp.role = 'superadmin');
+$$;
+
+create or replace function private.is_admin_or_above() returns boolean
+language sql security definer stable set search_path = '' as $$
+  select exists (select 1 from public.staff_profile sp
+                 where sp.id = (select auth.uid()) and sp.is_active and sp.role in ('superadmin', 'admin'));
+$$;
+
+-- ============================================================================
+-- 2. staff_department -- the junction table replacing department_id
 -- ============================================================================
 create table public.staff_department (
   staff_id uuid not null references public.staff_profile(id) on delete cascade,
@@ -69,26 +87,33 @@ create policy staff_department_delete on public.staff_department for delete to a
 grant select, insert, update, delete on public.staff_department to authenticated;
 
 -- ============================================================================
--- 2. Data migration -- in order, before anything is dropped
+-- 3. Data migration -- in order, before anything is dropped
 -- ============================================================================
 
--- 2a. Carry forward every scoped reviewer/viewer's single department into the
+-- 3a. Carry forward every scoped reviewer/viewer's single department into the
 -- junction table before the role split below repurposes those rows.
 insert into public.staff_department (staff_id, department_id)
 select id, department_id from public.staff_profile
 where role in ('reviewer', 'viewer') and department_id is not null
 on conflict do nothing;
 
--- 2b. Old top role -> superadmin (this IS today's admin, unchanged capability).
+-- 3b. The old check constraint only allows ('admin','reviewer','viewer'), so
+-- it has to go BEFORE the value updates below can write the new role names --
+-- not after. Safe to drop outright (rather than widen-then-narrow) because
+-- this whole file runs inside one migration transaction: no concurrent writer
+-- can observe or insert an invalid role while the constraint is briefly gone.
+alter table public.staff_profile drop constraint staff_profile_role_check;
+
+-- 3c. Old top role -> superadmin (this IS today's admin, unchanged capability).
 update public.staff_profile set role = 'superadmin' where role = 'admin';
 
--- 2c. A scoped reviewer/viewer becomes dept (their one department is now in
--- staff_department from 2a).
+-- 3d. A scoped reviewer/viewer becomes dept (their one department is now in
+-- staff_department from 3a).
 update public.staff_profile
 set role = 'dept'
 where role in ('reviewer', 'viewer') and department_id is not null;
 
--- 2d. An all-departments reviewer/viewer (finance-head/auditor account, per
+-- 3e. An all-departments reviewer/viewer (finance-head/auditor account, per
 -- MASTER-PLAN §4.4c's old "viewer exists for the finance head and auditors")
 -- would silently become full cross-department admin under the new model.
 -- Land it as admin but deactivated, so a superadmin has to consciously
@@ -97,28 +122,15 @@ update public.staff_profile
 set role = 'admin', is_active = false
 where role in ('reviewer', 'viewer') and department_id is null;
 
--- 2e. Only now can the check constraint and default change -- the values
--- above had to land under the OLD constraint first.
-alter table public.staff_profile drop constraint staff_profile_role_check;
+-- 3f. Now that every row holds a new-model value, lock the constraint down
+-- and flip the default.
 alter table public.staff_profile
   add constraint staff_profile_role_check check (role in ('superadmin', 'admin', 'dept'));
 alter table public.staff_profile alter column role set default 'dept';
 
 -- ============================================================================
--- 3. Helpers -- §4.1 replacements
+-- 4. Remaining §4.1 helper replacements -- can now reference staff_department
 -- ============================================================================
-
-create or replace function private.is_superadmin() returns boolean
-language sql security definer stable set search_path = '' as $$
-  select exists (select 1 from public.staff_profile sp
-                 where sp.id = (select auth.uid()) and sp.is_active and sp.role = 'superadmin');
-$$;
-
-create or replace function private.is_admin_or_above() returns boolean
-language sql security definer stable set search_path = '' as $$
-  select exists (select 1 from public.staff_profile sp
-                 where sp.id = (select auth.uid()) and sp.is_active and sp.role in ('superadmin', 'admin'));
-$$;
 
 -- Rewritten to consult staff_department instead of the (about-to-be-dropped)
 -- department_id column. Redefined BEFORE that column is dropped below so
@@ -151,14 +163,62 @@ $$;
 -- entries in a department they can see.
 
 -- ============================================================================
--- 4. Drop staff_profile.department_id -- fully superseded by staff_department
+-- 5. staff_profile_update -- the user-management boundary. Fixed BEFORE the
+--    department_id column is dropped below: the ORIGINAL policy (still live
+--    on the DB at this point) references `department_id` directly inside its
+--    WITH CHECK tuple, and Postgres records that as a real column-level
+--    dependency -- DROP COLUMN fails outright while a policy still names it,
+--    the same way it would for a view. This has to be replaced first to
+--    clear that dependency.
+--
+-- Deliberately NOT using the (now widened) is_admin() alias -- this is the
+-- one place that must stay pinned to the true top role, or admin could edit
+-- its own row to role = 'superadmin' and defeat the "cannot manage users"
+-- restriction.
+--
+-- Also drops and recreates private.staff_profile_locked_fields (20260808000026),
+-- not just the policy: that function currently selects `sp.department_id`,
+-- which is about to stop existing, so it needs a new 2-column return
+-- signature (role, is_active) -- and CREATE OR REPLACE FUNCTION cannot
+-- change an existing function's return columns. This policy is the
+-- function's only caller (verified: nothing else in the migrations
+-- references it), so the policy has to be dropped first to clear ITS
+-- dependency on the function too, before the function itself can be dropped
+-- and recreated.
+drop policy staff_profile_update on public.staff_profile;
+drop function private.staff_profile_locked_fields(uuid);
+
+create function private.staff_profile_locked_fields(p_id uuid)
+returns table(role text, is_active boolean)
+language sql security definer stable set search_path = '' as $$
+  select sp.role, sp.is_active from public.staff_profile sp where sp.id = p_id;
+$$;
+
+create policy staff_profile_update on public.staff_profile for update to authenticated
+  using (id = (select auth.uid()) or (select private.is_superadmin()))
+  with check (
+    (select private.is_superadmin())
+    or (
+      id = (select auth.uid())
+      and (role, is_active) = (
+        select role, is_active from private.staff_profile_locked_fields(id)
+      )
+    )
+  );
+
+-- staff_profile_select already reads correctly through the widened is_admin()
+-- alias (admin can view the roster read-only, same as superadmin) -- no
+-- change needed there.
+
+-- ============================================================================
+-- 6. Drop staff_profile.department_id -- fully superseded by staff_department
 -- ============================================================================
 alter table public.staff_profile drop constraint staff_profile_department_id_fkey;
 drop index public.staff_profile_department_idx;
 alter table public.staff_profile drop column department_id;
 
 -- ============================================================================
--- 5. private.handle_new_user() -- department_id metadata -> department_ids array
+-- 7. private.handle_new_user() -- department_id metadata -> department_ids array
 -- ============================================================================
 create or replace function private.handle_new_user() returns trigger
 language plpgsql security definer set search_path = '' as $$
@@ -192,10 +252,12 @@ begin
 end; $$;
 
 -- ============================================================================
--- 6. Policy updates -- the three that cannot be satisfied by the aliases above
+-- 8. Policy updates -- entries_insert/entries_update, the two that cannot be
+--    satisfied by the aliases above (staff_profile_update was already fixed
+--    in section 5, ahead of the column drop it would otherwise block)
 -- ============================================================================
 
--- 6a. entries_insert (20260819000002): dept/admin/superadmin can all create,
+-- 8a. entries_insert (20260819000002): dept/admin/superadmin can all create,
 -- scoped by can_see_department -- is_reviewer_or_admin() would now wrongly
 -- exclude dept, so this one is pointed at is_staff() explicitly.
 alter policy entries_insert on public.entries
@@ -206,7 +268,7 @@ alter policy entries_insert on public.entries
     and source = 'manual'
   );
 
--- 6b. entries_update (20260808000026): dept loses UPDATE entirely under the
+-- 8b. entries_update (20260808000026): dept loses UPDATE entirely under the
 -- confirmed "view + create only" restriction -- this is what removes a dept
 -- user's ability to self-complete the provisional-UBBL-number swap
 -- (lib/actions/entries.ts replaceProvisionalUbblNumber); an admin/superadmin
@@ -215,41 +277,3 @@ alter policy entries_update on public.entries
   using ((select private.can_see_department(department_id))
          and (select private.is_admin_or_above()))
   with check ((select private.can_see_department(department_id)));
-
--- 6c. staff_profile_update: the actual user-management boundary. Deliberately
--- NOT using the (now widened) is_admin() alias -- this is the one place that
--- must stay pinned to the true top role, or admin could edit its own row to
--- role = 'superadmin' and defeat the "cannot manage users" restriction.
---
--- Dropped and recreated (not ALTER POLICY) because private.staff_profile_
--- locked_fields (20260808000026) selects `sp.department_id`, which no longer
--- exists as of step 4 above -- it needs a new 2-column return signature
--- (role, is_active), and CREATE OR REPLACE FUNCTION cannot change an
--- existing function's return columns. This policy is its only caller
--- (verified: nothing else in the migrations references it), so it has to be
--- dropped first to clear the dependency, then the function can be dropped
--- and recreated, then the policy recreated against the new signature.
-drop policy staff_profile_update on public.staff_profile;
-drop function private.staff_profile_locked_fields(uuid);
-
-create function private.staff_profile_locked_fields(p_id uuid)
-returns table(role text, is_active boolean)
-language sql security definer stable set search_path = '' as $$
-  select sp.role, sp.is_active from public.staff_profile sp where sp.id = p_id;
-$$;
-
-create policy staff_profile_update on public.staff_profile for update to authenticated
-  using (id = (select auth.uid()) or (select private.is_superadmin()))
-  with check (
-    (select private.is_superadmin())
-    or (
-      id = (select auth.uid())
-      and (role, is_active) = (
-        select role, is_active from private.staff_profile_locked_fields(id)
-      )
-    )
-  );
-
--- staff_profile_select already reads correctly through the widened is_admin()
--- alias (admin can view the roster read-only, same as superadmin) -- no
--- change needed there.
