@@ -6,11 +6,17 @@ import { withSentryConfig } from '@sentry/nextjs'
 // nothing here may branch on the host.
 const nextConfig: NextConfig = {
   output: 'standalone',
-  // pdfjs-dist is loaded at runtime by lib/pdf.ts (server-only, Node runtime) to
-  // read a PDF's page count. It ships its own ESM/worker plumbing that webpack
-  // mangles when bundled; leaving it external makes `require`/`import` resolve
-  // from node_modules at runtime instead.
-  serverExternalPackages: ['pdfjs-dist'],
+  // No serverExternalPackages entry for pdfjs-dist anymore — lib/pdf.ts's
+  // server-side code (getPdfPageCount, splitPdfPage) no longer imports it at
+  // all, having moved to pdf-lib specifically because pdfjs-dist's worker
+  // plumbing did not survive Vercel's serverless bundling (see
+  // getPdfPageCount's doc comment in lib/pdf.ts for the full story — this is
+  // what the "Cannot find module '.../pdf.worker.mjs'" errors were).
+  // pdfjs-dist is still a real dependency (package.json) for
+  // components/review/pdf-viewer.tsx's browser-side rendering, which is
+  // unaffected: that ships to the client as a normal webpack bundle with its
+  // worker served as a static asset, not read off a serverless function's
+  // filesystem, so it was never the same failure mode.
   eslint: {
     // next build already fails on ESLint errors by default — this just makes it explicit.
     ignoreDuringBuilds: false,

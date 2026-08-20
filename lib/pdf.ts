@@ -73,25 +73,31 @@ export function looksLikePdf(bytes: Uint8Array): boolean {
 /**
  * Reads the page count without rendering anything.
  *
- * pdfjs-dist is imported dynamically so that merely importing this module
- * never drags its ESM build (and its worker plumbing) into a bundle that
- * doesn't need it.
+ * `pdf-lib` rather than `pdfjs-dist`, as of the fix for a Vercel-only failure:
+ * pdfjs-dist parses fine locally, but its worker plumbing turned out not to
+ * survive Vercel's serverless bundling — every deployed call failed with
+ * "Cannot find module '.../pdfjs-dist/legacy/build/pdf.worker.mjs'", because
+ * pdfjs's own "fake worker" fallback (used when it can't spin up a real
+ * `Worker` thread — the normal, expected path in a Node server function)
+ * still needs to *import* that worker module to run its message-handling
+ * logic inline, and Next.js's build-time file tracing (what decides which
+ * files actually ship in the deployed function bundle) never detected that
+ * dynamic import as a dependency worth including. Locally, nothing is
+ * pruned, so the file is just there — which is exactly why this went
+ * unnoticed until it was actually diagnosed against the deployed site rather
+ * than a local dev server.
+ *
+ * `pdf-lib` sidesteps the whole problem rather than working around it: it is
+ * pure JavaScript with no worker thread and nothing to trace and fail to
+ * include in the first place. It's already a dependency here for
+ * `splitPdfPage` below, which does the exact same `PDFDocument.load` this
+ * does — a page-count call is what that load already knows for free, before
+ * any splitting happens.
  */
 export async function getPdfPageCount(bytes: Uint8Array): Promise<number> {
-  const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs')
-  const doc = await pdfjs.getDocument({
-    // pdf.js transfers ownership of the buffer it is given, so hand it a copy —
-    // otherwise the caller's bytes are detached and every later read sees zero
-    // length (this bit us on the hash-then-parse ordering).
-    data: new Uint8Array(bytes),
-    isEvalSupported: false,
-    useSystemFonts: false,
-  }).promise
-  try {
-    return doc.numPages
-  } finally {
-    await doc.destroy()
-  }
+  const { PDFDocument } = await import('pdf-lib')
+  const doc = await PDFDocument.load(bytes)
+  return doc.getPageCount()
 }
 
 /**
