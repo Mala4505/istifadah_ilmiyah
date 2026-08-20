@@ -134,9 +134,9 @@ async function main() {
   const { rows: lineItemRows } = await pool.query<{
     document_extraction_id: number
     description_verified: string | null
-    line_amount_verified: string | null
+    amount_verified: string | null
   }>(`
-    select document_extraction_id, description_verified, line_amount_verified
+    select document_extraction_id, description_verified, amount_verified
     from public.document_extraction_line_item
     where document_extraction_id = any($1::bigint[])
     order by document_extraction_id, line_order
@@ -145,8 +145,8 @@ async function main() {
   const lineItemsByExtractionId = new Map<number, GoldLineItem[]>()
   for (const li of lineItemRows) {
     const list = lineItemsByExtractionId.get(li.document_extraction_id) ?? []
-    if (li.description_verified !== null && li.line_amount_verified !== null) {
-      list.push({ description: li.description_verified, amount: Number(li.line_amount_verified) })
+    if (li.description_verified !== null && li.amount_verified !== null) {
+      list.push({ description: li.description_verified, amount: Number(li.amount_verified) })
     }
     lineItemsByExtractionId.set(li.document_extraction_id, list)
   }

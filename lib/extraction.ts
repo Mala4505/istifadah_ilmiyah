@@ -180,7 +180,7 @@ async function callOnce(
  */
 export function lineItemTotal(bill: ExtractionBill): number | null {
   const amounts = bill.line_items
-    .map((item) => item.line_amount)
+    .map((item) => item.amount)
     .filter((amount): amount is number => amount !== null)
   if (amounts.length === 0) return null
   return amounts.reduce((sum, amount) => sum + amount, 0)

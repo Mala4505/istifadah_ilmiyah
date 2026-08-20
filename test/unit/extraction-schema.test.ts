@@ -250,11 +250,9 @@ describe('sanitizeExtractionResponse — leaked tool-call tag syntax backstop (�
               quantity: 4,
               quantity_raw_text: '4 nos',
               unit: 'NOS',
-              list_rate: 500,
-              discount_pct: 0,
-              discount_note: '',
-              net_rate: 500,
-              line_amount: 2000,
+              rate: 500,
+              discount: '',
+              amount: 2000,
               ...lineItemOverrides,
             },
           ],
@@ -287,13 +285,13 @@ describe('sanitizeExtractionResponse — leaked tool-call tag syntax backstop (�
     expect(blankedFields).toEqual(['bills[0].line_items[0].description'])
     // The rest of the line item survives untouched.
     expect(cleaned.bills[0]?.line_items[0]?.hsn_sac_code).toBe('9401')
-    expect(cleaned.bills[0]?.line_items[0]?.line_amount).toBe(2000)
+    expect(cleaned.bills[0]?.line_items[0]?.amount).toBe(2000)
   })
 
   it('reports every blanked field across header and line items in one call', () => {
-    const extraction = extractionWithLineItems({ vendor_phone: '<foo>' }, { discount_note: '</bar>' })
+    const extraction = extractionWithLineItems({ vendor_phone: '<foo>' }, { discount: '</bar>' })
     const { blankedFields } = sanitizeExtractionResponse(extraction)
-    expect(blankedFields).toEqual(['bills[0].vendor_phone', 'bills[0].line_items[0].discount_note'])
+    expect(blankedFields).toEqual(['bills[0].vendor_phone', 'bills[0].line_items[0].discount'])
   })
 
   it('does not flag a bare angle bracket that is not tag-shaped', () => {
@@ -315,10 +313,10 @@ describe('sanitizeExtractionResponse — leaked tool-call tag syntax backstop (�
       // Regression: an earlier version of LEAKED_TAG_PATTERN let a digit open
       // the "tag name" and let arbitrary text span to the next `>`, so real
       // line-item text using `<`/`>` as comparators was wrongly blanked.
-      const extraction = extractionWithLineItems({}, { discount_note: text })
+      const extraction = extractionWithLineItems({}, { discount: text })
       const { cleaned, blankedFields } = sanitizeExtractionResponse(extraction)
       expect(blankedFields).toEqual([])
-      expect(cleaned.bills[0]?.line_items[0]?.discount_note).toBe(text)
+      expect(cleaned.bills[0]?.line_items[0]?.discount).toBe(text)
     }
   )
 
@@ -423,16 +421,17 @@ describe('extractionToolInputSchema — union-type parameter budget', () => {
   })
 
   it('moving header fields under bills.items.properties does not add new union parameters', () => {
-    // Pre-existing count, unchanged by the Phase 2 bills[] move: skip_reason
-    // (pages.items) = 1; subtotal, tax_amount, total_amount, cgst_amount,
-    // sgst_amount, igst_amount, round_off (bills.items) = 7; quantity,
-    // list_rate, discount_pct, net_rate, line_amount (bills.items.line_items.items)
-    // = 5. Total 13 — same total as before the move, since instrument_type,
-    // vendor_*, invoice_number, invoice_date, place_of_supply, notes stay
-    // plain (non-union) strings and page_number_start/page_number_end are
-    // plain integers, none of which were ever union-typed.
+    // skip_reason (pages.items) = 1; subtotal, tax_amount, total_amount,
+    // cgst_amount, sgst_amount, igst_amount, round_off (bills.items) = 7;
+    // quantity, rate, amount (bills.items.line_items.items) = 3. Total 11 —
+    // down from 13 after 20260820000003 dropped list_rate/discount_pct as
+    // separate union-typed number fields (§ dropEmptyBills doc comment for
+    // why). instrument_type, vendor_*, invoice_number, invoice_date,
+    // place_of_supply, notes, discount stay plain (non-union) strings and
+    // page_number_start/page_number_end are plain integers, none of which
+    // were ever union-typed.
     const count = countUnionTypedProperties(extractionToolInputSchema)
-    expect(count).toBe(13)
+    expect(count).toBe(11)
   })
 })
 
@@ -459,11 +458,9 @@ describe('dropEmptyBills — per-page extraction phantom-bill backstop', () => {
             quantity: null,
             quantity_raw_text: '',
             unit: '',
-            list_rate: null,
-            discount_pct: null,
-            discount_note: '',
-            net_rate: null,
-            line_amount: 500,
+            rate: null,
+            discount: '',
+            amount: 500,
           },
         ],
       })
@@ -515,11 +512,9 @@ describe('remapExtractionToActualPage — per-page extraction page-number correc
               quantity: null,
               quantity_raw_text: '',
               unit: '',
-              list_rate: null,
-              discount_pct: null,
-              discount_note: '',
-              net_rate: null,
-              line_amount: 500,
+              rate: null,
+              discount: '',
+              amount: 500,
             },
           ],
         }

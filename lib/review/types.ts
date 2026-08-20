@@ -35,11 +35,9 @@ export interface LineItemDetail {
   quantityRawText: { ocr: string | null; verified: string | null }
   unit: { ocr: string | null; verified: string | null }
   unitNormalized: string | null
-  listRate: { ocr: number | null; verified: number | null }
-  discountPct: { ocr: number | null; verified: number | null }
-  discountNote: { ocr: string | null; verified: string | null }
-  netRate: { ocr: number | null; verified: number | null }
-  lineAmount: { ocr: number | null; verified: number | null }
+  rate: { ocr: number | null; verified: number | null }
+  discount: { ocr: string | null; verified: string | null }
+  amount: { ocr: number | null; verified: number | null }
 }
 
 export interface HeaderFieldSet<T> {

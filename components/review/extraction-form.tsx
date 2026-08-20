@@ -41,11 +41,9 @@ export interface LineItemFormState {
   quantityRawText: string
   unit: string
   unitNormalized: string
-  listRate: string
-  discountPct: string
-  discountNote: string
-  netRate: string
-  lineAmount: string
+  rate: string
+  discount: string
+  amount: string
 }
 
 const TINT_CLASSES: Record<ConfidenceTint, string> = {
@@ -155,10 +153,8 @@ export const ExtractionForm = forwardRef(function ExtractionForm(
                 <th className="px-2 py-1.5">Qty</th>
                 <th className="px-2 py-1.5">Qty (raw)</th>
                 <th className="px-2 py-1.5">Unit</th>
-                <th className="px-2 py-1.5">List rate</th>
-                <th className="px-2 py-1.5">Disc %</th>
-                <th className="px-2 py-1.5">Disc note</th>
-                <th className="px-2 py-1.5">Net rate</th>
+                <th className="px-2 py-1.5">Rate</th>
+                <th className="px-2 py-1.5">Discount</th>
                 <th className="px-2 py-1.5">Amount</th>
               </tr>
             </thead>
@@ -208,31 +204,23 @@ export const ExtractionForm = forwardRef(function ExtractionForm(
                       </div>
                     </td>
                     <td className="min-w-24 px-1 py-1">
-                      <Input inputMode="decimal" disabled={disabled} className={tintClass} value={item.listRate}
-                        onChange={(e) => onLineItemChange(item.id, 'listRate', e.target.value)} onKeyDown={handleEnter} />
-                    </td>
-                    <td className="min-w-20 px-1 py-1">
-                      <Input inputMode="decimal" disabled={disabled} className={tintClass} value={item.discountPct}
-                        onChange={(e) => onLineItemChange(item.id, 'discountPct', e.target.value)} onKeyDown={handleEnter} />
+                      <Input inputMode="decimal" disabled={disabled} className={tintClass} value={item.rate}
+                        onChange={(e) => onLineItemChange(item.id, 'rate', e.target.value)} onKeyDown={handleEnter} />
                     </td>
                     <td className="min-w-28 px-1 py-1">
-                      <Input disabled={disabled} className={tintClass} value={item.discountNote}
-                        onChange={(e) => onLineItemChange(item.id, 'discountNote', e.target.value)} onKeyDown={handleEnter} />
+                      <Input disabled={disabled} className={tintClass} value={item.discount}
+                        onChange={(e) => onLineItemChange(item.id, 'discount', e.target.value)} onKeyDown={handleEnter} />
                     </td>
                     <td className="min-w-24 px-1 py-1">
-                      <Input inputMode="decimal" disabled={disabled} className={tintClass} value={item.netRate}
-                        onChange={(e) => onLineItemChange(item.id, 'netRate', e.target.value)} onKeyDown={handleEnter} />
-                    </td>
-                    <td className="min-w-24 px-1 py-1">
-                      <Input inputMode="decimal" disabled={disabled} className={tintClass} value={item.lineAmount}
-                        onChange={(e) => onLineItemChange(item.id, 'lineAmount', e.target.value)} onKeyDown={handleEnter} />
+                      <Input inputMode="decimal" disabled={disabled} className={tintClass} value={item.amount}
+                        onChange={(e) => onLineItemChange(item.id, 'amount', e.target.value)} onKeyDown={handleEnter} />
                     </td>
                   </tr>
                 )
               })}
               {lineItems.length === 0 ? (
                 <tr>
-                  <td colSpan={11} className="px-2 py-4 text-center text-sm text-muted-foreground">
+                  <td colSpan={9} className="px-2 py-4 text-center text-sm text-muted-foreground">
                     No line items were extracted from this document.
                   </td>
                 </tr>

@@ -142,7 +142,7 @@ async function runExtraction(pdfPath: string): Promise<ExtractionResult> {
     total_amount: bill?.total_amount ?? null,
     line_items: (bill?.line_items ?? []).map((item) => ({
       description: item.description ?? '',
-      amount: item.line_amount ?? 0,
+      amount: item.amount ?? 0,
     })),
     pages: extraction.pages.map((page) => ({
       page_number: page.page_number,

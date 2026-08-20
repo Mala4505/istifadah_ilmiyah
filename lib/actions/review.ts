@@ -38,11 +38,9 @@ export interface VerifiedLineItemInput {
   quantity_raw_text: string | null
   unit: string | null
   unit_normalized: string | null
-  list_rate: number | null
-  discount_pct: number | null
-  discount_note: string | null
-  net_rate: number | null
-  line_amount: number | null
+  rate: number | null
+  discount: string | null
+  amount: number | null
 }
 
 export interface SaveVerificationInput {

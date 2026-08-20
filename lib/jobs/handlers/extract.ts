@@ -444,11 +444,9 @@ export async function persistExtractionPipelineResult(
         quantity_ocr: item.quantity,
         quantity_raw_text_ocr: item.quantity_raw_text,
         unit_ocr: item.unit,
-        list_rate_ocr: item.list_rate,
-        discount_pct_ocr: item.discount_pct,
-        discount_note_ocr: item.discount_note,
-        net_rate_ocr: item.net_rate,
-        line_amount_ocr: item.line_amount,
+        rate_ocr: item.rate,
+        discount_ocr: item.discount,
+        amount_ocr: item.amount,
       }))
       const { error: itemError } = await admin
         .from('document_extraction_line_item')

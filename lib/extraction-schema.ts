@@ -165,7 +165,24 @@ export const extractionPageSchema = z.object({
 })
 export type ExtractionPage = z.infer<typeof extractionPageSchema>
 
-/** One line item, tagged with the page it came from (§8, §3.8). */
+/**
+ * One line item, tagged with the page it came from (§8, §3.8).
+ *
+ * Deliberately just `rate` + `amount`, not the earlier list_rate/discount_pct/
+ * net_rate/line_amount four-way split. That split asked the model to reverse-
+ * engineer a pre-discount "list" price and a discount percentage from
+ * invoices that almost never print either — the overwhelming majority of
+ * real bills print exactly ONE rate per line — so in practice the model just
+ * copied the same number into list_rate, net_rate, AND line_amount on every
+ * row (confirmed against production data: every non-null list_rate exactly
+ * equalled net_rate exactly equalled line_amount, every time, discount_pct
+ * always null). Three fields carrying one real number is not more precise
+ * than one field carrying it, it is just three places for that number to
+ * silently drift out of sync on a later edit. `discount` stays as free text
+ * for the rare invoice that DOES print an explicit discount line — there is
+ * no reliable structured discount_pct signal to extract, so it is not worth
+ * a numeric field.
+ */
 export const extractionLineItemSchema = z.object({
   page_number: z.number().int().positive(),
   line_order: z.number().int().nonnegative(),
@@ -174,11 +191,12 @@ export const extractionLineItemSchema = z.object({
   quantity: z.number().nullable(),
   quantity_raw_text: absentTextAsNull,
   unit: absentTextAsNull,
-  list_rate: z.number().nullable(),
-  discount_pct: z.number().nullable(),
-  discount_note: absentTextAsNull,
-  net_rate: z.number().nullable(),
-  line_amount: z.number().nullable(),
+  /** The actual per-unit price charged, as printed — not a pre-discount "list" price. */
+  rate: z.number().nullable(),
+  /** Free text for an explicit discount line/note the invoice prints, if any. */
+  discount: absentTextAsNull,
+  /** rate × quantity, or the line total as printed when that differs from the arithmetic. */
+  amount: z.number().nullable(),
 })
 export type ExtractionLineItem = z.infer<typeof extractionLineItemSchema>
 
@@ -355,11 +373,9 @@ export const extractionToolInputSchema = {
                 quantity: nullableNumber,
                 quantity_raw_text: textField,
                 unit: textField,
-                list_rate: nullableNumber,
-                discount_pct: nullableNumber,
-                discount_note: textField,
-                net_rate: nullableNumber,
-                line_amount: nullableNumber,
+                rate: nullableNumber,
+                discount: textField,
+                amount: nullableNumber,
               },
               required: [
                 'page_number',
@@ -369,11 +385,9 @@ export const extractionToolInputSchema = {
                 'quantity',
                 'quantity_raw_text',
                 'unit',
-                'list_rate',
-                'discount_pct',
-                'discount_note',
-                'net_rate',
-                'line_amount',
+                'rate',
+                'discount',
+                'amount',
               ],
             },
           },
@@ -425,7 +439,13 @@ export const EXTRACTION_TOOL_DESCRIPTION =
   'and only the instrument type tells those two cases apart. When a bill is a GST invoice, also ' +
   'capture place_of_supply (the state name or code printed as "Place of Supply") and report tax split ' +
   'by component — cgst_amount, sgst_amount, and igst_amount — instead of only a combined tax_amount, ' +
-  'and capture round_off when the invoice prints an explicit rounding line.'
+  'and capture round_off when the invoice prints an explicit rounding line. For each line item, `rate` ' +
+  'is the actual per-unit price charged as printed on the invoice — never a separate pre-discount "list" ' +
+  'price you back-calculate — and `amount` is rate × quantity, or the line total exactly as printed when ' +
+  'it differs from that arithmetic. When quantity is 1, rate and amount will legitimately be the same ' +
+  'number — write that number once in each field, do not invent a different value for one of them just to ' +
+  'make them look distinct. Only fill `discount` (free text) when the invoice itself prints an explicit ' +
+  'discount line or note; leave it empty rather than guessing a discount that is not shown.'
 
 /**
  * The exact shape `messages.create({ tools: [...] })` expects.
@@ -530,8 +550,8 @@ export function filterNonFinancialLineItems(extraction: ExtractionResponse): Ext
 
 /**
  * Drops any bill with no real MONEY in it: no `total_amount`, and (after
- * `filterNonFinancialLineItems` has already run) no line item carrying a
- * `line_amount` either. A vendor name or invoice number alone is deliberately
+ * `filterNonFinancialLineItems` has already run) no line item carrying an
+ * `amount` either. A vendor name or invoice number alone is deliberately
  * NOT enough to save a bill here — see below for why that's the line drawn.
  *
  * This exists specifically for the failure mode per-page extraction surfaced
@@ -563,7 +583,7 @@ export function dropEmptyBills(extraction: ExtractionResponse): ExtractionRespon
   return {
     ...extraction,
     bills: extraction.bills.filter(
-      (bill) => bill.total_amount !== null || bill.line_items.some((item) => item.line_amount !== null)
+      (bill) => bill.total_amount !== null || bill.line_items.some((item) => item.amount !== null)
     ),
   }
 }
@@ -704,7 +724,7 @@ export const LINE_ITEM_TEXT_FIELDS_TO_SANITIZE = [
   'hsn_sac_code',
   'quantity_raw_text',
   'unit',
-  'discount_note',
+  'discount',
 ] as const satisfies readonly (keyof ExtractionLineItem)[]
 
 /** Result of sanitizing a whole extraction response, every bill's header and every line item. */

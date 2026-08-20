@@ -188,7 +188,7 @@ async function loadDocumentDetail(
     supabase
       .from('document_extraction_line_item')
       .select(
-        'id, line_order, description_ocr, description_verified, hsn_sac_code_ocr, hsn_sac_code_verified, quantity_ocr, quantity_verified, quantity_raw_text_ocr, quantity_raw_text_verified, unit_ocr, unit_verified, unit_normalized, list_rate_ocr, list_rate_verified, discount_pct_ocr, discount_pct_verified, discount_note_ocr, discount_note_verified, net_rate_ocr, net_rate_verified, line_amount_ocr, line_amount_verified'
+        'id, line_order, description_ocr, description_verified, hsn_sac_code_ocr, hsn_sac_code_verified, quantity_ocr, quantity_verified, quantity_raw_text_ocr, quantity_raw_text_verified, unit_ocr, unit_verified, unit_normalized, rate_ocr, rate_verified, discount_ocr, discount_verified, amount_ocr, amount_verified'
       )
       .eq('document_extraction_id', documentExtractionId)
       .order('line_order'),
@@ -267,14 +267,9 @@ async function loadDocumentDetail(
     },
     unit: { ocr: li.unit_ocr as string | null, verified: li.unit_verified as string | null },
     unitNormalized: li.unit_normalized as string | null,
-    listRate: { ocr: li.list_rate_ocr as number | null, verified: li.list_rate_verified as number | null },
-    discountPct: { ocr: li.discount_pct_ocr as number | null, verified: li.discount_pct_verified as number | null },
-    discountNote: {
-      ocr: li.discount_note_ocr as string | null,
-      verified: li.discount_note_verified as string | null,
-    },
-    netRate: { ocr: li.net_rate_ocr as number | null, verified: li.net_rate_verified as number | null },
-    lineAmount: { ocr: li.line_amount_ocr as number | null, verified: li.line_amount_verified as number | null },
+    rate: { ocr: li.rate_ocr as number | null, verified: li.rate_verified as number | null },
+    discount: { ocr: li.discount_ocr as string | null, verified: li.discount_verified as string | null },
+    amount: { ocr: li.amount_ocr as number | null, verified: li.amount_verified as number | null },
   }))
 
   const pages: PageStatus[] = (pagesRes.data ?? []).map((p) => ({

@@ -75,11 +75,9 @@ function buildLineItemState(detail: ReviewDocumentDetail): LineItemFormState[] {
     quantityRawText: numToStr(li.quantityRawText.verified ?? li.quantityRawText.ocr),
     unit: numToStr(li.unit.verified ?? li.unit.ocr),
     unitNormalized: li.unitNormalized ?? '',
-    listRate: numToStr(li.listRate.verified ?? li.listRate.ocr),
-    discountPct: numToStr(li.discountPct.verified ?? li.discountPct.ocr),
-    discountNote: numToStr(li.discountNote.verified ?? li.discountNote.ocr),
-    netRate: numToStr(li.netRate.verified ?? li.netRate.ocr),
-    lineAmount: numToStr(li.lineAmount.verified ?? li.lineAmount.ocr),
+    rate: numToStr(li.rate.verified ?? li.rate.ocr),
+    discount: numToStr(li.discount.verified ?? li.discount.ocr),
+    amount: numToStr(li.amount.verified ?? li.amount.ocr),
   }))
 }
 
@@ -190,11 +188,9 @@ export function ReviewWorkspace({
           quantity_raw_text: li.quantityRawText.trim() || null,
           unit: li.unit.trim() || null,
           unit_normalized: rawUnit ? normalizeUnit(rawUnit) : null,
-          list_rate: parseNum(li.listRate),
-          discount_pct: parseNum(li.discountPct),
-          discount_note: li.discountNote.trim() || null,
-          net_rate: parseNum(li.netRate),
-          line_amount: parseNum(li.lineAmount),
+          rate: parseNum(li.rate),
+          discount: li.discount.trim() || null,
+          amount: parseNum(li.amount),
         }
       }),
       vendorId,
@@ -360,7 +356,7 @@ export function ReviewWorkspace({
   })
 
   const tint = confidenceTint(detail.extractionConfidence)
-  const lineItemSum = lineItems.length > 0 ? lineItems.reduce((sum, li) => sum + (parseNum(li.lineAmount) ?? 0), 0) : null
+  const lineItemSum = lineItems.length > 0 ? lineItems.reduce((sum, li) => sum + (parseNum(li.amount) ?? 0), 0) : null
   const documentTotal = parseNum(header.totalAmount)
   const formDisabled = claimState === 'blocked'
 
