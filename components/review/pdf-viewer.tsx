@@ -83,8 +83,17 @@ interface PdfDocumentProxy {
 
 export const PdfViewer = forwardRef<
   PdfViewerHandle,
-  { sourceDocumentId: number; pages?: PageStatus[]; uncertainFields?: UncertainField[]; collapsed?: boolean }
->(function PdfViewer({ sourceDocumentId, pages = [], uncertainFields = [], collapsed = false }, ref) {
+  {
+    sourceDocumentId: number
+    pages?: PageStatus[]
+    uncertainFields?: UncertainField[]
+    collapsed?: boolean
+    // Plan §2: lets the workspace's new nav cluster show/drive page position
+    // without lifting the whole pdf.js render loop up a level -- pageNumber
+    // and numPages otherwise live only in this component's own state.
+    onPageInfoChange?: (pageNumber: number, numPages: number) => void
+  }
+>(function PdfViewer({ sourceDocumentId, pages = [], uncertainFields = [], collapsed = false, onPageInfoChange }, ref) {
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   // 5.20 (checklist Phase 5, plan §13): bumped by the Retry button below to
@@ -127,6 +136,12 @@ export const PdfViewer = forwardRef<
     for (const p of pages) map.set(p.pageNumber, p)
     return map
   }, [pages])
+
+  // Plan §2: the workspace's nav cluster has no other way to know current
+  // position -- pageNumber/numPages were previously internal-only.
+  useEffect(() => {
+    onPageInfoChange?.(pageNumber, numPages)
+  }, [pageNumber, numPages, onPageInfoChange])
 
   // Highlight boxes for the page currently on screen, resolved into the
   // rotated viewport's own fraction space. Each field's bbox is captured in
@@ -368,32 +383,9 @@ export const PdfViewer = forwardRef<
         </div>
       ) : (
         <div className="flex items-center gap-1 border-b border-border bg-background px-2 py-1.5">
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            disabled={pageNumber <= 1}
-            onClick={() => setPageNumber((p) => Math.max(1, p - 1))}
-            aria-label="Previous page"
-            title="Previous page (← / ↑)"
-          >
-            <ChevronLeft className="h-4 w-4" />
-          </Button>
-          <span className="min-w-16 text-center text-xs text-muted-foreground">
-            {numPages > 0 ? `Page ${pageNumber} / ${numPages}` : '—'}
-          </span>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            disabled={pageNumber >= numPages}
-            onClick={() => setPageNumber((p) => Math.min(numPages, p + 1))}
-            aria-label="Next page"
-            title="Next page (→ / ↓)"
-          >
-            <ChevronRight className="h-4 w-4" />
-          </Button>
-          <div className="mx-1 h-4 w-px bg-border" />
+          {/* Plan §2: page position + Prev/Next moved to the workspace's nav
+              cluster (sourced via onPageInfoChange / pdfViewerRef) -- this
+              toolbar keeps only zoom/rotate/uncertain-count now. */}
           <Button
             type="button"
             variant="ghost"
