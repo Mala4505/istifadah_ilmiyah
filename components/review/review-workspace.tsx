@@ -22,9 +22,12 @@ import { toast } from 'sonner'
 import { toastError } from '@/components/ui/error-toast'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Label } from '@/components/ui/label'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { normalizeUnit } from '@/lib/normalize'
 import {
   claimReviewDocument,
+  saveEntryClassification,
   saveVerification,
   type SaveVerificationInput,
   type VendorSearchResult,
@@ -37,7 +40,10 @@ import { ClaimBanner } from './claim-banner'
 import { ShortcutsOverlay } from './shortcuts-overlay'
 import { ExceptionDialog } from './exception-dialog'
 import { HubStatusDialog } from './hub-status-dialog'
-import { EntryAttachCombobox } from './entry-attach-combobox'
+import { MatchStrip } from './match-strip'
+import { StageProgress, type StageStatus } from './stage-progress'
+
+const NONE = '__none__'
 
 // L3 (plan §11): confidence used to tint every field in the form; it now
 // lives only here, as one toolbar badge, colour-matched to confidenceTint's
@@ -221,6 +227,26 @@ export function ReviewWorkspace({
   const [confirmAction, setConfirmAction] = useState<
     { kind: 're-extract' } | { kind: 'navigate'; targetId: number } | null
   >(null)
+
+  // Stage 3 (Classify, §8) -- string state + NONE sentinel, same pattern as
+  // components/entries/detail/enrichment-form.tsx. Saved via
+  // saveEntryClassification (lib/actions/review.ts), not saveEntryEnrichment
+  // -- see that action's doc comment for why.
+  const [adminHeadId, setAdminHeadId] = useState<string>(
+    detail.entryAdminHeadId ? String(detail.entryAdminHeadId) : NONE
+  )
+  const [zoneId, setZoneId] = useState<string>(detail.entryZoneId ? String(detail.entryZoneId) : NONE)
+
+  // MatchStrip's attach/change actions call router.refresh() rather than
+  // navigating (no key change), so this component doesn't remount when
+  // `detail.entryId` changes mid-session -- re-seed explicitly whenever the
+  // matched entry (or its classification) changes underneath us, otherwise
+  // these two Selects would keep showing whatever was true for the
+  // previously-attached (or no) entry.
+  useEffect(() => {
+    setAdminHeadId(detail.entryAdminHeadId ? String(detail.entryAdminHeadId) : NONE)
+    setZoneId(detail.entryZoneId ? String(detail.entryZoneId) : NONE)
+  }, [detail.entryId, detail.entryAdminHeadId, detail.entryZoneId])
 
   const [claimState, setClaimState] = useState<'checking' | 'mine' | 'blocked'>('checking')
   const [claimInfo, setClaimInfo] = useState<{ displayName: string; claimedAt: string } | null>(null)
@@ -415,6 +441,25 @@ export function ReviewWorkspace({
         toastError(result.error, { context: 'review-workspace' })
         return
       }
+
+      // Stage 3 rides the same save (§8, "all three stages commit on the
+      // same Ctrl/Cmd+Enter") -- non-blocking per the plan, so a failure
+      // here surfaces a toast but does not undo the verification save or
+      // stop navigation to the next document.
+      if (detail.entryId !== null) {
+        const classificationResult = await saveEntryClassification({
+          entryId: detail.entryId,
+          adminHeadId: adminHeadId === NONE ? null : Number(adminHeadId),
+          zoneId: zoneId === NONE ? null : Number(zoneId),
+        })
+        if (!classificationResult.ok) {
+          toastError(classificationResult.error, {
+            title: 'Saved, but admin head/zone could not be saved.',
+            context: 'review-workspace',
+          })
+        }
+      }
+
       toast.success(
         result.rateReferenceRowsInserted > 0
           ? `Saved -- ${result.rateReferenceRowsInserted} rate reference row(s) recorded.`
@@ -559,6 +604,16 @@ export function ReviewWorkspace({
         setVendorAutocompleteOpen(true)
         return
       }
+      if (e.key.toLowerCase() === 'z') {
+        e.preventDefault()
+        document.getElementById('stage3-zone-select')?.focus()
+        return
+      }
+      if (e.key.toLowerCase() === 'h') {
+        e.preventDefault()
+        document.getElementById('stage3-admin-head-select')?.focus()
+        return
+      }
       if (/^[1-9]$/.test(e.key)) {
         e.preventDefault()
         const target = formContainerRef.current?.querySelector<HTMLElement>(`[data-line-jump-index="${e.key}"]`)
@@ -591,6 +646,16 @@ export function ReviewWorkspace({
   const lineItemSum = lineItems.length > 0 ? lineItems.reduce((sum, li) => sum + (parseNum(li.amount) ?? 0), 0) : null
   const documentTotal = parseNum(header.totalAmount)
   const formDisabled = claimState === 'blocked'
+
+  // Three-stage review flow (§8) -- legibility only, never gates Save.
+  // Stage 2 (Connect) gates stage 3 (Classify) becoming reachable; stage 1
+  // (Verify) has no hard gate of its own, it just reads as "done" once
+  // there's a match to move past.
+  const stage2Done = detail.entryId !== null
+  const stage3Done = stage2Done && adminHeadId !== NONE && zoneId !== NONE
+  const verifyStatus: StageStatus = stage2Done ? 'done' : 'current'
+  const connectStatus: StageStatus = stage2Done ? 'done' : 'current'
+  const classifyStatus: StageStatus = !stage2Done ? 'blocked' : stage3Done ? 'done' : 'current'
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-2">
@@ -702,16 +767,43 @@ export function ReviewWorkspace({
         ) : null}
       </div>
 
-      {detail.billCount > 1 ? (
-        <div className="flex flex-wrap items-center gap-2 rounded-md border border-border bg-background px-2 py-1.5">
-          <span className="text-xs text-muted-foreground">This bill&apos;s ledger match:</span>
-          <EntryAttachCombobox
-            documentExtractionId={detail.documentExtractionId}
-            entryDisplayLabel={detail.entryId !== null ? detail.entryUbblNumber : null}
-            onAttached={() => router.refresh()}
-          />
-        </div>
-      ) : null}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <StageProgress verify={verifyStatus} connect={connectStatus} classify={classifyStatus} />
+        {detail.billCount > 1 ? (
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-xs text-muted-foreground">Bills in this PDF:</span>
+            {detail.siblingBills.map((bill) => (
+              <button
+                key={bill.documentExtractionId}
+                type="button"
+                onClick={() => requestGoToDocument(bill.documentExtractionId)}
+                title={bill.matched ? 'Matched' : 'Unmatched'}
+                className={`flex h-6 min-w-6 items-center justify-center rounded-full border px-1.5 text-xs ${
+                  bill.documentExtractionId === detail.documentExtractionId
+                    ? 'border-primary bg-primary text-primary-foreground'
+                    : bill.matched
+                      ? 'border-emerald-300 bg-emerald-50 text-emerald-900 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-200'
+                      : 'border-border bg-background text-muted-foreground'
+                }`}
+              >
+                {bill.billIndex + 1}
+              </button>
+            ))}
+          </div>
+        ) : null}
+      </div>
+
+      <MatchStrip
+        documentExtractionId={detail.documentExtractionId}
+        sourceDocumentId={detail.sourceDocumentId}
+        entryId={detail.entryId}
+        entryUbblNumber={detail.entryUbblNumber}
+        entryVendorDisplayName={detail.entryVendorDisplayName}
+        entryAmount={detail.entryAmount}
+        liveTotalAmount={documentTotal}
+        matchCandidates={detail.matchCandidates}
+        onChanged={() => router.refresh()}
+      />
 
       <div ref={paneContainerRef} className="flex min-h-0 flex-1">
         <div
@@ -775,6 +867,53 @@ export function ReviewWorkspace({
       </div>
 
       <TallyFooter lineItemSum={lineItemSum} documentTotal={documentTotal} entryAmount={detail.entryAmount} />
+
+      <div className="flex flex-wrap items-end gap-3 rounded-md border border-border bg-background px-2 py-1.5">
+        <span className="text-xs font-medium text-muted-foreground">3 Classify</span>
+        {!stage2Done ? (
+          <span className="text-xs text-muted-foreground">Match this bill to an entry first</span>
+        ) : (
+          <>
+            <div className="flex flex-col gap-1">
+              <Label htmlFor="stage3-admin-head-select" className="text-xs">
+                Admin head (H)
+              </Label>
+              <Select value={adminHeadId} onValueChange={setAdminHeadId}>
+                <SelectTrigger id="stage3-admin-head-select" className="h-8 w-56 text-xs">
+                  <SelectValue placeholder="Not set" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={NONE}>Not set</SelectItem>
+                  {detail.adminHeadOptions.map((h) => (
+                    <SelectItem key={h.id} value={String(h.id)}>
+                      {h.head_number}. {h.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex flex-col gap-1">
+              <Label htmlFor="stage3-zone-select" className="text-xs">
+                Zone (Z)
+              </Label>
+              <Select value={zoneId} onValueChange={setZoneId}>
+                <SelectTrigger id="stage3-zone-select" className="h-8 w-56 text-xs">
+                  <SelectValue placeholder="Not set" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={NONE}>Not set</SelectItem>
+                  {detail.zoneOptions.map((z) => (
+                    <SelectItem key={z.id} value={String(z.id)}>
+                      {z.zone_number}. {z.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <span className="text-xs text-muted-foreground">Saved with the next Save (Ctrl/Cmd+Enter)</span>
+          </>
+        )}
+      </div>
 
       <Dialog
         open={confirmAction !== null}

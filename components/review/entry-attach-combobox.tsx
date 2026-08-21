@@ -27,12 +27,20 @@ export function EntryAttachCombobox({
   documentExtractionId,
   entryDisplayLabel,
   onAttached,
+  triggerLabel,
+  triggerVariant = 'outline',
 }: {
   documentExtractionId: number
   /** Currently-matched entry's display label (e.g. its UBBL number), or
    * null when this bill has no per-bill match yet. */
   entryDisplayLabel: string | null
   onAttached: () => void
+  /** Overrides the trigger button's text entirely (e.g. "Change" in
+   * match-strip.tsx's Matched state, where the ubbl/vendor/amount are
+   * already shown elsewhere in the strip). Falls back to entryDisplayLabel
+   * when omitted. */
+  triggerLabel?: string
+  triggerVariant?: 'outline' | 'ghost'
 }) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
@@ -82,14 +90,14 @@ export function EntryAttachCombobox({
       <PopoverTrigger asChild>
         <Button
           type="button"
-          variant="outline"
+          variant={triggerVariant}
           size="sm"
           role="combobox"
           aria-expanded={open}
           className="justify-between font-normal"
           onClick={() => setOpen(true)}
         >
-          <span className="truncate">{entryDisplayLabel ?? 'Not attached -- attach to entry'}</span>
+          <span className="truncate">{triggerLabel ?? entryDisplayLabel ?? 'Not attached -- attach to entry'}</span>
           <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
         </Button>
       </PopoverTrigger>
