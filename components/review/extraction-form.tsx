@@ -4,9 +4,11 @@
  * Split-pane's right half: header fields + line-items table (§7). Document
  * confidence is a single toolbar badge (ReviewWorkspace) -- painting every
  * field the same tint trained reviewers to ignore it (plan L3). Field-level
- * colour here is reserved for two per-field conditions that actually vary
- * row to row: an OCR uncertainty flag (orange ring) and a value the reviewer
- * edited away from the OCR baseline (blue ring) -- see UNCERTAIN_RING_CLASS
+ * colour here is reserved for three per-field conditions that actually vary
+ * row to row, in priority order: a validation failure (red ring, checklist
+ * 5.15 -- this value can't be parsed and will silently fail to save), an OCR
+ * uncertainty flag (orange ring), and a value the reviewer edited away from
+ * the OCR baseline (blue ring) -- see ERROR_RING_CLASS / UNCERTAIN_RING_CLASS
  * / EDITED_RING_CLASS. Field state is kept as plain strings, parsed to
  * numbers only at save time (ReviewWorkspace.buildSavePayload) -- a
  * controlled numeric `<input type="number">` fights the user mid-keystroke
@@ -17,6 +19,7 @@
 import type { Ref } from 'react'
 import { Fragment, forwardRef, useState } from 'react'
 import { ChevronRight } from 'lucide-react'
+import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
@@ -59,15 +62,24 @@ const UNIT_QUICK_PICKS = ['sqft', 'nos', 'day', 'kg', 'rft']
 
 /** A flagged field gets this ring -- an OCR-uncertainty flag takes priority
  * over an "edited from OCR" one (EDITED_RING_CLASS) when a field is both,
- * since the model doubting itself is the stronger signal to check. */
+ * since the model doubting itself is the stronger signal to check. Beaten
+ * only by ERROR_RING_CLASS below (checklist 5.15): a validation failure means
+ * this value will silently fail to save, which is more urgent than either. */
 const UNCERTAIN_RING_CLASS = 'ring-2 ring-orange-500 ring-offset-1 dark:ring-offset-background'
 
-/** A field the reviewer changed from its OCR baseline -- deliberately blue,
- * not red, since red/destructive is reserved for a future validation-error
- * state (plan L3, not built yet). Distinct from UNCERTAIN_RING_CLASS so
- * "the model wasn't sure" and "you changed this" never look like the same
- * thing. */
+/** A field the reviewer changed from its OCR baseline. Distinct from
+ * UNCERTAIN_RING_CLASS so "the model wasn't sure" and "you changed this"
+ * never look like the same thing; beaten by both UNCERTAIN_RING_CLASS and
+ * ERROR_RING_CLASS in priority. */
 const EDITED_RING_CLASS = 'ring-2 ring-blue-500 ring-offset-1 dark:ring-offset-background'
+
+/** Checklist 5.15 (plan §13 V1): the validation-error state 3.3's comment
+ * called out as "not built yet" -- an amount-shaped field whose text can't be
+ * parsed as a number, which today saves as a silent null. Outranks both
+ * UNCERTAIN_RING_CLASS and EDITED_RING_CLASS: a field that's both
+ * model-uncertain AND unparseable shows red, since "this will silently lose
+ * data" beats "the model wasn't sure." */
+const ERROR_RING_CLASS = 'ring-2 ring-red-500 ring-offset-1 dark:ring-offset-background'
 
 /** Per-field "differs from OCR" lookups, computed once in ReviewWorkspace
  * from `detail.header`/`detail.lineItems`' `.ocr` baselines against live form
@@ -80,6 +92,18 @@ export interface EditedFieldSets {
 }
 
 const EMPTY_EDITED_FIELDS: EditedFieldSets = { header: new Set(), lineItems: new Map() }
+
+/** Checklist 5.15: fields whose live value can't be parsed as a number
+ * (ReviewWorkspace's isUnparseableAmount) -- same shape as EditedFieldSets,
+ * covering only the amount-shaped fields buildSavePayload runs through
+ * parseNum (header subtotal/taxAmount/totalAmount; line-item
+ * quantity/rate/amount). Drives ERROR_RING_CLASS and blocks Save. */
+export interface ValidationErrorSets {
+  header: Set<keyof HeaderFormState>
+  lineItems: Map<number, Set<string>>
+}
+
+const EMPTY_VALIDATION_ERRORS: ValidationErrorSets = { header: new Set(), lineItems: new Map() }
 
 /** Maps HeaderFormState's camelCase keys to the wire field names
  * UNCERTAIN_FIELD_NAMES uses (lib/extraction-schema.ts) — 'notes' has no
@@ -123,6 +147,12 @@ export const ExtractionForm = forwardRef(function ExtractionForm(
     onVendorSelect,
     uncertainFields = [],
     editedFields = EMPTY_EDITED_FIELDS,
+    validationErrors = EMPTY_VALIDATION_ERRORS,
+    invoiceDateWarning = null,
+    onAddLineItem,
+    addingLineItem = false,
+    onReExtract,
+    onFlagException,
     onJumpToPage,
   }: {
     header: HeaderFormState
@@ -141,6 +171,26 @@ export const ExtractionForm = forwardRef(function ExtractionForm(
     /** Fields whose live value differs from its OCR baseline — drives the blue
      *  ring when a field isn't also flagged uncertain. */
     editedFields?: EditedFieldSets
+    /** Checklist 5.15: amount-shaped fields that couldn't be parsed as a
+     *  number — drives the red ring (highest priority) and Save is blocked
+     *  while this is non-empty. */
+    validationErrors?: ValidationErrorSets
+    /** Checklist 5.16: non-blocking advisory shown under Invoice Date when the
+     *  live value is strictly after today -- null when there's nothing to warn
+     *  about. */
+    invoiceDateWarning?: string | null
+    /** Checklist 5.21: "Add a row" in the empty-line-items state. Undefined
+     *  hides the button entirely (defensive; ReviewWorkspace always passes it). */
+    onAddLineItem?: () => void
+    /** True while an addLineItem() call is in flight -- disables the button so
+     *  a double-click can't insert two blank rows. */
+    addingLineItem?: boolean
+    /** Checklist 5.21: "Re-extract" in the empty-line-items state -- reuses
+     *  ReviewWorkspace's existing requestReExtract, not a new code path. */
+    onReExtract?: () => void
+    /** Checklist 5.21: "Flag exception" in the empty-line-items state -- reuses
+     *  ReviewWorkspace's existing setExceptionOpen(true), not a new code path. */
+    onFlagException?: () => void
     /** Called with a field's source page when a flagged field is clicked/focused. */
     onJumpToPage?: (pageNumber: number) => void
   },
@@ -192,6 +242,14 @@ export const ExtractionForm = forwardRef(function ExtractionForm(
 
   function lineItemEdited(lineOrder: number, key: string): boolean {
     return editedFields.lineItems.get(lineOrder)?.has(key) ?? false
+  }
+
+  function headerError(key: keyof HeaderFormState): boolean {
+    return validationErrors.header.has(key)
+  }
+
+  function lineItemError(lineOrder: number, key: string): boolean {
+    return validationErrors.lineItems.get(lineOrder)?.has(key) ?? false
   }
 
   // L2 (plan §10, checklist 3.11-3.13): a 12-line invoice was 108 inputs plus
@@ -290,19 +348,19 @@ export const ExtractionForm = forwardRef(function ExtractionForm(
         <Field label="Invoice date" type="date" disabled={disabled} onKeyDown={handleEnter}
           value={header.invoiceDate} onChange={(v) => onHeaderChange('invoiceDate', v)}
           uncertain={headerUncertainty('invoiceDate')} uncertainIndex={uncertainIndexOf(headerUncertainty('invoiceDate'))}
-          edited={headerEdited('invoiceDate')} onJumpToPage={onJumpToPage} />
+          edited={headerEdited('invoiceDate')} onJumpToPage={onJumpToPage} warning={invoiceDateWarning} />
         <Field label="Subtotal" inputMode="decimal" disabled={disabled} onKeyDown={handleEnter}
           value={header.subtotal} onChange={(v) => onHeaderChange('subtotal', v)}
           uncertain={headerUncertainty('subtotal')} uncertainIndex={uncertainIndexOf(headerUncertainty('subtotal'))}
-          edited={headerEdited('subtotal')} onJumpToPage={onJumpToPage} />
+          edited={headerEdited('subtotal')} error={headerError('subtotal')} onJumpToPage={onJumpToPage} />
         <Field label="Tax amount" inputMode="decimal" disabled={disabled} onKeyDown={handleEnter}
           value={header.taxAmount} onChange={(v) => onHeaderChange('taxAmount', v)}
           uncertain={headerUncertainty('taxAmount')} uncertainIndex={uncertainIndexOf(headerUncertainty('taxAmount'))}
-          edited={headerEdited('taxAmount')} onJumpToPage={onJumpToPage} />
+          edited={headerEdited('taxAmount')} error={headerError('taxAmount')} onJumpToPage={onJumpToPage} />
         <Field label="Total amount" inputMode="decimal" disabled={disabled} onKeyDown={handleEnter}
           value={header.totalAmount} onChange={(v) => onHeaderChange('totalAmount', v)}
           uncertain={headerUncertainty('totalAmount')} uncertainIndex={uncertainIndexOf(headerUncertainty('totalAmount'))}
-          edited={headerEdited('totalAmount')} onJumpToPage={onJumpToPage} />
+          edited={headerEdited('totalAmount')} error={headerError('totalAmount')} onJumpToPage={onJumpToPage} />
         <div className="col-span-2 flex flex-col gap-1.5">
           <Label>
             Notes
@@ -352,14 +410,28 @@ export const ExtractionForm = forwardRef(function ExtractionForm(
                 const rateUncertainIndex = uncertainIndexOf(rateUncertain)
                 const discountUncertainIndex = uncertainIndexOf(discountUncertain)
                 const amountUncertainIndex = uncertainIndexOf(amountUncertain)
-                const ringClass = (uncertain: UncertainField | undefined, editedKey: string) =>
-                  uncertain ? UNCERTAIN_RING_CLASS : lineItemEdited(item.lineOrder, editedKey) ? EDITED_RING_CLASS : ''
-                const titleFor = (uncertain: UncertainField | undefined, editedKey: string) =>
-                  uncertain
-                    ? 'Model was uncertain about this value — click to jump to the source page'
-                    : lineItemEdited(item.lineOrder, editedKey)
-                      ? 'Edited from the original OCR value'
-                      : undefined
+                const qtyError = lineItemError(item.lineOrder, 'quantity')
+                const rateError = lineItemError(item.lineOrder, 'rate')
+                const amountError = lineItemError(item.lineOrder, 'amount')
+                // 5.15: error outranks uncertain outranks edited -- a field
+                // that's both model-uncertain and unparseable still shows
+                // red, since it will silently fail to save either way.
+                const ringClass = (uncertain: UncertainField | undefined, editedKey: string, error = false) =>
+                  error
+                    ? ERROR_RING_CLASS
+                    : uncertain
+                      ? UNCERTAIN_RING_CLASS
+                      : lineItemEdited(item.lineOrder, editedKey)
+                        ? EDITED_RING_CLASS
+                        : ''
+                const titleFor = (uncertain: UncertainField | undefined, editedKey: string, error = false) =>
+                  error
+                    ? 'This value could not be read as a number and will not be saved -- fix or clear it'
+                    : uncertain
+                      ? 'Model was uncertain about this value — click to jump to the source page'
+                      : lineItemEdited(item.lineOrder, editedKey)
+                        ? 'Edited from the original OCR value'
+                        : undefined
                 const expanded = expandedRows.has(item.id)
                 const rowFocusProps = {
                   'data-row-id': item.id,
@@ -402,8 +474,9 @@ export const ExtractionForm = forwardRef(function ExtractionForm(
                       <td className="min-w-20 px-1 py-1">
                         <Input inputMode="decimal" disabled={disabled}
                           data-uncertain-index={qtyUncertainIndex}
-                          className={ringClass(qtyUncertain, 'quantity')}
-                          title={titleFor(qtyUncertain, 'quantity')}
+                          data-validation-error={qtyError ? 'true' : undefined}
+                          className={ringClass(qtyUncertain, 'quantity', qtyError)}
+                          title={titleFor(qtyUncertain, 'quantity', qtyError)}
                           onFocus={() => qtyUncertain && onJumpToPage?.(qtyUncertain.pageNumber)}
                           value={item.quantity}
                           onChange={(e) => onLineItemChange(item.id, 'quantity', e.target.value)} onKeyDown={handleEnter} />
@@ -431,8 +504,9 @@ export const ExtractionForm = forwardRef(function ExtractionForm(
                       <td className="min-w-24 px-1 py-1">
                         <Input inputMode="decimal" disabled={disabled}
                           data-uncertain-index={rateUncertainIndex}
-                          className={ringClass(rateUncertain, 'rate')}
-                          title={titleFor(rateUncertain, 'rate')}
+                          data-validation-error={rateError ? 'true' : undefined}
+                          className={ringClass(rateUncertain, 'rate', rateError)}
+                          title={titleFor(rateUncertain, 'rate', rateError)}
                           onFocus={() => rateUncertain && onJumpToPage?.(rateUncertain.pageNumber)}
                           value={item.rate}
                           onChange={(e) => onLineItemChange(item.id, 'rate', e.target.value)} onKeyDown={handleEnter} />
@@ -440,8 +514,9 @@ export const ExtractionForm = forwardRef(function ExtractionForm(
                       <td className="min-w-24 px-1 py-1">
                         <Input inputMode="decimal" disabled={disabled}
                           data-uncertain-index={amountUncertainIndex}
-                          className={ringClass(amountUncertain, 'amount')}
-                          title={titleFor(amountUncertain, 'amount')}
+                          data-validation-error={amountError ? 'true' : undefined}
+                          className={ringClass(amountUncertain, 'amount', amountError)}
+                          title={titleFor(amountUncertain, 'amount', amountError)}
                           onFocus={() => amountUncertain && onJumpToPage?.(amountUncertain.pageNumber)}
                           value={item.amount}
                           onChange={(e) => onLineItemChange(item.id, 'amount', e.target.value)} onKeyDown={handleEnter} />
@@ -480,9 +555,25 @@ export const ExtractionForm = forwardRef(function ExtractionForm(
                 )
               })}
               {lineItems.length === 0 ? (
+                // 5.21: an empty extraction was previously a dead end -- just
+                // a sentence with no next step. All three actions here reuse
+                // existing ReviewWorkspace machinery (requestReExtract,
+                // setExceptionOpen); only "Add a row" is new (addLineItem,
+                // lib/actions/review.ts).
                 <tr>
                   <td colSpan={6} className="px-2 py-4 text-center text-sm text-muted-foreground">
-                    No line items were extracted from this document.
+                    <p>No line items were extracted from this document.</p>
+                    <div className="mt-2 flex flex-wrap items-center justify-center gap-2">
+                      <Button type="button" size="sm" variant="outline" disabled={disabled || addingLineItem} onClick={onAddLineItem}>
+                        {addingLineItem ? 'Adding…' : 'Add a row'}
+                      </Button>
+                      <Button type="button" size="sm" variant="outline" onClick={onReExtract}>
+                        Re-extract
+                      </Button>
+                      <Button type="button" size="sm" variant="outline" onClick={onFlagException}>
+                        Flag exception
+                      </Button>
+                    </div>
                   </td>
                 </tr>
               ) : null}
@@ -505,6 +596,8 @@ function Field({
   uncertain,
   uncertainIndex,
   edited = false,
+  error = false,
+  warning = null,
   onJumpToPage,
 }: {
   label: string
@@ -521,14 +614,25 @@ function Field({
   uncertainIndex?: number
   /** True when the live value differs from its OCR baseline. */
   edited?: boolean
+  /** Checklist 5.15: true when this value can't be parsed as a number --
+   *  outranks both `uncertain` and `edited` for ring colour/title, and marks
+   *  `data-validation-error` so ReviewWorkspace's handleSave can focus it. */
+  error?: boolean
+  /** Checklist 5.16: non-blocking advisory rendered under the field (e.g.
+   *  "This invoice date is in the future.") -- null renders nothing. Distinct
+   *  from `error`: this never blocks Save or affects the ring colour. */
+  warning?: string | null
   onJumpToPage?: (pageNumber: number) => void
 }) {
   return (
     <div className="flex flex-col gap-1.5">
       <Label>
         {label}
-        {uncertain ? <span className="ml-1 text-orange-500" title="Model was uncertain about this value">●</span> : null}
-        {!uncertain && edited ? (
+        {error ? (
+          <span className="ml-1 text-red-500" title="This value could not be read as a number and will not be saved">●</span>
+        ) : uncertain ? (
+          <span className="ml-1 text-orange-500" title="Model was uncertain about this value">●</span>
+        ) : edited ? (
           <span className="ml-1 text-blue-500" title="Edited from the original OCR value">●</span>
         ) : null}
       </Label>
@@ -537,19 +641,23 @@ function Field({
         inputMode={inputMode}
         disabled={disabled}
         data-uncertain-index={uncertainIndex}
-        className={uncertain ? UNCERTAIN_RING_CLASS : edited ? EDITED_RING_CLASS : ''}
+        data-validation-error={error ? 'true' : undefined}
+        className={error ? ERROR_RING_CLASS : uncertain ? UNCERTAIN_RING_CLASS : edited ? EDITED_RING_CLASS : ''}
         title={
-          uncertain
-            ? 'Model was uncertain about this value — click to jump to the source page'
-            : edited
-              ? 'Edited from the original OCR value'
-              : undefined
+          error
+            ? 'This value could not be read as a number and will not be saved — fix or clear it'
+            : uncertain
+              ? 'Model was uncertain about this value — click to jump to the source page'
+              : edited
+                ? 'Edited from the original OCR value'
+                : undefined
         }
         onFocus={() => uncertain && onJumpToPage?.(uncertain.pageNumber)}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         onKeyDown={onKeyDown}
       />
+      {warning ? <p className="text-xs text-amber-600 dark:text-amber-400">{warning}</p> : null}
     </div>
   )
 }
