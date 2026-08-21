@@ -16,6 +16,7 @@ const SHORTCUTS: [string, string][] = [
   ['1-9', 'Jump to line item n'],
   ['/', 'Focus vendor autocomplete'],
   ['S', 'Set Hub status, with a note'],
+  ['\\', 'Cycle PDF pane: Split / Collapsed / Document'],
   ['?', 'This overlay'],
 ]
 
@@ -37,8 +38,8 @@ export function ShortcutsOverlay({ open, onOpenChange }: { open: boolean; onOpen
           ))}
         </dl>
         <p className="text-xs text-muted-foreground">
-          Page Up/Down, arrows, E, Shift+R, digits, / and S only act outside a focused text field -- typing amounts
-          and notes is never intercepted.
+          Page Up/Down, arrows, E, Shift+R, digits, /, S and \ only act outside a focused text field -- typing
+          amounts and notes is never intercepted.
         </p>
       </DialogContent>
     </Dialog>

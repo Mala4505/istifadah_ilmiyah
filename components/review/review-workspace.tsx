@@ -16,7 +16,7 @@
  * document.
  */
 
-import { useEffect, useMemo, useRef, useState, useTransition } from 'react'
+import { useEffect, useMemo, useRef, useState, useTransition, type PointerEvent as ReactPointerEvent } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { toastError } from '@/components/ui/error-toast'
@@ -29,15 +29,52 @@ import {
   type SaveVerificationInput,
   type VendorSearchResult,
 } from '@/lib/actions/review'
-import { confidenceTint, type ReviewDocumentDetail } from '@/lib/review/types'
+import { confidenceTint, type ConfidenceTint, type ReviewDocumentDetail } from '@/lib/review/types'
 import { PdfViewer, type PdfViewerHandle } from './pdf-viewer'
-import { ExtractionForm, type HeaderFormState, type LineItemFormState } from './extraction-form'
+import { ExtractionForm, type EditedFieldSets, type HeaderFormState, type LineItemFormState } from './extraction-form'
 import { TallyFooter } from './tally-footer'
 import { ClaimBanner } from './claim-banner'
 import { ShortcutsOverlay } from './shortcuts-overlay'
 import { ExceptionDialog } from './exception-dialog'
 import { HubStatusDialog } from './hub-status-dialog'
 import { EntryAttachCombobox } from './entry-attach-combobox'
+
+// L3 (plan §11): confidence used to tint every field in the form; it now
+// lives only here, as one toolbar badge, colour-matched to confidenceTint's
+// same 0.9/0.7 thresholds so the badge and the (removed) field tint would
+// never have disagreed.
+const CONFIDENCE_BADGE_CLASSES: Record<ConfidenceTint, string> = {
+  green: 'border-emerald-300 bg-emerald-50 text-emerald-900 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-200',
+  amber: 'border-amber-300 bg-amber-50 text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200',
+  red: 'border-red-300 bg-red-50 text-red-900 dark:border-red-800 dark:bg-red-950 dark:text-red-200',
+  none: 'border-border bg-background text-muted-foreground',
+}
+
+// L1 (checklist 3.4-3.6): the PDF/form split is a working style, not a
+// per-document decision -- a reviewer who works Collapsed stays Collapsed
+// across the whole queue, so both the named mode and the dragged ratio
+// persist in localStorage rather than component state.
+const PANE_MODE_KEY = 'review-pdf-pane-mode'
+const PANE_SPLIT_KEY = 'review-pdf-pane-split'
+const SPLIT_PERCENT_BOUNDS = { min: 15, max: 85 }
+const PANE_MODE_DEFAULT_SPLIT: Record<'split' | 'document', number> = { split: 50, document: 75 }
+const COLLAPSED_PANE_WIDTH_PX = 120
+
+type PdfPaneMode = 'split' | 'collapsed' | 'document'
+
+function readStoredPaneMode(): PdfPaneMode {
+  if (typeof window === 'undefined') return 'split'
+  const stored = window.localStorage.getItem(PANE_MODE_KEY)
+  return stored === 'split' || stored === 'collapsed' || stored === 'document' ? stored : 'split'
+}
+
+function readStoredSplitPercent(): number {
+  if (typeof window === 'undefined') return PANE_MODE_DEFAULT_SPLIT.split
+  const stored = Number(window.localStorage.getItem(PANE_SPLIT_KEY))
+  return Number.isFinite(stored) && stored >= SPLIT_PERCENT_BOUNDS.min && stored <= SPLIT_PERCENT_BOUNDS.max
+    ? stored
+    : PANE_MODE_DEFAULT_SPLIT.split
+}
 
 function numToStr(v: string | number | null): string {
   return v === null || v === undefined ? '' : String(v)
@@ -119,6 +156,43 @@ export function ReviewWorkspace({
     [header, lineItems]
   )
 
+  // L3 (plan §11, checklist 3.3): "edited from OCR" is a different question
+  // from `dirty` above -- dirty compares against this mount's initial
+  // snapshot (which may already include a previous reviewer's corrections);
+  // this compares the live value against `detail.header`/`detail.lineItems`'
+  // `.ocr` baseline, so a field corrected in an earlier pass and left
+  // untouched now still reads as edited. Feeds ExtractionForm's blue ring
+  // and drives L2's per-row auto-expand.
+  const editedFields = useMemo<EditedFieldSets>(() => {
+    const headerSet = new Set<keyof HeaderFormState>()
+    for (const key of Object.keys(header) as (keyof HeaderFormState)[]) {
+      if (header[key].trim() !== numToStr(detail.header[key].ocr).trim()) headerSet.add(key)
+    }
+    const lineItemsMap = new Map<number, Set<string>>()
+    for (const li of lineItems) {
+      const baseline = detail.lineItems.find((d) => d.id === li.id)
+      if (!baseline) continue
+      const editedKeys = new Set<string>()
+      const checks: [string, string, string | number | null][] = [
+        ['description', li.description, baseline.description.ocr],
+        ['hsnSacCode', li.hsnSacCode, baseline.hsnSacCode.ocr],
+        ['quantity', li.quantity, baseline.quantity.ocr],
+        ['quantityRawText', li.quantityRawText, baseline.quantityRawText.ocr],
+        // The Unit column edits/displays `unitNormalized`, not `unit` --
+        // compare what's shown against the same OCR baseline it started from.
+        ['unitNormalized', li.unitNormalized || li.unit, baseline.unit.ocr],
+        ['rate', li.rate, baseline.rate.ocr],
+        ['discount', li.discount, baseline.discount.ocr],
+        ['amount', li.amount, baseline.amount.ocr],
+      ]
+      for (const [key, liveValue, ocrValue] of checks) {
+        if (liveValue.trim() !== numToStr(ocrValue).trim()) editedKeys.add(key)
+      }
+      if (editedKeys.size > 0) lineItemsMap.set(li.lineOrder, editedKeys)
+    }
+    return { header: headerSet, lineItems: lineItemsMap }
+  }, [header, lineItems, detail])
+
   // Pending action awaiting confirmation because it would discard unsaved
   // edits (re-extract, or navigating away). Reused for both so there is one
   // dialog and one place that decides "does this need confirming."
@@ -136,6 +210,57 @@ export function ReviewWorkspace({
   const [reExtracting, setReExtracting] = useState(false)
 
   const [isSaving, startSaving] = useTransition()
+
+  // L1 -- PDF pane mode (checklist 3.4-3.10). Lazy initializers read
+  // localStorage once, guarded for SSR (this component is 'use client' but
+  // Next.js still evaluates the initial render pass server-side).
+  const [paneMode, setPaneMode] = useState<PdfPaneMode>(readStoredPaneMode)
+  const [splitPercent, setSplitPercent] = useState<number>(readStoredSplitPercent)
+  const [isDraggingDivider, setIsDraggingDivider] = useState(false)
+  const paneContainerRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    window.localStorage.setItem(PANE_MODE_KEY, paneMode)
+  }, [paneMode])
+
+  useEffect(() => {
+    window.localStorage.setItem(PANE_SPLIT_KEY, String(splitPercent))
+  }, [splitPercent])
+
+  // \ cycles Split -> Collapsed -> Document -> Split. Snaps to each mode's
+  // canonical ratio -- the drag handler below is what makes the ratio
+  // continuous in between.
+  function cyclePaneMode() {
+    const next: PdfPaneMode = paneMode === 'split' ? 'collapsed' : paneMode === 'collapsed' ? 'document' : 'split'
+    setPaneMode(next)
+    if (next === 'split' || next === 'document') {
+      setSplitPercent(PANE_MODE_DEFAULT_SPLIT[next])
+    }
+  }
+
+  function handleDividerPointerDown(e: ReactPointerEvent<HTMLDivElement>) {
+    e.preventDefault()
+    e.currentTarget.setPointerCapture(e.pointerId)
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+    setIsDraggingDivider(true)
+  }
+
+  function handleDividerPointerMove(e: ReactPointerEvent<HTMLDivElement>) {
+    if (!isDraggingDivider) return
+    const container = paneContainerRef.current
+    if (!container) return
+    const rect = container.getBoundingClientRect()
+    const percent = ((e.clientX - rect.left) / rect.width) * 100
+    setSplitPercent(Math.min(SPLIT_PERCENT_BOUNDS.max, Math.max(SPLIT_PERCENT_BOUNDS.min, percent)))
+  }
+
+  function handleDividerPointerUp(e: ReactPointerEvent<HTMLDivElement>) {
+    document.body.style.cursor = ''
+    document.body.style.userSelect = ''
+    setIsDraggingDivider(false)
+    e.currentTarget.releasePointerCapture(e.pointerId)
+  }
 
   // Claim/lock (§7): attempt to claim on mount; surface a takeover prompt
   // instead of silently overwriting someone else's active claim.
@@ -380,6 +505,12 @@ export function ReviewWorkspace({
         pdfViewerRef.current?.prevPage()
         return
       }
+      // PDF pane mode (L1, checklist 3.5): Split -> Collapsed -> Document -> Split.
+      if (e.key === '\\') {
+        e.preventDefault()
+        cyclePaneMode()
+        return
+      }
       if (e.key.toLowerCase() === 'e') {
         e.preventDefault()
         setExceptionOpen(true)
@@ -508,6 +639,15 @@ export function ReviewWorkspace({
         <span className="text-xs text-muted-foreground">
           Document {currentIndex + 1} of {queue.length}
         </span>
+        {detail.extractionConfidence !== null || detail.model || detail.legibility ? (
+          <span
+            className={`rounded-full border px-2 py-0.5 text-xs ${CONFIDENCE_BADGE_CLASSES[tint]}`}
+          >
+            {detail.extractionConfidence !== null ? `${Math.round(detail.extractionConfidence * 100)}% confidence` : 'Confidence unknown'}
+            {detail.model ? ` · ${detail.model}` : ''}
+            {detail.legibility ? ` · ${detail.legibility}` : ''}
+          </span>
+        ) : null}
         {detail.billCount > 1 ? (
           <span className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
             Bill {detail.billIndex + 1} of {detail.billCount} in this PDF
@@ -526,31 +666,65 @@ export function ReviewWorkspace({
         </div>
       ) : null}
 
-      <div className="grid min-h-0 flex-1 grid-cols-2 gap-3">
-        <PdfViewer
-          ref={pdfViewerRef}
-          sourceDocumentId={detail.sourceDocumentId}
-          pages={detail.pages}
-          uncertainFields={detail.uncertainFields}
-        />
-        <ExtractionForm
-          ref={formContainerRef}
-          header={header}
-          onHeaderChange={(field, value) => setHeader((h) => ({ ...h, [field]: value }))}
-          lineItems={lineItems}
-          onLineItemChange={(id, field, value) =>
-            setLineItems((items) => items.map((li) => (li.id === id ? { ...li, [field]: value } : li)))
-          }
-          tint={tint}
-          disabled={formDisabled}
-          onFieldEnter={handleFieldEnter}
-          vendorId={vendorId}
-          vendorAutocompleteOpen={vendorAutocompleteOpen}
-          onVendorAutocompleteOpenChange={setVendorAutocompleteOpen}
-          onVendorSelect={handleVendorSelect}
-          uncertainFields={detail.uncertainFields}
-          onJumpToPage={(pageNumber) => pdfViewerRef.current?.goToPage(pageNumber)}
-        />
+      <div ref={paneContainerRef} className="flex min-h-0 flex-1">
+        <div
+          className="min-h-0 min-w-0 flex-shrink-0"
+          style={{ width: paneMode === 'collapsed' ? COLLAPSED_PANE_WIDTH_PX : `${splitPercent}%` }}
+        >
+          <PdfViewer
+            ref={pdfViewerRef}
+            sourceDocumentId={detail.sourceDocumentId}
+            pages={detail.pages}
+            uncertainFields={detail.uncertainFields}
+            collapsed={paneMode === 'collapsed'}
+          />
+        </div>
+
+        {paneMode === 'collapsed' ? (
+          <div className="w-3 flex-shrink-0" />
+        ) : (
+          // Draggable divider (checklist 3.4): continuous, not limited to the
+          // three preset stops -- \ snaps to a mode's canonical ratio, this
+          // adjusts splitPercent to anything in between.
+          <div
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Resize PDF and form panes"
+            className="mx-1 w-1.5 flex-shrink-0 cursor-col-resize touch-none rounded bg-border hover:bg-primary/50"
+            onPointerDown={handleDividerPointerDown}
+            onPointerMove={handleDividerPointerMove}
+            onPointerUp={handleDividerPointerUp}
+          />
+        )}
+
+        <div className="min-h-0 min-w-0 flex-1">
+          <ExtractionForm
+            ref={formContainerRef}
+            header={header}
+            onHeaderChange={(field, value) => setHeader((h) => ({ ...h, [field]: value }))}
+            lineItems={lineItems}
+            onLineItemChange={(id, field, value) =>
+              setLineItems((items) => items.map((li) => (li.id === id ? { ...li, [field]: value } : li)))
+            }
+            disabled={formDisabled}
+            onFieldEnter={handleFieldEnter}
+            vendorId={vendorId}
+            vendorAutocompleteOpen={vendorAutocompleteOpen}
+            onVendorAutocompleteOpenChange={setVendorAutocompleteOpen}
+            onVendorSelect={handleVendorSelect}
+            uncertainFields={detail.uncertainFields}
+            editedFields={editedFields}
+            onJumpToPage={(pageNumber) => {
+              pdfViewerRef.current?.goToPage(pageNumber)
+              // Checklist 3.10: a collapsed spine can't actually show the
+              // page being jumped to -- expand so the reviewer can see it.
+              if (paneMode === 'collapsed') {
+                setPaneMode('split')
+                setSplitPercent(PANE_MODE_DEFAULT_SPLIT.split)
+              }
+            }}
+          />
+        </div>
       </div>
 
       <TallyFooter lineItemSum={lineItemSum} documentTotal={documentTotal} entryAmount={detail.entryAmount} />

@@ -41,11 +41,18 @@ export interface PdfViewerHandle {
   goToPage: (pageNumber: number) => void
 }
 
+// L1 (checklist 3.5): the render effect fits the page to whatever width the
+// pane is currently given, rather than a fixed pixel scale -- this is what
+// makes Collapsed mode show a small legible page instead of an
+// overflowing/underflowing one, and keeps the page fitted while the reviewer
+// drags the pane divider. `p-3` on the content wrapper below is 12px/side.
+const CONTENT_PADDING_PX = 24
+
 // Minimal shape of what this component actually calls, so it doesn't need to
 // import pdfjs-dist's full type surface (imported dynamically below anyway).
 interface PdfPageProxy {
   getViewport(params: { scale: number; rotation?: number }): { width: number; height: number }
-  render(params: { canvasContext: CanvasRenderingContext2D; viewport: unknown }): { promise: Promise<void> }
+  render(params: { canvasContext: CanvasRenderingContext2D; viewport: unknown }): { promise: Promise<void>; cancel: () => void }
 }
 interface PdfDocumentProxy {
   numPages: number
@@ -55,22 +62,39 @@ interface PdfDocumentProxy {
 
 export const PdfViewer = forwardRef<
   PdfViewerHandle,
-  { sourceDocumentId: number; pages?: PageStatus[]; uncertainFields?: UncertainField[] }
->(function PdfViewer({ sourceDocumentId, pages = [], uncertainFields = [] }, ref) {
+  { sourceDocumentId: number; pages?: PageStatus[]; uncertainFields?: UncertainField[]; collapsed?: boolean }
+>(function PdfViewer({ sourceDocumentId, pages = [], uncertainFields = [], collapsed = false }, ref) {
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [numPages, setNumPages] = useState(0)
   const [pageNumber, setPageNumber] = useState(1)
-  const [scale, setScale] = useState(1.1)
+  // Manual zoom multiplier on top of the fit-width base scale computed below
+  // -- 1 means "exactly fit the pane," not "no zoom applied at a fixed pixel
+  // size" like the old fixed-scale render did.
+  const [zoom, setZoom] = useState(1)
   const [rotation, setRotation] = useState(0)
   // Tracks the canvas's own rendered pixel size so the highlight-box overlay
   // below (a sibling, absolutely positioned) can size itself to match exactly
   // — see the overlay wrapper's comment for why percentages alone aren't enough.
   const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 })
+  // Width of the content wrapper below, kept in sync by the ResizeObserver
+  // effect further down -- the render effect fits the page to this on every
+  // change, which is what re-renders the canvas across drag-resize and pane
+  // mode cycling (L1, checklist 3.8).
+  const [containerWidth, setContainerWidth] = useState(0)
 
   const docRef = useRef<PdfDocumentProxy | null>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
+  const contentRef = useRef<HTMLDivElement | null>(null)
   const thumbCanvasRefs = useRef<Map<number, HTMLCanvasElement>>(new Map())
+  // The in-flight pdf.js render task on the main canvas, if any -- pdf.js
+  // throws "Cannot use the same canvas during multiple render() operations"
+  // if a second render() starts on the same canvas before the first
+  // finishes, which the fit-width ResizeObserver below makes easy to hit
+  // (several containerWidth ticks can land in quick succession while the
+  // pane layout settles). Cancelling whatever's running before starting a
+  // new one avoids that.
+  const renderTaskRef = useRef<{ promise: Promise<void>; cancel: () => void } | null>(null)
 
   const pageStatusByNumber = useMemo(() => {
     const map = new Map<number, PageStatus>()
@@ -149,29 +173,86 @@ export const PdfViewer = forwardRef<
     }
   }, [sourceDocumentId])
 
-  // Render the current page whenever page/scale/rotation changes.
+  // Measure the content wrapper's own width and re-measure on resize -- the
+  // wrapper stays mounted at every pane mode/width (never conditionally
+  // rendered, so pdf.js's document never tears down -- checklist 3.7), only
+  // its CSS width changes as the review workspace's divider moves or the
+  // pane mode cycles. requestAnimationFrame coalesces bursts of resize
+  // notifications during an active drag into one measurement per frame.
+  useEffect(() => {
+    const el = contentRef.current
+    if (!el) return
+    let frame: number | null = null
+    const observer = new ResizeObserver((entries) => {
+      const width = entries[0]?.contentRect.width
+      if (width === undefined) return
+      if (frame !== null) cancelAnimationFrame(frame)
+      frame = requestAnimationFrame(() => setContainerWidth(width))
+    })
+    observer.observe(el)
+    return () => {
+      observer.disconnect()
+      if (frame !== null) cancelAnimationFrame(frame)
+    }
+  }, [])
+
+  // Render the current page whenever page/zoom/rotation/container width
+  // changes. The render scale fits the page to the container's own width
+  // (containerWidth, from the ResizeObserver above) rather than a fixed
+  // pixel scale, then applies `zoom` as a multiplier on top -- this is what
+  // makes the Collapsed spine show a small legible page instead of an
+  // overflowing one, and what re-renders the canvas as the divider is
+  // dragged (L1, checklist 3.8).
   useEffect(() => {
     const doc = docRef.current
     const canvas = canvasRef.current
-    if (!doc || !canvas || pageNumber < 1 || pageNumber > doc.numPages) return
+    if (!doc || !canvas || pageNumber < 1 || pageNumber > doc.numPages || containerWidth <= 0) return
 
     let cancelled = false
     void (async () => {
       const page = await doc.getPage(pageNumber)
       if (cancelled) return
-      const viewport = page.getViewport({ scale, rotation })
-      canvas.width = viewport.width
-      canvas.height = viewport.height
+      const naturalViewport = page.getViewport({ scale: 1, rotation })
+      const availableWidth = Math.max(containerWidth - CONTENT_PADDING_PX, 40)
+      const fitWidthScale = availableWidth / naturalViewport.width
+      const viewport = page.getViewport({ scale: fitWidthScale * zoom, rotation })
       const context = canvas.getContext('2d')
       if (!context) return
-      await page.render({ canvasContext: context, viewport }).promise
+      // cancel() doesn't synchronously free pdf.js's internal lock on this
+      // canvas -- it schedules cancellation, which the previous task's own
+      // promise only reflects once its in-progress paint operation next
+      // checks the cancel flag. Calling render() again before that promise
+      // settles hits pdf.js's "same canvas" guard even though cancel() was
+      // already called, which is what a burst of ResizeObserver ticks kept
+      // doing here. Awaiting the rejection first guarantees only one
+      // render() is ever active on the canvas.
+      if (renderTaskRef.current) {
+        const prevTask = renderTaskRef.current
+        prevTask.cancel()
+        await prevTask.promise.catch(() => {})
+      }
+      if (cancelled) return
+      canvas.width = viewport.width
+      canvas.height = viewport.height
+      const task = page.render({ canvasContext: context, viewport })
+      renderTaskRef.current = task
+      try {
+        await task.promise
+      } catch (err) {
+        // A cancelled render rejects by design (RenderingCancelledException) --
+        // only a genuine render failure should propagate.
+        if (cancelled || (err instanceof Error && err.name === 'RenderingCancelledException')) return
+        throw err
+      }
+      if (renderTaskRef.current === task) renderTaskRef.current = null
       if (!cancelled) setCanvasSize({ width: viewport.width, height: viewport.height })
     })()
 
     return () => {
       cancelled = true
+      renderTaskRef.current?.cancel()
     }
-  }, [pageNumber, scale, rotation, numPages])
+  }, [pageNumber, zoom, rotation, numPages, containerWidth])
 
   // Lazily render a small thumbnail once its canvas mounts.
   async function renderThumbnail(n: number) {
@@ -187,48 +268,117 @@ export const PdfViewer = forwardRef<
     await page.render({ canvasContext: context, viewport }).promise
   }
 
+  // L1 (checklist 3.7): one JSX tree for both toolbar states, not two
+  // early-returned branches -- the content wrapper (contentRef, observed by
+  // the ResizeObserver above) and the <canvas> itself (canvasRef, painted by
+  // the render effect above) have to stay the *same* DOM nodes across a
+  // Collapsed toggle. Two separate branches would give each mode its own
+  // copy of both elements: React would unmount/remount them on every toggle,
+  // orphaning the ResizeObserver (its effect only runs once, on the node it
+  // saw at mount) and leaving the fresh canvas unpainted until some other
+  // dependency happened to change. Only the toolbar and thumbnail rail --
+  // genuinely different content, not the same element resized -- switch on
+  // `collapsed`.
   return (
     <div className="flex h-full min-w-0 flex-col overflow-hidden rounded-md border border-border bg-muted/30">
-      <div className="flex items-center gap-1 border-b border-border bg-background px-2 py-1.5">
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          disabled={pageNumber <= 1}
-          onClick={() => setPageNumber((p) => Math.max(1, p - 1))}
-          aria-label="Previous page"
-          title="Previous page (← / ↑)"
-        >
-          <ChevronLeft className="h-4 w-4" />
-        </Button>
-        <span className="min-w-16 text-center text-xs text-muted-foreground">
-          {numPages > 0 ? `Page ${pageNumber} / ${numPages}` : '—'}
-        </span>
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          disabled={pageNumber >= numPages}
-          onClick={() => setPageNumber((p) => Math.min(numPages, p + 1))}
-          aria-label="Next page"
-          title="Next page (→ / ↓)"
-        >
-          <ChevronRight className="h-4 w-4" />
-        </Button>
-        <div className="mx-1 h-4 w-px bg-border" />
-        <Button type="button" variant="ghost" size="sm" onClick={() => setScale((s) => Math.max(0.4, s - 0.15))} aria-label="Zoom out">
-          <ZoomOut className="h-4 w-4" />
-        </Button>
-        <Button type="button" variant="ghost" size="sm" onClick={() => setScale((s) => Math.min(3, s + 0.15))} aria-label="Zoom in">
-          <ZoomIn className="h-4 w-4" />
-        </Button>
-        <Button type="button" variant="ghost" size="sm" onClick={() => setRotation((r) => (r + 90) % 360)} aria-label="Rotate">
-          <RotateCw className="h-4 w-4" />
-        </Button>
-      </div>
+      {collapsed ? (
+        <div className="flex flex-col items-center gap-1.5 border-b border-border bg-background px-1 py-2">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            disabled={pageNumber <= 1}
+            onClick={() => setPageNumber((p) => Math.max(1, p - 1))}
+            aria-label="Previous page"
+            title="Previous page (← / ↑)"
+          >
+            <ChevronLeft className="h-4 w-4 rotate-90" />
+          </Button>
+          <span className="text-center text-[10px] leading-tight text-muted-foreground">
+            {numPages > 0 ? `${pageNumber}/${numPages}` : '—'}
+          </span>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            disabled={pageNumber >= numPages}
+            onClick={() => setPageNumber((p) => Math.min(numPages, p + 1))}
+            aria-label="Next page"
+            title="Next page (→ / ↓)"
+          >
+            <ChevronRight className="h-4 w-4 rotate-90" />
+          </Button>
+          {uncertainFields.length > 0 ? (
+            <span
+              className="rounded-full bg-orange-500 px-1.5 py-0.5 text-[9px] font-medium leading-none text-white"
+              title={`${uncertainFields.length} field(s) flagged for review`}
+            >
+              {uncertainFields.length}
+            </span>
+          ) : null}
+        </div>
+      ) : (
+        <div className="flex items-center gap-1 border-b border-border bg-background px-2 py-1.5">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            disabled={pageNumber <= 1}
+            onClick={() => setPageNumber((p) => Math.max(1, p - 1))}
+            aria-label="Previous page"
+            title="Previous page (← / ↑)"
+          >
+            <ChevronLeft className="h-4 w-4" />
+          </Button>
+          <span className="min-w-16 text-center text-xs text-muted-foreground">
+            {numPages > 0 ? `Page ${pageNumber} / ${numPages}` : '—'}
+          </span>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            disabled={pageNumber >= numPages}
+            onClick={() => setPageNumber((p) => Math.min(numPages, p + 1))}
+            aria-label="Next page"
+            title="Next page (→ / ↓)"
+          >
+            <ChevronRight className="h-4 w-4" />
+          </Button>
+          <div className="mx-1 h-4 w-px bg-border" />
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => setZoom((z) => Math.max(0.4, z - 0.15))}
+            aria-label="Zoom out"
+          >
+            <ZoomOut className="h-4 w-4" />
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => setZoom((z) => Math.min(3, z + 0.15))}
+            aria-label="Zoom in"
+          >
+            <ZoomIn className="h-4 w-4" />
+          </Button>
+          <Button type="button" variant="ghost" size="sm" onClick={() => setRotation((r) => (r + 90) % 360)} aria-label="Rotate">
+            <RotateCw className="h-4 w-4" />
+          </Button>
+          {uncertainFields.length > 0 ? (
+            <span
+              className="ml-1 rounded-full bg-orange-500 px-1.5 py-0.5 text-[10px] font-medium leading-none text-white"
+              title={`${uncertainFields.length} field(s) flagged for review`}
+            >
+              {uncertainFields.length} flagged
+            </span>
+          ) : null}
+        </div>
+      )}
 
       <div className="flex min-h-0 flex-1">
-        {numPages > 1 ? (
+        {numPages > 1 && !collapsed ? (
           <div className="flex w-20 flex-shrink-0 flex-col gap-2 overflow-y-auto border-r border-border bg-background p-2">
             {Array.from({ length: numPages }, (_, i) => i + 1).map((n) => {
               const status = pageStatusByNumber.get(n)
@@ -251,7 +401,14 @@ export const PdfViewer = forwardRef<
                   ) : null}
                   <canvas
                     ref={(el) => {
-                      if (el) {
+                      // This inline arrow function is a new reference every render, so
+                      // React detaches/reattaches it (calling this callback again with
+                      // the same `el`) on every re-render, not just on real mount --
+                      // L1's ResizeObserver-driven re-renders (checklist 3.8) made that
+                      // frequent enough to stack up concurrent render() calls on the
+                      // same thumbnail canvas, which pdf.js forbids. Only (re-)render
+                      // when the element genuinely changed.
+                      if (el && thumbCanvasRefs.current.get(n) !== el) {
                         thumbCanvasRefs.current.set(n, el)
                         void renderThumbnail(n)
                       }
@@ -268,7 +425,7 @@ export const PdfViewer = forwardRef<
           </div>
         ) : null}
 
-        <div className="flex-1 overflow-auto p-3">
+        <div ref={contentRef} className="flex-1 overflow-auto p-3">
           {loading ? (
             // Roughly an A4 page's aspect ratio (1:1.414) -- the canvas below
             // renders at whatever the actual page size turns out to be, but
@@ -276,7 +433,7 @@ export const PdfViewer = forwardRef<
             // getReviewDocumentUrl + pdf.js's getDocument() are in flight.
             <Skeleton className="mx-auto h-full max-h-[80vh] w-full max-w-md" style={{ aspectRatio: '1 / 1.414' }} />
           ) : error ? (
-            <p className="text-sm text-destructive">Could not load document: {error}</p>
+            collapsed ? null : <p className="text-sm text-destructive">Could not load document: {error}</p>
           ) : (
             // Sized in JS pixels (not CSS %) to exactly match the canvas's own
             // rendered size, so the overlay boxes below -- positioned with
@@ -284,19 +441,20 @@ export const PdfViewer = forwardRef<
             // zoom level without a separate pixel<->fraction conversion.
             <div className="relative mx-auto" style={{ width: canvasSize.width, height: canvasSize.height }}>
               <canvas ref={canvasRef} className="shadow-sm" />
-              {currentPageBoxes.map((box, i) => (
-                <div
-                  key={i}
-                  title={box.field.replace(/_/g, ' ')}
-                  className="pointer-events-none absolute rounded-sm border-2 border-orange-500 bg-orange-400/20"
-                  style={{
-                    left: `${box.bboxX0 * 100}%`,
-                    top: `${box.bboxY0 * 100}%`,
-                    width: `${(box.bboxX1 - box.bboxX0) * 100}%`,
-                    height: `${(box.bboxY1 - box.bboxY0) * 100}%`,
-                  }}
-                />
-              ))}
+              {!collapsed &&
+                currentPageBoxes.map((box, i) => (
+                  <div
+                    key={i}
+                    title={box.field.replace(/_/g, ' ')}
+                    className="pointer-events-none absolute rounded-sm border-2 border-orange-500 bg-orange-400/20"
+                    style={{
+                      left: `${box.bboxX0 * 100}%`,
+                      top: `${box.bboxY0 * 100}%`,
+                      width: `${(box.bboxX1 - box.bboxX0) * 100}%`,
+                      height: `${(box.bboxY1 - box.bboxY0) * 100}%`,
+                    }}
+                  />
+                ))}
             </div>
           )}
         </div>
