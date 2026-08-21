@@ -1,8 +1,10 @@
 import { redirect } from 'next/navigation'
+import { cookies } from 'next/headers'
 import { createClient } from '@/lib/supabase/server'
 import { getStaffContext } from '@/lib/export/auth'
 import { Card, CardContent } from '@/components/ui/card'
 import { ReviewWorkspace } from '@/components/review/review-workspace'
+import { QueueScopeToggle } from '@/components/review/queue-scope-toggle'
 import type {
   LineItemDetail,
   MatchCandidate,
@@ -58,8 +60,18 @@ export default async function ReviewPage({
   const supabase = await createClient()
   const { id: idParam } = await searchParams
 
+  // Unverified/All toggle (review-page-layout-redesign-plan.md §1): the
+  // position counter and Prev/Next used to silently span the whole document
+  // set via v_review_queue -- which is actually already unverified-only
+  // (`where de.verified_at is null`, 20260817000004). Default to that
+  // pending-only view; the cookie (not a `?scope=` param, see
+  // setReviewQueueScope's doc comment) lets a reviewer opt into
+  // v_review_queue_all, the superset view with verified_at added, without
+  // review-workspace.tsx's Prev/Next needing to carry a scope param through.
+  const scope = (await cookies()).get('review_queue_scope')?.value === 'all' ? 'all' : 'pending'
+
   const { data: queueRows, error: queueError } = await supabase
-    .from('v_review_queue')
+    .from(scope === 'all' ? 'v_review_queue_all' : 'v_review_queue')
     .select(
       'document_extraction_id, source_document_id, original_filename, extraction_confidence, max_open_severity_rank, open_issue_count, queue_amount, bill_index, page_number_start, page_number_end, bill_count'
     )
@@ -89,13 +101,17 @@ export default async function ReviewPage({
   if (queue.length === 0) {
     return (
       <div className="flex flex-col gap-4">
-        <PageHeader />
+        <PageHeader scope={scope} />
         <Card>
           <CardContent className="flex flex-col gap-2 pt-6">
             <p className="text-sm font-medium">Queue is empty</p>
             <p className="text-sm text-muted-foreground">
-              Every extracted document has been verified. New documents enter this queue as soon as
-              extraction finishes (§8) -- nothing to do here right now.
+              {scope === 'all'
+                ? // v_review_queue_all has no verified_at filter, so this can
+                  // basically only happen when no document has ever been
+                  // extracted at all -- still worth a correct, non-assuming message.
+                  'There are no extracted documents yet. New documents enter this queue as soon as extraction finishes (§8).'
+                : 'Every extracted document has been verified. New documents enter this queue as soon as extraction finishes (§8) -- nothing to do here right now.'}
             </p>
           </CardContent>
         </Card>
@@ -128,7 +144,7 @@ export default async function ReviewPage({
 
   return (
     <div className="flex h-[calc(100vh-3rem)] flex-col gap-3">
-      <PageHeader position={currentIndex + 1} total={queue.length} />
+      <PageHeader position={currentIndex + 1} total={queue.length} scope={scope} />
       <ReviewWorkspace
         key={`${detail.documentExtractionId}:${detail.currentExtractionRunId ?? 'none'}`}
         detail={detail}
@@ -141,7 +157,15 @@ export default async function ReviewPage({
   )
 }
 
-function PageHeader({ position, total }: { position?: number; total?: number }) {
+function PageHeader({
+  position,
+  total,
+  scope,
+}: {
+  position?: number
+  total?: number
+  scope?: 'pending' | 'all'
+}) {
   return (
     <div className="flex flex-wrap items-center gap-3">
       <h1 className="text-xl font-semibold tracking-tight">Review queue</h1>
@@ -150,6 +174,7 @@ function PageHeader({ position, total }: { position?: number; total?: number }) 
           Document {position} of {total}
         </span>
       ) : null}
+      {scope !== undefined ? <QueueScopeToggle current={scope} /> : null}
       <span className="ml-auto text-xs text-muted-foreground">Press ? for keyboard shortcuts</span>
     </div>
   )
