@@ -173,46 +173,48 @@ Closes the loop: one screen, one keystroke, document verified, entry connected a
 
 ### C1 — Always-present three-state match strip *(plan §7)*
 
-- [ ] **5.1** `components/review/review-workspace.tsx:427` — remove the `billCount > 1` condition. A single-bill unmatched document currently has **no way** to be matched from the review screen at all.
-- [ ] **5.2** Build the strip with three states:
-  - **Matched** — UBBL, vendor, ledger amount, live variance against the total being typed, one *Change* link.
-  - **Suggested** — top-ranked candidate inline with score, *Attach* button, *See 4 more*.
-  - **Unmatched** — search field plus *No entry expected*.
-- [ ] **5.3** Reuse `rankCandidates` from `lib/matching.ts` to populate Suggested. Do not reimplement — it already runs on this exact extraction shape in the inbox.
-- [ ] **5.4** Multi-bill **bill rail**: `Bill 1 · 2 · 3` chips showing each bill's match state at a glance.
+- [x] **5.1** `components/review/review-workspace.tsx` — the `billCount > 1` condition is gone; `MatchStrip` (new, `components/review/match-strip.tsx`) always renders under the toolbar.
+- [x] **5.2** Three states built: **Matched** (UBBL, vendor, ledger amount, live variance against the total being typed, *Change* reusing `EntryAttachCombobox`), **Suggested** (top-ranked candidate inline with score, one-click *Attach*, *See 4 more*), **Unmatched** (search plus *No entry expected*, via the existing `markNoEntryExpected`).
+- [x] **5.3** `loadDocumentDetail` (`app/(app)/review/page.tsx`) now runs the exact same `rankCandidates`/candidate-pool pattern `documents/page.tsx` uses, scored against this bill's own OCR fields, only when the bill has no match yet.
+- [x] **5.4** Bill rail added: `Bill 1 · 2 · 3` chips (new `siblingBills` query), matched shown filled, click navigates through the existing dirty-guarded `requestGoToDocument` — not a bare navigation, so an in-progress correction still asks before discarding.
 
-**Done when:** the common case is one click, not a search, and an unmatched bill 2 is visible without stepping through the queue.
+"No entry expected" acts at `source_document` level (the schema has no per-bill match-status column) — a deliberate, documented scope limit on multi-bill PDFs, not a new column.
+
+**Done when:** the common case is one click, not a search, and an unmatched bill 2 is visible without stepping through the queue. ✅ Mechanically verified (typecheck/lint/diff review); no live Supabase credentials in this environment to click through the actual screen.
 
 ### Z1 — Zone + head as stage 3 of a visible flow *(plan §8)*
 
-- [ ] **5.5** Render the review screen's three stages as a visible progression, each showing done / current / blocked:
-  **1 Verify** (correct OCR fields) → **2 Connect** (match to entry) → **3 Classify** (admin head + zone).
-- [ ] **5.6** Fetch department-scoped `admin_head` and `zone` options in `loadDocumentDetail`, alongside `hubStatusOptions` which already follows this pattern.
-- [ ] **5.7** Stage 3 sits directly below the stage-2 match strip. Disabled with *"Match this bill to an entry first"* until stage 2 completes; options populate the moment a match lands.
-- [ ] **5.8** Extend `saveVerification` to write `admin_head_id` / `zone_id` in the same transaction, or call the existing `saveEntryEnrichment` after it. All three stages commit on the same <kbd>Ctrl/Cmd+Enter</kbd>.
-- [ ] **5.9** Shortcuts <kbd>Z</kbd> and <kbd>H</kbd> jump to stage 3.
-- [ ] **5.10** Ship **non-blocking** — see plan §16, still open. The progression makes an unfinished stage 3 obvious without a hard block.
+- [x] **5.5** New `StageProgress` component (`components/review/stage-progress.tsx`) renders **1 Verify → 2 Connect → 3 Classify**, done/current/blocked, above the match strip.
+- [x] **5.6** `loadDocumentDetail` fetches department-scoped `admin_head`/`zone` options (same pattern as `entries/[id]/page.tsx`), keyed off the matched entry's `department_id`.
+- [x] **5.7** Stage 3 sits below the match strip, disabled with "Match this bill to an entry first" until `entryId !== null`; options populate the moment a match lands.
+- [x] **5.8** New `saveEntryClassification` (`lib/actions/review.ts`) — deliberately **not** `saveEntryEnrichment`, which unconditionally overwrites `cost_center_id`/`remark` too. Rides the same `Cmd/Ctrl+Enter` as the rest of the form (`handleSave` calls it right after `saveVerification` when an entry is matched).
+- [x] **5.9** `Z`/`H` focus the zone/admin-head selects; documented in `shortcuts-overlay.tsx`.
+- [x] **5.10** Shipped non-blocking, exactly as decided in plan §16 — stage 3 never gates Save.
 
-**Done when:** a reviewer can always see which of the three stages they are on, and zone/head are assignable without leaving the queue.
+**Done when:** a reviewer can always see which of the three stages they are on, and zone/head are assignable without leaving the queue. ✅ Mechanically verified; not visually confirmed (no live credentials in this environment).
 
 ### Z2 — Zone + head at the moment of attach in the inbox *(plan §8)*
 
-- [ ] **5.11** When attaching a document to an entry with no zone or head set, show the two dropdowns inline in the confirmation, pre-filled from the most recent entry for the same vendor and department. Skipping is free.
-- [ ] **5.12** For bulk attach, reuse `BulkEnrichmentDialog` as a follow-up step — it already handles *Don't change / Clear / Set* and partial-success reporting under RLS.
-- [ ] **5.13** Call the existing `saveEntryEnrichment` / `bulkSaveEntryEnrichment`. **No new server action needed.**
+- [x] **5.11** `document-card.tsx`'s attach confirmation now shows Admin head/Zone `<Select>`s, department-scoped, only when the chosen entry has **neither** set — pre-filled via new `getRecentClassificationDefaults` (`lib/actions/entry-classification-defaults.ts`), looking up the most recent other entry for the same vendor + department that already carries one. Skipping (leaving both "Not set") never blocks or delays the attach.
+- [x] **5.12** After a successful bulk attach, `document-inbox.tsx` opens the existing `BulkEnrichmentDialog` unmodified, scoped to just the entries actually attached (partial-failure-safe).
+- [x] **5.13** Write path is **not** `saveEntryEnrichment`/`bulkSaveEntryEnrichment` for the single-attach case — a new narrow `setEntryClassification` (`lib/actions/entry-enrichment.ts`) writes only `admin_head_id`/`zone_id`, for the same clobber reason as Z1's 5.8. Bulk attach's follow-up dialog does reuse `bulkSaveEntryEnrichment` as-is, per the original wording.
+
+**Judgment call, flagged for review:** the attach-time write fires whenever the final dropdown state has *any* non-null value — including an accepted, untouched pre-fill — not only when the reviewer manually changed a dropdown. Requiring an explicit touch would make the pre-fill feature silently useless (the reviewer would have to re-pick the value already shown), which reads against "skipping is free"; worth a second look if a stricter reading was intended.
+
+**Done when:** (no single "done when" was written for Z2 in the plan — folded into Z1's/C1's, satisfied above.)
 
 ### V1 — Validation, dirty state, save conflicts *(plan §13)*
 
-- [ ] **5.14** `parseNum` — accept thousands separators and `₹`. Today `Number("12,500")` is `NaN`, so the value is **saved as null with no warning**.
-- [ ] **5.15** Block save on an unparseable amount, with an inline field error.
-- [ ] **5.16** Warn on invoice dates in the future or outside the event window.
-- [ ] **5.17** Per-field "changed from OCR" marker, with a count in the toolbar. (Builds on the `dirty` flag from 1.5.)
-- [ ] **5.18** Save-conflict detection — version check against `current_extraction_run_id`; today it is last-write-wins.
-- [ ] **5.19** Resolve the claim check server-side, or disable inputs until it settles. The form is currently editable while "Checking claim…" is still running.
-- [ ] **5.20** `components/review/pdf-viewer.tsx:258` — route the PDF load failure through `FriendlyError` instead of printing raw `err.message`. Add Retry. *(Violates the project's plain-English error rule — every other site uses `toastError`/`FriendlyError`.)*
-- [ ] **5.21** Empty-extraction state — offer the next action (add a row, re-extract, flag) instead of only "No line items were extracted."
+- [x] **5.14** `parseNum` strips a leading `₹` and thousands-separator commas before parsing.
+- [x] **5.15** New `isUnparseableAmount` tells a genuinely blank field apart from garbage text (both used to collapse to the same `null`); a `validationErrors` set (header amounts + line-item quantity/rate/amount) drives a new red ring (priority error > uncertain > edited) and blocks `handleSave` outright, focusing the first bad field.
+- [x] **5.16** Non-blocking amber warning under Invoice Date when it's in the future. **No event-window check** — no event-start/end config exists anywhere in this codebase to check against; deferred until one does, not invented.
+- [x] **5.17** Toolbar badge "K changed from OCR", summing the existing `editedFields` sets. Informational only, no stepper (nothing distinct to jump to that the blue rings don't already show).
+- [x] **5.18** Save-conflict detection shipped: two new migrations (`20260821000003`, `20260821000004`) append `p_expected_extraction_run_id` to `verify_document_extraction` (default `null`, back-compat) and raise a `SAVE_CONFLICT:`-prefixed exception when it no longer matches `current_extraction_run_id`. `saveVerification` detects the prefix and returns a `conflict` flag; `handleSave` shows a pinned (non-auto-dismissing) toast with a Reload action instead of the generic vanishing one.
+- [x] **5.19** `formDisabled` now includes `claimState === 'checking'`, not just `'blocked'` — the form was editable underneath the claim banner while the check was still in flight.
+- [x] **5.20** `pdf-viewer.tsx` now renders `<FriendlyError>` plus a Retry button (bumps a retry-nonce into the load effect's dependencies) instead of printing `err.message` raw; the raw text is still logged via `logRawError`.
+- [x] **5.21** Empty-line-items state now offers **Add a row** (new `addLineItem` action + a matching insert RLS policy, migration `20260821000004`, since only the OCR pipeline could insert this row before), **Re-extract**, and **Flag exception** — the latter two threaded to the existing handlers, not duplicated.
 
-**Done when:** no silent data loss on save, and no raw error text on screen.
+**Done when:** no silent data loss on save, and no raw error text on screen. ✅ Mechanically verified (typecheck/lint/full unit suite — 322/322 — all pass); the two new migrations were reviewed carefully against the two migrations they extend but were never applied to a live database in this environment.
 
 ---
 
