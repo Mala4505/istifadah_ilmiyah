@@ -188,7 +188,7 @@ async function loadDocumentDetail(
     supabase
       .from('document_extraction')
       .select(
-        'id, current_extraction_run_id, verified_at, bill_index, page_number_start, page_number_end, vendor_name_ocr, vendor_name_verified, vendor_gstin_ocr, vendor_gstin_verified, vendor_phone_ocr, vendor_phone_verified, vendor_email_ocr, vendor_email_verified, vendor_address_ocr, vendor_address_verified, invoice_number_ocr, invoice_number_verified, invoice_date_ocr, invoice_date_verified, subtotal_ocr, subtotal_verified, tax_amount_ocr, tax_amount_verified, total_amount_ocr, total_amount_verified, notes_ocr, notes_verified, uncertain_fields_ocr'
+        'id, entry_id, current_extraction_run_id, verified_at, bill_index, page_number_start, page_number_end, vendor_name_ocr, vendor_name_verified, vendor_gstin_ocr, vendor_gstin_verified, vendor_phone_ocr, vendor_phone_verified, vendor_email_ocr, vendor_email_verified, vendor_address_ocr, vendor_address_verified, invoice_number_ocr, invoice_number_verified, invoice_date_ocr, invoice_date_verified, subtotal_ocr, subtotal_verified, tax_amount_ocr, tax_amount_verified, total_amount_ocr, total_amount_verified, notes_ocr, notes_verified, uncertain_fields_ocr'
       )
       .eq('id', documentExtractionId)
       .maybeSingle(),
@@ -210,7 +210,12 @@ async function loadDocumentDetail(
   const extraction = extractionRes.data
   if (!sourceDoc || !extraction) return null
 
-  const entryId = sourceDoc.entry_id as number | null
+  // document_extraction.entry_id is the source of truth for this bill's
+  // match (written per-bill by attachExtractionToEntry,
+  // lib/actions/review.ts); source_document.entry_id is only the
+  // single-bill convenience mirror written by extract.ts, so it's the
+  // fallback here, not the primary read (plan.md D1).
+  const entryId = (extraction.entry_id as number | null) ?? (sourceDoc.entry_id as number | null)
 
   const [runRes, entryRes, exceptionsRes, hubStatusRes] = await Promise.all([
     extraction.current_extraction_run_id
