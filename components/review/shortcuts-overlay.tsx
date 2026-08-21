@@ -12,7 +12,7 @@ const SHORTCUTS: [string, string][] = [
   ['→ / ↓', 'Next page of the current document'],
   ['← / ↑', 'Previous page of the current document'],
   ['E', 'Flag as exception, with a note'],
-  ['R', 'Re-run extraction (Sonnet)'],
+  ['Shift+R', 'Re-run extraction (Sonnet) -- confirms first if you have unsaved edits'],
   ['1-9', 'Jump to line item n'],
   ['/', 'Focus vendor autocomplete'],
   ['S', 'Set Hub status, with a note'],
@@ -37,8 +37,8 @@ export function ShortcutsOverlay({ open, onOpenChange }: { open: boolean; onOpen
           ))}
         </dl>
         <p className="text-xs text-muted-foreground">
-          Page Up/Down, arrows, E, R, digits, / and S only act outside a focused text field -- typing amounts and
-          notes is never intercepted.
+          Page Up/Down, arrows, E, Shift+R, digits, / and S only act outside a focused text field -- typing amounts
+          and notes is never intercepted.
         </p>
       </DialogContent>
     </Dialog>

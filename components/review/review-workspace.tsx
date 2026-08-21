@@ -16,11 +16,12 @@
  * document.
  */
 
-import { useEffect, useRef, useState, useTransition } from 'react'
+import { useEffect, useMemo, useRef, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { toastError } from '@/components/ui/error-toast'
 import { Button } from '@/components/ui/button'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { normalizeUnit } from '@/lib/normalize'
 import {
   claimReviewDocument,
@@ -104,6 +105,27 @@ export function ReviewWorkspace({
   const [vendorId, setVendorId] = useState<number | null>(detail.entryVendorId)
   const [vendorAutocompleteOpen, setVendorAutocompleteOpen] = useState(false)
 
+  // Dirty tracking (D3/plan §2, checklist 1.5): the workspace remounts fresh
+  // per document + extraction run (keyed in review/page.tsx), so capturing
+  // the initial snapshot once at mount -- before any edits -- gives a stable
+  // baseline to diff live state against for the rest of this document's
+  // lifetime.
+  const initialHeaderRef = useRef<HeaderFormState>(header)
+  const initialLineItemsRef = useRef<LineItemFormState[]>(lineItems)
+  const dirty = useMemo(
+    () =>
+      JSON.stringify(header) !== JSON.stringify(initialHeaderRef.current) ||
+      JSON.stringify(lineItems) !== JSON.stringify(initialLineItemsRef.current),
+    [header, lineItems]
+  )
+
+  // Pending action awaiting confirmation because it would discard unsaved
+  // edits (re-extract, or navigating away). Reused for both so there is one
+  // dialog and one place that decides "does this need confirming."
+  const [confirmAction, setConfirmAction] = useState<
+    { kind: 're-extract' } | { kind: 'navigate'; targetId: number } | null
+  >(null)
+
   const [claimState, setClaimState] = useState<'checking' | 'mine' | 'blocked'>('checking')
   const [claimInfo, setClaimInfo] = useState<{ displayName: string; claimedAt: string } | null>(null)
   const [takingOver, setTakingOver] = useState(false)
@@ -147,6 +169,43 @@ export function ReviewWorkspace({
       return
     }
     router.push(`/review?id=${id}`)
+  }
+
+  // Guarded entry point for Prev/Next/PgUp/PgDn (checklist 1.8): today
+  // `goToDocument` discards unsaved edits the instant the target component
+  // remounts. Route every navigation call site through this instead so a
+  // dirty form always confirms first.
+  function requestGoToDocument(id: number | null) {
+    if (id === null) {
+      toast.info('No more documents in that direction.')
+      return
+    }
+    if (dirty) {
+      setConfirmAction({ kind: 'navigate', targetId: id })
+      return
+    }
+    goToDocument(id)
+  }
+
+  // Guarded entry point for re-extract (checklist 1.6): confirms first when
+  // there are unsaved edits that the new extraction run would silently wipe
+  // out on remount.
+  function requestReExtract() {
+    if (dirty) {
+      setConfirmAction({ kind: 're-extract' })
+      return
+    }
+    void handleReExtract()
+  }
+
+  function confirmPendingAction() {
+    if (!confirmAction) return
+    if (confirmAction.kind === 're-extract') {
+      void handleReExtract()
+    } else {
+      goToDocument(confirmAction.targetId)
+    }
+    setConfirmAction(null)
   }
 
   function handleTakeOver() {
@@ -301,12 +360,12 @@ export function ReviewWorkspace({
       // onto two adjacent physical keys instead of one.
       if (e.key === 'PageDown') {
         e.preventDefault()
-        goToDocument(nextId)
+        requestGoToDocument(nextId)
         return
       }
       if (e.key === 'PageUp') {
         e.preventDefault()
-        goToDocument(prevId)
+        requestGoToDocument(prevId)
         return
       }
       // Page navigation within the open document -- all four arrows work so
@@ -326,9 +385,15 @@ export function ReviewWorkspace({
         setExceptionOpen(true)
         return
       }
-      if (e.key.toLowerCase() === 'r') {
+      // Re-extract moved off the bare letter (D3, checklist 1.6): this
+      // forces a new Sonnet run and, via review/page.tsx's run-id key,
+      // remounts the whole workspace from the database -- previously a
+      // single unmodified `r` silently discarded every unsaved correction.
+      // Shift+R plus a confirm-when-dirty gate makes that a deliberate
+      // choice instead of a typo.
+      if (e.shiftKey && e.key.toLowerCase() === 'r') {
         e.preventDefault()
-        void handleReExtract()
+        requestReExtract()
         return
       }
       if (e.key.toLowerCase() === 's') {
@@ -355,6 +420,19 @@ export function ReviewWorkspace({
     // cheap at this component's render frequency and simpler than threading
     // everything through refs just to satisfy exhaustive-deps.
   })
+
+  // Tab-close/refresh guard (checklist 1.7): most browsers ignore the
+  // custom string and show their own generic warning, but setting
+  // `returnValue` is what triggers that prompt at all.
+  useEffect(() => {
+    if (!dirty) return
+    function handleBeforeUnload(e: BeforeUnloadEvent) {
+      e.preventDefault()
+      e.returnValue = ''
+    }
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload)
+  }, [dirty])
 
   const tint = confidenceTint(detail.extractionConfidence)
   const lineItemSum = lineItems.length > 0 ? lineItems.reduce((sum, li) => sum + (parseNum(li.amount) ?? 0), 0) : null
@@ -391,11 +469,11 @@ export function ReviewWorkspace({
         <Button type="button" size="sm" variant="outline" onClick={() => setExceptionOpen(true)} disabled={formDisabled}>
           Flag exception (E)
         </Button>
-        <Button type="button" size="sm" variant="outline" onClick={() => void handleReExtract()} disabled={reExtracting}>
+        <Button type="button" size="sm" variant="outline" onClick={requestReExtract} disabled={reExtracting}>
           {/* Named because this control forces Sonnet, unlike the Documents
               inbox's "Extract now (Haiku)" — and Sonnet costs materially
               more per document, so the choice should be deliberate. */}
-          {reExtracting ? 'Re-extracting…' : 'Re-extract with Sonnet (R)'}
+          {reExtracting ? 'Re-extracting…' : 'Re-extract with Sonnet (Shift+R)'}
         </Button>
         <Button
           type="button"
@@ -409,10 +487,22 @@ export function ReviewWorkspace({
         <Button type="button" size="sm" variant="ghost" className="ml-auto" onClick={() => setShortcutsOpen(true)}>
           Shortcuts (?)
         </Button>
-        <Button type="button" size="sm" variant="ghost" disabled={prevId === null} onClick={() => goToDocument(prevId)}>
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          disabled={prevId === null}
+          onClick={() => requestGoToDocument(prevId)}
+        >
           ← Prev doc (PgUp)
         </Button>
-        <Button type="button" size="sm" variant="ghost" disabled={nextId === null} onClick={() => goToDocument(nextId)}>
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          disabled={nextId === null}
+          onClick={() => requestGoToDocument(nextId)}
+        >
           Next doc (PgDn) →
         </Button>
         <span className="text-xs text-muted-foreground">
@@ -464,6 +554,34 @@ export function ReviewWorkspace({
       </div>
 
       <TallyFooter lineItemSum={lineItemSum} documentTotal={documentTotal} entryAmount={detail.entryAmount} />
+
+      <Dialog
+        open={confirmAction !== null}
+        onOpenChange={(open) => {
+          if (!open) setConfirmAction(null)
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              {confirmAction?.kind === 're-extract' ? 'Discard unsaved corrections?' : 'Leave without saving?'}
+            </DialogTitle>
+            <DialogDescription>
+              {confirmAction?.kind === 're-extract'
+                ? 'Re-extracting with Sonnet rebuilds this form from a new OCR run. Your unsaved corrections on this document will be lost.'
+                : 'This document has unsaved corrections. Moving to another document discards them.'}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setConfirmAction(null)}>
+              Cancel
+            </Button>
+            <Button type="button" variant="destructive" onClick={confirmPendingAction}>
+              {confirmAction?.kind === 're-extract' ? 'Re-extract anyway' : 'Discard and continue'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <ShortcutsOverlay open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
       <ExceptionDialog
