@@ -1,6 +1,6 @@
 # Review Page Layout Redesign — Plan
 
-**Status:** Design decisions locked from a 2026-08-21 walkthrough of `/review`. **Nothing in this document is built yet** — this is the plan, not a change log. Companion artifact (visual mockups, four iterations from the raw current layout through the agreed final pass): [Review Page Redesign](https://claude.ai/code/artifact/c1ae9afa-e8c4-4232-b0e4-d58d84584098).
+**Status:** Design decisions locked from a 2026-08-21 walkthrough of `/review`. Items 1-9 and 12 are built and on `master`; see §0 for the rest. Companion artifact (visual mockups, four iterations from the raw current layout through the agreed final pass): [Review Page Redesign](https://claude.ai/code/artifact/c1ae9afa-e8c4-4232-b0e4-d58d84584098).
 
 ---
 
@@ -14,18 +14,18 @@
 
 | # | Item | Status | Size |
 |---|---|---|---|
-| 1 | Scope bill navigation to pending/unverified, with an explicit Unverified/All toggle | To build — needs a query check first, see §1 | Small–Medium |
-| 2 | Merge bill nav, page nav, and sibling-bill nav into one navigation cluster; drop the standing flagged-field stepper | To build | Small |
-| 3 | Actions bar: keep Save + Flag exception primary, move Re-extract/Hub status behind "More" | To build | Small |
-| 4 | Collapse the Verify/Connect/Classify status cards into one line with inline controls | To build | Medium |
-| 5 | Reorder the extraction-form panel: fields first, page/flag clarification demoted below | To build | Small |
-| 6 | Page↔field OCR sync indicator (which page produced which field, flagged-field ring) | To build | Medium |
+| 1 | Scope bill navigation to pending/unverified, with an explicit Unverified/All toggle | Built | Small–Medium |
+| 2 | Merge bill nav, page nav, and sibling-bill nav into one navigation cluster; drop the standing flagged-field stepper | Built | Small |
+| 3 | Actions bar: keep Save + Flag exception primary, move Re-extract/Hub status behind "More" | Built | Small |
+| 4 | Collapse the Verify/Connect/Classify status cards into one line with inline controls | Built | Medium |
+| 5 | Reorder the extraction-form panel: fields first, page/flag clarification demoted below | Built | Small |
+| 6 | Page↔field OCR sync indicator (which page produced which field, flagged-field ring) | Built | Medium |
 | 7 | Simplify the suggested-match UI to one line; relabel the fallback control | Built | Small |
 | 8 | Footer: two labeled cards ("Bill math", "Compared to Entries") with plain-English captions | Built | Small |
 | 9 | Add `invoice_number` as a scored matching factor (real gap found — see §9) | Built — weighted factor, not an exact-match short-circuit | Unknown |
 | 10 | Vendor alias/correction memory to raise suggestion confidence over time | **Idea only, not spec'd** | Large |
 | 11 | Budgeted-vs-actual variance reporting per department | **Explicitly out of scope for this page** — separate initiative | Unknown |
-| 12 | GST recipient-compliance check (buyer GSTIN, buyer name, invoice number required when GST is charged) | To build — spec locked, see §12 | Medium |
+| 12 | GST recipient-compliance check (buyer GSTIN, buyer name, invoice number required when GST is charged) | **Done** — see §12 | Medium |
 
 ---
 
@@ -168,6 +168,8 @@ If GST is **not** charged on a bill, none of this applies — the check (and its
 - **Check logic:** when triggered, all three of (buyer GSTIN present and matches `COMMUNITY_GSTIN`), (buyer name present and fuzzy-matches `COMMUNITY_NAME`), (invoice number present) are required. Any one missing raises an exception — mirroring the existing `vendor_gstin_is_own_org` / `vendor_gstin_invalid_checksum` pattern in `lib/jobs/handlers/extract.ts`, including a new exception type (needs a migration extending `reconciliation_exception_exception_type_check`, same as `20260820000002_gstin_checksum_and_page_failure_exceptions.sql` did for the checksum check) and a dedup key scoped per bill/run.
 - **On `/review`:** the compliance check surfaces as a conditionally-rendered section — present only on a bill where the trigger condition is true, entirely absent (not collapsed, not disabled — genuinely not in the DOM) otherwise. Natural fit is alongside the existing exception flag in the page-title row (§4), or as a fourth line item if it needs more room than a single chip; exact placement to be mocked once the field/exception plumbing exists.
 
-**Not yet decided:** exception severity (the existing GSTIN checks use `low`; missing recipient details on what's meant to be an ITC-eligible tax invoice arguably deserves `high`, since it can mean the community can't actually claim the credit) — confirm with the user before implementing. Also open: whether all three missing items raise one combined exception or three separate ones (separate matches the existing one-exception-per-distinct-problem pattern, but three near-identical exceptions on one bill may be noisier than useful).
+**Decided with the user:** exception severity is `high` (not the `low` the existing GSTIN checks use — this one has real ITC-claim consequences). All three missing items raise ONE combined exception per bill, not three separate ones — a bill missing all three would otherwise produce three near-identical rows for what a reviewer experiences as one problem. Both implemented in `lib/jobs/handlers/extract.ts`'s `gst_recipient_compliance_missing` exception.
+
+**Built:** `buyer_gstin_ocr`/`_verified` and `buyer_name_ocr`/`_verified` (migration `20260821000007_gst_recipient_compliance.sql`, which also extends `verify_document_extraction` and the exception-type check constraint); wire/Zod schema fields in `lib/extraction-schema.ts` (plain `textField`, not union-typed — added no union parameters, so the 16-parameter budget check above never came into play); `COMMUNITY_NAME` env var; the recipient-block reading instructions in `buildSystemPrompt` (`lib/claude-client.ts`); the pure decision function `checkGstRecipientCompliance` (`lib/gst-recipient-compliance.ts`, buyer-name fuzzy match threshold 0.5, reasoned and tested against real "Dawat e Hadiyah" variants) plus its call site and exception-raising in `lib/jobs/handlers/extract.ts`; and the conditionally-rendered Buyer GSTIN/Buyer name fields on `/review` (`components/review/extraction-form.tsx`, `review-workspace.tsx`), gated on the new `ReviewDocumentDetail.gstCharged` flag computed in `app/(app)/review/page.tsx`. The exception itself needed no new UI — the page-title-row exception chip (§4) already renders any open exception generically; it now also shows the exception's `description` as a hover tooltip.
 
 **Model capability (confirmed):** Haiku can do the reading half of this — extracting `buyer_gstin`/`buyer_name` off a "Bill To"/recipient block is the same category of task it already does for vendor identity and invoice number, no Sonnet needed, consistent with the standing OCR-stays-Haiku-only rule. The compliance *decision* must stay deterministic code, not a model judgment call — mirroring `isOwnOrgGstin`/`validateGstin` exactly: the model only writes what it read (or blank), code compares it against `COMMUNITY_GSTIN` / fuzzy-matches `COMMUNITY_NAME` / checks `invoice_number_ocr` presence, and raises the exception. Two real accuracy caveats to design for: (1) recipient blocks print smaller/less reliably than the vendor letterhead (sometimes stamped, handwritten, or genuinely absent) — run `buyer_gstin_ocr` through the existing `validateGstin()` checksum check before trusting it, same backstop already used for `vendor_gstin`; (2) block-confusion risk is symmetric to the existing `isOwnOrgGstin` case — the prompt must clearly distinguish "Seller/Vendor" vs. "Bill To/Recipient" sections, since Haiku could copy the seller's GSTIN into `buyer_gstin` just as it sometimes copies the recipient's into `vendor_gstin` today. No new API call — rides the same one extraction call per bill, two more output fields, no added per-document cost.
