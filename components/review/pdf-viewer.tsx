@@ -20,6 +20,8 @@ import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState }
 import { ZoomIn, ZoomOut, RotateCw, ChevronLeft, ChevronRight } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
+import { FriendlyError } from '@/components/ui/friendly-error'
+import { logRawError } from '@/lib/friendly-error'
 import { getReviewDocumentUrl } from '@/lib/actions/review'
 import type { PageStatus, UncertainField } from '@/lib/review/types'
 
@@ -85,6 +87,11 @@ export const PdfViewer = forwardRef<
 >(function PdfViewer({ sourceDocumentId, pages = [], uncertainFields = [], collapsed = false }, ref) {
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
+  // 5.20 (checklist Phase 5, plan §13): bumped by the Retry button below to
+  // re-run the URL-fetch/pdf.js-load effect without needing a full remount --
+  // it's a dependency of that effect purely to force it to re-fire, its
+  // actual value is never read.
+  const [retryNonce, setRetryNonce] = useState(0)
   const [numPages, setNumPages] = useState(0)
   const [pageNumber, setPageNumber] = useState(1)
   // Manual zoom multiplier on top of the fit-width base scale computed below
@@ -169,6 +176,11 @@ export const PdfViewer = forwardRef<
       const urlResult = await getReviewDocumentUrl(sourceDocumentId)
       if (cancelled) return
       if (!urlResult.ok) {
+        // 5.20: the raw text is what a developer needs (a storage path, a
+        // signed-URL failure) -- log it here rather than only ever putting it
+        // in component state, matching this codebase's plain-English-error
+        // convention (lib/friendly-error.ts's header comment).
+        logRawError('pdf-viewer', urlResult.error)
         setError(urlResult.error)
         setLoading(false)
         return
@@ -192,7 +204,9 @@ export const PdfViewer = forwardRef<
         setLoading(false)
       } catch (err) {
         if (!cancelled) {
-          setError(err instanceof Error ? err.message : String(err))
+          const message = err instanceof Error ? err.message : String(err)
+          logRawError('pdf-viewer', message)
+          setError(message)
           setLoading(false)
         }
       }
@@ -203,7 +217,10 @@ export const PdfViewer = forwardRef<
       void docRef.current?.destroy()
       docRef.current = null
     }
-  }, [sourceDocumentId])
+    // retryNonce is a dependency purely so the Retry button (rendered in the
+    // error branch below) can force this effect to re-run without a full
+    // remount -- its value is never read.
+  }, [sourceDocumentId, retryNonce])
 
   // Measure the content wrapper's own width and re-measure on resize -- the
   // wrapper stays mounted at every pane mode/width (never conditionally
@@ -465,7 +482,21 @@ export const PdfViewer = forwardRef<
             // getReviewDocumentUrl + pdf.js's getDocument() are in flight.
             <Skeleton className="mx-auto h-full max-h-[80vh] w-full max-w-md" style={{ aspectRatio: '1 / 1.414' }} />
           ) : error ? (
-            collapsed ? null : <p className="text-sm text-destructive">Could not load document: {error}</p>
+            // 5.20 (checklist Phase 5, plan §13): this used to print
+            // err.message raw on screen -- the one place in this component
+            // that violated the project's plain-English-error rule (every
+            // other screen routes through FriendlyError/toastError). Retry
+            // just bumps retryNonce, which re-runs the load effect above
+            // without remounting the whole component (pdf.js's document and
+            // this pane's layout state stay put).
+            collapsed ? null : (
+              <div className="mx-auto max-w-md">
+                <FriendlyError message={error} />
+                <Button type="button" size="sm" variant="outline" className="mt-2" onClick={() => setRetryNonce((n) => n + 1)}>
+                  Retry
+                </Button>
+              </div>
+            )
           ) : (
             // Sized in JS pixels (not CSS %) to exactly match the canvas's own
             // rendered size, so the overlay boxes below -- positioned with

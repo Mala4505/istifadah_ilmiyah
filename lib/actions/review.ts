@@ -49,13 +49,18 @@ export interface SaveVerificationInput {
   header: VerifiedHeaderInput
   lineItems: VerifiedLineItemInput[]
   vendorId: number | null
+  /** Checklist 5.18 (plan §13): the extraction run ReviewDocumentDetail was
+   *  built from (lib/review/types.ts's currentExtractionRunId). Passed
+   *  through to the RPC's p_expected_extraction_run_id -- null skips the
+   *  conflict check entirely (e.g. a caller that doesn't track it). */
+  expectedExtractionRunId: number | null
 }
 
 export type SimpleActionResult = { ok: true } | { ok: false; error: string }
 
 export type SaveVerificationResult =
   | { ok: true; lineItemsUpdated: number; rateReferenceRowsInserted: number }
-  | { ok: false; error: string }
+  | { ok: false; error: string; conflict?: true }
 
 /**
  * Save (`Enter` per field, `Cmd/Ctrl-Enter` for the whole document). Calls
@@ -78,11 +83,22 @@ export async function saveVerification(input: SaveVerificationInput): Promise<Sa
       p_header: input.header,
       p_line_items: input.lineItems,
       p_vendor_id: input.vendorId,
+      p_expected_extraction_run_id: input.expectedExtractionRunId,
     })
     .single()
 
   if (error) {
-    return { ok: false, error: logRawError('review.saveVerification', error.message) }
+    // 5.18: a version-conflict raise (private.verify_document_extraction,
+    // 20260821000003) is distinguished from every other RPC failure by this
+    // prefix -- surfaced as its own `conflict` flag rather than folded into
+    // the generic friendly-error string, so the caller can show something
+    // more specific than a toast that vanishes (ReviewWorkspace.handleSave).
+    const conflict = error.message.startsWith('SAVE_CONFLICT:')
+    return {
+      ok: false,
+      error: logRawError('review.saveVerification', error.message),
+      ...(conflict ? { conflict: true as const } : {}),
+    }
   }
 
   const result = data as {
@@ -298,6 +314,68 @@ export async function attachExtractionToEntry(input: {
 
   revalidatePath('/review')
   return { ok: true }
+}
+
+/**
+ * Checklist 5.21 (plan §13 V1): "Add a row" in the empty-line-items state.
+ * Inserts one blank `document_extraction_line_item` row -- every `_ocr`/
+ * `_verified` column left null, only `document_extraction_id` and
+ * `line_order` set -- so the reviewer can type straight into a normal row
+ * that flows through buildSavePayload/saveVerification unchanged on the next
+ * save. A plain session-bound insert, not a SECURITY DEFINER RPC: same shape
+ * as flagReviewException's reconciliation_exception insert above -- a
+ * single-table write RLS can gate on its own
+ * (document_extraction_line_item_insert, new migration, checklist 5.21),
+ * with no multi-table concern the way verify_document_extraction has.
+ *
+ * line_order is computed from a preceding select rather than a single atomic
+ * insert-with-subquery -- PostgREST's insert only accepts JSON values, not a
+ * SQL subquery expression, so there's no way to do "coalesce(max(line_order),
+ * 0) + 1" in one round trip without a dedicated RPC. This document is already
+ * claim-locked to one reviewer at a time (§7), so two concurrent "Add a row"
+ * calls racing each other here is not a realistic scenario.
+ */
+export async function addLineItem(
+  documentExtractionId: number
+): Promise<{ ok: true; lineItem: { id: number; lineOrder: number } } | { ok: false; error: string }> {
+  if (!Number.isInteger(documentExtractionId)) {
+    return { ok: false, error: 'Invalid document extraction id.' }
+  }
+
+  const supabase = await createClient()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+  if (!user) {
+    return { ok: false, error: 'You must be signed in.' }
+  }
+
+  const { data: maxRow, error: maxError } = await supabase
+    .from('document_extraction_line_item')
+    .select('line_order')
+    .eq('document_extraction_id', documentExtractionId)
+    .order('line_order', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  if (maxError) {
+    return { ok: false, error: logRawError('review.addLineItem', maxError.message) }
+  }
+
+  const nextLineOrder = ((maxRow?.line_order as number | undefined) ?? 0) + 1
+
+  const { data, error } = await supabase
+    .from('document_extraction_line_item')
+    .insert({ document_extraction_id: documentExtractionId, line_order: nextLineOrder })
+    .select('id, line_order')
+    .single()
+
+  if (error) {
+    return { ok: false, error: logRawError('review.addLineItem', error.message) }
+  }
+
+  revalidatePath('/review')
+  return { ok: true, lineItem: { id: data.id as number, lineOrder: data.line_order as number } }
 }
 
 export interface VendorSearchResult {

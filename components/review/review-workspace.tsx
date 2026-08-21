@@ -24,6 +24,7 @@ import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { normalizeUnit } from '@/lib/normalize'
 import {
+  addLineItem,
   claimReviewDocument,
   saveVerification,
   type SaveVerificationInput,
@@ -31,7 +32,13 @@ import {
 } from '@/lib/actions/review'
 import { confidenceTint, type ConfidenceTint, type ReviewDocumentDetail } from '@/lib/review/types'
 import { PdfViewer, type PdfViewerHandle } from './pdf-viewer'
-import { ExtractionForm, type EditedFieldSets, type HeaderFormState, type LineItemFormState } from './extraction-form'
+import {
+  ExtractionForm,
+  type EditedFieldSets,
+  type HeaderFormState,
+  type LineItemFormState,
+  type ValidationErrorSets,
+} from './extraction-form'
 import { TallyFooter } from './tally-footer'
 import { ClaimBanner } from './claim-banner'
 import { ShortcutsOverlay } from './shortcuts-overlay'
@@ -80,12 +87,40 @@ function numToStr(v: string | number | null): string {
   return v === null || v === undefined ? '' : String(v)
 }
 
+// 5.14 (checklist Phase 5, plan §13): accepts the two shapes real invoices
+// print amounts in that `Number(...)` chokes on -- a leading rupee sign and
+// thousands-separator commas. Stripped before parsing, not after -- there is
+// no other reason a decimal amount would contain either character. A
+// genuinely blank field still returns null with no warning (isUnparseableAmount
+// below is what tells "blank" apart from "garbage").
 function parseNum(s: string): number | null {
   const t = s.trim()
   if (!t) return null
-  const n = Number(t)
+  const cleaned = t.replace(/^₹\s*/, '').replace(/,/g, '')
+  const n = Number(cleaned)
   return Number.isFinite(n) ? n : null
 }
+
+// 5.15: `parseNum(s) === null` is ambiguous by itself -- "" (intentionally
+// blank) and "abc" (garbage) both collapse to null, and today that garbage
+// silently saves as a null amount with no warning. This tells them apart so
+// buildSavePayload/validationErrors can block only the second case.
+function isUnparseableAmount(raw: string): boolean {
+  const t = raw.trim()
+  if (!t) return false
+  return parseNum(t) === null
+}
+
+// 5.16: local calendar date (not UTC) so "today" matches whatever the
+// reviewer's own clock shows in the date picker -- YYYY-MM-DD sorts
+// lexicographically the same as chronologically, so a plain string compare
+// against header.invoiceDate is enough, no Date-object arithmetic needed.
+function todayLocalDateString(): string {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+const HEADER_AMOUNT_FIELDS: (keyof HeaderFormState)[] = ['subtotal', 'taxAmount', 'totalAmount']
 
 function buildHeaderState(detail: ReviewDocumentDetail): HeaderFormState {
   const h = detail.header
@@ -215,6 +250,47 @@ export function ReviewWorkspace({
     return { header: headerSet, lineItems: lineItemsMap }
   }, [header, lineItems, detail])
 
+  // 5.15 (checklist Phase 5, plan §13): every amount-shaped field that
+  // buildSavePayload below runs through parseNum, checked with
+  // isUnparseableAmount so a genuinely blank field (parses to null, no error)
+  // and garbage text (also parses to null, but should block save) are told
+  // apart. Shaped exactly like editedFields above -- header Set + line-items
+  // Map keyed by lineOrder -- so ExtractionForm can reuse the same lookup
+  // pattern for the red ring.
+  const validationErrors = useMemo<ValidationErrorSets>(() => {
+    const headerSet = new Set<keyof HeaderFormState>()
+    for (const key of HEADER_AMOUNT_FIELDS) {
+      if (isUnparseableAmount(header[key])) headerSet.add(key)
+    }
+    const lineItemsMap = new Map<number, Set<string>>()
+    for (const li of lineItems) {
+      const errorKeys = new Set<string>()
+      if (isUnparseableAmount(li.quantity)) errorKeys.add('quantity')
+      if (isUnparseableAmount(li.rate)) errorKeys.add('rate')
+      if (isUnparseableAmount(li.amount)) errorKeys.add('amount')
+      if (errorKeys.size > 0) lineItemsMap.set(li.lineOrder, errorKeys)
+    }
+    return { header: headerSet, lineItems: lineItemsMap }
+  }, [header, lineItems])
+
+  const validationErrorCount =
+    validationErrors.header.size +
+    [...validationErrors.lineItems.values()].reduce((sum, s) => sum + s.size, 0)
+
+  const editedFieldCount =
+    editedFields.header.size + [...editedFields.lineItems.values()].reduce((sum, s) => sum + s.size, 0)
+
+  // 5.16: advisory only -- a future invoice date is unusual, not invalid, so
+  // this never blocks Save the way validationErrors does. No event-window
+  // check here (plan §13's "or outside the event window" clause) -- this
+  // codebase has no event-start/event-end config anywhere to check against;
+  // build that check only once such a config exists.
+  const invoiceDateWarning = useMemo(() => {
+    const raw = header.invoiceDate.trim()
+    if (!raw) return null
+    return raw > todayLocalDateString() ? 'This invoice date is in the future.' : null
+  }, [header.invoiceDate])
+
   // Pending action awaiting confirmation because it would discard unsaved
   // edits (re-extract, or navigating away). Reused for both so there is one
   // dialog and one place that decides "does this need confirming."
@@ -230,6 +306,7 @@ export function ReviewWorkspace({
   const [exceptionOpen, setExceptionOpen] = useState(false)
   const [hubStatusOpen, setHubStatusOpen] = useState(false)
   const [reExtracting, setReExtracting] = useState(false)
+  const [addingLineItem, setAddingLineItem] = useState(false)
 
   const [isSaving, startSaving] = useTransition()
 
@@ -401,6 +478,11 @@ export function ReviewWorkspace({
         }
       }),
       vendorId,
+      // 5.18: the extraction run this form was built from. The RPC compares
+      // this against document_extraction.current_extraction_run_id at save
+      // time and raises SAVE_CONFLICT if a re-extraction moved the document
+      // on since this page loaded -- see saveVerification's conflict check.
+      expectedExtractionRunId: detail.currentExtractionRunId,
     }
   }
 
@@ -409,9 +491,36 @@ export function ReviewWorkspace({
       toast.error('Take over the claim before saving.')
       return
     }
+    // 5.15: block save outright when any amount-shaped field couldn't be
+    // parsed as a number -- saving it anyway would silently write null with
+    // no further warning (the bug this whole item exists to close). Jump to
+    // the first offending field the same way the codebase already jumps to a
+    // flagged field elsewhere, just keyed off a boolean data attribute
+    // (data-validation-error) rather than an index -- there's nothing to
+    // step between here, only ever "the first one."
+    if (validationErrorCount > 0) {
+      toast.error(
+        `Fix ${validationErrorCount} invalid amount field${validationErrorCount === 1 ? '' : 's'} before saving.`
+      )
+      formContainerRef.current?.querySelector<HTMLElement>('[data-validation-error="true"]')?.focus()
+      return
+    }
     startSaving(async () => {
       const result = await saveVerification(buildSavePayload())
       if (!result.ok) {
+        // 5.18: a save conflict is a different situation from a generic
+        // save failure -- the reviewer's corrections are still good, but the
+        // document underneath them has moved on, so a vanishing toast isn't
+        // enough (they'd lose the thread of what happened). Pin it open with
+        // an explicit Reload action instead of the default auto-dismiss.
+        if ('conflict' in result && result.conflict) {
+          toast.error('This document was re-extracted since you opened it.', {
+            description: 'Reload to see the latest version before saving your corrections.',
+            duration: Infinity,
+            action: { label: 'Reload', onClick: () => router.refresh() },
+          })
+          return
+        }
         toastError(result.error, { context: 'review-workspace' })
         return
       }
@@ -447,6 +556,38 @@ export function ReviewWorkspace({
     } finally {
       setReExtracting(false)
     }
+  }
+
+  // 5.21: the empty-line-items state's "Add a row" action. Inserts one blank
+  // row server-side (lib/actions/review.ts's addLineItem, RLS-gated the same
+  // way flagReviewException's insert is) and appends it to local state in
+  // buildLineItemState's own shape -- empty strings for every text field --
+  // so it's immediately editable and behaves like any other row on the next
+  // Save, no special-casing in buildSavePayload.
+  async function handleAddLineItem() {
+    setAddingLineItem(true)
+    const result = await addLineItem(detail.documentExtractionId)
+    setAddingLineItem(false)
+    if (!result.ok) {
+      toastError(result.error, { context: 'review-workspace' })
+      return
+    }
+    setLineItems((items) => [
+      ...items,
+      {
+        id: result.lineItem.id,
+        lineOrder: result.lineItem.lineOrder,
+        description: '',
+        hsnSacCode: '',
+        quantity: '',
+        quantityRawText: '',
+        unit: '',
+        unitNormalized: '',
+        rate: '',
+        discount: '',
+        amount: '',
+      },
+    ])
   }
 
   function handleFieldEnter(target: HTMLElement) {
@@ -590,7 +731,11 @@ export function ReviewWorkspace({
   const tint = confidenceTint(detail.extractionConfidence)
   const lineItemSum = lineItems.length > 0 ? lineItems.reduce((sum, li) => sum + (parseNum(li.amount) ?? 0), 0) : null
   const documentTotal = parseNum(header.totalAmount)
-  const formDisabled = claimState === 'blocked'
+  // 5.19: 'checking' was missing here -- the ClaimBanner visually gates the
+  // form while "Checking claim…" is in flight, but the inputs themselves
+  // stayed live underneath it, so a fast typist could get edits in before the
+  // claim result even came back.
+  const formDisabled = claimState === 'blocked' || claimState === 'checking'
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-2">
@@ -695,6 +840,15 @@ export function ReviewWorkspace({
             </Button>
           </span>
         ) : null}
+        {/* 5.17: informational only, unlike the uncertain-fields chip above --
+            editedFields already exists (1.5/L3's blue ring), this just totals
+            it up. No stepper: there's nowhere useful to jump to that the blue
+            rings on the form don't already show at a glance. */}
+        {editedFieldCount > 0 ? (
+          <span className="rounded-full border border-blue-300 bg-blue-50 px-2 py-0.5 text-xs text-blue-900 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-200">
+            {editedFieldCount} changed from OCR
+          </span>
+        ) : null}
         {detail.billCount > 1 ? (
           <span className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
             Bill {detail.billIndex + 1} of {detail.billCount} in this PDF
@@ -761,6 +915,12 @@ export function ReviewWorkspace({
             onVendorSelect={handleVendorSelect}
             uncertainFields={detail.uncertainFields}
             editedFields={editedFields}
+            validationErrors={validationErrors}
+            invoiceDateWarning={invoiceDateWarning}
+            onAddLineItem={handleAddLineItem}
+            addingLineItem={addingLineItem}
+            onReExtract={requestReExtract}
+            onFlagException={() => setExceptionOpen(true)}
             onJumpToPage={(pageNumber) => {
               pdfViewerRef.current?.goToPage(pageNumber)
               // Checklist 3.10: a collapsed spine can't actually show the
