@@ -39,7 +39,7 @@ Three defects where the UI reports success and nothing observable changes. Small
 - [x] **1.1** New migration: redefine `v_review_queue` to join entries on `coalesce(de.entry_id, sd.entry_id)` instead of `sd.entry_id`. Base it on `20260817000004_review_queue_multi_bill.sql`, the last migration-tracked definition.
 - [x] **1.2** `app/(app)/review/page.tsx:191` — add `entry_id` to the `document_extraction` select string.
 - [x] **1.3** `app/(app)/review/page.tsx:213` — change to `const entryId = extraction.entry_id ?? sourceDoc.entry_id`.
-- [x] **1.4** Audit other readers of `source_document.entry_id` for the same bug — `/export`, the reporting views, `lib/actions/documents.ts`. Anywhere a per-bill match should win, apply the same coalesce. Fixed `v_entry_enriched` and `v_vendor_spend` (also fixed an unrelated fan-out bug in the latter). `/export` and `lib/actions/documents.ts` audited — no change needed (neither reads `source_document.entry_id` as a matching signal). **Found but out of scope:** `app/(app)/entries/[id]/page.tsx`'s linked-documents list still queries only `source_document.entry_id`, so it won't show a document whose match lives solely on `document_extraction.entry_id`. Needs a follow-up, not a drop-in coalesce (different query shape).
+- [x] **1.4** Audit other readers of `source_document.entry_id` for the same bug — `/export`, the reporting views, `lib/actions/documents.ts`. Anywhere a per-bill match should win, apply the same coalesce. Fixed `v_entry_enriched` and `v_vendor_spend` (also fixed an unrelated fan-out bug in the latter). `/export` and `lib/actions/documents.ts` audited — no change needed (neither reads `source_document.entry_id` as a matching signal). **Follow-up closed:** `app/(app)/entries/[id]/page.tsx`'s linked-documents list previously queried only `source_document.entry_id`, missing a document matched solely via `document_extraction.entry_id` on a multi-bill PDF. Now unions per-bill matches (`document_extraction.entry_id = id`) with direct matches (`source_document.entry_id = id`), and picks each multi-bill document's own matching bill for the displayed vendor/invoice/total fields instead of whichever bill sorted first.
 
 Committed `8675fa7`.
 
@@ -74,40 +74,44 @@ Also required a ripple fix in `document-inbox.tsx` (default-candidate seeding re
 
 Where the screen goes quiet, or actively lies. Biggest single change to "feels stuck"; touches almost no UI structure.
 
+**Note (2026-08-21):** every box in this phase below was actually built already — commits `5550c26` and `e3124f3` predate this session's own work but the checklist was never ticked off at the time. Verified against the current code before checking these: the backlog drain really is gone, the status endpoint/polling backoff/loading skeleton all exist, `maxDuration = 180` is set, and the queue-stalled banner is wired up. Only 2.9 was genuinely still open — implemented now, see below.
+
 ### D5 — Upload blocks on other users' backlog; timeout reported as failure *(plan §4)*
 
-- [ ] **2.1** `app/api/documents/ingest/route.ts:292-299` — **remove the backlog drain.** Cap the inline work to this document's own job (`runJobById`) and nothing else. A user's upload must never spend its budget on other people's queued documents. *(Single highest-impact change in this phase.)*
-- [ ] **2.2** Respond as soon as the `source_document` row and job exist, with the extraction outcome as a field rather than a precondition.
-- [ ] **2.3** `components/documents/upload-dropzone.tsx` — replace the single `xhr.upload.onprogress` bar with the staged model. Only **Sending** carries a percentage; **Queued / Extracting / Extracted** are named states with elapsed time. Reuse `stagesFor()` from `document-card.tsx` — do not duplicate the mapping.
-- [ ] **2.4** On timeout or network error where a `documentId` was returned, show **"Still extracting"**, never `error`. Reconcile against the id.
+- [x] **2.1** `app/api/documents/ingest/route.ts` — the backlog drain is gone; the inline work is capped to this document's own job (`runJobById`) and nothing else. Committed `5550c26`.
+- [x] **2.2** Responds as soon as the `source_document` row and job exist, extraction outcome as a field rather than a precondition.
+- [x] **2.3** `components/documents/upload-dropzone.tsx` — staged model in place (Sending/Queued/Extracting/Extracted), reusing `stagesFor()` from `document-card.tsx`.
+- [x] **2.4** Timeout/network error with a returned `documentId` shows "Still extracting", not `error`.
 
-**Done when:** an upload returns in seconds, the row shows a named stage rather than a frozen 100%, and a slow extraction never displays as a failure.
+**Done when:** an upload returns in seconds, the row shows a named stage rather than a frozen 100%, and a slow extraction never displays as a failure. ✅
 
 ### D6 — Inbox re-runs its heaviest query every 4s, invisibly *(plan §5)*
 
-- [ ] **2.5** New narrow status endpoint returning only `id, upload_status, has_extraction` for pending documents.
-- [ ] **2.6** `components/documents/document-inbox.tsx:57-64` — poll that endpoint and patch rows in place. Remove the `router.refresh()` interval, which re-runs six queries including a 5,000-row `entries` fetch.
-- [ ] **2.7** Back off: 4s → 8s → 15s. Stop polling entirely on `visibilitychange` when the tab is hidden.
-- [ ] **2.8** Add `app/(app)/documents/loading.tsx` — mirror the dropzone and table shape, like the existing `review/loading.tsx`.
-- [ ] **2.9** Move `rankCandidates` off the render path (`documents/page.tsx:162`) — compute on extraction completion and persist, or lazily on row expand.
+- [x] **2.5** `app/api/documents/status/route.ts` — narrow status endpoint returning `id, upload_status, has_extraction`.
+- [x] **2.6** `components/documents/document-inbox.tsx` — polls that endpoint and patches rows in place; no more `router.refresh()` interval.
+- [x] **2.7** Backs off 4s → 8s → 15s; stops entirely on `visibilitychange` when hidden.
+- [x] **2.8** `app/(app)/documents/loading.tsx` exists, mirroring the dropzone/table shape.
+- [x] **2.9** Moved `rankCandidates` off the render path. `app/(app)/documents/page.tsx` no longer builds the candidate pool or scores anything during its own render — each bill starts with `candidates: []`. New `getInboxMatchCandidates` (`lib/actions/documents.ts`) runs the same query/scoring shape on demand; `DocumentInbox` calls it once client-side after mount (and again after every `router.refresh()`), merges the results into local state, and seeds the default per-document choice from them. Deliberately recomputed fresh on every call rather than persisted — the candidate pool is the whole `entries` table and changes on every import, so a cached ranking would go stale exactly when a newly-imported entry would now match an old unmatched document.
 
-**Done when:** the inbox stops re-fetching 5,000 entries every 4 seconds, first load shows a skeleton, and a background tab stops polling.
+**Done when:** the inbox stops re-fetching 5,000 entries every 4 seconds, first load shows a skeleton, and a background tab stops polling. ✅ Mechanically verified (typecheck/lint/full unit suite — 322/322); no live click-through in this environment.
 
 ### D7 — Import commit has no progress and no timeout ceiling *(plan §6)*
 
-- [ ] **2.10** `app/api/import/route.ts` — set an explicit `maxDuration` (it declares `runtime = 'nodejs'` but no duration; the ingest route sets 60).
-- [ ] **2.11** `components/import/import-workspace.tsx:215` — show the skeleton for `commit`, not only `dry_run`.
-- [ ] **2.12** Dim the stale dry-run result during commit so it cannot be misread as current.
-- [ ] **2.13** Report real counts as known ("412 of 1,180 rows") instead of an indeterminate spinner.
-- [ ] **2.14** On network failure, replace "Could not reach the server" with *"The import may still be running. Check batch history before retrying"* — blind re-commit is the worst available action.
+- [x] **2.10** `app/api/import/route.ts` — `maxDuration = 180` set explicitly.
+- [x] **2.11** `components/import/import-workspace.tsx` — skeleton shows for `commit`, not only `dry_run`.
+- [x] **2.12** Stale dry-run result dimmed (`opacity-40`, `pointer-events-none`) during commit.
+- [x] **2.13** Real counts reported as known, not an indeterminate spinner.
+- [x] **2.14** Network failure during commit shows the exact "The import may still be running. Check batch history before retrying." message.
 
-**Done when:** a commit shows progress, and a failed commit tells the user not to retry blindly.
+Committed `e3124f3`.
+
+**Done when:** a commit shows progress, and a failed commit tells the user not to retry blindly. ✅
 
 ### D8 — No visible signal when the queue stops draining *(plan §15)*
 
-- [ ] **2.15** Surface a banner in the document inbox when the oldest `queued` job is older than ~10 minutes: *"Extraction is running behind. Uploads may take longer than usual."* Cheap query against `job_queue`.
+- [x] **2.15** `app/(app)/documents/page.tsx` computes `queueStalled` (oldest queued `extract_document` job older than 10 minutes) and `document-inbox.tsx` renders the amber banner.
 
-**Done when:** a stalled pipeline is a named, visible state instead of silence.
+**Done when:** a stalled pipeline is a named, visible state instead of silence. ✅
 
 ---
 
