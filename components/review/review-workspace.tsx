@@ -134,6 +134,8 @@ function buildHeaderState(detail: ReviewDocumentDetail): HeaderFormState {
     vendorPhone: numToStr(h.vendorPhone.verified ?? h.vendorPhone.ocr),
     vendorEmail: numToStr(h.vendorEmail.verified ?? h.vendorEmail.ocr),
     vendorAddress: numToStr(h.vendorAddress.verified ?? h.vendorAddress.ocr),
+    buyerGstin: numToStr(h.buyerGstin.verified ?? h.buyerGstin.ocr),
+    buyerName: numToStr(h.buyerName.verified ?? h.buyerName.ocr),
     invoiceNumber: numToStr(h.invoiceNumber.verified ?? h.invoiceNumber.ocr),
     invoiceDate: numToStr(h.invoiceDate.verified ?? h.invoiceDate.ocr),
     subtotal: numToStr(h.subtotal.verified ?? h.subtotal.ocr),
@@ -485,6 +487,8 @@ export function ReviewWorkspace({
         vendor_phone: header.vendorPhone.trim() || null,
         vendor_email: header.vendorEmail.trim() || null,
         vendor_address: header.vendorAddress.trim() || null,
+        buyer_gstin: header.buyerGstin.trim() || null,
+        buyer_name: header.buyerName.trim() || null,
         invoice_number: header.invoiceNumber.trim() || null,
         invoice_date: header.invoiceDate.trim() || null,
         subtotal: parseNum(header.subtotal),
@@ -822,6 +826,7 @@ export function ReviewWorkspace({
             <span
               key={ex.id}
               className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200"
+              title={ex.description ?? undefined}
             >
               {ex.severity.toUpperCase()} · {ex.exceptionType.replace(/_/g, ' ')}
             </span>
@@ -1059,6 +1064,7 @@ export function ReviewWorkspace({
             pageNumberStart={detail.pageNumberStart}
             pageNumberEnd={detail.pageNumberEnd}
             currentPdfPage={pdfPageInfo.pageNumber}
+            gstCharged={detail.gstCharged}
             onJumpToPage={(pageNumber) => {
               pdfViewerRef.current?.goToPage(pageNumber)
               // Checklist 3.10: a collapsed spine can't actually show the

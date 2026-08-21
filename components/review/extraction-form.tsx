@@ -33,6 +33,11 @@ export interface HeaderFormState {
   vendorPhone: string
   vendorEmail: string
   vendorAddress: string
+  /** Recipient/"Bill To" block -- plan §12 GST recipient-compliance check.
+   *  Only rendered (ExtractionForm) when `gstCharged` is true; not part of
+   *  UNCERTAIN_FIELD_NAMES, so these never carry the orange uncertainty ring. */
+  buyerGstin: string
+  buyerName: string
   invoiceNumber: string
   invoiceDate: string
   subtotal: string
@@ -183,6 +188,7 @@ export const ExtractionForm = forwardRef(function ExtractionForm(
     pageNumberStart = null,
     pageNumberEnd = null,
     currentPdfPage,
+    gstCharged,
   }: {
     header: HeaderFormState
     onHeaderChange: (field: keyof HeaderFormState, value: string) => void
@@ -234,6 +240,11 @@ export const ExtractionForm = forwardRef(function ExtractionForm(
      *  down from ReviewWorkspace's existing pdfPageInfo state. Drives the
      *  quiet bottom clarification line ("This page has N flagged fields…"). */
     currentPdfPage: number
+    /** Plan §12: whether GST is actually charged on this bill (server-computed,
+     *  detail.gstCharged) -- gates the Buyer GSTIN/Buyer Name recipient-block
+     *  fields below. When false, that whole block is genuinely absent from
+     *  the DOM, not just hidden, per the plan's explicit requirement. */
+    gstCharged: boolean
   },
   ref: Ref<HTMLDivElement>
 ) {
@@ -421,6 +432,22 @@ export const ExtractionForm = forwardRef(function ExtractionForm(
             uncertain={headerUncertainty('vendorAddress')} uncertainIndex={uncertainIndexOf(headerUncertainty('vendorAddress'))}
             edited={headerEdited('vendorAddress')} onJumpToPage={onJumpToPage} pageLabel={headerPageLabel(headerUncertainty('vendorAddress'))} />
         </div>
+        {gstCharged ? (
+          <>
+            {/* Plan §12: recipient/"Bill To" block -- required on a GST tax
+                invoice alongside the vendor's own identity above. Plain
+                editable fields (no uncertainty ring): buyer_gstin/buyer_name
+                aren't in UNCERTAIN_FIELD_NAMES, so they can only ever be
+                edited or not, never model-flagged. */}
+            <div className="col-span-2 -mb-1 mt-1 text-xs font-medium text-muted-foreground">Bill to (recipient)</div>
+            <Field label="Buyer GSTIN" disabled={disabled} onKeyDown={handleEnter}
+              value={header.buyerGstin} onChange={(v) => onHeaderChange('buyerGstin', v)}
+              edited={headerEdited('buyerGstin')} />
+            <Field label="Buyer name" disabled={disabled} onKeyDown={handleEnter}
+              value={header.buyerName} onChange={(v) => onHeaderChange('buyerName', v)}
+              edited={headerEdited('buyerName')} />
+          </>
+        ) : null}
         <Field label="Invoice number" disabled={disabled} onKeyDown={handleEnter}
           value={header.invoiceNumber} onChange={(v) => onHeaderChange('invoiceNumber', v)}
           uncertain={headerUncertainty('invoiceNumber')} uncertainIndex={uncertainIndexOf(headerUncertainty('invoiceNumber'))}

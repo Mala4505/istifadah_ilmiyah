@@ -43,6 +43,10 @@ import {
 import { EXTRACTION_MAX_TOKENS, MODELS, submitExtractionBatch, type ModelId } from '@/lib/claude-client'
 import { serverEnv } from '@/lib/env.server'
 import { isSameGstin, validateGstin } from '@/lib/analytics/gstin'
+import {
+  checkGstRecipientCompliance,
+  type GstComplianceMissingItem,
+} from '@/lib/gst-recipient-compliance'
 
 export interface ExtractDocumentPayload {
   source_document_id: number
@@ -319,6 +323,20 @@ export async function persistExtractionPipelineResult(
       !isOwnOrgGstin && bill.vendor_gstin !== null ? validateGstin(bill.vendor_gstin) : null
     const isInvalidGstinChecksum = gstinChecksum !== null && !gstinChecksum.valid
 
+    // Buyer-GSTIN checksum guard (redesign plan §12): same backstop as
+    // vendor_gstin above — a failed checksum means the GSTIN is
+    // definitionally wrong, so it is never written as-is. Unlike
+    // vendor_gstin, there is no own-org exclusion here: buyer_gstin is
+    // SUPPOSED to equal COMMUNITY_GSTIN, so isOwnOrgGstin (which exists to
+    // catch the recipient's GSTIN leaking into the *vendor* field) does not
+    // apply. A checksum failure is not raised as its own exception — it
+    // simply flows into the combined gst_recipient_compliance_missing
+    // exception below as "buyer GSTIN missing," since a checksum-failed
+    // value can't be trusted either way.
+    const buyerGstinChecksum = bill.buyer_gstin !== null ? validateGstin(bill.buyer_gstin) : null
+    const isInvalidBuyerGstinChecksum = buyerGstinChecksum !== null && !buyerGstinChecksum.valid
+    const buyerGstinOcr = isInvalidBuyerGstinChecksum ? null : bill.buyer_gstin
+
     const upsertPayload: Record<string, unknown> = {
       source_document_id: sourceDocumentId,
       bill_index: billIndexOffset + billIndex,
@@ -327,6 +345,11 @@ export async function persistExtractionPipelineResult(
       page_number_end: bill.page_number_end,
       vendor_name_ocr: bill.vendor_name,
       vendor_gstin_ocr: isOwnOrgGstin || isInvalidGstinChecksum ? null : bill.vendor_gstin,
+      // Recipient/"Bill To" block (redesign plan §12) — read separately from
+      // the vendor block above (buildSystemPrompt, lib/claude-client.ts).
+      // buyer_gstin_ocr already reflects the checksum guard above.
+      buyer_gstin_ocr: buyerGstinOcr,
+      buyer_name_ocr: bill.buyer_name,
       vendor_phone_ocr: bill.vendor_phone,
       vendor_email_ocr: bill.vendor_email,
       vendor_address_ocr: bill.vendor_address,
@@ -407,6 +430,47 @@ export async function persistExtractionPipelineResult(
             'GSTIN. vendor_gstin_ocr was left blank rather than written with a value known to be wrong; ' +
             'enter the correct GSTIN on review if legible.',
           dedup_key: `vendor_gstin_invalid_checksum:${documentExtractionId}:${currentRunId}:${billIndex}`,
+        },
+        { onConflict: 'dedup_key' }
+      )
+    }
+
+    // GST recipient-compliance check (redesign plan §12): only runs when GST
+    // is actually charged on this bill; when it does, all three of buyer
+    // GSTIN / buyer name / invoice number are required for the community to
+    // claim input tax credit. One combined exception per bill (not one per
+    // missing item) — high severity, unlike the low-severity GSTIN checks
+    // above, since a missing item here has real ITC-claim consequences
+    // rather than just being an OCR-quality signal.
+    const compliance = checkGstRecipientCompliance({
+      buyerGstin: buyerGstinOcr,
+      buyerName: bill.buyer_name,
+      invoiceNumber: bill.invoice_number,
+      communityGstin: serverEnv.COMMUNITY_GSTIN || null,
+      communityName: serverEnv.COMMUNITY_NAME || null,
+      cgstAmount: bill.cgst_amount,
+      sgstAmount: bill.sgst_amount,
+      igstAmount: bill.igst_amount,
+      taxAmount: bill.tax_amount,
+      instrumentType: bill.instrument_type,
+    })
+
+    if (compliance.triggered && compliance.missing.length > 0) {
+      const missingLabels: Record<GstComplianceMissingItem, string> = {
+        buyer_gstin: 'buyer GSTIN',
+        buyer_name: 'buyer name',
+        invoice_number: 'invoice number',
+      }
+      const missingText = compliance.missing.map((item) => missingLabels[item]).join(', ')
+      await admin.from('reconciliation_exception').upsert(
+        {
+          document_extraction_id: documentExtractionId,
+          exception_type: 'gst_recipient_compliance_missing',
+          severity: 'high',
+          description:
+            `This bill has GST charged but is missing: ${missingText} — required for the community ` +
+            'to claim input tax credit.',
+          dedup_key: `gst_recipient_compliance_missing:${documentExtractionId}:${currentRunId}:${billIndex}`,
         },
         { onConflict: 'dedup_key' }
       )

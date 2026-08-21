@@ -44,6 +44,12 @@ const serverSchema = z.object({
   // vendor_gstin is written exactly as extracted, same as before this field
   // existed.
   COMMUNITY_GSTIN: z.string().optional().default(''),
+  // The organization's canonical name, fuzzy-matched (lib/matching.ts's
+  // vendorSimilarity) against the recipient/"Bill To" block on a GST bill --
+  // plan §12's recipient-compliance check. Optional: when unset, the buyer-name
+  // half of that check cannot run (treated as never matching), same posture
+  // as COMMUNITY_GSTIN unset above.
+  COMMUNITY_NAME: z.string().optional().default(''),
   // Whether a low-confidence / non-Latin-script Haiku run may automatically
   // re-run on Sonnet (§8 escalation rule, lib/extraction.ts). Default OFF.
   //
@@ -119,6 +125,7 @@ function readServerEnv() {
     WORKER_ID: process.env.WORKER_ID,
     ITS_LOGIN_EMAIL_DOMAIN: process.env.ITS_LOGIN_EMAIL_DOMAIN,
     COMMUNITY_GSTIN: process.env.COMMUNITY_GSTIN,
+    COMMUNITY_NAME: process.env.COMMUNITY_NAME,
     OCR_AUTO_ESCALATION: process.env.OCR_AUTO_ESCALATION,
     OCR_USE_BATCH_API: process.env.OCR_USE_BATCH_API,
     INGEST_INLINE_EXTRACTION: process.env.INGEST_INLINE_EXTRACTION,

@@ -305,6 +305,11 @@ export const extractionBillSchema = z.object({
   vendor_phone: absentTextAsNull,
   vendor_email: absentTextAsNull,
   vendor_address: absentTextAsNull,
+  /** Recipient/"Bill To" block, read separately from the vendor/seller block
+   *  above -- plan §12 GST recipient-compliance check needs the community's
+   *  own GSTIN and name as printed on the bill, not the vendor's. */
+  buyer_gstin: absentTextAsNull,
+  buyer_name: absentTextAsNull,
   invoice_number: absentTextAsNull,
   /** ISO 8601 date string (`YYYY-MM-DD`), or null when not legible/present. */
   invoice_date: isoDateOrNull,
@@ -443,6 +448,8 @@ export const extractionToolInputSchema = {
           vendor_phone: textField,
           vendor_email: textField,
           vendor_address: textField,
+          buyer_gstin: textField,
+          buyer_name: textField,
           invoice_number: textField,
           invoice_date: textField,
           place_of_supply: textField,
@@ -520,6 +527,8 @@ export const extractionToolInputSchema = {
           'vendor_phone',
           'vendor_email',
           'vendor_address',
+          'buyer_gstin',
+          'buyer_name',
           'invoice_number',
           'invoice_date',
           'place_of_supply',

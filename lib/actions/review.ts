@@ -23,6 +23,9 @@ export interface VerifiedHeaderInput {
   vendor_phone: string | null
   vendor_email: string | null
   vendor_address: string | null
+  /** Recipient/"Bill To" block -- plan §12 GST recipient-compliance check. */
+  buyer_gstin: string | null
+  buyer_name: string | null
   invoice_number: string | null
   invoice_date: string | null
   subtotal: number | null

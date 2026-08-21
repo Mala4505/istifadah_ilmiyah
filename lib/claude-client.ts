@@ -166,13 +166,15 @@ export const EXTRACTION_CALL_TIMEOUT_MS = 45_000
 
 /**
  * Builds the system prompt, optionally appending an own-GSTIN exclusion rule
- * when `communityGstin` is set (COMMUNITY_GSTIN, lib/env.server.ts). This is
- * a function rather than a module-level constant so the prompt can vary per
- * call without threading a second parameter through the whole extraction
- * pipeline — `extractDocument` is the only caller, and it reads
- * `serverEnv.COMMUNITY_GSTIN` itself.
+ * when `communityGstin` is set (COMMUNITY_GSTIN, lib/env.server.ts) and/or a
+ * recipient-block reading instruction when either `communityGstin` or
+ * `communityName` (COMMUNITY_NAME) is set. This is a function rather than a
+ * module-level constant so the prompt can vary per call without threading
+ * these parameters through the whole extraction pipeline —
+ * `extractDocument` is the only caller, and it reads `serverEnv.COMMUNITY_GSTIN`
+ * / `serverEnv.COMMUNITY_NAME` itself.
  */
-function buildSystemPrompt(communityGstin: string | null): string {
+function buildSystemPrompt(communityGstin: string | null, communityName: string | null): string {
   const base =
     'You are extracting structured data from a scanned financial document (invoice, chit, or receipt) ' +
     'submitted for expense reconciliation. The document may span multiple pages, and some pages may not ' +
@@ -213,15 +215,34 @@ function buildSystemPrompt(communityGstin: string | null): string {
     '(anything shaped like `<...>` or `</...>`) inside a field, even if it resembles formatting you have ' +
     'seen elsewhere; that is never part of a real invoice.'
 
-  if (!communityGstin) return base
+  let prompt = base
 
-  return (
-    base +
-    ' For vendor_gstin specifically: extract the VENDOR/SELLER\'s GSTIN — the one printed under ' +
-    '"GSTIN"/"Seller" near the vendor\'s own name and address — never the buyer/recipient\'s GSTIN. ' +
-    `If the community's own GSTIN (${communityGstin}) appears on the page as the recipient, do not ` +
-    'return it as vendor_gstin; leave vendor_gstin empty instead.'
-  )
+  if (communityGstin) {
+    prompt +=
+      ' For vendor_gstin specifically: extract the VENDOR/SELLER\'s GSTIN — the one printed under ' +
+      '"GSTIN"/"Seller" near the vendor\'s own name and address — never the buyer/recipient\'s GSTIN. ' +
+      `If the community's own GSTIN (${communityGstin}) appears on the page as the recipient, do not ` +
+      'return it as vendor_gstin; leave vendor_gstin empty instead.'
+  }
+
+  if (communityGstin || communityName) {
+    const known: string[] = []
+    if (communityGstin) known.push(`GSTIN ${communityGstin}`)
+    if (communityName) known.push(`name "${communityName}"`)
+    prompt +=
+      ' Separately, also read the RECIPIENT/"Bill To" block on the invoice — a different block from the ' +
+      'vendor/seller letterhead you already read for vendor_gstin/vendor_name, usually printed lower on ' +
+      'the page or in a "Billed To"/"Buyer"/"Ship To" section — into buyer_gstin and buyer_name. ' +
+      `The community receiving this bill is known in advance to have ${known.join(' and ')}; check ` +
+      'specifically whether that known value appears in the recipient block rather than free-reading it ' +
+      'with no prior, and transcribe it into buyer_gstin/buyer_name exactly as printed. This is the ' +
+      'mirror image of the vendor_gstin rule above: just as the community\'s own GSTIN must never be ' +
+      'copied into vendor_gstin, the vendor/seller\'s GSTIN or name must never be copied into ' +
+      'buyer_gstin/buyer_name — if only the seller block is visible and no separate recipient block is ' +
+      'printed on the page, leave buyer_gstin/buyer_name empty rather than reusing the seller\'s details.'
+  }
+
+  return prompt
 }
 
 /** What this SDK version accepts inside a user turn's `content` array. */
@@ -243,11 +264,14 @@ function buildPdfBlock(data: string): UserContentBlockParam {
  * prompt together; every subsequent extraction call within the 5-minute TTL
  * reads that ~90% cheaper instead of paying full price for it again.
  */
-function buildCachedSystemPrompt(communityGstin: string | null): Anthropic.TextBlockParam[] {
+function buildCachedSystemPrompt(
+  communityGstin: string | null,
+  communityName: string | null
+): Anthropic.TextBlockParam[] {
   return [
     {
       type: 'text',
-      text: buildSystemPrompt(communityGstin),
+      text: buildSystemPrompt(communityGstin, communityName),
       cache_control: { type: 'ephemeral' },
     },
   ]
@@ -279,7 +303,7 @@ function buildExtractionRequestParams(params: {
   return {
     model: params.model,
     max_tokens: params.maxTokens,
-    system: buildCachedSystemPrompt(serverEnv.COMMUNITY_GSTIN || null),
+    system: buildCachedSystemPrompt(serverEnv.COMMUNITY_GSTIN || null, serverEnv.COMMUNITY_NAME || null),
     // `tool` is built from `extractionToolInputSchema`'s `as const` literal
     // (lib/extraction-schema.ts), whose `required` arrays are readonly
     // tuples; the SDK's `Tool.InputSchema.required` is typed as a mutable

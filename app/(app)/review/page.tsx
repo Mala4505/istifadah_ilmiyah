@@ -216,7 +216,7 @@ async function loadDocumentDetail(
     supabase
       .from('document_extraction')
       .select(
-        'id, entry_id, current_extraction_run_id, verified_at, bill_index, page_number_start, page_number_end, vendor_name_ocr, vendor_name_verified, vendor_gstin_ocr, vendor_gstin_verified, vendor_phone_ocr, vendor_phone_verified, vendor_email_ocr, vendor_email_verified, vendor_address_ocr, vendor_address_verified, invoice_number_ocr, invoice_number_verified, invoice_date_ocr, invoice_date_verified, subtotal_ocr, subtotal_verified, tax_amount_ocr, tax_amount_verified, total_amount_ocr, total_amount_verified, notes_ocr, notes_verified, uncertain_fields_ocr'
+        'id, entry_id, current_extraction_run_id, verified_at, bill_index, page_number_start, page_number_end, vendor_name_ocr, vendor_name_verified, vendor_gstin_ocr, vendor_gstin_verified, vendor_phone_ocr, vendor_phone_verified, vendor_email_ocr, vendor_email_verified, vendor_address_ocr, vendor_address_verified, buyer_gstin_ocr, buyer_gstin_verified, buyer_name_ocr, buyer_name_verified, invoice_number_ocr, invoice_number_verified, invoice_date_ocr, invoice_date_verified, subtotal_ocr, subtotal_verified, tax_amount_ocr, tax_amount_verified, total_amount_ocr, total_amount_verified, notes_ocr, notes_verified, uncertain_fields_ocr, instrument_type_ocr, tax_breakdown_ocr'
       )
       .eq('id', documentExtractionId)
       .maybeSingle(),
@@ -450,6 +450,23 @@ async function loadDocumentDetail(
     createdAt: e.created_at as string,
   }))
 
+  // Plan §12 trigger condition: GST is "charged" when any tax component is
+  // present and non-zero, or the instrument itself is classified as a tax
+  // invoice -- mirrors the same check lib/jobs/handlers/extract.ts runs
+  // server-side to decide whether to raise the compliance exception at all.
+  const taxAmount = (extraction.tax_amount_verified ?? extraction.tax_amount_ocr) as number | null
+  const taxBreakdown = extraction.tax_breakdown_ocr as {
+    cgst?: { amount: number | null } | null
+    sgst?: { amount: number | null } | null
+    igst?: { amount: number | null } | null
+  } | null
+  const gstCharged =
+    (taxAmount !== null && taxAmount !== 0) ||
+    [taxBreakdown?.cgst, taxBreakdown?.sgst, taxBreakdown?.igst].some(
+      (component) => component?.amount !== null && component?.amount !== undefined && component.amount !== 0
+    ) ||
+    extraction.instrument_type_ocr === 'tax_invoice'
+
   return {
     sourceDocumentId,
     documentExtractionId,
@@ -481,12 +498,15 @@ async function loadDocumentDetail(
     legibility: run?.legibility ?? null,
     model: run?.model ?? null,
     verifiedAt: extraction.verified_at as string | null,
+    gstCharged,
     header: {
       vendorName: { ocr: extraction.vendor_name_ocr, verified: extraction.vendor_name_verified },
       vendorGstin: { ocr: extraction.vendor_gstin_ocr, verified: extraction.vendor_gstin_verified },
       vendorPhone: { ocr: extraction.vendor_phone_ocr, verified: extraction.vendor_phone_verified },
       vendorEmail: { ocr: extraction.vendor_email_ocr, verified: extraction.vendor_email_verified },
       vendorAddress: { ocr: extraction.vendor_address_ocr, verified: extraction.vendor_address_verified },
+      buyerGstin: { ocr: extraction.buyer_gstin_ocr, verified: extraction.buyer_gstin_verified },
+      buyerName: { ocr: extraction.buyer_name_ocr, verified: extraction.buyer_name_verified },
       invoiceNumber: { ocr: extraction.invoice_number_ocr, verified: extraction.invoice_number_verified },
       invoiceDate: { ocr: extraction.invoice_date_ocr, verified: extraction.invoice_date_verified },
       subtotal: { ocr: extraction.subtotal_ocr, verified: extraction.subtotal_verified },

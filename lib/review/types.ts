@@ -46,6 +46,10 @@ export interface HeaderFieldSet<T> {
   vendorPhone: T
   vendorEmail: T
   vendorAddress: T
+  /** Recipient/"Bill To" block -- plan §12 GST recipient-compliance check.
+   *  Only meaningful (and only rendered) when `gstCharged` is true. */
+  buyerGstin: T
+  buyerName: T
   invoiceNumber: T
   invoiceDate: T
   subtotal: T
@@ -153,6 +157,13 @@ export interface ReviewDocumentDetail {
   legibility: 'clear' | 'partial' | 'poor' | null
   model: string | null
   verifiedAt: string | null
+  /** Plan §12: whether GST is charged on this bill (any of cgst/sgst/igst/
+   *  tax_amount present and non-zero, or instrument_type_ocr === 'tax_invoice').
+   *  Drives whether the buyer GSTIN/name fields and the recipient-compliance
+   *  exception have anything to show -- both stay genuinely absent, not just
+   *  hidden, when this is false (plan §12: "nothing about it appears anywhere
+   *  in the UI"). */
+  gstCharged: boolean
   header: HeaderFieldSet<{ ocr: string | number | null; verified: string | number | null }>
   lineItems: LineItemDetail[]
   uncertainFields: UncertainField[]
