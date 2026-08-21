@@ -18,23 +18,23 @@ import {
   LogOut,
   ChevronLeft,
   ChevronRight,
+  ChevronsUpDown,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { ThemeToggle } from '@/components/app-shell/theme-toggle'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { signOut } from '@/lib/actions/auth'
-import { isAdminOrAbove } from '@/lib/auth/roles'
+import { isAdminOrAbove, isSuperadmin } from '@/lib/auth/roles'
 
 const COLLAPSE_STORAGE_KEY = 'nav-rail-collapsed'
 
-// Persistent left rail (MASTER-PLAN §5 "Navigation"). Export and Admin are
-// admin-only per §4.4c's role table, and are now hidden outright
-// from anyone who isn't an active admin — each of those pages already blocks
-// non-admins server-side, so showing the link only ever produced a click that
-// led to a refusal. That mattered little while every account was an admin; it
-// matters now that departments have their own scoped accounts, for whom those
-// two links are pure noise. (/import has no rail entry at all — it is reached
+// Persistent left rail (MASTER-PLAN §5 "Navigation"). Export is admin-only
+// and Admin is superadmin-only per §4.4c's role table, and each is hidden
+// outright from anyone below that role — the page itself already blocks
+// lower roles server-side, so showing the link only ever produced a click
+// that led to a refusal. (/import has no rail entry at all — it is reached
 // from the dashboard's imports tile, which is gated the same way.)
 //
 // This is presentation only. RLS in the database, and each page's own
@@ -50,7 +50,7 @@ const NAV_ITEMS = [
   { label: 'Reports', href: '/reports', icon: FileBarChart },
   { label: 'Analytics', href: '/analytics', icon: LineChart },
   { label: 'Export', href: '/export', icon: Download, adminOnly: true },
-  { label: 'Admin', href: '/admin', icon: Settings, adminOnly: true },
+  { label: 'Admin', href: '/admin', icon: Settings, superadminOnly: true },
 ] as const
 
 function initialsFor(name: string): string {
@@ -69,7 +69,12 @@ export function NavRail({
   const [collapsed, setCollapsed] = useState(false)
 
   const isAdmin = isAdminOrAbove(user.role)
-  const navItems = NAV_ITEMS.filter((item) => isAdmin || !('adminOnly' in item && item.adminOnly))
+  const isSuperadminUser = isSuperadmin(user.role)
+  const navItems = NAV_ITEMS.filter((item) => {
+    if ('superadminOnly' in item && item.superadminOnly) return isSuperadminUser
+    if ('adminOnly' in item && item.adminOnly) return isAdmin
+    return true
+  })
 
   // Per-visit override: true once the user manually re-expands the rail
   // while on /review. Not persisted — a ref (not state) so it survives
@@ -110,27 +115,6 @@ export function NavRail({
   }
 
   const toggleLabel = collapsed ? 'Expand sidebar' : 'Collapse sidebar'
-  const toggleButton = (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          className="h-7 w-7 shrink-0 text-muted-foreground hover:text-foreground"
-          onClick={toggleCollapsed}
-          aria-label={toggleLabel}
-        >
-          {collapsed ? (
-            <ChevronRight className="h-4 w-4" strokeWidth={1.75} />
-          ) : (
-            <ChevronLeft className="h-4 w-4" strokeWidth={1.75} />
-          )}
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent side="right">{toggleLabel}</TooltipContent>
-    </Tooltip>
-  )
 
   return (
     <TooltipProvider delayDuration={200}>
@@ -142,17 +126,34 @@ export function NavRail({
       >
         <div
           className={cn(
-            'flex items-center border-b border-border',
-            collapsed ? 'flex-col gap-2 px-2 py-3' : 'justify-between gap-2 px-4 py-4'
+            'flex items-center justify-center border-b border-border',
+            collapsed ? 'px-2 py-6' : 'px-4 py-8'
           )}
         >
-          <Logo imageClassName={collapsed ? 'w-8' : 'w-20'} />
-          {toggleButton}
+          <Logo imageClassName={collapsed ? 'w-9' : 'w-32'} />
         </div>
+
+        {/* Collapse/expand handle: docked on the rail's right border, faint
+            until the pointer is near the edge, brightening on hover/focus —
+            keeps it out of the logo's way without hiding it outright. */}
+        <button
+          type="button"
+          onClick={toggleCollapsed}
+          aria-label={toggleLabel}
+          className="group/edge absolute inset-y-0 -right-[18px] z-10 flex w-9 items-center justify-center"
+        >
+          <span className="flex h-7 w-7 items-center justify-center rounded-full border border-border bg-card text-muted-foreground opacity-30 shadow-sm transition-opacity duration-150 group-hover/edge:opacity-100 group-focus-visible/edge:opacity-100">
+            {collapsed ? (
+              <ChevronRight className="h-3.5 w-3.5" strokeWidth={1.9} />
+            ) : (
+              <ChevronLeft className="h-3.5 w-3.5" strokeWidth={1.9} />
+            )}
+          </span>
+        </button>
+
         <ul className="flex-1 space-y-0.5 p-2">
           {navItems.map((item) => {
             const isActive = item.href === '/' ? pathname === '/' : pathname.startsWith(item.href)
-            const isAdminOnly = 'adminOnly' in item && item.adminOnly
             const Icon = item.icon
             const link = (
               <Link
@@ -167,11 +168,6 @@ export function NavRail({
               >
                 <Icon className="h-4 w-4 shrink-0" strokeWidth={1.75} aria-hidden="true" />
                 <span className={cn('truncate', collapsed && 'sr-only')}>{item.label}</span>
-                {!collapsed && isAdminOnly && (
-                  <span className="ml-auto rounded border border-border px-1 py-0.5 text-[9px] font-medium uppercase tracking-wide text-muted-foreground">
-                    Admin
-                  </span>
-                )}
               </Link>
             )
             return (
@@ -179,10 +175,7 @@ export function NavRail({
                 {collapsed ? (
                   <Tooltip>
                     <TooltipTrigger asChild>{link}</TooltipTrigger>
-                    <TooltipContent side="right">
-                      {item.label}
-                      {isAdminOnly ? ' (Admin)' : ''}
-                    </TooltipContent>
+                    <TooltipContent side="right">{item.label}</TooltipContent>
                   </Tooltip>
                 ) : (
                   link
@@ -191,98 +184,77 @@ export function NavRail({
             )
           })}
         </ul>
+
+        {/* Account footer: one row (avatar, and name/role when expanded)
+            that opens a popover for everything else — shortcut hint, theme
+            toggle, sign-out — instead of stacking them underneath. */}
         <div className={cn('border-t border-border', collapsed ? 'p-2' : 'p-3')}>
-          <div className={cn('flex items-center', collapsed ? 'flex-col gap-2' : 'gap-2.5')}>
-            {collapsed ? (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <div
-                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-secondary font-mono text-xs font-semibold text-secondary-foreground"
-                    tabIndex={0}
-                  >
-                    {initialsFor(user.displayName)}
-                  </div>
-                </TooltipTrigger>
-                <TooltipContent side="right">
-                  {user.displayName}
-                  {user.role ? ` — ${user.role}` : ''}
-                </TooltipContent>
-              </Tooltip>
-            ) : (
-              <div
-                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-secondary font-mono text-xs font-semibold text-secondary-foreground"
-                aria-hidden="true"
+          <Popover>
+            <PopoverTrigger asChild>
+              <button
+                type="button"
+                aria-label={`${user.displayName}${user.role ? ` — ${user.role}` : ''}, account menu`}
+                className={cn(
+                  'flex w-full items-center rounded-md transition-colors hover:bg-secondary/60',
+                  collapsed ? 'justify-center p-1.5' : 'gap-2.5 p-1.5'
+                )}
               >
-                {initialsFor(user.displayName)}
+                <div
+                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-secondary font-mono text-xs font-semibold text-secondary-foreground"
+                  aria-hidden="true"
+                >
+                  {initialsFor(user.displayName)}
+                </div>
+                {!collapsed && (
+                  <>
+                    <div className="min-w-0 flex-1 text-left">
+                      <p className="truncate text-sm font-medium leading-tight text-foreground">
+                        {user.displayName}
+                      </p>
+                      {user.role && (
+                        <p className="truncate text-[11px] font-medium uppercase leading-tight tracking-wide text-muted-foreground">
+                          {user.role}
+                        </p>
+                      )}
+                    </div>
+                    <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" strokeWidth={1.75} />
+                  </>
+                )}
+              </button>
+            </PopoverTrigger>
+            <PopoverContent side="top" align={collapsed ? 'center' : 'start'} sideOffset={8} className="w-56 p-2">
+              <div className="px-1.5 py-1">
+                <p className="truncate text-sm font-medium text-foreground">{user.displayName}</p>
+                {user.role && (
+                  <p className="truncate text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                    {user.role}
+                  </p>
+                )}
               </div>
-            )}
-            <div className={cn('min-w-0 flex-1', collapsed && 'sr-only')}>
-              <p className="truncate text-sm font-medium leading-tight text-foreground">{user.displayName}</p>
-              {user.role && (
-                <p className="truncate text-[11px] font-medium uppercase leading-tight tracking-wide text-muted-foreground">
-                  {user.role}
-                </p>
-              )}
-            </div>
-            {collapsed ? (
-              <form action={signOut}>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      type="submit"
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8 text-muted-foreground hover:text-destructive"
-                      aria-label="Sign out"
-                    >
-                      <LogOut className="h-4 w-4" strokeWidth={1.75} />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent side="right">Sign out</TooltipContent>
-                </Tooltip>
-              </form>
-            ) : (
+              <div className="my-1.5 border-t border-border" />
+              <div className="flex items-center justify-between gap-2 px-1.5 py-1">
+                <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <kbd className="rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[10px]">
+                    Ctrl K
+                  </kbd>
+                  <span>jump to entry</span>
+                </div>
+                <ThemeToggle />
+              </div>
+              <div className="my-1.5 border-t border-border" />
               <form action={signOut}>
                 <Button
                   type="submit"
                   variant="ghost"
-                  size="icon"
-                  className="h-8 w-8 text-muted-foreground hover:text-destructive"
-                  aria-label="Sign out"
+                  size="sm"
+                  className="w-full justify-start gap-2 px-1.5 text-muted-foreground hover:text-destructive"
                 >
                   <LogOut className="h-4 w-4" strokeWidth={1.75} />
+                  Sign out
                 </Button>
               </form>
-            )}
-          </div>
-          <div
-            className={cn(
-              'mt-2.5 flex items-center text-xs text-muted-foreground',
-              collapsed ? 'flex-col gap-2' : 'justify-between gap-1.5'
-            )}
-          >
-            {collapsed ? (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <kbd
-                    className="rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[10px]"
-                    tabIndex={0}
-                  >
-                    Ctrl K
-                  </kbd>
-                </TooltipTrigger>
-                <TooltipContent side="right">Ctrl K — jump to entry</TooltipContent>
-              </Tooltip>
-            ) : (
-              <div className="flex items-center gap-1.5">
-                <kbd className="rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[10px]">
-                  Ctrl K
-                </kbd>
-                <span>jump to entry</span>
-              </div>
-            )}
-            <ThemeToggle />
-          </div>
+            </PopoverContent>
+          </Popover>
         </div>
       </nav>
     </TooltipProvider>

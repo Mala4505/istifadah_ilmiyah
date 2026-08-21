@@ -1,6 +1,6 @@
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
-import { isAdminOrAbove, isSuperadmin } from '@/lib/auth/roles'
+import { isSuperadmin } from '@/lib/auth/roles'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Badge } from '@/components/ui/badge'
@@ -57,7 +57,7 @@ export default async function AdminPage() {
     .eq('id', user.id)
     .single()
 
-  if (!profile || !isAdminOrAbove(profile.role) || !profile.is_active) {
+  if (!profile || !isSuperadmin(profile.role) || !profile.is_active) {
     return (
       <div className="flex flex-col gap-4">
         <PageHeader />
@@ -66,16 +66,14 @@ export default async function AdminPage() {
             <CardTitle>Admin access required</CardTitle>
             <CardDescription>
               This screen manages staff roles, budget-head mapping, vendor identity merges, and Hub
-              master data. It is restricted to active admins and superadmins — your account does not
-              currently have that role, so there is nothing further to show here.
+              master data. It is restricted to active superadmins — your account does not currently
+              have that role, so there is nothing further to show here.
             </CardDescription>
           </CardHeader>
         </Card>
       </div>
     )
   }
-
-  const viewerIsSuperadmin = isSuperadmin(profile.role)
 
   const [
     { data: departmentsData },
@@ -198,7 +196,7 @@ export default async function AdminPage() {
                   role and department set below.
                 </CardDescription>
               </div>
-              {viewerIsSuperadmin && <CreateUserDialog departments={departments} />}
+              <CreateUserDialog departments={departments} />
             </CardHeader>
             <CardContent>
               {staff.length === 0 ? (
@@ -208,7 +206,7 @@ export default async function AdminPage() {
                   staff={staff}
                   departments={departments}
                   currentUserId={user.id}
-                  canEdit={viewerIsSuperadmin}
+                  canEdit
                 />
               )}
             </CardContent>
