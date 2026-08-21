@@ -15,7 +15,7 @@ import { forwardRef } from 'react'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
-import type { ConfidenceTint } from '@/lib/review/types'
+import type { ConfidenceTint, UncertainField } from '@/lib/review/types'
 import type { VendorSearchResult } from '@/lib/actions/review'
 import { VendorAutocomplete } from './vendor-autocomplete'
 
@@ -35,6 +35,10 @@ export interface HeaderFormState {
 
 export interface LineItemFormState {
   id: number
+  /** From document_extraction_line_item.line_order — the key uncertain_fields_ocr
+   *  entries use to name a specific line item (stable across re-sorts, unlike
+   *  the row's render index). */
+  lineOrder: number
   description: string
   hsnSacCode: string
   quantity: string
@@ -55,6 +59,39 @@ const TINT_CLASSES: Record<ConfidenceTint, string> = {
 
 const UNIT_QUICK_PICKS = ['sqft', 'nos', 'day', 'kg', 'rft']
 
+/** A flagged field gets this on top of its confidence tint — deliberately a
+ * different visual channel (ring, not background) so "the whole document is
+ * amber" and "this one field is uncertain" never look like the same thing. */
+const UNCERTAIN_RING_CLASS = 'ring-2 ring-orange-500 ring-offset-1 dark:ring-offset-background'
+
+/** Maps HeaderFormState's camelCase keys to the wire field names
+ * UNCERTAIN_FIELD_NAMES uses (lib/extraction-schema.ts) — 'notes' has no
+ * entry because it isn't part of that vocabulary (free-text commentary, not
+ * a transcribed fact worth flagging). */
+const HEADER_WIRE_FIELD: Partial<Record<keyof HeaderFormState, string>> = {
+  vendorName: 'vendor_name',
+  vendorGstin: 'vendor_gstin',
+  vendorPhone: 'vendor_phone',
+  vendorEmail: 'vendor_email',
+  vendorAddress: 'vendor_address',
+  invoiceNumber: 'invoice_number',
+  invoiceDate: 'invoice_date',
+  subtotal: 'subtotal',
+  taxAmount: 'tax_amount',
+  totalAmount: 'total_amount',
+}
+
+/** Same idea for line-item columns — only the ones UNCERTAIN_FIELD_NAMES
+ * covers (description/quantity/rate/discount/amount); hsnSacCode, unit, etc.
+ * are never flaggable. */
+const LINE_ITEM_WIRE_FIELD: Partial<Record<keyof Omit<LineItemFormState, 'id'>, string>> = {
+  description: 'line_item_description',
+  quantity: 'line_item_quantity',
+  rate: 'line_item_rate',
+  discount: 'line_item_discount',
+  amount: 'line_item_amount',
+}
+
 export const ExtractionForm = forwardRef(function ExtractionForm(
   {
     header,
@@ -68,6 +105,8 @@ export const ExtractionForm = forwardRef(function ExtractionForm(
     vendorAutocompleteOpen,
     onVendorAutocompleteOpenChange,
     onVendorSelect,
+    uncertainFields = [],
+    onJumpToPage,
   }: {
     header: HeaderFormState
     onHeaderChange: (field: keyof HeaderFormState, value: string) => void
@@ -80,6 +119,11 @@ export const ExtractionForm = forwardRef(function ExtractionForm(
     vendorAutocompleteOpen: boolean
     onVendorAutocompleteOpenChange: (open: boolean) => void
     onVendorSelect: (vendor: VendorSearchResult) => void
+    /** Fields the model doubted (document_extraction.uncertain_fields_ocr) — drives
+     *  the ring highlight on top of `tint` and the "jump to page" affordance. */
+    uncertainFields?: UncertainField[]
+    /** Called with a field's source page when a flagged field is clicked/focused. */
+    onJumpToPage?: (pageNumber: number) => void
   },
   ref: Ref<HTMLDivElement>
 ) {
@@ -90,6 +134,30 @@ export const ExtractionForm = forwardRef(function ExtractionForm(
       e.preventDefault()
       onFieldEnter(e.currentTarget)
     }
+  }
+
+  // header key -> the uncertain-field entry flagging it, if any.
+  const uncertainHeaderByField = new Map<string, UncertainField>()
+  // line_order -> (line-item wire field name -> entry).
+  const uncertainByLineOrder = new Map<number, Map<string, UncertainField>>()
+  for (const f of uncertainFields) {
+    if (f.lineOrder === null) {
+      uncertainHeaderByField.set(f.field, f)
+    } else {
+      if (!uncertainByLineOrder.has(f.lineOrder)) uncertainByLineOrder.set(f.lineOrder, new Map())
+      uncertainByLineOrder.get(f.lineOrder)!.set(f.field, f)
+    }
+  }
+
+  function headerUncertainty(key: keyof HeaderFormState): UncertainField | undefined {
+    const wireField = HEADER_WIRE_FIELD[key]
+    return wireField ? uncertainHeaderByField.get(wireField) : undefined
+  }
+
+  function lineItemUncertainty(lineOrder: number, key: keyof Omit<LineItemFormState, 'id'>): UncertainField | undefined {
+    const wireField = LINE_ITEM_WIRE_FIELD[key]
+    if (!wireField) return undefined
+    return uncertainByLineOrder.get(lineOrder)?.get(wireField)
   }
 
   return (
@@ -107,25 +175,34 @@ export const ExtractionForm = forwardRef(function ExtractionForm(
           />
         </div>
         <Field label="GSTIN" tintClass={tintClass} disabled={disabled} onKeyDown={handleEnter}
-          value={header.vendorGstin} onChange={(v) => onHeaderChange('vendorGstin', v)} />
+          value={header.vendorGstin} onChange={(v) => onHeaderChange('vendorGstin', v)}
+          uncertain={headerUncertainty('vendorGstin')} onJumpToPage={onJumpToPage} />
         <Field label="Phone" tintClass={tintClass} disabled={disabled} onKeyDown={handleEnter}
-          value={header.vendorPhone} onChange={(v) => onHeaderChange('vendorPhone', v)} />
+          value={header.vendorPhone} onChange={(v) => onHeaderChange('vendorPhone', v)}
+          uncertain={headerUncertainty('vendorPhone')} onJumpToPage={onJumpToPage} />
         <Field label="Email" tintClass={tintClass} disabled={disabled} onKeyDown={handleEnter}
-          value={header.vendorEmail} onChange={(v) => onHeaderChange('vendorEmail', v)} />
+          value={header.vendorEmail} onChange={(v) => onHeaderChange('vendorEmail', v)}
+          uncertain={headerUncertainty('vendorEmail')} onJumpToPage={onJumpToPage} />
         <div className="col-span-2">
           <Field label="Address" tintClass={tintClass} disabled={disabled} onKeyDown={handleEnter}
-            value={header.vendorAddress} onChange={(v) => onHeaderChange('vendorAddress', v)} />
+            value={header.vendorAddress} onChange={(v) => onHeaderChange('vendorAddress', v)}
+            uncertain={headerUncertainty('vendorAddress')} onJumpToPage={onJumpToPage} />
         </div>
         <Field label="Invoice number" tintClass={tintClass} disabled={disabled} onKeyDown={handleEnter}
-          value={header.invoiceNumber} onChange={(v) => onHeaderChange('invoiceNumber', v)} />
+          value={header.invoiceNumber} onChange={(v) => onHeaderChange('invoiceNumber', v)}
+          uncertain={headerUncertainty('invoiceNumber')} onJumpToPage={onJumpToPage} />
         <Field label="Invoice date" type="date" tintClass={tintClass} disabled={disabled} onKeyDown={handleEnter}
-          value={header.invoiceDate} onChange={(v) => onHeaderChange('invoiceDate', v)} />
+          value={header.invoiceDate} onChange={(v) => onHeaderChange('invoiceDate', v)}
+          uncertain={headerUncertainty('invoiceDate')} onJumpToPage={onJumpToPage} />
         <Field label="Subtotal" inputMode="decimal" tintClass={tintClass} disabled={disabled} onKeyDown={handleEnter}
-          value={header.subtotal} onChange={(v) => onHeaderChange('subtotal', v)} />
+          value={header.subtotal} onChange={(v) => onHeaderChange('subtotal', v)}
+          uncertain={headerUncertainty('subtotal')} onJumpToPage={onJumpToPage} />
         <Field label="Tax amount" inputMode="decimal" tintClass={tintClass} disabled={disabled} onKeyDown={handleEnter}
-          value={header.taxAmount} onChange={(v) => onHeaderChange('taxAmount', v)} />
+          value={header.taxAmount} onChange={(v) => onHeaderChange('taxAmount', v)}
+          uncertain={headerUncertainty('taxAmount')} onJumpToPage={onJumpToPage} />
         <Field label="Total amount" inputMode="decimal" tintClass={tintClass} disabled={disabled} onKeyDown={handleEnter}
-          value={header.totalAmount} onChange={(v) => onHeaderChange('totalAmount', v)} />
+          value={header.totalAmount} onChange={(v) => onHeaderChange('totalAmount', v)}
+          uncertain={headerUncertainty('totalAmount')} onJumpToPage={onJumpToPage} />
         <div className="col-span-2 flex flex-col gap-1.5">
           <Label>Notes</Label>
           <Textarea
@@ -161,6 +238,11 @@ export const ExtractionForm = forwardRef(function ExtractionForm(
             <tbody>
               {lineItems.map((item, index) => {
                 const jumpIndex = index < 9 ? index + 1 : null
+                const descUncertain = lineItemUncertainty(item.lineOrder, 'description')
+                const qtyUncertain = lineItemUncertainty(item.lineOrder, 'quantity')
+                const rateUncertain = lineItemUncertainty(item.lineOrder, 'rate')
+                const discountUncertain = lineItemUncertainty(item.lineOrder, 'discount')
+                const amountUncertain = lineItemUncertainty(item.lineOrder, 'amount')
                 return (
                   <tr key={item.id} className="border-t border-border">
                     <td className="px-2 py-1 text-center text-xs text-muted-foreground">{index + 1}</td>
@@ -168,7 +250,9 @@ export const ExtractionForm = forwardRef(function ExtractionForm(
                       <Input
                         data-line-jump-index={jumpIndex ?? undefined}
                         disabled={disabled}
-                        className={tintClass}
+                        className={`${tintClass} ${descUncertain ? UNCERTAIN_RING_CLASS : ''}`}
+                        title={descUncertain ? 'Model was uncertain about this value — click to jump to the source page' : undefined}
+                        onFocus={() => descUncertain && onJumpToPage?.(descUncertain.pageNumber)}
                         value={item.description}
                         onChange={(e) => onLineItemChange(item.id, 'description', e.target.value)}
                         onKeyDown={handleEnter}
@@ -179,7 +263,11 @@ export const ExtractionForm = forwardRef(function ExtractionForm(
                         onChange={(e) => onLineItemChange(item.id, 'hsnSacCode', e.target.value)} onKeyDown={handleEnter} />
                     </td>
                     <td className="min-w-20 px-1 py-1">
-                      <Input inputMode="decimal" disabled={disabled} className={tintClass} value={item.quantity}
+                      <Input inputMode="decimal" disabled={disabled}
+                        className={`${tintClass} ${qtyUncertain ? UNCERTAIN_RING_CLASS : ''}`}
+                        title={qtyUncertain ? 'Model was uncertain about this value — click to jump to the source page' : undefined}
+                        onFocus={() => qtyUncertain && onJumpToPage?.(qtyUncertain.pageNumber)}
+                        value={item.quantity}
                         onChange={(e) => onLineItemChange(item.id, 'quantity', e.target.value)} onKeyDown={handleEnter} />
                     </td>
                     <td className="min-w-28 px-1 py-1">
@@ -204,15 +292,27 @@ export const ExtractionForm = forwardRef(function ExtractionForm(
                       </div>
                     </td>
                     <td className="min-w-24 px-1 py-1">
-                      <Input inputMode="decimal" disabled={disabled} className={tintClass} value={item.rate}
+                      <Input inputMode="decimal" disabled={disabled}
+                        className={`${tintClass} ${rateUncertain ? UNCERTAIN_RING_CLASS : ''}`}
+                        title={rateUncertain ? 'Model was uncertain about this value — click to jump to the source page' : undefined}
+                        onFocus={() => rateUncertain && onJumpToPage?.(rateUncertain.pageNumber)}
+                        value={item.rate}
                         onChange={(e) => onLineItemChange(item.id, 'rate', e.target.value)} onKeyDown={handleEnter} />
                     </td>
                     <td className="min-w-28 px-1 py-1">
-                      <Input disabled={disabled} className={tintClass} value={item.discount}
+                      <Input disabled={disabled}
+                        className={`${tintClass} ${discountUncertain ? UNCERTAIN_RING_CLASS : ''}`}
+                        title={discountUncertain ? 'Model was uncertain about this value — click to jump to the source page' : undefined}
+                        onFocus={() => discountUncertain && onJumpToPage?.(discountUncertain.pageNumber)}
+                        value={item.discount}
                         onChange={(e) => onLineItemChange(item.id, 'discount', e.target.value)} onKeyDown={handleEnter} />
                     </td>
                     <td className="min-w-24 px-1 py-1">
-                      <Input inputMode="decimal" disabled={disabled} className={tintClass} value={item.amount}
+                      <Input inputMode="decimal" disabled={disabled}
+                        className={`${tintClass} ${amountUncertain ? UNCERTAIN_RING_CLASS : ''}`}
+                        title={amountUncertain ? 'Model was uncertain about this value — click to jump to the source page' : undefined}
+                        onFocus={() => amountUncertain && onJumpToPage?.(amountUncertain.pageNumber)}
+                        value={item.amount}
                         onChange={(e) => onLineItemChange(item.id, 'amount', e.target.value)} onKeyDown={handleEnter} />
                     </td>
                   </tr>
@@ -242,6 +342,8 @@ function Field({
   type = 'text',
   inputMode,
   onKeyDown,
+  uncertain,
+  onJumpToPage,
 }: {
   label: string
   value: string
@@ -251,15 +353,23 @@ function Field({
   type?: string
   inputMode?: React.HTMLAttributes<HTMLInputElement>['inputMode']
   onKeyDown: (e: React.KeyboardEvent<HTMLElement>) => void
+  /** Present when this field was flagged in uncertain_fields_ocr. */
+  uncertain?: UncertainField
+  onJumpToPage?: (pageNumber: number) => void
 }) {
   return (
     <div className="flex flex-col gap-1.5">
-      <Label>{label}</Label>
+      <Label>
+        {label}
+        {uncertain ? <span className="ml-1 text-orange-500" title="Model was uncertain about this value">●</span> : null}
+      </Label>
       <Input
         type={type}
         inputMode={inputMode}
         disabled={disabled}
-        className={tintClass}
+        className={`${tintClass} ${uncertain ? UNCERTAIN_RING_CLASS : ''}`}
+        title={uncertain ? 'Model was uncertain about this value — click to jump to the source page' : undefined}
+        onFocus={() => uncertain && onJumpToPage?.(uncertain.pageNumber)}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         onKeyDown={onKeyDown}

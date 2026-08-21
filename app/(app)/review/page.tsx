@@ -3,7 +3,14 @@ import { createClient } from '@/lib/supabase/server'
 import { getStaffContext } from '@/lib/export/auth'
 import { Card, CardContent } from '@/components/ui/card'
 import { ReviewWorkspace } from '@/components/review/review-workspace'
-import type { LineItemDetail, OpenExceptionSummary, PageStatus, QueueEntry, ReviewDocumentDetail } from '@/lib/review/types'
+import type {
+  LineItemDetail,
+  OpenExceptionSummary,
+  PageStatus,
+  QueueEntry,
+  ReviewDocumentDetail,
+  UncertainField,
+} from '@/lib/review/types'
 import { friendlyErrorMessage } from '@/lib/friendly-error'
 import { isAdminOrAbove } from '@/lib/auth/roles'
 
@@ -181,7 +188,7 @@ async function loadDocumentDetail(
     supabase
       .from('document_extraction')
       .select(
-        'id, current_extraction_run_id, verified_at, bill_index, page_number_start, page_number_end, vendor_name_ocr, vendor_name_verified, vendor_gstin_ocr, vendor_gstin_verified, vendor_phone_ocr, vendor_phone_verified, vendor_email_ocr, vendor_email_verified, vendor_address_ocr, vendor_address_verified, invoice_number_ocr, invoice_number_verified, invoice_date_ocr, invoice_date_verified, subtotal_ocr, subtotal_verified, tax_amount_ocr, tax_amount_verified, total_amount_ocr, total_amount_verified, notes_ocr, notes_verified'
+        'id, current_extraction_run_id, verified_at, bill_index, page_number_start, page_number_end, vendor_name_ocr, vendor_name_verified, vendor_gstin_ocr, vendor_gstin_verified, vendor_phone_ocr, vendor_phone_verified, vendor_email_ocr, vendor_email_verified, vendor_address_ocr, vendor_address_verified, invoice_number_ocr, invoice_number_verified, invoice_date_ocr, invoice_date_verified, subtotal_ocr, subtotal_verified, tax_amount_ocr, tax_amount_verified, total_amount_ocr, total_amount_verified, notes_ocr, notes_verified, uncertain_fields_ocr'
       )
       .eq('id', documentExtractionId)
       .maybeSingle(),
@@ -279,6 +286,24 @@ async function loadDocumentDetail(
     classificationConfidence: p.classification_confidence as number | null,
   }))
 
+  // uncertain_fields_ocr is jsonb -- shaped by extractionUncertainFieldSchema
+  // (lib/extraction-schema.ts) at write time (lib/jobs/handlers/extract.ts),
+  // never hand-authored, so a raw cast is fine here the same way the other
+  // jsonb columns (tax_breakdown_ocr) are read elsewhere in this codebase.
+  const uncertainFields: UncertainField[] = (
+    (extraction.uncertain_fields_ocr as
+      | { field: string; line_order: number | null; page_number: number; bbox_x0: number; bbox_y0: number; bbox_x1: number; bbox_y1: number }[]
+      | null) ?? []
+  ).map((f) => ({
+    field: f.field,
+    lineOrder: f.line_order,
+    pageNumber: f.page_number,
+    bboxX0: f.bbox_x0,
+    bboxY0: f.bbox_y0,
+    bboxX1: f.bbox_x1,
+    bboxY1: f.bbox_y1,
+  }))
+
   const openExceptions: OpenExceptionSummary[] = (exceptionsRes.data ?? []).map((e) => ({
     id: e.id as number,
     exceptionType: e.exception_type as string,
@@ -325,6 +350,7 @@ async function loadDocumentDetail(
       notes: { ocr: extraction.notes_ocr, verified: extraction.notes_verified },
     },
     lineItems,
+    uncertainFields,
     pages,
     openExceptions,
     canSetHubStatus: entryId !== null,

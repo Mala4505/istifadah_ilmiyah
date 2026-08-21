@@ -54,6 +54,23 @@ export interface HeaderFieldSet<T> {
   notes: T
 }
 
+/**
+ * One field the model transcribed but doubts (`document_extraction.uncertain_fields_ocr`,
+ * mirrors `ExtractionUncertainField` in lib/extraction-schema.ts field-for-field).
+ * `bbox_*` are fractions (0-1) of the source page's full width/height, not pixels —
+ * `components/review/pdf-viewer.tsx` converts to on-screen pixels at whatever
+ * scale/rotation it's currently rendering.
+ */
+export interface UncertainField {
+  field: string
+  lineOrder: number | null
+  pageNumber: number
+  bboxX0: number
+  bboxY0: number
+  bboxX1: number
+  bboxY1: number
+}
+
 export interface OpenExceptionSummary {
   id: number
   exceptionType: string
@@ -102,6 +119,7 @@ export interface ReviewDocumentDetail {
   verifiedAt: string | null
   header: HeaderFieldSet<{ ocr: string | number | null; verified: string | number | null }>
   lineItems: LineItemDetail[]
+  uncertainFields: UncertainField[]
   pages: PageStatus[]
   openExceptions: OpenExceptionSummary[]
   canSetHubStatus: boolean

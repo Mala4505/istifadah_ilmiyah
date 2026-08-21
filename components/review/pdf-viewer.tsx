@@ -21,7 +21,7 @@ import { ZoomIn, ZoomOut, RotateCw, ChevronLeft, ChevronRight } from 'lucide-rea
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { getReviewDocumentUrl } from '@/lib/actions/review'
-import type { PageStatus } from '@/lib/review/types'
+import type { PageStatus, UncertainField } from '@/lib/review/types'
 
 /** "bank_cheque" -> "Bank cheque", for the skipped-page tooltip/label. */
 function formatSkipReason(reason: string): string {
@@ -35,6 +35,10 @@ function formatSkipReason(reason: string): string {
 export interface PdfViewerHandle {
   nextPage: () => void
   prevPage: () => void
+  /** Jumps straight to a page — used by the extraction form (§7) when a
+   *  reviewer clicks a field flagged in `uncertainFields` below, so they land
+   *  on the source page without hunting through the thumbnail rail. */
+  goToPage: (pageNumber: number) => void
 }
 
 // Minimal shape of what this component actually calls, so it doesn't need to
@@ -49,14 +53,20 @@ interface PdfDocumentProxy {
   destroy(): Promise<void>
 }
 
-export const PdfViewer = forwardRef<PdfViewerHandle, { sourceDocumentId: number; pages?: PageStatus[] }>(
-  function PdfViewer({ sourceDocumentId, pages = [] }, ref) {
+export const PdfViewer = forwardRef<
+  PdfViewerHandle,
+  { sourceDocumentId: number; pages?: PageStatus[]; uncertainFields?: UncertainField[] }
+>(function PdfViewer({ sourceDocumentId, pages = [], uncertainFields = [] }, ref) {
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [numPages, setNumPages] = useState(0)
   const [pageNumber, setPageNumber] = useState(1)
   const [scale, setScale] = useState(1.1)
   const [rotation, setRotation] = useState(0)
+  // Tracks the canvas's own rendered pixel size so the highlight-box overlay
+  // below (a sibling, absolutely positioned) can size itself to match exactly
+  // — see the overlay wrapper's comment for why percentages alone aren't enough.
+  const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 })
 
   const docRef = useRef<PdfDocumentProxy | null>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
@@ -68,11 +78,25 @@ export const PdfViewer = forwardRef<PdfViewerHandle, { sourceDocumentId: number;
     return map
   }, [pages])
 
+  // Best-effort highlight boxes for the page currently on screen. Only drawn
+  // at rotation 0: a bbox is captured in the page's natural (unrotated)
+  // orientation (extractionUncertainFieldSchema's doc comment,
+  // lib/extraction-schema.ts), and correctly transforming x0/y0/x1/y1 through
+  // a 90/180/270 rotation is real extra complexity for a feature that is
+  // already explicitly a best-effort aid, not a precise one — simplest safe
+  // cut is to hide the (possibly-misleading) boxes rather than draw wrong ones.
+  const currentPageBoxes = useMemo(
+    () => (rotation === 0 ? uncertainFields.filter((f) => f.pageNumber === pageNumber) : []),
+    [uncertainFields, pageNumber, rotation]
+  )
+
   useImperativeHandle(
     ref,
     () => ({
       nextPage: () => setPageNumber((p) => (docRef.current ? Math.min(docRef.current.numPages, p + 1) : p)),
       prevPage: () => setPageNumber((p) => Math.max(1, p - 1)),
+      goToPage: (n: number) =>
+        setPageNumber((p) => (docRef.current ? Math.min(Math.max(1, n), docRef.current.numPages) : p)),
     }),
     []
   )
@@ -141,6 +165,7 @@ export const PdfViewer = forwardRef<PdfViewerHandle, { sourceDocumentId: number;
       const context = canvas.getContext('2d')
       if (!context) return
       await page.render({ canvasContext: context, viewport }).promise
+      if (!cancelled) setCanvasSize({ width: viewport.width, height: viewport.height })
     })()
 
     return () => {
@@ -253,7 +278,26 @@ export const PdfViewer = forwardRef<PdfViewerHandle, { sourceDocumentId: number;
           ) : error ? (
             <p className="text-sm text-destructive">Could not load document: {error}</p>
           ) : (
-            <canvas ref={canvasRef} className="mx-auto shadow-sm" />
+            // Sized in JS pixels (not CSS %) to exactly match the canvas's own
+            // rendered size, so the overlay boxes below -- positioned with
+            // percentages relative to THIS wrapper -- track the canvas at any
+            // zoom level without a separate pixel<->fraction conversion.
+            <div className="relative mx-auto" style={{ width: canvasSize.width, height: canvasSize.height }}>
+              <canvas ref={canvasRef} className="shadow-sm" />
+              {currentPageBoxes.map((box, i) => (
+                <div
+                  key={i}
+                  title={box.field.replace(/_/g, ' ')}
+                  className="pointer-events-none absolute rounded-sm border-2 border-orange-500 bg-orange-400/20"
+                  style={{
+                    left: `${box.bboxX0 * 100}%`,
+                    top: `${box.bboxY0 * 100}%`,
+                    width: `${(box.bboxX1 - box.bboxX0) * 100}%`,
+                    height: `${(box.bboxY1 - box.bboxY0) * 100}%`,
+                  }}
+                />
+              ))}
+            </div>
           )}
         </div>
       </div>

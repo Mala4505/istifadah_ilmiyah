@@ -180,7 +180,14 @@ function buildSystemPrompt(communityGstin: string | null): string {
     'ID, or an unrelated scan caught in the same batch) — classify every page first via the tool schema ' +
     'before extracting anything from it. ' +
     'A line-item table may continue across a page break, so treat continuation pages as part of the bill ' +
-    'they belong to. Note that a batch scan may contain SEVERAL SEPARATE BILLS from different vendors: a ' +
+    'they belong to. For every financial page, also set continues_previous_bill: true when the page has ' +
+    'no vendor letterhead or invoice number of its own — it is simply more line items or totals carrying ' +
+    'on from the page before it — and false when it starts a bill (its own header) or is not a financial ' +
+    'page at all. When you are shown only one page at a time, judge this from that page alone: the ' +
+    'absence of a new header is itself the signal, even without seeing what came before it. When you are ' +
+    'shown several pages together, use them directly: a page whose table simply keeps going with no new ' +
+    'header is a continuation of the bill on the page(s) before it. ' +
+    'Note that a batch scan may contain SEVERAL SEPARATE BILLS from different vendors: a ' +
     'new vendor header, invoice number, and total starting on a later page is a NEW bill — extract it as ' +
     'its own entry in `bills[]`, never folded into `notes` and never merged with the previous bill\'s ' +
     'line items. Give each bill entry the page_number_start/page_number_end its own header and totals ' +
@@ -195,7 +202,11 @@ function buildSystemPrompt(communityGstin: string | null): string {
     'classifying it as non-financial with zero bills over guessing; a missed real bill is a page a human ' +
     'reviewer can revisit, but a fabricated bill entry with no real content behind it pollutes the review ' +
     'queue with something that can never be corrected because there was never anything there to correct ' +
-    'it to. Never ' +
+    'it to. A vendor\'s own contact details — email address, phone number, GSTIN, or address, however they ' +
+    'are printed or positioned on the page, including in a footer/signature block below the line-item ' +
+    'table — are header information, never a line item of their own: never create a line-item row whose ' +
+    'description is an email address, a phone number, or similar contact text, even if it visually sits ' +
+    'in the same area as the line items. Never ' +
     'fabricate a value — for anything illegible or genuinely absent use an empty string in a text field ' +
     'and null in a numeric field, and reflect uncertainty via the confidence fields rather than guessing. ' +
     'Every field value must be plain text transcribed from the document — never emit tag-like syntax ' +

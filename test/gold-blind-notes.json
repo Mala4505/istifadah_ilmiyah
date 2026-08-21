@@ -1,0 +1,33 @@
+[
+  {
+    "source_file": "test1.pdf",
+    "vendor_name": "Poonam Ajak Kumar Sharma",
+    "invoice_number": "120",
+    "invoice_date": "2026-07-15",
+    "subtotal": 9750,
+    "tax_amount": null,
+    "total_amount": 9750,
+    "line_items": [
+      { "description": "labour", "amount": 9350, "quantity": 11, "rate": 850 },
+      { "description": "Ek Gadi Kachra", "amount": 400, "quantity": 1, "rate": 400 }
+    ],
+    "is_gujarati_or_devanagari": false,
+    "notes": "vendor_email: poonamajaykumar056@gmail.com"
+  },
+  {
+    "source_file": "test2.pdf",
+    "vendor_name": "Juser S. Saleh",
+    "invoice_number": "756",
+    "invoice_date": "2026-07-26",
+    "subtotal": 12500,
+    "tax_amount": null,
+    "total_amount": 12500,
+    "line_items": [
+      { "description": "1 Salvet Zabihat", "amount": 7000, "quantity": 1, "rate": 7000 },
+      { "description": "1 Sadka Zabihat", "amount": 5000, "quantity": 1, "rate": 5000 },
+      { "description": "Rick Bhara", "amount": 500, "quantity": null, "rate": null }
+    ],
+    "is_gujarati_or_devanagari": true,
+    "notes": "vendor_email: abbasindoor@gmail.com. Heading text above the line items (\"Rick bhara ane dawat hadiyah\") is written in Gujarati script; the line item descriptions themselves are English/Latin."
+  }
+]

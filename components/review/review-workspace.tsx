@@ -69,6 +69,7 @@ function buildHeaderState(detail: ReviewDocumentDetail): HeaderFormState {
 function buildLineItemState(detail: ReviewDocumentDetail): LineItemFormState[] {
   return detail.lineItems.map((li) => ({
     id: li.id,
+    lineOrder: li.lineOrder,
     description: numToStr(li.description.verified ?? li.description.ocr),
     hsnSacCode: numToStr(li.hsnSacCode.verified ?? li.hsnSacCode.ocr),
     quantity: numToStr(li.quantity.verified ?? li.quantity.ocr),
@@ -436,7 +437,12 @@ export function ReviewWorkspace({
       ) : null}
 
       <div className="grid min-h-0 flex-1 grid-cols-2 gap-3">
-        <PdfViewer ref={pdfViewerRef} sourceDocumentId={detail.sourceDocumentId} pages={detail.pages} />
+        <PdfViewer
+          ref={pdfViewerRef}
+          sourceDocumentId={detail.sourceDocumentId}
+          pages={detail.pages}
+          uncertainFields={detail.uncertainFields}
+        />
         <ExtractionForm
           ref={formContainerRef}
           header={header}
@@ -452,6 +458,8 @@ export function ReviewWorkspace({
           vendorAutocompleteOpen={vendorAutocompleteOpen}
           onVendorAutocompleteOpenChange={setVendorAutocompleteOpen}
           onVendorSelect={handleVendorSelect}
+          uncertainFields={detail.uncertainFields}
+          onJumpToPage={(pageNumber) => pdfViewerRef.current?.goToPage(pageNumber)}
         />
       </div>
 

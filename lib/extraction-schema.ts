@@ -162,6 +162,26 @@ export const extractionPageSchema = z.object({
   is_financial_document: z.boolean(),
   skip_reason: skipReasonSchema.nullable(),
   classification_confidence: z.number().min(0).max(1),
+  /**
+   * True when this financial page has no vendor header/invoice number of its
+   * own and is simply a continuation of the previous financial page's bill
+   * (a line-item table, or its totals, carrying on without a new letterhead).
+   * Always false for a non-financial page or for a page that starts a bill.
+   *
+   * This is what lib/jobs/handlers/extract.ts's page-grouping step
+   * (`groupPageOutcomes`) uses to re-run continuation pages together with
+   * the page(s) that started their bill, in one call that can see the whole
+   * bill at once — restoring the header context that per-page splitting
+   * otherwise throws away (see lib/pdf.ts's header comment on why pages are
+   * split at all, and this field's use in buildSystemPrompt below). Under
+   * per-page extraction the model is shown only the one page being
+   * classified, so this has to be judged from that page's own content alone
+   * — the absence of a new header is itself the signal.
+   *
+   * `.default(false)` so extraction responses/fixtures written before this
+   * field existed still parse.
+   */
+  continues_previous_bill: z.boolean().default(false),
 })
 export type ExtractionPage = z.infer<typeof extractionPageSchema>
 
@@ -199,6 +219,70 @@ export const extractionLineItemSchema = z.object({
   amount: z.number().nullable(),
 })
 export type ExtractionLineItem = z.infer<typeof extractionLineItemSchema>
+
+/**
+ * Field names `uncertain_fields[].field` (below) is allowed to name — the
+ * header fields worth flagging, plus one entry per line-item column
+ * (disambiguated per-line via `line_order`, not a separate name per line).
+ * `notes` and the classification/page fields are deliberately excluded —
+ * this is for values a reviewer would want to double-check against the
+ * source image, not free-text commentary or a verdict already carrying its
+ * own `_confidence` field.
+ */
+export const UNCERTAIN_FIELD_NAMES = [
+  'vendor_name',
+  'vendor_gstin',
+  'vendor_phone',
+  'vendor_email',
+  'vendor_address',
+  'invoice_number',
+  'invoice_date',
+  'subtotal',
+  'tax_amount',
+  'total_amount',
+  'line_item_description',
+  'line_item_quantity',
+  'line_item_rate',
+  'line_item_discount',
+  'line_item_amount',
+] as const
+export const uncertainFieldNameSchema = z.enum(UNCERTAIN_FIELD_NAMES)
+export type UncertainFieldName = z.infer<typeof uncertainFieldNameSchema>
+
+/**
+ * One field the model transcribed but is not confident about — distinct from
+ * the existing null-for-illegible convention (buildSystemPrompt in
+ * lib/claude-client.ts): a genuinely illegible value stays null/empty and is
+ * never listed here, but a value the model *did* read and fill in, while
+ * still doubting it (ambiguous handwriting, a smudged digit, overlapping
+ * text), gets both — a best-effort value AND an entry here pointing at where
+ * it came from, so a reviewer's attention goes straight to the one number
+ * worth double-checking against the source image instead of every field.
+ *
+ * `bbox_*` are fractions (0-1) of the *page's* full width/height, top-left
+ * origin — not pixels, and not relative to the app's current zoom/rotation —
+ * so the review UI (`components/review/pdf-viewer.tsx`) can convert to
+ * on-screen pixels at whatever scale it happens to be rendering, and the
+ * value stays correct regardless of the PDF's actual page size. This is a
+ * best-effort visual aid, not a precise measurement: vision models are not
+ * reliable at exact spatial grounding on scanned/handwritten pages, so the
+ * box may land near the field rather than exactly on it — the field-level
+ * highlight in the review form (keyed on `field`/`line_order` alone) is the
+ * reliable half of this feature; the on-page box is the best-effort half.
+ */
+export const extractionUncertainFieldSchema = z.object({
+  field: uncertainFieldNameSchema,
+  /** Which line item (by its own `line_order`, not array index — stable
+   *  even if line items get re-sorted). Required when `field` starts with
+   *  `line_item_`, null for a header field. */
+  line_order: z.number().int().nonnegative().nullable(),
+  page_number: z.number().int().positive(),
+  bbox_x0: z.number().min(0).max(1),
+  bbox_y0: z.number().min(0).max(1),
+  bbox_x1: z.number().min(0).max(1),
+  bbox_y1: z.number().min(0).max(1),
+})
+export type ExtractionUncertainField = z.infer<typeof extractionUncertainFieldSchema>
 
 /**
  * One bill's worth of header fields + its own line items (Phase 2 — one
@@ -241,6 +325,10 @@ export const extractionBillSchema = z.object({
   notes: absentTextAsNull,
 
   line_items: z.array(extractionLineItemSchema),
+  /** Fields the model transcribed but doubts — see extractionUncertainFieldSchema's
+   *  doc comment. `.default([])` so responses/fixtures written before this field
+   *  existed still parse. */
+  uncertain_fields: z.array(extractionUncertainFieldSchema).default([]),
 })
 export type ExtractionBill = z.infer<typeof extractionBillSchema>
 
@@ -320,8 +408,15 @@ export const extractionToolInputSchema = {
             anyOf: [{ type: 'string', enum: [...SKIP_REASONS] }, { type: 'null' }],
           },
           classification_confidence: { type: 'number' },
+          continues_previous_bill: { type: 'boolean' },
         },
-        required: ['page_number', 'is_financial_document', 'skip_reason', 'classification_confidence'],
+        required: [
+          'page_number',
+          'is_financial_document',
+          'skip_reason',
+          'classification_confidence',
+          'continues_previous_bill',
+        ],
       },
     },
     legibility: { type: 'string', enum: [...LEGIBILITY_VALUES] },
@@ -391,6 +486,30 @@ export const extractionToolInputSchema = {
               ],
             },
           },
+
+          // Fields the model transcribed but doubts — see
+          // extractionUncertainFieldSchema's doc comment. Kept as a small,
+          // dynamic list (only genuinely uncertain fields, usually 0) rather
+          // than a confidence number on every single field, which would
+          // roughly double this schema's size for no benefit on the large
+          // majority of fields that were read with no real doubt.
+          uncertain_fields: {
+            type: 'array',
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              properties: {
+                field: { type: 'string', enum: [...UNCERTAIN_FIELD_NAMES] },
+                line_order: { anyOf: [{ type: 'integer' }, { type: 'null' }] },
+                page_number: { type: 'integer' },
+                bbox_x0: { type: 'number' },
+                bbox_y0: { type: 'number' },
+                bbox_x1: { type: 'number' },
+                bbox_y1: { type: 'number' },
+              },
+              required: ['field', 'line_order', 'page_number', 'bbox_x0', 'bbox_y0', 'bbox_x1', 'bbox_y1'],
+            },
+          },
         },
         required: [
           'page_number_start',
@@ -413,6 +532,7 @@ export const extractionToolInputSchema = {
           'total_amount',
           'notes',
           'line_items',
+          'uncertain_fields',
         ],
       },
     },
@@ -427,7 +547,10 @@ export const EXTRACTION_TOOL_DESCRIPTION =
   'multiple pages. It may also be a batch scan containing SEVERAL DISTINCT BILLS from different vendors ' +
   '— give each bill its own entry in bills[], never merge two vendors\' headers/totals/line items into ' +
   'one entry. Classify every page first — only line items sourced from pages where is_financial_document ' +
-  'is true will be kept. For each bill, extract header fields (vendor identity including GSTIN, phone, ' +
+  'is true will be kept. Also set continues_previous_bill on each page: true when it is a bare ' +
+  'continuation of the previous financial page\'s bill (no vendor letterhead or invoice number of its own ' +
+  '— just more line items or totals carrying on), false when it starts a bill or is not a financial page. ' +
+  'For each bill, extract header fields (vendor identity including GSTIN, phone, ' +
   'email, and address for later vendor-clustering; invoice number/date; subtotal/tax/total), the page ' +
   'range (page_number_start/page_number_end) its header and totals were read from, and every line item, ' +
   'each tagged with the page it was read from. Write invoice_date as ISO YYYY-MM-DD (the source is ' +
@@ -445,7 +568,14 @@ export const EXTRACTION_TOOL_DESCRIPTION =
   'it differs from that arithmetic. When quantity is 1, rate and amount will legitimately be the same ' +
   'number — write that number once in each field, do not invent a different value for one of them just to ' +
   'make them look distinct. Only fill `discount` (free text) when the invoice itself prints an explicit ' +
-  'discount line or note; leave it empty rather than guessing a discount that is not shown.'
+  'discount line or note; leave it empty rather than guessing a discount that is not shown. ' +
+  'For a value you filled in but are not fully confident about — ambiguous handwriting, a smudged digit, ' +
+  'overlapping text — add an entry to uncertain_fields naming the field (and, for a line item, its ' +
+  'line_order), the page it is on, and an approximate bounding box (bbox_x0/y0 top-left, bbox_x1/y1 ' +
+  'bottom-right, each a fraction from 0 to 1 of that page\'s full width/height) around roughly where the ' +
+  'value is printed. This is separate from the illegible/absent convention above: a value you could not ' +
+  'read at all stays empty/null and is never listed here; uncertain_fields is only for a value you DID ' +
+  'transcribe but still doubt. Keep this list short — only fields with genuine doubt, not a routine one.'
 
 /**
  * The exact shape `messages.create({ tools: [...] })` expects.
@@ -515,14 +645,35 @@ export function remapExtractionToActualPage(
   extraction: ExtractionResponse,
   actualPageNumber: number
 ): ExtractionResponse {
+  return remapExtractionPageNumbers(extraction, () => actualPageNumber)
+}
+
+/**
+ * General form of `remapExtractionToActualPage` above: rewrites every page
+ * number in a response through `mapPageNumber` instead of collapsing them all
+ * to one constant.
+ *
+ * Needed by lib/jobs/handlers/extract.ts's bill-grouping step
+ * (`resolveGroups`): when several continuation pages are re-extracted
+ * together as one merged PDF (`lib/pdf.ts`'s `extractPageRange`), the model
+ * sees that merged PDF's own page 1..N and reports page numbers relative to
+ * it, not to the source document — `mapPageNumber(n) = n + (startPage - 1)`
+ * converts those back to real page numbers, the same way the single-page
+ * case converts "always 1" back to one real page number.
+ */
+export function remapExtractionPageNumbers(
+  extraction: ExtractionResponse,
+  mapPageNumber: (localPageNumber: number) => number
+): ExtractionResponse {
   return {
     ...extraction,
-    pages: extraction.pages.map((page) => ({ ...page, page_number: actualPageNumber })),
+    pages: extraction.pages.map((page) => ({ ...page, page_number: mapPageNumber(page.page_number) })),
     bills: extraction.bills.map((bill) => ({
       ...bill,
-      page_number_start: actualPageNumber,
-      page_number_end: actualPageNumber,
-      line_items: bill.line_items.map((item) => ({ ...item, page_number: actualPageNumber })),
+      page_number_start: mapPageNumber(bill.page_number_start),
+      page_number_end: mapPageNumber(bill.page_number_end),
+      line_items: bill.line_items.map((item) => ({ ...item, page_number: mapPageNumber(item.page_number) })),
+      uncertain_fields: bill.uncertain_fields.map((f) => ({ ...f, page_number: mapPageNumber(f.page_number) })),
     })),
   }
 }

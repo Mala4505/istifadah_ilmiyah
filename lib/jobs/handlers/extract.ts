@@ -24,7 +24,7 @@ import { POLL_BACKOFF_BASE_MS } from '@/lib/jobs/poll-backoff'
 import { buildExtractionBatchCustomId } from '@/lib/jobs/batch-custom-id'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { getSignedUrl } from '@/lib/storage'
-import { getPdfPageCount, splitPdfPage, toBase64 } from '@/lib/pdf'
+import { extractPageRange, getPdfPageCount, splitPdfPage, toBase64 } from '@/lib/pdf'
 import { tallyWithinTolerance } from '@/lib/normalize'
 import {
   escalationReason,
@@ -33,7 +33,13 @@ import {
   type ExtractionAttempt,
   type ExtractionPipelineResult,
 } from '@/lib/extraction'
-import { buildTaxBreakdown, remapExtractionToActualPage, sanitizeExtractionResponse } from '@/lib/extraction-schema'
+import {
+  buildTaxBreakdown,
+  remapExtractionPageNumbers,
+  remapExtractionToActualPage,
+  sanitizeExtractionResponse,
+  type ExtractionPage,
+} from '@/lib/extraction-schema'
 import { EXTRACTION_MAX_TOKENS, MODELS, submitExtractionBatch, type ModelId } from '@/lib/claude-client'
 import { serverEnv } from '@/lib/env.server'
 import { isSameGstin, validateGstin } from '@/lib/analytics/gstin'
@@ -339,6 +345,13 @@ export async function persistExtractionPipelineResult(
       round_off_ocr: bill.round_off,
       total_amount_ocr: bill.total_amount,
       notes_ocr: bill.notes,
+      // Field-level confidence for the review UI (per-field highlight + the
+      // PDF viewer's best-effort on-page box) — see extractionUncertainFieldSchema's
+      // doc comment (lib/extraction-schema.ts) for the shape and why there is
+      // no _verified twin. `sanitizeExtractionResponse` above only scans free-text
+      // fields for leaked tag syntax; `field` here is enum-constrained on the
+      // wire already, so there is nothing for that pass to catch in this array.
+      uncertain_fields_ocr: bill.uncertain_fields,
     }
     // entry_id is only written here for the dominant single-bill case — a
     // read-only mirror of source_document.entry_id, preserving today's
@@ -732,47 +745,176 @@ async function recordPageExtractionFailure(
 }
 
 /**
- * Persists every successful page's outcome, strictly in page order — the
- * second, sequential phase of per-page extraction (see
- * `PAGE_EXTRACTION_CONCURRENCY`'s doc comment for why the extraction phase
- * itself runs concurrently but this one does not).
+ * A run of pages, as decided from phase 1's own per-page classification —
+ * `continues_previous_bill` (extraction-schema.ts) chains adjacent financial
+ * pages into one group when a later page has no header of its own. Not yet
+ * re-extracted: a `merged` group still holds each page's independent phase-1
+ * pipeline until `resolveGroups` below re-runs it as one call.
+ */
+type PendingGroup =
+  | { kind: 'single'; outcome: Extract<PageExtractionOutcome, { status: 'ok' }> }
+  | { kind: 'merged'; outcomes: Extract<PageExtractionOutcome, { status: 'ok' }>[] }
+  | { kind: 'failed'; outcome: Extract<PageExtractionOutcome, { status: 'error' }> }
+
+/**
+ * Chains phase 1's per-page outcomes into bill-scoped groups using each
+ * page's own `continues_previous_bill` verdict (extraction-schema.ts's doc
+ * comment on that field has the full reasoning). Outcomes are already in
+ * page order (`extractAllPagesConcurrently`'s guarantee), so a run of
+ * continuation pages is always the contiguous page range it needs to be for
+ * `extractPageRange` (lib/pdf.ts) to merge back into one PDF.
+ *
+ * A failed page always breaks a run — its own extraction never happened, so
+ * there is no classification to chain from or into. A non-financial page
+ * never chains either: `continues_previous_bill` is only meaningful for a
+ * page that itself is part of a bill.
+ */
+function groupPageOutcomes(outcomes: PageExtractionOutcome[]): PendingGroup[] {
+  const groups: PendingGroup[] = []
+  let current: Extract<PageExtractionOutcome, { status: 'ok' }>[] = []
+
+  const flush = () => {
+    if (current.length === 0) return
+    groups.push(current.length === 1 ? { kind: 'single', outcome: current[0]! } : { kind: 'merged', outcomes: current })
+    current = []
+  }
+
+  for (const outcome of outcomes) {
+    if (outcome.status === 'error') {
+      flush()
+      groups.push({ kind: 'failed', outcome })
+      continue
+    }
+
+    const page = outcome.pipeline.final.extraction.pages[0]
+    const chainsToPrevious =
+      current.length > 0 && (page?.is_financial_document ?? false) && (page?.continues_previous_bill ?? false)
+
+    if (chainsToPrevious) {
+      current.push(outcome)
+    } else {
+      flush()
+      current.push(outcome)
+    }
+  }
+  flush()
+
+  return groups
+}
+
+/** One group after phase 2 — always has a single `ExtractionPipelineResult` ready to persist, or a failure to record. */
+type ResolvedGroup =
+  | { kind: 'ok'; pageCount: number; pipeline: ExtractionPipelineResult }
+  | { kind: 'failed'; pageNumber: number; error: unknown }
+
+/**
+ * Turns `PendingGroup[]` into `ResolvedGroup[]`: a `single` or `failed` group
+ * passes through untouched (phase 1 already has everything needed for it), a
+ * `merged` group gets re-extracted from scratch as one call over its whole
+ * page range — restoring the header context per-page splitting threw away,
+ * which is the entire point of this second pass (lib/pdf.ts's header
+ * comment, extraction-schema.ts's `continues_previous_bill` doc comment).
+ *
+ * Sequential rather than concurrent: merged groups are rare (the overwhelming
+ * majority of bills are one page — same reasoning as PAGE_EXTRACTION_CONCURRENCY's
+ * doc comment), so there is little wall-clock time to save, and it keeps this
+ * pass simple.
+ */
+async function resolveGroups(
+  pdfBytes: Uint8Array,
+  groups: PendingGroup[],
+  pipelineOptions: { model?: ModelId; runReason: ExtractAndPersistOptions['runReason']; allowEscalation: boolean }
+): Promise<ResolvedGroup[]> {
+  const resolved: ResolvedGroup[] = []
+
+  for (const group of groups) {
+    if (group.kind === 'failed') {
+      resolved.push({ kind: 'failed', pageNumber: group.outcome.pageNumber, error: group.outcome.error })
+      continue
+    }
+    if (group.kind === 'single') {
+      resolved.push({ kind: 'ok', pageCount: 1, pipeline: group.outcome.pipeline })
+      continue
+    }
+
+    const startPage = group.outcomes[0]!.pageNumber
+    const endPage = group.outcomes[group.outcomes.length - 1]!.pageNumber
+
+    try {
+      const rangeBytes = await extractPageRange(pdfBytes, startPage, endPage)
+      const raw = await runExtractionPipeline(rangeBytes, pipelineOptions)
+      const offset = startPage - 1
+
+      // Phase 1 already classified every page in this range on its own
+      // merits — that verdict is what grouped them together in the first
+      // place, so it stays authoritative rather than whatever this merged
+      // call's own pages[] reports for the same pages (already remapped to
+      // real page numbers by extractAllPagesConcurrently).
+      const phase1Pages: ExtractionPage[] = group.outcomes.map((o) => o.pipeline.final.extraction.pages[0]!)
+
+      const attempts = raw.attempts.map((attempt) => ({
+        ...attempt,
+        extraction: {
+          ...remapExtractionPageNumbers(attempt.extraction, (n) => n + offset),
+          pages: phase1Pages,
+        },
+      }))
+      const pipeline: ExtractionPipelineResult = {
+        attempts,
+        final: attempts[attempts.length - 1]!,
+        escalated: raw.escalated,
+        totalCostUsd: raw.totalCostUsd,
+      }
+      resolved.push({ kind: 'ok', pageCount: group.outcomes.length, pipeline })
+    } catch (error) {
+      // The merged re-extraction failed outright (timeout, API error) — every
+      // page in the range fails together rather than silently falling back to
+      // phase 1's own incomplete per-page reads, which is exactly the
+      // broken-header/duplicate-bill outcome this whole pass exists to avoid.
+      for (const outcome of group.outcomes) {
+        resolved.push({ kind: 'failed', pageNumber: outcome.pageNumber, error })
+      }
+    }
+  }
+
+  return resolved
+}
+
+/**
+ * Persists every group's outcome, strictly in page order — the final,
+ * sequential phase (see `PAGE_EXTRACTION_CONCURRENCY`'s doc comment for why
+ * the phase-1 extraction runs concurrently but this one does not).
  *
  * Sequential is not a performance compromise here, it is a correctness
  * requirement: `document_extraction.bill_index` has to be assigned without
- * collisions across however many bills each page turned out to have, and
+ * collisions across however many bills each group turned out to have, and
  * `persistExtractionPipelineResult`'s upsert is keyed on
- * `(source_document_id, bill_index)` — two pages persisted concurrently could
- * both read the same "next" index and the second writer would silently
+ * `(source_document_id, bill_index)` — two groups persisted concurrently
+ * could both read the same "next" index and the second writer would silently
  * overwrite the first's row instead of erroring. Database writes are fast
- * relative to a Claude call, so doing this part sequentially after the
- * concurrent extraction phase costs very little wall-clock time in exchange
- * for that guarantee.
+ * relative to a Claude call, so doing this part sequentially costs very
+ * little wall-clock time in exchange for that guarantee.
  *
  * A page classified as non-financial (`is_financial_document: false` — a
  * cheque photo, a permission letter, blank paper) is not special-cased here
- * at all: `persistExtractionPipelineResult` already writes that page's
- * `document_page` classification row from its own `pages[]` entry regardless
- * of whether any bills came with it, and an empty `bills[]` array simply
- * means the loop inside it does zero `document_extraction` inserts. No bill
- * is ever created for a skipped page, which is what keeps it out of the
- * review queue and out of every other bill's data — see lib/pdf.ts's header
- * comment and this function's caller (`extractAndPersist`) for the fuller
- * explanation of why one call per page is what makes that guarantee possible
- * in the first place.
+ * at all: it arrives as its own `single` group, `persistExtractionPipelineResult`
+ * writes its `document_page` classification row regardless of whether any
+ * bills came with it, and an empty `bills[]` array simply means the loop
+ * inside it does zero `document_extraction` inserts.
  */
-async function persistPagesInOrder(
+async function persistGroupsInOrder(
   admin: AdminClient,
   params: {
     sourceDocumentId: number
     doc: SourceDocumentForExtraction
     totalPages: number
-    outcomes: PageExtractionOutcome[]
+    groups: ResolvedGroup[]
     model: ModelId
     runReason: ExtractAndPersistOptions['runReason']
     triggeredBy: string | null
   }
 ): Promise<ExtractAndPersistResult> {
-  const { sourceDocumentId, doc, totalPages, outcomes, model, runReason, triggeredBy } = params
+  const { sourceDocumentId, doc, totalPages, groups, model, runReason, triggeredBy } = params
 
   let nextBillIndex = 0
   let classifiedPageCount = 0
@@ -787,42 +929,34 @@ async function persistPagesInOrder(
   let escalatedBecause: string | null = null
   let modelUsed: ModelId = model
 
-  for (const outcome of outcomes) {
-    if (outcome.status === 'error') {
-      await recordPageExtractionFailure(
-        admin,
-        sourceDocumentId,
-        outcome.pageNumber,
-        model,
-        runReason,
-        triggeredBy,
-        outcome.error
-      )
+  for (const group of groups) {
+    if (group.kind === 'failed') {
+      await recordPageExtractionFailure(admin, sourceDocumentId, group.pageNumber, model, runReason, triggeredBy, group.error)
       continue
     }
 
-    const pageResult = await persistExtractionPipelineResult(admin, {
+    const groupResult = await persistExtractionPipelineResult(admin, {
       sourceDocumentId,
       doc,
-      pipeline: outcome.pipeline,
+      pipeline: group.pipeline,
       triggeredBy,
       billIndexOffset: nextBillIndex,
       finalizeDocument: false,
     })
 
-    nextBillIndex += pageResult.billCount
-    classifiedPageCount += 1
-    lastRunId = pageResult.currentRunId
-    documentExtractionIds.push(...pageResult.documentExtractionIds)
-    runIds.push(...pageResult.runIds)
-    exceptionsRaised.push(...pageResult.exceptionsRaised)
-    billCount += pageResult.billCount
-    lineItemCount += pageResult.lineItemCount
-    totalCostUsd += pageResult.totalCostUsd
-    if (pageResult.escalated) {
+    nextBillIndex += groupResult.billCount
+    classifiedPageCount += group.pageCount
+    lastRunId = groupResult.currentRunId
+    documentExtractionIds.push(...groupResult.documentExtractionIds)
+    runIds.push(...groupResult.runIds)
+    exceptionsRaised.push(...groupResult.exceptionsRaised)
+    billCount += groupResult.billCount
+    lineItemCount += groupResult.lineItemCount
+    totalCostUsd += groupResult.totalCostUsd
+    if (groupResult.escalated) {
       escalated = true
-      escalatedBecause ??= pageResult.escalatedBecause
-      modelUsed = pageResult.modelUsed
+      escalatedBecause ??= groupResult.escalatedBecause
+      modelUsed = groupResult.modelUsed
     }
   }
 
@@ -831,9 +965,7 @@ async function persistPagesInOrder(
   // (recordExtractionFailure, marking upload_status 'failed') instead of
   // silently "succeeding" with zero bills and upload_status 'processed'.
   if (lastRunId === null) {
-    const firstFailure = outcomes.find(
-      (o): o is Extract<PageExtractionOutcome, { status: 'error' }> => o.status === 'error'
-    )
+    const firstFailure = groups.find((g): g is Extract<ResolvedGroup, { kind: 'failed' }> => g.kind === 'failed')
     const reason = firstFailure ? String((firstFailure.error as Error)?.message ?? firstFailure.error) : 'unknown'
     throw new Error(
       `extractAndPersist: every page of source_document ${sourceDocumentId} failed (first failure: ${reason})`
@@ -869,16 +1001,27 @@ async function persistPagesInOrder(
  * re-escalation route (§8 point 7) reuses exactly this path instead of a
  * parallel copy of it.
  *
- * One Claude call per PAGE, not one call per document — see lib/pdf.ts's
- * `splitPdfPage` and this file's header comment. The original design sent
- * every page of a document in a single request; splitting fixes three things
- * that design ran into on real multi-page scans: a dense document truncating
- * the tool call (and, worse, being re-sent whole a second time to retry it);
- * one bad page losing the entire document instead of just that page; and the
- * model occasionally reading a page's vendor/amount off a DIFFERENT page's
- * summary table because it could see the whole document at once. Splitting
- * means each page's own call can only read what's actually printed on that
- * page.
+ * One Claude call per PAGE as the first pass, not one call per document —
+ * see lib/pdf.ts's `splitPdfPage` and this file's header comment. The
+ * original design sent every page of a document in a single request;
+ * splitting fixes three things that design ran into on real multi-page
+ * scans: a dense document truncating the tool call (and, worse, being
+ * re-sent whole a second time to retry it); one bad page losing the entire
+ * document instead of just that page; and the model occasionally reading a
+ * page's vendor/amount off a DIFFERENT page's summary table because it could
+ * see the whole document at once. Splitting means each page's own call can
+ * only read what's actually printed on that page.
+ *
+ * That first pass alone broke a fourth case, though: a bill whose line items
+ * continue onto a following page. A lone split-out continuation page has no
+ * header to read at all, so it either got misread as its own phantom bill or
+ * silently lost from the bill it belonged to. `groupPageOutcomes` +
+ * `resolveGroups` below are the second pass that fixes this: they chain
+ * continuation pages (via each page's own `continues_previous_bill`
+ * verdict — extraction-schema.ts) back into the contiguous range they came
+ * from and re-extract exactly that range as one call, restoring full context
+ * for the one bill that needs it while every single-page bill (the large
+ * majority) never pays for a second call at all.
  *
  * Always synchronous, regardless of `OCR_USE_BATCH_API` (lib/env.server.ts) —
  * that flag only changes what `handleExtractDocument` does for the
@@ -911,17 +1054,20 @@ export async function extractAndPersist(
     const totalPages = doc.pageCount ?? (await getPdfPageCount(pdfBytes))
 
     const model = options.model ?? MODELS.haiku
-    const outcomes = await extractAllPagesConcurrently(pdfBytes, totalPages, {
+    const pipelineOptions = {
       model: options.model,
       runReason,
       allowEscalation: model === MODELS.haiku,
-    })
+    }
+    const outcomes = await extractAllPagesConcurrently(pdfBytes, totalPages, pipelineOptions)
+    const pendingGroups = groupPageOutcomes(outcomes)
+    const resolvedGroups = await resolveGroups(pdfBytes, pendingGroups, pipelineOptions)
 
-    return await persistPagesInOrder(admin, {
+    return await persistGroupsInOrder(admin, {
       sourceDocumentId,
       doc,
       totalPages,
-      outcomes,
+      groups: resolvedGroups,
       model,
       runReason,
       triggeredBy: options.triggeredBy ?? null,

@@ -423,15 +423,16 @@ describe('extractionToolInputSchema — union-type parameter budget', () => {
   it('moving header fields under bills.items.properties does not add new union parameters', () => {
     // skip_reason (pages.items) = 1; subtotal, tax_amount, total_amount,
     // cgst_amount, sgst_amount, igst_amount, round_off (bills.items) = 7;
-    // quantity, rate, amount (bills.items.line_items.items) = 3. Total 11 —
-    // down from 13 after 20260820000003 dropped list_rate/discount_pct as
-    // separate union-typed number fields (§ dropEmptyBills doc comment for
-    // why). instrument_type, vendor_*, invoice_number, invoice_date,
-    // place_of_supply, notes, discount stay plain (non-union) strings and
-    // page_number_start/page_number_end are plain integers, none of which
-    // were ever union-typed.
+    // quantity, rate, amount (bills.items.line_items.items) = 3;
+    // line_order (bills.items.uncertain_fields.items) = 1. Total 12 — up
+    // from 11 after uncertain_fields was added (line_order is nullable:
+    // null for a header field, an integer for a line-item field). continues
+    // to sit well clear of the 16 ceiling. instrument_type, vendor_*,
+    // invoice_number, invoice_date, place_of_supply, notes, discount,
+    // uncertain_fields' own `field`/page_number/bbox_* stay plain
+    // (non-union) types, none of which are union-typed.
     const count = countUnionTypedProperties(extractionToolInputSchema)
-    expect(count).toBe(11)
+    expect(count).toBe(12)
   })
 })
 

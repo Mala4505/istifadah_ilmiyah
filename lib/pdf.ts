@@ -45,6 +45,13 @@
  * real bill or something to skip — see that file for what "skip" means for a
  * page that never becomes a bill.
  *
+ * This single-page split is a per-page FIRST PASS only, not the whole story:
+ * a bill whose line items continue onto a following page needs that page's
+ * own header context back, which a lone split-out page cannot carry — see
+ * `extractPageRange` below and `resolveGroups` in
+ * lib/jobs/handlers/extract.ts for the second pass that re-merges exactly
+ * those pages (and only those) back into one call.
+ *
  * TODO (Day 3/4): when the inbox screen renders pages with pdf.js in the
  * browser, it can POST per-page PNGs and the handler can switch to
  * `documentImages` — lib/claude-client.ts already accepts both.
@@ -130,5 +137,34 @@ export async function splitPdfPage(bytes: Uint8Array, pageNumber: number): Promi
   const out = await PDFDocument.create()
   const [copied] = await out.copyPages(source, [pageIndex])
   out.addPage(copied)
+  return out.save()
+}
+
+/**
+ * Extracts a contiguous run of pages [startPage, endPage] (1-indexed,
+ * inclusive) out of `bytes` as its own standalone PDF — the multi-page
+ * counterpart to `splitPdfPage` above.
+ *
+ * Used by lib/jobs/handlers/extract.ts's bill-grouping step
+ * (`resolveGroups`): when a bill's line-item table continues across a page
+ * break, per-page splitting throws away the header context a continuation
+ * page needs (this file's header comment). Rather than reverting to one call
+ * per whole document — which is what made truncation/one-bad-page-loses-
+ * everything a problem in the first place — only that bill's own pages are
+ * re-merged and re-extracted together, in one call bounded to just those
+ * few pages.
+ */
+export async function extractPageRange(bytes: Uint8Array, startPage: number, endPage: number): Promise<Uint8Array> {
+  const { PDFDocument } = await import('pdf-lib')
+  const source = await PDFDocument.load(bytes)
+  const pageCount = source.getPageCount()
+  if (startPage < 1 || endPage < startPage || endPage > pageCount) {
+    throw new RangeError(`extractPageRange: range ${startPage}-${endPage} is invalid for a ${pageCount}-page document`)
+  }
+
+  const indices = Array.from({ length: endPage - startPage + 1 }, (_, i) => startPage - 1 + i)
+  const out = await PDFDocument.create()
+  const copied = await out.copyPages(source, indices)
+  for (const page of copied) out.addPage(page)
   return out.save()
 }
