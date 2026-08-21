@@ -14,7 +14,13 @@ import { Check, ChevronsUpDown } from 'lucide-react'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
+import { cn } from '@/lib/utils'
 import { searchReviewVendors, type VendorSearchResult } from '@/lib/actions/review'
+
+/** Matches extraction-form.tsx's UNCERTAIN_RING_CLASS -- kept local since
+ *  that constant isn't exported, and this is the one non-Field/non-table
+ *  input that needs the same orange-ring convention. */
+const UNCERTAIN_RING_CLASS = 'ring-2 ring-orange-500 ring-offset-1 dark:ring-offset-background'
 
 export const VendorAutocomplete = forwardRef(function VendorAutocomplete(
   {
@@ -24,6 +30,9 @@ export const VendorAutocomplete = forwardRef(function VendorAutocomplete(
     open,
     onOpenChange,
     fieldIndex,
+    uncertain = false,
+    uncertainIndex,
+    onFocus,
   }: {
     /** Current display text -- usually the OCR/verified vendor_name field. */
     value: string
@@ -32,6 +41,15 @@ export const VendorAutocomplete = forwardRef(function VendorAutocomplete(
     open: boolean
     onOpenChange: (open: boolean) => void
     fieldIndex: number
+    /** True when vendor_name was flagged in uncertain_fields_ocr -- draws
+     *  the orange ring on the trigger button. */
+    uncertain?: boolean
+    /** This field's position in the uncertainFields array, rendered as
+     *  data-uncertain-index for the toolbar's next/previous stepper. */
+    uncertainIndex?: number
+    /** Called when the trigger button is focused while flagged uncertain --
+     *  the caller uses this to jump the PDF pane to the source page. */
+    onFocus?: () => void
   },
   ref: Ref<HTMLButtonElement>
 ) {
@@ -65,8 +83,11 @@ export const VendorAutocomplete = forwardRef(function VendorAutocomplete(
           variant="outline"
           role="combobox"
           data-field-index={fieldIndex}
+          data-uncertain-index={uncertainIndex}
           aria-expanded={open}
-          className="w-full justify-between font-normal"
+          className={cn('w-full justify-between font-normal', uncertain && UNCERTAIN_RING_CLASS)}
+          title={uncertain ? 'Model was uncertain about this value — click to jump to the source page' : undefined}
+          onFocus={onFocus}
           onClick={() => onOpenChange(true)}
         >
           <span className="truncate">{value || 'Vendor not set'}</span>

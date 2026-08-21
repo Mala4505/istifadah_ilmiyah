@@ -29,6 +29,25 @@ function formatSkipReason(reason: string): string {
   return words[0]!.charAt(0).toUpperCase() + words[0]!.slice(1) + (words.length > 1 ? ' ' + words.slice(1).join(' ') : '')
 }
 
+/** Maps a point given as (x, y) fractions (0-1, top-left origin) of the
+ * page's natural (unrotated) orientation to the equivalent fractions in the
+ * viewport as rendered after a clockwise `rotation` of 0/90/180/270 degrees
+ * -- reconciling extractionUncertainFieldSchema's natural-page bbox space
+ * (lib/extraction-schema.ts) with the rotated canvas pdf.js actually draws
+ * (see `currentPageBoxes` below). */
+function rotateFractionPoint(x: number, y: number, rotation: number): [number, number] {
+  switch (((rotation % 360) + 360) % 360) {
+    case 90:
+      return [1 - y, x]
+    case 180:
+      return [1 - x, 1 - y]
+    case 270:
+      return [y, 1 - x]
+    default:
+      return [x, y]
+  }
+}
+
 /** Imperative page-turn API so the review workspace's global Arrow-key
  * handler (§7 keyboard contract) can drive this pane without lifting its
  * whole pdf.js render loop up a level. */
@@ -102,17 +121,30 @@ export const PdfViewer = forwardRef<
     return map
   }, [pages])
 
-  // Best-effort highlight boxes for the page currently on screen. Only drawn
-  // at rotation 0: a bbox is captured in the page's natural (unrotated)
-  // orientation (extractionUncertainFieldSchema's doc comment,
-  // lib/extraction-schema.ts), and correctly transforming x0/y0/x1/y1 through
-  // a 90/180/270 rotation is real extra complexity for a feature that is
-  // already explicitly a best-effort aid, not a precise one — simplest safe
-  // cut is to hide the (possibly-misleading) boxes rather than draw wrong ones.
-  const currentPageBoxes = useMemo(
-    () => (rotation === 0 ? uncertainFields.filter((f) => f.pageNumber === pageNumber) : []),
-    [uncertainFields, pageNumber, rotation]
-  )
+  // Highlight boxes for the page currently on screen, resolved into the
+  // rotated viewport's own fraction space. Each field's bbox is captured in
+  // the page's natural (unrotated) orientation (extractionUncertainFieldSchema's
+  // doc comment, lib/extraction-schema.ts; UncertainField, lib/review/types.ts),
+  // while the overlay wrapper below is sized to the current (possibly
+  // rotated) rendered viewport -- rotateFractionPoint reconciles the two by
+  // mapping both corners through the current rotation, then taking the
+  // min/max of the transformed corners to get the new axis-aligned rectangle
+  // (a 90-degree-multiple rotation keeps an axis-aligned rectangle
+  // axis-aligned, so the two given diagonal corners remain diagonal corners
+  // of the transformed rectangle -- no need for all four).
+  const currentPageBoxes = useMemo(() => {
+    return uncertainFields
+      .filter((f) => f.pageNumber === pageNumber)
+      .map((f) => {
+        const [ax, ay] = rotateFractionPoint(f.bboxX0, f.bboxY0, rotation)
+        const [bx, by] = rotateFractionPoint(f.bboxX1, f.bboxY1, rotation)
+        const left = Math.min(ax, bx)
+        const top = Math.min(ay, by)
+        const right = Math.max(ax, bx)
+        const bottom = Math.max(ay, by)
+        return { field: f.field, left, top, width: right - left, height: bottom - top }
+      })
+  }, [uncertainFields, pageNumber, rotation])
 
   useImperativeHandle(
     ref,
@@ -448,10 +480,10 @@ export const PdfViewer = forwardRef<
                     title={box.field.replace(/_/g, ' ')}
                     className="pointer-events-none absolute rounded-sm border-2 border-orange-500 bg-orange-400/20"
                     style={{
-                      left: `${box.bboxX0 * 100}%`,
-                      top: `${box.bboxY0 * 100}%`,
-                      width: `${(box.bboxX1 - box.bboxX0) * 100}%`,
-                      height: `${(box.bboxY1 - box.bboxY0) * 100}%`,
+                      left: `${box.left * 100}%`,
+                      top: `${box.top * 100}%`,
+                      width: `${box.width * 100}%`,
+                      height: `${box.height * 100}%`,
                     }}
                   />
                 ))}

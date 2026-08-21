@@ -142,6 +142,28 @@ export function ReviewWorkspace({
   const [vendorId, setVendorId] = useState<number | null>(detail.entryVendorId)
   const [vendorAutocompleteOpen, setVendorAutocompleteOpen] = useState(false)
 
+  // Checklist 4.2: the toolbar's "N of M to check" stepper. Fields carry a
+  // stable `data-uncertain-index` (their position in detail.uncertainFields,
+  // set in ExtractionForm/VendorAutocomplete) that this focuses directly --
+  // the field's own onFocus handler (already wired for the orange-ring
+  // affordance) takes care of the PDF jump, so this only needs to focus.
+  const [uncertainStepIndex, setUncertainStepIndex] = useState<number | null>(null)
+  function focusUncertainField(index: number) {
+    formContainerRef.current?.querySelector<HTMLElement>(`[data-uncertain-index="${index}"]`)?.focus()
+  }
+  function stepUncertainField(direction: 1 | -1) {
+    const total = detail.uncertainFields.length
+    if (total === 0) return
+    const next =
+      uncertainStepIndex === null
+        ? direction === 1
+          ? 0
+          : total - 1
+        : (uncertainStepIndex + direction + total) % total
+    setUncertainStepIndex(next)
+    focusUncertainField(next)
+  }
+
   // Dirty tracking (D3/plan §2, checklist 1.5): the workspace remounts fresh
   // per document + extraction run (keyed in review/page.tsx), so capturing
   // the initial snapshot once at mount -- before any edits -- gives a stable
@@ -646,6 +668,31 @@ export function ReviewWorkspace({
             {detail.extractionConfidence !== null ? `${Math.round(detail.extractionConfidence * 100)}% confidence` : 'Confidence unknown'}
             {detail.model ? ` · ${detail.model}` : ''}
             {detail.legibility ? ` · ${detail.legibility}` : ''}
+          </span>
+        ) : null}
+        {detail.uncertainFields.length > 0 ? (
+          <span className="flex items-center gap-1 rounded-full border border-orange-300 bg-orange-50 px-2 py-0.5 text-xs text-orange-900 dark:border-orange-800 dark:bg-orange-950 dark:text-orange-200">
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="h-5 px-1 text-orange-900 hover:bg-orange-100 dark:text-orange-200 dark:hover:bg-orange-900"
+              aria-label="Previous flagged field"
+              onClick={() => stepUncertainField(-1)}
+            >
+              ‹
+            </Button>
+            {uncertainStepIndex !== null ? uncertainStepIndex + 1 : '—'} of {detail.uncertainFields.length} to check
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="h-5 px-1 text-orange-900 hover:bg-orange-100 dark:text-orange-200 dark:hover:bg-orange-900"
+              aria-label="Next flagged field"
+              onClick={() => stepUncertainField(1)}
+            >
+              ›
+            </Button>
           </span>
         ) : null}
         {detail.billCount > 1 ? (

@@ -171,6 +171,15 @@ export const ExtractionForm = forwardRef(function ExtractionForm(
     return wireField ? uncertainHeaderByField.get(wireField) : undefined
   }
 
+  /** A flagged field's position in `uncertainFields` -- rendered as
+   *  `data-uncertain-index` so ReviewWorkspace's toolbar stepper can focus
+   *  fields in order regardless of which section (header/vendor/line item)
+   *  they live in. Reference equality is safe here since the matched object
+   *  always comes from iterating this same array. */
+  function uncertainIndexOf(uncertain: UncertainField | undefined): number | undefined {
+    return uncertain ? uncertainFields.indexOf(uncertain) : undefined
+  }
+
   function lineItemUncertainty(lineOrder: number, key: keyof Omit<LineItemFormState, 'id'>): UncertainField | undefined {
     const wireField = LINE_ITEM_WIRE_FIELD[key]
     if (!wireField) return undefined
@@ -231,11 +240,19 @@ export const ExtractionForm = forwardRef(function ExtractionForm(
     }
   }
 
+  const vendorNameUncertain = headerUncertainty('vendorName')
+  const vendorNameUncertainIndex = uncertainIndexOf(vendorNameUncertain)
+
   return (
     <div ref={ref} className="flex h-full min-w-0 flex-1 flex-col gap-4 overflow-y-auto p-1">
       <section className="grid grid-cols-2 gap-3 rounded-md border border-border p-3">
         <div className="col-span-2 flex flex-col gap-1.5">
-          <Label>Vendor</Label>
+          <Label>
+            Vendor
+            {vendorNameUncertain ? (
+              <span className="ml-1 text-orange-500" title="Model was uncertain about this value">●</span>
+            ) : null}
+          </Label>
           <VendorAutocomplete
             value={header.vendorName}
             selectedVendorId={vendorId}
@@ -243,37 +260,49 @@ export const ExtractionForm = forwardRef(function ExtractionForm(
             onOpenChange={onVendorAutocompleteOpenChange}
             onSelect={onVendorSelect}
             fieldIndex={0}
+            uncertain={!!vendorNameUncertain}
+            uncertainIndex={vendorNameUncertainIndex}
+            onFocus={() => vendorNameUncertain && onJumpToPage?.(vendorNameUncertain.pageNumber)}
           />
         </div>
         <Field label="GSTIN" disabled={disabled} onKeyDown={handleEnter}
           value={header.vendorGstin} onChange={(v) => onHeaderChange('vendorGstin', v)}
-          uncertain={headerUncertainty('vendorGstin')} edited={headerEdited('vendorGstin')} onJumpToPage={onJumpToPage} />
+          uncertain={headerUncertainty('vendorGstin')} uncertainIndex={uncertainIndexOf(headerUncertainty('vendorGstin'))}
+          edited={headerEdited('vendorGstin')} onJumpToPage={onJumpToPage} />
         <Field label="Phone" disabled={disabled} onKeyDown={handleEnter}
           value={header.vendorPhone} onChange={(v) => onHeaderChange('vendorPhone', v)}
-          uncertain={headerUncertainty('vendorPhone')} edited={headerEdited('vendorPhone')} onJumpToPage={onJumpToPage} />
+          uncertain={headerUncertainty('vendorPhone')} uncertainIndex={uncertainIndexOf(headerUncertainty('vendorPhone'))}
+          edited={headerEdited('vendorPhone')} onJumpToPage={onJumpToPage} />
         <Field label="Email" disabled={disabled} onKeyDown={handleEnter}
           value={header.vendorEmail} onChange={(v) => onHeaderChange('vendorEmail', v)}
-          uncertain={headerUncertainty('vendorEmail')} edited={headerEdited('vendorEmail')} onJumpToPage={onJumpToPage} />
+          uncertain={headerUncertainty('vendorEmail')} uncertainIndex={uncertainIndexOf(headerUncertainty('vendorEmail'))}
+          edited={headerEdited('vendorEmail')} onJumpToPage={onJumpToPage} />
         <div className="col-span-2">
           <Field label="Address" disabled={disabled} onKeyDown={handleEnter}
             value={header.vendorAddress} onChange={(v) => onHeaderChange('vendorAddress', v)}
-            uncertain={headerUncertainty('vendorAddress')} edited={headerEdited('vendorAddress')} onJumpToPage={onJumpToPage} />
+            uncertain={headerUncertainty('vendorAddress')} uncertainIndex={uncertainIndexOf(headerUncertainty('vendorAddress'))}
+            edited={headerEdited('vendorAddress')} onJumpToPage={onJumpToPage} />
         </div>
         <Field label="Invoice number" disabled={disabled} onKeyDown={handleEnter}
           value={header.invoiceNumber} onChange={(v) => onHeaderChange('invoiceNumber', v)}
-          uncertain={headerUncertainty('invoiceNumber')} edited={headerEdited('invoiceNumber')} onJumpToPage={onJumpToPage} />
+          uncertain={headerUncertainty('invoiceNumber')} uncertainIndex={uncertainIndexOf(headerUncertainty('invoiceNumber'))}
+          edited={headerEdited('invoiceNumber')} onJumpToPage={onJumpToPage} />
         <Field label="Invoice date" type="date" disabled={disabled} onKeyDown={handleEnter}
           value={header.invoiceDate} onChange={(v) => onHeaderChange('invoiceDate', v)}
-          uncertain={headerUncertainty('invoiceDate')} edited={headerEdited('invoiceDate')} onJumpToPage={onJumpToPage} />
+          uncertain={headerUncertainty('invoiceDate')} uncertainIndex={uncertainIndexOf(headerUncertainty('invoiceDate'))}
+          edited={headerEdited('invoiceDate')} onJumpToPage={onJumpToPage} />
         <Field label="Subtotal" inputMode="decimal" disabled={disabled} onKeyDown={handleEnter}
           value={header.subtotal} onChange={(v) => onHeaderChange('subtotal', v)}
-          uncertain={headerUncertainty('subtotal')} edited={headerEdited('subtotal')} onJumpToPage={onJumpToPage} />
+          uncertain={headerUncertainty('subtotal')} uncertainIndex={uncertainIndexOf(headerUncertainty('subtotal'))}
+          edited={headerEdited('subtotal')} onJumpToPage={onJumpToPage} />
         <Field label="Tax amount" inputMode="decimal" disabled={disabled} onKeyDown={handleEnter}
           value={header.taxAmount} onChange={(v) => onHeaderChange('taxAmount', v)}
-          uncertain={headerUncertainty('taxAmount')} edited={headerEdited('taxAmount')} onJumpToPage={onJumpToPage} />
+          uncertain={headerUncertainty('taxAmount')} uncertainIndex={uncertainIndexOf(headerUncertainty('taxAmount'))}
+          edited={headerEdited('taxAmount')} onJumpToPage={onJumpToPage} />
         <Field label="Total amount" inputMode="decimal" disabled={disabled} onKeyDown={handleEnter}
           value={header.totalAmount} onChange={(v) => onHeaderChange('totalAmount', v)}
-          uncertain={headerUncertainty('totalAmount')} edited={headerEdited('totalAmount')} onJumpToPage={onJumpToPage} />
+          uncertain={headerUncertainty('totalAmount')} uncertainIndex={uncertainIndexOf(headerUncertainty('totalAmount'))}
+          edited={headerEdited('totalAmount')} onJumpToPage={onJumpToPage} />
         <div className="col-span-2 flex flex-col gap-1.5">
           <Label>
             Notes
@@ -318,6 +347,11 @@ export const ExtractionForm = forwardRef(function ExtractionForm(
                 const rateUncertain = lineItemUncertainty(item.lineOrder, 'rate')
                 const discountUncertain = lineItemUncertainty(item.lineOrder, 'discount')
                 const amountUncertain = lineItemUncertainty(item.lineOrder, 'amount')
+                const descUncertainIndex = uncertainIndexOf(descUncertain)
+                const qtyUncertainIndex = uncertainIndexOf(qtyUncertain)
+                const rateUncertainIndex = uncertainIndexOf(rateUncertain)
+                const discountUncertainIndex = uncertainIndexOf(discountUncertain)
+                const amountUncertainIndex = uncertainIndexOf(amountUncertain)
                 const ringClass = (uncertain: UncertainField | undefined, editedKey: string) =>
                   uncertain ? UNCERTAIN_RING_CLASS : lineItemEdited(item.lineOrder, editedKey) ? EDITED_RING_CLASS : ''
                 const titleFor = (uncertain: UncertainField | undefined, editedKey: string) =>
@@ -355,6 +389,7 @@ export const ExtractionForm = forwardRef(function ExtractionForm(
                       <td className="min-w-40 px-1 py-1">
                         <Input
                           data-line-jump-index={jumpIndex ?? undefined}
+                          data-uncertain-index={descUncertainIndex}
                           disabled={disabled}
                           className={ringClass(descUncertain, 'description')}
                           title={titleFor(descUncertain, 'description')}
@@ -366,6 +401,7 @@ export const ExtractionForm = forwardRef(function ExtractionForm(
                       </td>
                       <td className="min-w-20 px-1 py-1">
                         <Input inputMode="decimal" disabled={disabled}
+                          data-uncertain-index={qtyUncertainIndex}
                           className={ringClass(qtyUncertain, 'quantity')}
                           title={titleFor(qtyUncertain, 'quantity')}
                           onFocus={() => qtyUncertain && onJumpToPage?.(qtyUncertain.pageNumber)}
@@ -394,6 +430,7 @@ export const ExtractionForm = forwardRef(function ExtractionForm(
                       </td>
                       <td className="min-w-24 px-1 py-1">
                         <Input inputMode="decimal" disabled={disabled}
+                          data-uncertain-index={rateUncertainIndex}
                           className={ringClass(rateUncertain, 'rate')}
                           title={titleFor(rateUncertain, 'rate')}
                           onFocus={() => rateUncertain && onJumpToPage?.(rateUncertain.pageNumber)}
@@ -402,6 +439,7 @@ export const ExtractionForm = forwardRef(function ExtractionForm(
                       </td>
                       <td className="min-w-24 px-1 py-1">
                         <Input inputMode="decimal" disabled={disabled}
+                          data-uncertain-index={amountUncertainIndex}
                           className={ringClass(amountUncertain, 'amount')}
                           title={titleFor(amountUncertain, 'amount')}
                           onFocus={() => amountUncertain && onJumpToPage?.(amountUncertain.pageNumber)}
@@ -427,7 +465,8 @@ export const ExtractionForm = forwardRef(function ExtractionForm(
                             </label>
                             <label className="flex flex-col gap-1 text-xs text-muted-foreground">
                               Discount
-                              <Input disabled={disabled} className={`w-28 ${ringClass(discountUncertain, 'discount')}`}
+                              <Input disabled={disabled} data-uncertain-index={discountUncertainIndex}
+                                className={`w-28 ${ringClass(discountUncertain, 'discount')}`}
                                 title={titleFor(discountUncertain, 'discount')}
                                 onFocus={() => discountUncertain && onJumpToPage?.(discountUncertain.pageNumber)}
                                 value={item.discount}
@@ -464,6 +503,7 @@ function Field({
   inputMode,
   onKeyDown,
   uncertain,
+  uncertainIndex,
   edited = false,
   onJumpToPage,
 }: {
@@ -476,6 +516,9 @@ function Field({
   onKeyDown: (e: React.KeyboardEvent<HTMLElement>) => void
   /** Present when this field was flagged in uncertain_fields_ocr. */
   uncertain?: UncertainField
+  /** This field's position in the `uncertainFields` array -- rendered as
+   *  `data-uncertain-index` for the toolbar's next/previous stepper. */
+  uncertainIndex?: number
   /** True when the live value differs from its OCR baseline. */
   edited?: boolean
   onJumpToPage?: (pageNumber: number) => void
@@ -493,6 +536,7 @@ function Field({
         type={type}
         inputMode={inputMode}
         disabled={disabled}
+        data-uncertain-index={uncertainIndex}
         className={uncertain ? UNCERTAIN_RING_CLASS : edited ? EDITED_RING_CLASS : ''}
         title={
           uncertain
