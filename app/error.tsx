@@ -5,6 +5,7 @@ import Link from 'next/link'
 import * as Sentry from '@sentry/nextjs'
 import { Button } from '@/components/ui/button'
 import { FriendlyError } from '@/components/ui/friendly-error'
+import { Logo } from '@/components/app-shell/logo'
 
 // Root-level route error boundary — catches anything thrown while a page or
 // layout renders, but only once the app shell itself mounted successfully
@@ -22,6 +23,7 @@ export default function Error({
 
   return (
     <main className="flex min-h-screen flex-col items-center justify-center gap-8 bg-background px-4 py-16 text-center">
+      <Logo imageClassName="w-24" />
       <div className="flex flex-col items-center gap-3">
         <p className="font-mono text-xs font-medium uppercase tracking-[0.14em] text-secondary">
           Ref · flagged for review

@@ -43,6 +43,14 @@ export default function GlobalError({
           }}
         >
           <div style={{ maxWidth: '360px', textAlign: 'center' }}>
+            {/* eslint-disable-next-line @next/next/no-img-element -- next/image depends on the app's own image-optimization pipeline, which this file can't assume survived the crash */}
+            <img
+              src="/istifadah_logo_1_alpha.png"
+              alt="Istifadah Ilmiyah"
+              width={96}
+              height={96}
+              style={{ height: '3.5rem', width: 'auto', margin: '0 auto 1.5rem' }}
+            />
             <div
               style={{
                 height: '4px',
