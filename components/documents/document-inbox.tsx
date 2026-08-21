@@ -1,8 +1,9 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
+import { AlertTriangle } from 'lucide-react'
 import { toastError } from '@/components/ui/error-toast'
 import { Button } from '@/components/ui/button'
 import { bulkAttachDocuments, deleteDocuments } from '@/lib/actions/documents'
@@ -10,9 +11,23 @@ import { UploadDropzone } from './upload-dropzone'
 import { DocumentTable } from './document-table'
 import type { InboxDocumentView } from './types'
 
-/** While any document sits in 'uploaded' or 'processing', poll the RSC data path so the stage tracker reflects a background worker's progress without a dedicated status endpoint. */
+/**
+ * While any document sits in 'uploaded' or 'processing', poll the narrow
+ * `GET /api/documents/status` endpoint (checklist 2.5/2.6) instead of
+ * `router.refresh()`-ing the whole RSC tree on a timer — that used to re-run
+ * six queries including a 5,000-row `entries` fetch every tick, whether or
+ * not anything had actually changed.
+ */
 const PENDING_STATUSES: ReadonlySet<InboxDocumentView['uploadStatus']> = new Set(['uploaded', 'processing'])
-const POLL_INTERVAL_MS = 4000
+
+/** 4s -> 8s -> 15s: backs off after each tick that finds no change, resets whenever the polled set or a document's status changes (checklist 2.7). */
+const POLL_BACKOFF_MS = [4000, 8000, 15000] as const
+
+interface StatusResponseDoc {
+  id: number
+  uploadStatus: InboxDocumentView['uploadStatus']
+  hasExtraction: boolean
+}
 
 /**
  * Client shell for /documents (MASTER-PLAN §11.2 Day 3): owns the upload
@@ -26,9 +41,12 @@ const POLL_INTERVAL_MS = 4000
 export function DocumentInbox({
   initialDocuments,
   canAct,
+  queueStalled = false,
 }: {
   initialDocuments: InboxDocumentView[]
   canAct: boolean
+  /** True when the oldest queued `extract_document` job has been sitting for more than ~10 minutes (checklist 2.15, D8) — a stalled pipeline made visible instead of silent. */
+  queueStalled?: boolean
 }) {
   const router = useRouter()
   const [documents, setDocuments] = useState(initialDocuments)
@@ -57,13 +75,110 @@ export function DocumentInbox({
     })
   }, [initialDocuments])
 
+  // Kept in a ref so the polling effect below can always read the latest
+  // documents inside an async tick without re-subscribing on every render.
+  const documentsRef = useRef(documents)
   useEffect(() => {
-    const hasPending = documents.some((d) => PENDING_STATUSES.has(d.uploadStatus))
-    if (!hasPending) return
-    const interval = setInterval(() => {
-      router.refresh()
-    }, POLL_INTERVAL_MS)
-    return () => clearInterval(interval)
+    documentsRef.current = documents
+  }, [documents])
+
+  useEffect(() => {
+    const pendingIds = documents.filter((d) => PENDING_STATUSES.has(d.uploadStatus)).map((d) => d.id)
+    if (pendingIds.length === 0) return
+
+    let cancelled = false
+    let backoffIndex = 0
+    let timeoutId: ReturnType<typeof setTimeout> | null = null
+
+    function scheduleNext() {
+      if (cancelled || document.visibilityState === 'hidden') return
+      const delay = POLL_BACKOFF_MS[Math.min(backoffIndex, POLL_BACKOFF_MS.length - 1)]
+      timeoutId = setTimeout(() => void tick(), delay)
+    }
+
+    async function tick() {
+      timeoutId = null
+      if (cancelled || document.visibilityState === 'hidden') return
+
+      const currentPendingIds = documentsRef.current
+        .filter((d) => PENDING_STATUSES.has(d.uploadStatus))
+        .map((d) => d.id)
+      if (currentPendingIds.length === 0) return
+
+      try {
+        const res = await fetch(`/api/documents/status?ids=${currentPendingIds.join(',')}`)
+        if (cancelled) return
+        if (!res.ok) {
+          backoffIndex = Math.min(backoffIndex + 1, POLL_BACKOFF_MS.length - 1)
+          scheduleNext()
+          return
+        }
+        const body = (await res.json()) as { documents?: StatusResponseDoc[] }
+        if (cancelled) return
+        const serverById = new Map((body.documents ?? []).map((d) => [d.id, d]))
+
+        let anyChange = false
+        let completed = false
+        const patched = documentsRef.current.map((doc) => {
+          const server = serverById.get(doc.id)
+          if (!server) return doc
+          // extraction is 1:many per document (multi-bill PDFs) — an empty
+          // array means "not extracted yet", same signal the old single-bill
+          // `extraction !== null` check used to read off a nullable object.
+          const wasExtracted = doc.extraction.length > 0
+          const statusChanged = server.uploadStatus !== doc.uploadStatus
+          const extractionArrived = server.hasExtraction && !wasExtracted
+          if (!statusChanged && !extractionArrived) return doc
+
+          anyChange = true
+          if (server.uploadStatus === 'processed' || server.uploadStatus === 'failed' || extractionArrived) {
+            // Only a real router.refresh() brings in the actual extracted
+            // fields and candidate rankings — leave this document's local
+            // state alone and let the RSC round trip replace it.
+            completed = true
+            return doc
+          }
+          return { ...doc, uploadStatus: server.uploadStatus }
+        })
+
+        if (completed) {
+          router.refresh()
+          return
+        }
+        if (anyChange) {
+          // Patching triggers this effect's own cleanup + re-run (documents
+          // changed), which naturally resets backoffIndex to 0 and
+          // recomputes the pending set — no manual reset needed here.
+          setDocuments(patched)
+          return
+        }
+
+        backoffIndex = Math.min(backoffIndex + 1, POLL_BACKOFF_MS.length - 1)
+        scheduleNext()
+      } catch {
+        if (cancelled) return
+        backoffIndex = Math.min(backoffIndex + 1, POLL_BACKOFF_MS.length - 1)
+        scheduleNext()
+      }
+    }
+
+    function handleVisibilityChange() {
+      if (document.visibilityState === 'visible') {
+        if (timeoutId === null && !cancelled) void tick()
+      } else if (timeoutId !== null) {
+        clearTimeout(timeoutId)
+        timeoutId = null
+      }
+    }
+
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    scheduleNext()
+
+    return () => {
+      cancelled = true
+      if (timeoutId !== null) clearTimeout(timeoutId)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+    }
   }, [documents, router])
 
   function toggleSelected(documentId: number) {
@@ -191,6 +306,15 @@ export function DocumentInbox({
 
   return (
     <div className="flex flex-col gap-6">
+      {queueStalled && (
+        <div className="flex items-start gap-2 rounded-md border border-amber-300/50 bg-amber-50 px-3 py-2.5 text-sm dark:border-amber-900 dark:bg-amber-950/40">
+          <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0 text-amber-700 dark:text-amber-400" aria-hidden="true" />
+          <p className="text-amber-900 dark:text-amber-200">
+            Extraction is running behind. Uploads may take longer than usual.
+          </p>
+        </div>
+      )}
+
       <UploadDropzone onUploaded={() => router.refresh()} />
 
       {canAct && selectedCount > 0 && (

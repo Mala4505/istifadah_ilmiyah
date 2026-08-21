@@ -36,7 +36,7 @@ import { extractionFailureGuidance } from '@/lib/friendly-error'
 import { formatDate, formatDateTime, formatElapsed, formatMoney, formatScore } from './format'
 import type { CandidateEntryView, InboxDocumentView } from './types'
 
-type StageState = 'done' | 'active' | 'pending' | 'failed'
+export type StageState = 'done' | 'active' | 'pending' | 'failed'
 
 /**
  * Honest progress for a one-shot, non-streaming extraction call: there is no
@@ -47,7 +47,7 @@ type StageState = 'done' | 'active' | 'pending' | 'failed'
  * compact row rendering (icons only) so the mapping from `uploadStatus` to
  * stage lives in exactly one place.
  */
-function stagesFor(uploadStatus: InboxDocumentView['uploadStatus']): Array<{ label: string; state: StageState }> {
+export function stagesFor(uploadStatus: InboxDocumentView['uploadStatus']): Array<{ label: string; state: StageState }> {
   const queuedState: StageState = uploadStatus === 'uploaded' ? 'active' : 'done'
   const extractingState: StageState =
     uploadStatus === 'processing'

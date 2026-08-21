@@ -1,11 +1,15 @@
 import { Card, CardContent } from '@/components/ui/card'
 import { FriendlyError } from '@/components/ui/friendly-error'
 import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/admin'
 import { getStaffContext } from '@/lib/export/auth'
 import { rankCandidates, type MatchableEntry } from '@/lib/matching'
 import { DocumentInbox } from '@/components/documents/document-inbox'
 import type { CandidateEntryView, DocumentExtractionSummary, InboxDocumentView } from '@/components/documents/types'
 import { isAdminOrAbove } from '@/lib/auth/roles'
+
+/** A stalled queue is "the oldest queued job has been waiting longer than this" (checklist 2.15, D8) — long enough that a normal extraction backlog doesn't false-positive. */
+const STALLED_QUEUE_THRESHOLD_MS = 10 * 60 * 1000
 
 /**
  * /documents — the document inbox (MASTER-PLAN §5 row 6, §11.2 Day 3):
@@ -229,9 +233,30 @@ export default async function DocumentsPage() {
     }
   })
 
+  // job_queue's RLS restricts select to admins only (job_queue_select_admin),
+  // but the inbox itself is visible to every active staff member — so this
+  // one query goes through the admin (service-role) client, same as
+  // app/api/documents/ingest/route.ts's own job_queue writes, rather than
+  // the session-bound client used everywhere else on this page. Just the
+  // oldest queued row's timestamp, nothing else: cheap enough to run on
+  // every page load (checklist 2.15, D8).
+  const admin = createAdminClient()
+  const { data: oldestQueuedJob } = await admin
+    .from('job_queue')
+    .select('created_at')
+    .eq('status', 'queued')
+    .eq('job_type', 'extract_document')
+    .order('created_at', { ascending: true })
+    .limit(1)
+    .maybeSingle()
+
+  const queueStalled = Boolean(
+    oldestQueuedJob && Date.now() - new Date(oldestQueuedJob.created_at).getTime() > STALLED_QUEUE_THRESHOLD_MS
+  )
+
   return (
     <PageShell count={inboxDocuments.length}>
-      <DocumentInbox initialDocuments={inboxDocuments} canAct={canAct} />
+      <DocumentInbox initialDocuments={inboxDocuments} canAct={canAct} queueStalled={queueStalled} />
     </PageShell>
   )
 }

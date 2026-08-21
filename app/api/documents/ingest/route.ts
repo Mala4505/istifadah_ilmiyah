@@ -5,7 +5,7 @@ import { getStaffContext } from '@/lib/export/auth'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { putDocument } from '@/lib/storage'
 import { getPdfPageCount, looksLikePdf, sha256Hex } from '@/lib/pdf'
-import { drainJobQueue, runJobById } from '@/lib/jobs/drain'
+import { runJobById } from '@/lib/jobs/drain'
 import { serverEnv } from '@/lib/env.server'
 
 /**
@@ -21,14 +21,18 @@ import { serverEnv } from '@/lib/env.server'
  *
  * Creates `source_document` + one `document_page` per page, stores the
  * original in the private `invoice-documents` bucket, and queues an
- * `extract_document` job. Before responding, this route also drains that job
- * — and any backlog — itself (see the awaited drainJobQueue call below), so
- * extraction is attempted on upload rather than waiting for the next Vercel
- * Cron tick (app/api/jobs/tick/route.ts, a once/day safety net on Hobby).
- * Deliberately awaited rather than fired via next/server's after(): after()
- * did not reliably run to completion on this project's Vercel deployment in
- * practice, so the response now simply waits instead of trusting it. Returns
- * the new document id.
+ * `extract_document` job. Before responding, this route also runs THIS
+ * document's own job to completion itself (see the awaited runJobById call
+ * below), so extraction is attempted on upload rather than waiting for the
+ * next Vercel Cron tick (app/api/jobs/tick/route.ts, a once/day safety net on
+ * Hobby). It does NOT also drain anyone else's backlog — that used to happen
+ * here too, but spending a user's own upload request on other users' queued
+ * jobs was cut (see the comment above the runJobById call): the backlog is
+ * covered by the cron tick, and by every other user's own upload draining
+ * their own job the same way. Deliberately awaited rather than fired via
+ * next/server's after(): after() did not reliably run to completion on this
+ * project's Vercel deployment in practice, so the response now simply waits
+ * instead of trusting it. Returns the new document id.
  *
  * ── Contract note for the Day 3 inbox agent ────────────────────────────────
  * This route takes the **raw PDF**, not pre-rendered page images. §8 point 1
@@ -43,14 +47,6 @@ export const runtime = 'nodejs'
 export const maxDuration = 60
 
 const MAX_UPLOAD_BYTES = 32 * 1024 * 1024 // Claude's document-block ceiling (§8).
-
-// Extraction is attempted before this route responds, instead of waiting for
-// the next Vercel Cron tick — on Hobby that tick fires at most once/day,
-// which would otherwise pile up the whole day's documents into one
-// memory-heavy drain (the actual cause of the RangeError/
-// ERR_MEMORY_ALLOCATION_FAILED crashes this was added to fix). Budget stays
-// under maxDuration above, leaving headroom for the DB writes still to come.
-const POST_UPLOAD_DRAIN_BUDGET_MS = 45_000
 
 function safeFilename(name: string): string {
   const base = name.split(/[\\/]/).pop() ?? 'document.pdf'
@@ -258,45 +254,34 @@ async function handlePOST(request: NextRequest) {
   // Awaited, not fired via after(): after() turned out not to reliably run
   // to completion on this Vercel deployment (confirmed by hand — a document
   // stayed 'uploaded' indefinitely until /api/jobs/tick was hit manually,
-  // even though that route runs this exact same drainJobQueue call). Rather
-  // than keep chasing an unverified background-task platform behavior, the
-  // response simply waits for it: if this HTTP call succeeds, extraction has
-  // been attempted, no exceptions. Same claim_next_job RPC as the cron tick
-  // (lib/jobs/drain.ts), so a burst of concurrent uploads can't double-claim
-  // a row; this may also pick up and clear older backlog while it's here,
-  // not just this document's own job. maxDuration=60 above leaves headroom
-  // beyond this budget for the DB writes still to come.
+  // even though that route runs the same claim/dispatch logic via
+  // drainJobQueue). Rather than keep chasing an unverified background-task
+  // platform behavior, the response simply waits for it: if this HTTP call
+  // succeeds, extraction of THIS document has been attempted, no exceptions.
+  // Same claim_next_job family of RPCs as the cron tick (lib/jobs/drain.ts),
+  // so a burst of concurrent uploads can't double-claim a row. maxDuration=60
+  // above leaves headroom beyond runJobById for the DB writes already done.
   //
-  // THIS document's own job runs first, by id, before any backlog. Going
-  // through drainJobQueue alone meant going through claim_next_job's
-  // `order by priority, id` — oldest first — so an upload spent its whole
-  // budget on stale jobs queued days earlier and was killed by the platform's
-  // function timeout before ever reaching the document the user was waiting
-  // on. Whatever budget survives that is then spent on the backlog, which is
-  // where oldest-first is the correct policy.
+  // Only this document's own job runs here, claimed by id — never anyone
+  // else's backlog. That used to also run here (drainJobQueue after
+  // runJobById, oldest-job-first), but it meant an upload could spend its own
+  // request budget finishing other users' stale queued jobs, with no benefit
+  // to the user who is waiting on THIS document. That backlog is already
+  // covered without borrowing this request's time: the Vercel Cron tick
+  // (app/api/jobs/tick/route.ts) sweeps it on a schedule, and — as long as
+  // INGEST_INLINE_EXTRACTION is on — every other user's own upload drains
+  // their own job the same way this one does, so the backlog rarely
+  // accumulates in the first place.
   // ...but only when nothing better is available. With INGEST_INLINE_EXTRACTION
   // off (set it off as soon as a worker or cron is running, see
   // lib/env.server.ts), the job is left for that worker and the upload returns
   // immediately — which is the whole point of having one, since the worker is
   // not bounded by this route's maxDuration.
+  let extractionOutcome: 'handled' | 'skipped' | 'unavailable' | 'failed' | 'deferred' = 'deferred'
   if (serverEnv.INGEST_INLINE_EXTRACTION) {
     const workerId = `${serverEnv.WORKER_ID}-upload`
-    const drainStartedAt = Date.now()
-    try {
-      const outcome = await runJobById(workerId, insertedJob.id as number)
-      console.log(`[ingest] document ${documentId}: own extract job ${insertedJob.id} -> ${outcome}`)
-    } catch (err) {
-      console.error(`[ingest] post-upload extraction failed for document ${documentId}:`, err)
-    }
-
-    const backlogBudgetMs = POST_UPLOAD_DRAIN_BUDGET_MS - (Date.now() - drainStartedAt)
-    if (backlogBudgetMs > 0) {
-      try {
-        await drainJobQueue(workerId, backlogBudgetMs, false)
-      } catch (err) {
-        console.error(`[ingest] post-upload backlog drain failed after document ${documentId}:`, err)
-      }
-    }
+    extractionOutcome = await runJobById(workerId, insertedJob.id as number)
+    console.log(`[ingest] document ${documentId}: own extract job ${insertedJob.id} -> ${extractionOutcome}`)
   } else {
     console.log(
       `[ingest] document ${documentId}: extract job ${insertedJob.id} left for the worker ` +
@@ -312,6 +297,7 @@ async function handlePOST(request: NextRequest) {
     fileHashSha256: fileHash,
     duplicateOf,
     queued: true,
+    extractionOutcome,
   })
 }
 
