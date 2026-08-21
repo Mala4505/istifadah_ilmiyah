@@ -6,6 +6,7 @@ import { getStaffContext } from '@/lib/export/auth'
 import { rankCandidates, type MatchableEntry } from '@/lib/matching'
 import { DocumentInbox } from '@/components/documents/document-inbox'
 import type { CandidateEntryView, DocumentExtractionSummary, InboxDocumentView } from '@/components/documents/types'
+import type { LookupOption } from '@/components/entries/types'
 import { isAdminOrAbove } from '@/lib/auth/roles'
 
 /** A stalled queue is "the oldest queued job has been waiting longer than this" (checklist 2.15, D8) — long enough that a normal extraction backlog doesn't false-positive. */
@@ -162,7 +163,7 @@ export default async function DocumentsPage() {
   // future runs. A documented simplification, not a hard requirement.
   const { data: entriesData } = await supabase
     .from('entries')
-    .select('id, department_id, vendor_raw, amount, date, ubbl_number, main_number')
+    .select('id, department_id, vendor_raw, amount, date, ubbl_number, main_number, admin_head_id, zone_id')
     .eq('is_void', false)
     // nullsFirst: false — Postgres's own default for DESC is NULLS FIRST,
     // which would let entries with no date at all crowd out dated ones
@@ -180,10 +181,39 @@ export default async function DocumentsPage() {
       departmentId: e.department_id,
       ubblNumber: e.ubbl_number,
       mainNumber: e.main_number,
+      adminHeadId: e.admin_head_id,
+      zoneId: e.zone_id,
     }))
 
   const { data: departmentsData } = await supabase.from('department').select('id, name')
   const departmentNameById = new Map((departmentsData ?? []).map((d) => [d.id, d.name as string]))
+
+  // Fetched once here rather than per-document: the attach-time zone/admin-
+  // head prompt (checklist 5.11/5.12, plan §8 Z2) needs the full option
+  // lists in the client to populate its dropdowns (5.11, department-scoped
+  // client-side by document-card.tsx) and to feed BulkEnrichmentDialog
+  // (5.12, unfiltered — a bulk selection can span departments). Same
+  // shape/labeling convention as components/entries/entries-explorer.tsx's
+  // filter options.
+  const [adminHeadLookupResult, zoneLookupResult, costCenterLookupResult] = await Promise.all([
+    supabase.from('admin_head').select('id, department_id, head_number, name').eq('is_active', true).order('head_number'),
+    supabase.from('zone').select('id, department_id, zone_number, name').eq('is_active', true).order('zone_number'),
+    supabase.from('cost_center').select('id, name').order('name'),
+  ])
+  const adminHeadOptions: LookupOption[] = (adminHeadLookupResult.data ?? []).map((h) => ({
+    id: h.id,
+    label: `${h.head_number}. ${h.name}`,
+    department_id: h.department_id,
+  }))
+  const zoneOptions: LookupOption[] = (zoneLookupResult.data ?? []).map((z) => ({
+    id: z.id,
+    label: `${z.zone_number}. ${z.name}`,
+    department_id: z.department_id,
+  }))
+  const costCenterOptions: LookupOption[] = (costCenterLookupResult.data ?? []).map((c) => ({
+    id: c.id,
+    label: c.name,
+  }))
 
   const inboxDocuments: InboxDocumentView[] = docs.map((doc) => {
     const extractions = extractionsByDocId.get(doc.id) ?? []
@@ -208,6 +238,9 @@ export default async function DocumentsPage() {
         ubblNumber: c.ubblNumber,
         mainNumber: c.mainNumber,
         departmentName: c.departmentId !== null ? departmentNameById.get(c.departmentId) ?? null : null,
+        entryDepartmentId: c.departmentId,
+        adminHeadId: c.adminHeadId ?? null,
+        zoneId: c.zoneId ?? null,
       }))
 
       return {
@@ -256,7 +289,14 @@ export default async function DocumentsPage() {
 
   return (
     <PageShell count={inboxDocuments.length}>
-      <DocumentInbox initialDocuments={inboxDocuments} canAct={canAct} queueStalled={queueStalled} />
+      <DocumentInbox
+        initialDocuments={inboxDocuments}
+        canAct={canAct}
+        queueStalled={queueStalled}
+        adminHeadOptions={adminHeadOptions}
+        zoneOptions={zoneOptions}
+        costCenterOptions={costCenterOptions}
+      />
     </PageShell>
   )
 }

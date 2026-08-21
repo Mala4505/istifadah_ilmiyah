@@ -71,6 +71,61 @@ export async function saveEntryEnrichment(
   return { success: true }
 }
 
+export interface SetEntryClassificationInput {
+  entryId: number
+  adminHeadId: number | null
+  zoneId: number | null
+}
+
+/**
+ * Narrow attach-time classification write (import-review-ux-checklist.md
+ * 5.11/5.13, import-review-ux-plan.md §8 Z2): sets only `admin_head_id` /
+ * `zone_id`. Deliberately NOT `saveEntryEnrichment` above — that function
+ * always writes `cost_center_id` and `remark` too, which would silently
+ * clear whatever cost center/remark the entry already had the moment a
+ * reviewer accepts a zone/head suggestion while attaching a document, a
+ * screen that never shows or asks about those other two fields. Same
+ * session-bound-client RLS gate (`entries_update`,
+ * private.is_admin_or_above(), department-scoped) and 0-rows-as-permission-
+ * hint convention as the rest of this file.
+ */
+export async function setEntryClassification(
+  input: SetEntryClassificationInput
+): Promise<EntryActionResult> {
+  const { entryId } = input
+
+  if (!Number.isInteger(entryId) || entryId <= 0) {
+    return { success: false, error: 'Invalid entry.' }
+  }
+
+  const supabase = await createClient()
+
+  const { data, error } = await supabase
+    .from('entries')
+    .update({
+      admin_head_id: input.adminHeadId,
+      zone_id: input.zoneId,
+    })
+    .eq('id', entryId)
+    .select('id')
+
+  if (error) {
+    return { success: false, error: logRawError('entry-enrichment.setEntryClassification', error.message) }
+  }
+
+  if (!data || data.length === 0) {
+    return {
+      success: false,
+      error:
+        'Zone/admin head was not saved. This usually means a dept role (admin or above is required to edit enrichment fields), or the entry is outside your assigned department.',
+    }
+  }
+
+  revalidatePath(`/entries/${entryId}`)
+  revalidatePath('/entries')
+  return { success: true }
+}
+
 export interface BulkSaveEntryEnrichmentInput {
   entryIds: number[]
   // `undefined` (the field simply absent/omitted) = "don't touch this column

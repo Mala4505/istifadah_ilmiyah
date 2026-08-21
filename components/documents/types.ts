@@ -9,6 +9,16 @@ export interface CandidateEntryView {
   ubblNumber: string
   mainNumber: string | null
   departmentName: string | null
+  /**
+   * Carried alongside `departmentName` (a display string) so the
+   * attach-time zone/admin-head prompt (checklist 5.11, plan §8 Z2) can
+   * scope its dropdown options and pre-fill lookup without a second
+   * round trip — `departmentName` alone isn't enough to filter
+   * department-scoped admin_head/zone rows by id.
+   */
+  entryDepartmentId: number | null
+  adminHeadId: number | null
+  zoneId: number | null
 }
 
 /**

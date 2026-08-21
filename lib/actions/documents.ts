@@ -359,6 +359,10 @@ export interface EntrySearchResult {
   vendorRaw: string | null
   amount: number | null
   date: string | null
+  /** Same three fields as CandidateEntryView (components/documents/types.ts), and for the same reason: the attach-time zone/admin-head prompt (checklist 5.11) needs to know the target entry's department and current classification whether it was reached via the ranked candidates or this manual search. */
+  entryDepartmentId: number | null
+  adminHeadId: number | null
+  zoneId: number | null
 }
 
 /**
@@ -381,7 +385,7 @@ export async function searchEntriesForAttach(
   const pattern = `%${trimmed}%`
   const { data, error } = await supabase
     .from('entries')
-    .select('id, ubbl_number, main_number, vendor_raw, amount, date')
+    .select('id, ubbl_number, main_number, vendor_raw, amount, date, department_id, admin_head_id, zone_id')
     .eq('is_void', false)
     .or(
       `ubbl_number.ilike.${pattern},main_number.ilike.${pattern},vendor_raw.ilike.${pattern},invoice_number.ilike.${pattern}`
@@ -400,6 +404,9 @@ export async function searchEntriesForAttach(
       vendorRaw: e.vendor_raw,
       amount: e.amount,
       date: e.date,
+      entryDepartmentId: e.department_id,
+      adminHeadId: e.admin_head_id,
+      zoneId: e.zone_id,
     })),
   }
 }

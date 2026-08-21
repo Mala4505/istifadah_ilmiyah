@@ -41,6 +41,15 @@ export interface MatchableEntry {
   departmentId: number | null
   ubblNumber: string
   mainNumber: string | null
+  /**
+   * Pure passthrough for the attach-time zone/admin-head prompt (checklist
+   * 5.11, plan §8 Z2) — not read by any scoring function below, only
+   * carried through `scoreEntry`'s `{ ...entry, ... }` spread so
+   * `ScoredEntry` has them for free. Optional so the existing unit tests'
+   * `entry()` helper (test/unit/matching.test.ts) doesn't need updating.
+   */
+  adminHeadId?: number | null
+  zoneId?: number | null
 }
 
 export interface ScoredEntry extends MatchableEntry {

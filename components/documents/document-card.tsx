@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useEffect, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { toastError } from '@/components/ui/error-toast'
@@ -22,6 +22,8 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import {
   attachDocumentToEntry,
@@ -31,10 +33,16 @@ import {
   searchEntriesForAttach,
   type EntrySearchResult,
 } from '@/lib/actions/documents'
+import { getRecentClassificationDefaults } from '@/lib/actions/entry-classification-defaults'
+import { setEntryClassification } from '@/lib/actions/entry-enrichment'
 import { flagReviewException } from '@/lib/actions/review'
 import { extractionFailureGuidance } from '@/lib/friendly-error'
+import type { LookupOption } from '@/components/entries/types'
 import { formatDate, formatDateTime, formatElapsed, formatMoney, formatScore } from './format'
 import type { CandidateEntryView, InboxDocumentView } from './types'
+
+/** Sentinel for "no selection" in the zone/admin-head Selects below — same convention as components/entries/detail/enrichment-form.tsx's NONE. */
+const NONE = '__none__'
 
 export type StageState = 'done' | 'active' | 'pending' | 'failed'
 
@@ -141,6 +149,8 @@ export function DocumentCard({
   chosenEntryId,
   onChooseEntry,
   onMutated,
+  adminHeadOptions,
+  zoneOptions,
 }: {
   document: InboxDocumentView
   canAct: boolean
@@ -149,6 +159,9 @@ export function DocumentCard({
   chosenEntryId: number | null
   onChooseEntry: (entryId: number | null, display?: EntrySearchResult) => void
   onMutated: () => void
+  /** Department-scoped client-side below, against the chosen entry's own department (checklist 5.11, plan §8 Z2). */
+  adminHeadOptions: LookupOption[]
+  zoneOptions: LookupOption[]
 }) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
@@ -166,6 +179,13 @@ export function DocumentCard({
   const [flagStateByBillId, setFlagStateByBillId] = useState<
     Record<number, { open: boolean; note: string; pending: boolean }>
   >({})
+  // Attach-time zone/admin-head prompt (checklist 5.11, plan §8 Z2). Draft
+  // values are the Select's own NONE-sentinel strings, same convention as
+  // components/entries/detail/enrichment-form.tsx, so the dropdowns can be
+  // rendered exactly like that form's without a parallel number|null state.
+  const [draftAdminHeadId, setDraftAdminHeadId] = useState(NONE)
+  const [draftZoneId, setDraftZoneId] = useState(NONE)
+  const [classificationPrefillPending, setClassificationPrefillPending] = useState(false)
 
   function flagStateFor(billId: number) {
     return flagStateByBillId[billId] ?? { open: false, note: '', pending: false }
@@ -208,12 +228,41 @@ export function DocumentCard({
       toast.error('Choose a candidate entry first.')
       return
     }
+    const entryId = chosenEntryId
+    // Captured before the attach itself, since a successful attach clears
+    // the candidate/manual-search state this reads from.
+    const adminHeadIdToWrite = needsClassification && draftAdminHeadId !== NONE ? Number(draftAdminHeadId) : null
+    const zoneIdToWrite = needsClassification && draftZoneId !== NONE ? Number(draftZoneId) : null
+    // Only fire the classification write when there's actually something to
+    // set — an entry with no prior classification and nothing picked here
+    // (both dropdowns still "Not set") has nothing worth a second write for
+    // (checklist 5.11: "skipping is free").
+    const shouldWriteClassification = adminHeadIdToWrite !== null || zoneIdToWrite !== null
+
     startTransition(async () => {
-      const result = await attachDocumentToEntry({ documentId: document.id, entryId: chosenEntryId })
+      const result = await attachDocumentToEntry({ documentId: document.id, entryId })
       if (!result.ok) {
         toastError(result.error, { context: 'document-card' })
         return
       }
+
+      if (shouldWriteClassification) {
+        const classificationResult = await setEntryClassification({
+          entryId,
+          adminHeadId: adminHeadIdToWrite,
+          zoneId: zoneIdToWrite,
+        })
+        if (!classificationResult.success) {
+          // The attach itself succeeded — this is a secondary, best-effort
+          // write, so its failure is surfaced but does not undo the attach
+          // or block the success toast/refresh below.
+          toastError(classificationResult.error, {
+            title: 'Attached, but the zone/admin head could not be saved.',
+            context: 'document-card',
+          })
+        }
+      }
+
       toast.success(`Attached "${document.originalFilename}".`)
       onMutated()
       router.refresh()
@@ -300,6 +349,84 @@ export function DocumentCard({
   }
 
   const showingManualSelection = manualSelection !== null && manualSelection.id === chosenEntryId
+
+  /**
+   * Locates the chosen entry's own department/classification, whichever
+   * path it was picked from — a ranked candidate (any bill) or the manual
+   * search result. Both CandidateEntryView and EntrySearchResult carry the
+   * same three fields (components/documents/types.ts, lib/actions/documents.ts)
+   * for exactly this reason.
+   */
+  function findChosenEntryInfo(): {
+    vendorRaw: string | null
+    entryDepartmentId: number | null
+    adminHeadId: number | null
+    zoneId: number | null
+  } | null {
+    if (chosenEntryId === null) return null
+    if (showingManualSelection && manualSelection) {
+      return {
+        vendorRaw: manualSelection.vendorRaw,
+        entryDepartmentId: manualSelection.entryDepartmentId,
+        adminHeadId: manualSelection.adminHeadId,
+        zoneId: manualSelection.zoneId,
+      }
+    }
+    for (const bill of document.extraction) {
+      const found = bill.candidates.find((c) => c.entryId === chosenEntryId)
+      if (found) {
+        return {
+          vendorRaw: found.vendorRaw,
+          entryDepartmentId: found.entryDepartmentId,
+          adminHeadId: found.adminHeadId,
+          zoneId: found.zoneId,
+        }
+      }
+    }
+    return null
+  }
+
+  const chosenEntryInfo = findChosenEntryInfo()
+  // "no zone or head set" (checklist 5.11) — neither field, not just one,
+  // so an entry that already has one of the two classified doesn't get a
+  // dropdown pair implying it's still fully unclassified.
+  const needsClassification =
+    chosenEntryInfo !== null && chosenEntryInfo.adminHeadId === null && chosenEntryInfo.zoneId === null
+  const departmentScopedAdminHeadOptions = chosenEntryInfo
+    ? adminHeadOptions.filter((o) => o.department_id === chosenEntryInfo.entryDepartmentId)
+    : []
+  const departmentScopedZoneOptions = chosenEntryInfo
+    ? zoneOptions.filter((o) => o.department_id === chosenEntryInfo.entryDepartmentId)
+    : []
+
+  // Runs once per chosen-entry change (not debounced — unlike the search
+  // input above, this fires on a selection change, not a keystroke).
+  // Pre-fills from the most recent OTHER entry sharing vendor + department
+  // (lib/actions/entry-classification-defaults.ts); a miss just leaves both
+  // dropdowns on "Not set", which is the normal free-to-skip path.
+  useEffect(() => {
+    if (!needsClassification || !chosenEntryInfo) {
+      setDraftAdminHeadId(NONE)
+      setDraftZoneId(NONE)
+      return
+    }
+    let cancelled = false
+    setClassificationPrefillPending(true)
+    void (async () => {
+      const defaults = await getRecentClassificationDefaults(
+        chosenEntryInfo.vendorRaw,
+        chosenEntryInfo.entryDepartmentId
+      )
+      if (cancelled) return
+      setClassificationPrefillPending(false)
+      setDraftAdminHeadId(defaults?.adminHeadId != null ? String(defaults.adminHeadId) : NONE)
+      setDraftZoneId(defaults?.zoneId != null ? String(defaults.zoneId) : NONE)
+    })()
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chosenEntryId, needsClassification])
 
   return (
     <Card>
@@ -535,10 +662,60 @@ export function DocumentCard({
         </div>
 
         {canAct && chosenEntryId !== null && (
-          <p className="rounded bg-muted/50 px-2.5 py-1.5 text-xs text-muted-foreground">
-            Attach will use <span className="font-medium text-foreground">entry #{chosenEntryId}</span>
-            {showingManualSelection ? ' (your manual selection)' : ''}.
-          </p>
+          <div className="flex flex-col gap-2 rounded bg-muted/50 px-2.5 py-1.5">
+            <p className="text-xs text-muted-foreground">
+              Attach will use <span className="font-medium text-foreground">entry #{chosenEntryId}</span>
+              {showingManualSelection ? ' (your manual selection)' : ''}.
+            </p>
+
+            {needsClassification && (
+              <div className="flex flex-col gap-2 border-t border-border pt-2">
+                <p className="text-[11px] text-muted-foreground">
+                  This entry has no zone or admin head set yet. Set them now, or leave on &quot;Not set&quot; and
+                  skip — attaching never requires it.
+                  {classificationPrefillPending && ' Checking for a recent match…'}
+                </p>
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  <div className="flex flex-col gap-1">
+                    <Label htmlFor={`inline-admin-head-${document.id}`} className="text-[11px]">
+                      Admin head
+                    </Label>
+                    <Select value={draftAdminHeadId} onValueChange={setDraftAdminHeadId}>
+                      <SelectTrigger id={`inline-admin-head-${document.id}`} className="h-8 text-xs">
+                        <SelectValue placeholder="Not set" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={NONE}>Not set</SelectItem>
+                        {departmentScopedAdminHeadOptions.map((o) => (
+                          <SelectItem key={o.id} value={String(o.id)}>
+                            {o.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <Label htmlFor={`inline-zone-${document.id}`} className="text-[11px]">
+                      Zone
+                    </Label>
+                    <Select value={draftZoneId} onValueChange={setDraftZoneId}>
+                      <SelectTrigger id={`inline-zone-${document.id}`} className="h-8 text-xs">
+                        <SelectValue placeholder="Not set" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={NONE}>Not set</SelectItem>
+                        {departmentScopedZoneOptions.map((o) => (
+                          <SelectItem key={o.id} value={String(o.id)}>
+                            {o.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
         )}
 
         {canAct && parkConfirming ? (

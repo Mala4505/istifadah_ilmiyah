@@ -7,6 +7,8 @@ import { AlertTriangle } from 'lucide-react'
 import { toastError } from '@/components/ui/error-toast'
 import { Button } from '@/components/ui/button'
 import { bulkAttachDocuments, deleteDocuments } from '@/lib/actions/documents'
+import { BulkEnrichmentDialog } from '@/components/entries/bulk-enrichment-dialog'
+import type { LookupOption } from '@/components/entries/types'
 import { UploadDropzone } from './upload-dropzone'
 import { DocumentTable } from './document-table'
 import type { InboxDocumentView } from './types'
@@ -42,11 +44,19 @@ export function DocumentInbox({
   initialDocuments,
   canAct,
   queueStalled = false,
+  adminHeadOptions,
+  zoneOptions,
+  costCenterOptions,
 }: {
   initialDocuments: InboxDocumentView[]
   canAct: boolean
   /** True when the oldest queued `extract_document` job has been sitting for more than ~10 minutes (checklist 2.15, D8) — a stalled pipeline made visible instead of silent. */
   queueStalled?: boolean
+  /** Passed straight through to DocumentTable → DocumentCard (checklist 5.11's inline zone/head prompt) and to the bulk-attach follow-up dialog below (checklist 5.12). Fetched once in app/(app)/documents/page.tsx rather than per-card. */
+  adminHeadOptions: LookupOption[]
+  zoneOptions: LookupOption[]
+  /** Only needed for the bulk-attach follow-up dialog (5.12) — the single-attach inline prompt (5.11) doesn't touch cost center. */
+  costCenterOptions: LookupOption[]
 }) {
   const router = useRouter()
   const [documents, setDocuments] = useState(initialDocuments)
@@ -56,6 +66,12 @@ export function DocumentInbox({
   const [selected, setSelected] = useState<Set<number>>(new Set())
   const [bulkPending, setBulkPending] = useState(false)
   const [deletePending, setDeletePending] = useState(false)
+  // Follow-up step after a successful bulk attach (checklist 5.12): reuses
+  // BulkEnrichmentDialog unmodified, scoped to only the entries that were
+  // actually attached (a partial bulk-attach failure must not offer to
+  // classify entries whose document never got attached).
+  const [enrichmentDialogOpen, setEnrichmentDialogOpen] = useState(false)
+  const [enrichmentDialogEntryIds, setEnrichmentDialogEntryIds] = useState<number[]>([])
 
   useEffect(() => {
     setDocuments(initialDocuments)
@@ -238,13 +254,22 @@ export function DocumentInbox({
         toastError(result.error, { title: 'Bulk attach failed.', context: 'document-inbox' })
         return
       }
-      const attachedIds = new Set(pairs.map((p) => p.documentId).filter((id) => !result.failedDocumentIds.includes(id)))
+      const attachedPairs = pairs.filter((p) => !result.failedDocumentIds.includes(p.documentId))
+      const attachedIds = new Set(attachedPairs.map((p) => p.documentId))
       setDocuments((current) => current.filter((d) => !attachedIds.has(d.id)))
       setSelected(new Set())
       if (result.error) {
         toast.warning(result.error)
       } else {
         toast.success(`Attached ${result.attachedCount} document${result.attachedCount === 1 ? '' : 's'}.`)
+      }
+      // Offer the zone/admin-head follow-up only for entries a document was
+      // actually attached to (checklist 5.12) — deduped since two documents
+      // could in principle target the same entry.
+      const attachedEntryIds = Array.from(new Set(attachedPairs.map((p) => p.entryId)))
+      if (attachedEntryIds.length > 0) {
+        setEnrichmentDialogEntryIds(attachedEntryIds)
+        setEnrichmentDialogOpen(true)
       }
       router.refresh()
     })()
@@ -353,8 +378,20 @@ export function DocumentInbox({
           chosenByDocument={chosenByDocument}
           onChooseEntry={chooseEntry}
           onMutated={removeDocumentLocally}
+          adminHeadOptions={adminHeadOptions}
+          zoneOptions={zoneOptions}
         />
       )}
+
+      <BulkEnrichmentDialog
+        open={enrichmentDialogOpen}
+        onOpenChange={setEnrichmentDialogOpen}
+        entryIds={enrichmentDialogEntryIds}
+        adminHeadOptions={adminHeadOptions}
+        zoneOptions={zoneOptions}
+        costCenterOptions={costCenterOptions}
+        onDone={() => router.refresh()}
+      />
     </div>
   )
 }
