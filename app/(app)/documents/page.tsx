@@ -3,9 +3,8 @@ import { FriendlyError } from '@/components/ui/friendly-error'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { getStaffContext } from '@/lib/export/auth'
-import { rankCandidates, type MatchableEntry } from '@/lib/matching'
 import { DocumentInbox } from '@/components/documents/document-inbox'
-import type { CandidateEntryView, DocumentExtractionSummary, InboxDocumentView } from '@/components/documents/types'
+import type { DocumentExtractionSummary, InboxDocumentView } from '@/components/documents/types'
 import type { LookupOption } from '@/components/entries/types'
 import { isAdminOrAbove } from '@/lib/auth/roles'
 
@@ -146,48 +145,6 @@ export default async function DocumentsPage() {
     }
   }
 
-  // Entries already attached to some document are excluded from the
-  // candidate pool — one invoice does not usually belong to two documents,
-  // and surfacing an already-matched entry as a "suggestion" would just
-  // invite a confusing double-attach.
-  const { data: matchedRows } = await supabase
-    .from('source_document')
-    .select('entry_id')
-    .eq('match_status', 'matched')
-    .not('entry_id', 'is', null)
-  const matchedEntryIds = new Set((matchedRows ?? []).map((r) => r.entry_id as number))
-
-  // Bounded to a recent, generous window rather than every entry ever
-  // imported — reasonable at the stated 1,000–10,000 entry volume (§0)
-  // without risking an unbounded scan as the event's history grows across
-  // future runs. A documented simplification, not a hard requirement.
-  const { data: entriesData } = await supabase
-    .from('entries')
-    .select('id, department_id, vendor_raw, amount, date, ubbl_number, main_number, admin_head_id, zone_id')
-    .eq('is_void', false)
-    // nullsFirst: false — Postgres's own default for DESC is NULLS FIRST,
-    // which would let entries with no date at all crowd out dated ones
-    // inside the 5000-row window below.
-    .order('date', { ascending: false, nullsFirst: false })
-    .limit(5000)
-
-  const candidatePool: MatchableEntry[] = (entriesData ?? [])
-    .filter((e) => !matchedEntryIds.has(e.id))
-    .map((e) => ({
-      id: e.id,
-      vendorRaw: e.vendor_raw,
-      amount: e.amount,
-      date: e.date,
-      departmentId: e.department_id,
-      ubblNumber: e.ubbl_number,
-      mainNumber: e.main_number,
-      adminHeadId: e.admin_head_id,
-      zoneId: e.zone_id,
-    }))
-
-  const { data: departmentsData } = await supabase.from('department').select('id, name')
-  const departmentNameById = new Map((departmentsData ?? []).map((d) => [d.id, d.name as string]))
-
   // Fetched once here rather than per-document: the attach-time zone/admin-
   // head prompt (checklist 5.11/5.12, plan §8 Z2) needs the full option
   // lists in the client to populate its dropdowns (5.11, department-scoped
@@ -218,41 +175,22 @@ export default async function DocumentsPage() {
   const inboxDocuments: InboxDocumentView[] = docs.map((doc) => {
     const extractions = extractionsByDocId.get(doc.id) ?? []
 
-    // Ranked once per bill, against that bill's own OCR fields — a 4-bill
-    // PDF must not rank every bill against whichever one happened to be
-    // extracted last (plan.md D4 / checklist 1.13).
-    const bills: DocumentExtractionSummary[] = extractions.map((extraction) => {
-      const candidates: CandidateEntryView[] = rankCandidates(
-        {
-          vendorName: extraction.vendor_name_ocr,
-          totalAmount: extraction.total_amount_ocr,
-          invoiceDate: extraction.invoice_date_ocr,
-        },
-        candidatePool
-      ).map((c) => ({
-        entryId: c.id,
-        score: c.score,
-        vendorRaw: c.vendorRaw,
-        amount: c.amount,
-        date: c.date,
-        ubblNumber: c.ubblNumber,
-        mainNumber: c.mainNumber,
-        departmentName: c.departmentId !== null ? departmentNameById.get(c.departmentId) ?? null : null,
-        entryDepartmentId: c.departmentId,
-        adminHeadId: c.adminHeadId ?? null,
-        zoneId: c.zoneId ?? null,
-      }))
-
-      return {
-        id: extraction.id,
-        billIndex: extraction.bill_index,
-        vendorNameOcr: extraction.vendor_name_ocr,
-        invoiceDateOcr: extraction.invoice_date_ocr,
-        invoiceNumberOcr: extraction.invoice_number_ocr,
-        totalAmountOcr: extraction.total_amount_ocr,
-        candidates,
-      }
-    })
+    // Candidates are NOT ranked here any more (checklist 2.9, D6) — that
+    // used to run inline on every render of this page, scoring every
+    // unmatched/suggested bill against up to 5,000 entries before the page
+    // could even respond. Each bill starts with an empty candidate list;
+    // `DocumentInbox` fetches real rankings client-side, off this render
+    // path, via `getInboxMatchCandidates` (lib/actions/documents.ts) right
+    // after mount.
+    const bills: DocumentExtractionSummary[] = extractions.map((extraction) => ({
+      id: extraction.id,
+      billIndex: extraction.bill_index,
+      vendorNameOcr: extraction.vendor_name_ocr,
+      invoiceDateOcr: extraction.invoice_date_ocr,
+      invoiceNumberOcr: extraction.invoice_number_ocr,
+      totalAmountOcr: extraction.total_amount_ocr,
+      candidates: [],
+    }))
 
     return {
       id: doc.id,

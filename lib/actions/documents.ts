@@ -5,6 +5,8 @@ import { createClient } from '@/lib/supabase/server'
 import { deleteDocument, getSignedUrl } from '@/lib/storage'
 import { extractAndPersist } from '@/lib/jobs/handlers/extract'
 import { logRawError } from '@/lib/friendly-error'
+import { rankCandidates, type MatchableEntry } from '@/lib/matching'
+import type { CandidateEntryView } from '@/components/documents/types'
 
 /**
  * Document-inbox actions (MASTER-PLAN §5 row 6, §11.2 Day 3): attach, bulk
@@ -444,4 +446,105 @@ export async function getDocumentPreviewUrl(
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'Could not create a preview link.' }
   }
+}
+
+/**
+ * Checklist 2.9 (plan §5, D6): the inbox used to score `rankCandidates`
+ * against every unmatched/suggested bill on every server-rendered load of
+ * `/documents` — up to a few thousand entries per bill, scored in the
+ * request that also has to answer the page's own HTML. Moved here so
+ * `app/(app)/documents/page.tsx`'s render only ever fetches the cheap,
+ * unranked fields; `DocumentInbox` calls this once, client-side, after
+ * mount (and again after each `router.refresh()`), so the first paint is
+ * fast and ranking happens off the render path entirely.
+ *
+ * Deliberately NOT persisted: matching entries are the whole ledger and
+ * change constantly as imports land, so a cached/stored ranking would go
+ * stale exactly when it matters most (a newly-imported entry that would
+ * now match an old unmatched document). Recomputing fresh on every call
+ * keeps a suggestion honest at the cost of redoing the scoring work each
+ * time it's asked for — the same trade this screen has always made, just
+ * no longer paid inside the page's own render.
+ *
+ * Mirrors the exact query/scoring shape `app/(app)/documents/page.tsx` used
+ * to run inline: same matched-entry exclusion, same 5,000-row recency cap,
+ * same `rankCandidates` call, per bill. Returns every current
+ * unmatched/suggested bill's ranked candidates in one round trip rather
+ * than taking a list of ids to score — the shared candidate-pool queries
+ * (matched-entry exclusion, the 5,000-row entries fetch) cost the same
+ * whether scoring one bill or all of them, so there's nothing to save by
+ * asking for a subset.
+ */
+export async function getInboxMatchCandidates(): Promise<Record<number, CandidateEntryView[]>> {
+  const supabase = await createClient()
+
+  const { data: docsData } = await supabase
+    .from('source_document')
+    .select('id')
+    .in('match_status', ['unmatched', 'suggested'])
+  const docIds = (docsData ?? []).map((d) => d.id as number)
+  if (docIds.length === 0) return {}
+
+  const { data: extractionsData } = await supabase
+    .from('document_extraction')
+    .select('id, vendor_name_ocr, invoice_date_ocr, total_amount_ocr')
+    .in('source_document_id', docIds)
+  const extractions = extractionsData ?? []
+  if (extractions.length === 0) return {}
+
+  const { data: matchedRows } = await supabase
+    .from('source_document')
+    .select('entry_id')
+    .eq('match_status', 'matched')
+    .not('entry_id', 'is', null)
+  const matchedEntryIds = new Set((matchedRows ?? []).map((r) => r.entry_id as number))
+
+  const { data: entriesData } = await supabase
+    .from('entries')
+    .select('id, department_id, vendor_raw, amount, date, ubbl_number, main_number, admin_head_id, zone_id')
+    .eq('is_void', false)
+    .order('date', { ascending: false, nullsFirst: false })
+    .limit(5000)
+
+  const candidatePool: MatchableEntry[] = (entriesData ?? [])
+    .filter((e) => !matchedEntryIds.has(e.id))
+    .map((e) => ({
+      id: e.id,
+      vendorRaw: e.vendor_raw,
+      amount: e.amount,
+      date: e.date,
+      departmentId: e.department_id,
+      ubblNumber: e.ubbl_number,
+      mainNumber: e.main_number,
+      adminHeadId: e.admin_head_id,
+      zoneId: e.zone_id,
+    }))
+
+  const { data: departmentsData } = await supabase.from('department').select('id, name')
+  const departmentNameById = new Map((departmentsData ?? []).map((d) => [d.id as number, d.name as string]))
+
+  const result: Record<number, CandidateEntryView[]> = {}
+  for (const extraction of extractions) {
+    result[extraction.id as number] = rankCandidates(
+      {
+        vendorName: extraction.vendor_name_ocr as string | null,
+        totalAmount: extraction.total_amount_ocr as number | null,
+        invoiceDate: extraction.invoice_date_ocr as string | null,
+      },
+      candidatePool
+    ).map((c) => ({
+      entryId: c.id,
+      score: c.score,
+      vendorRaw: c.vendorRaw,
+      amount: c.amount,
+      date: c.date,
+      ubblNumber: c.ubblNumber,
+      mainNumber: c.mainNumber,
+      departmentName: c.departmentId !== null ? departmentNameById.get(c.departmentId) ?? null : null,
+      entryDepartmentId: c.departmentId,
+      adminHeadId: c.adminHeadId ?? null,
+      zoneId: c.zoneId ?? null,
+    }))
+  }
+  return result
 }

@@ -168,22 +168,66 @@ export default async function EntryDetailPage({
   // Answers "how does this PDF connect to this entry line": the actual
   // attached documents, plus the OCR'd values the match was made on — not
   // just a bare count (see components/entries/detail/linked-documents.tsx).
-  const { data: linkedDocsData } = await supabase
-    .from('source_document')
-    .select('id, original_filename, uploaded_at, page_count')
+  //
+  // Checklist 1.4's documented follow-up (plan.md D1): a source_document
+  // whose match lives solely on one bill's document_extraction.entry_id
+  // (multi-bill PDF, 20260817000002) used to be invisible here, because
+  // this query only ever looked at source_document.entry_id — the
+  // single-bill convenience mirror written by extract.ts, not the source of
+  // truth for a per-bill match. Two lookups, unioned: source_document rows
+  // matched directly (the common, single-bill case) plus source_document
+  // ids reached only through a per-bill document_extraction.entry_id match.
+  const { data: perBillMatches } = await supabase
+    .from('document_extraction')
+    .select('source_document_id')
     .eq('entry_id', id)
-    .order('uploaded_at', { ascending: false })
+  const { data: directMatches } = await supabase.from('source_document').select('id').eq('entry_id', id)
+  const linkedSourceDocIds = Array.from(
+    new Set([
+      ...(perBillMatches ?? []).map((r) => r.source_document_id as number),
+      ...(directMatches ?? []).map((r) => r.id as number),
+    ])
+  )
+
+  const { data: linkedDocsData } =
+    linkedSourceDocIds.length > 0
+      ? await supabase
+          .from('source_document')
+          .select('id, original_filename, uploaded_at, page_count')
+          .in('id', linkedSourceDocIds)
+          .order('uploaded_at', { ascending: false })
+      : { data: [] as { id: number; original_filename: string; uploaded_at: string; page_count: number | null }[] }
   const linkedDocIds = (linkedDocsData ?? []).map((d) => d.id)
+  interface LinkedExtractionRow {
+    source_document_id: number
+    entry_id: number | null
+    vendor_name_ocr: string | null
+    invoice_number_ocr: string | null
+    total_amount_ocr: number | null
+    invoice_date_ocr: string | null
+  }
   const { data: linkedExtractionsData } =
     linkedDocIds.length > 0
       ? await supabase
           .from('document_extraction')
-          .select('source_document_id, vendor_name_ocr, invoice_number_ocr, total_amount_ocr, invoice_date_ocr')
+          .select(
+            'source_document_id, entry_id, vendor_name_ocr, invoice_number_ocr, total_amount_ocr, invoice_date_ocr'
+          )
           .in('source_document_id', linkedDocIds)
-      : { data: [] as never[] }
-  const linkedExtractionByDocId = new Map(
-    (linkedExtractionsData ?? []).map((e) => [e.source_document_id, e])
-  )
+          .order('bill_index')
+      : { data: [] as LinkedExtractionRow[] }
+  // Prefer the bill whose own entry_id actually matches this entry — on a
+  // multi-bill document that's the bill this page is about, not whichever
+  // one sorted first. Only a document reached solely through the
+  // source_document-level mirror (no per-bill match at all) falls back to
+  // its first bill's fields, same as before this fix.
+  const linkedExtractionByDocId = new Map<number, LinkedExtractionRow>()
+  for (const extraction of linkedExtractionsData ?? []) {
+    const existing = linkedExtractionByDocId.get(extraction.source_document_id)
+    if (!existing || extraction.entry_id === id) {
+      linkedExtractionByDocId.set(extraction.source_document_id, extraction)
+    }
+  }
   const linkedDocuments: LinkedDocumentView[] = (linkedDocsData ?? []).map((d) => {
     const extraction = linkedExtractionByDocId.get(d.id)
     return {

@@ -6,7 +6,7 @@ import { toast } from 'sonner'
 import { AlertTriangle } from 'lucide-react'
 import { toastError } from '@/components/ui/error-toast'
 import { Button } from '@/components/ui/button'
-import { bulkAttachDocuments, deleteDocuments } from '@/lib/actions/documents'
+import { bulkAttachDocuments, deleteDocuments, getInboxMatchCandidates } from '@/lib/actions/documents'
 import { BulkEnrichmentDialog } from '@/components/entries/bulk-enrichment-dialog'
 import type { LookupOption } from '@/components/entries/types'
 import { UploadDropzone } from './upload-dropzone'
@@ -89,6 +89,57 @@ export function DocumentInbox({
       const validIds = new Set(initialDocuments.map((d) => d.id))
       return new Set([...current].filter((id) => validIds.has(id)))
     })
+  }, [initialDocuments])
+
+  // Checklist 2.9 (D6): ranking candidates against the full entries pool
+  // used to run inline in app/(app)/documents/page.tsx's own render, on
+  // every load. It's fetched here instead — once after mount, and again
+  // whenever the server sends a fresh `initialDocuments` (a new upload, a
+  // completed extraction, a mutation's router.refresh()) — so the page's
+  // own render never pays for it. `getInboxMatchCandidates` always
+  // recomputes fresh against the CURRENT entries table rather than reading
+  // anything persisted, so a document that arrived before its match was
+  // imported still picks it up on the very next fetch, not never.
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      const candidatesByExtractionId = await getInboxMatchCandidates()
+      if (cancelled) return
+
+      setDocuments((current) =>
+        current.map((doc) => ({
+          ...doc,
+          extraction: doc.extraction.map((bill) => {
+            const candidates = candidatesByExtractionId[bill.id]
+            return candidates ? { ...bill, candidates } : bill
+          }),
+        }))
+      )
+
+      // Seed the default choice for any document that doesn't already have
+      // one — mirrors the synchronous `?? null` seed above, just applied
+      // once real rankings are in rather than assumed present at mount.
+      // Never overrides a choice that's already set, whether that came from
+      // an earlier fetch or the reviewer's own manual pick.
+      setChosenByDocument((current) => {
+        let changed = false
+        const next = new Map(current)
+        for (const doc of initialDocuments) {
+          if (next.get(doc.id)) continue
+          const firstBillId = doc.extraction[0]?.id
+          const topCandidateId =
+            firstBillId !== undefined ? candidatesByExtractionId[firstBillId]?.[0]?.entryId : undefined
+          if (topCandidateId !== undefined) {
+            next.set(doc.id, topCandidateId)
+            changed = true
+          }
+        }
+        return changed ? next : current
+      })
+    })()
+    return () => {
+      cancelled = true
+    }
   }, [initialDocuments])
 
   // Kept in a ref so the polling effect below can always read the latest
