@@ -133,6 +133,32 @@ const LINE_ITEM_WIRE_FIELD: Partial<Record<keyof Omit<LineItemFormState, 'id'>, 
   amount: 'line_item_amount',
 }
 
+/** Plan §6 bottom clarification line: human-readable names for a flagged
+ * header field, keyed by the same wire names as HEADER_WIRE_FIELD above. */
+const HEADER_FIELD_LABEL: Record<string, string> = {
+  vendor_name: 'Vendor name',
+  vendor_gstin: 'GSTIN',
+  vendor_phone: 'Phone',
+  vendor_email: 'Email',
+  vendor_address: 'Address',
+  invoice_number: 'Invoice number',
+  invoice_date: 'Invoice date',
+  subtotal: 'Subtotal',
+  tax_amount: 'Tax amount',
+  total_amount: 'Total amount',
+}
+
+/** Same idea for a flagged line-item column, keyed by LINE_ITEM_WIRE_FIELD's
+ * wire names -- combined with a row number (not lineOrder, which isn't
+ * meaningful to a reviewer) in describeUncertainField below. */
+const LINE_ITEM_FIELD_LABEL: Record<string, string> = {
+  line_item_description: 'description',
+  line_item_quantity: 'quantity',
+  line_item_rate: 'rate',
+  line_item_discount: 'discount',
+  line_item_amount: 'amount',
+}
+
 export const ExtractionForm = forwardRef(function ExtractionForm(
   {
     header,
@@ -154,6 +180,9 @@ export const ExtractionForm = forwardRef(function ExtractionForm(
     onReExtract,
     onFlagException,
     onJumpToPage,
+    pageNumberStart = null,
+    pageNumberEnd = null,
+    currentPdfPage,
   }: {
     header: HeaderFormState
     onHeaderChange: (field: keyof HeaderFormState, value: string) => void
@@ -193,6 +222,18 @@ export const ExtractionForm = forwardRef(function ExtractionForm(
     onFlagException?: () => void
     /** Called with a field's source page when a flagged field is clicked/focused. */
     onJumpToPage?: (pageNumber: number) => void
+    /** Checklist §6: the whole bill's page range (detail.pageNumberStart/End) --
+     *  null for either means "unknown," same as the rest of the codebase treats
+     *  a null page range. Used to label header fields with "pages a–b" when the
+     *  bill spans more than one page and to caption the line-items table; a
+     *  single-page bill gets neither, since "page 1" next to every field is
+     *  noise, not information (plan §5/§6). */
+    pageNumberStart?: number | null
+    pageNumberEnd?: number | null
+    /** Checklist §6: the PDF page currently on screen in PdfViewer, threaded
+     *  down from ReviewWorkspace's existing pdfPageInfo state. Drives the
+     *  quiet bottom clarification line ("This page has N flagged fields…"). */
+    currentPdfPage: number
   },
   ref: Ref<HTMLDivElement>
 ) {
@@ -234,6 +275,33 @@ export const ExtractionForm = forwardRef(function ExtractionForm(
     const wireField = LINE_ITEM_WIRE_FIELD[key]
     if (!wireField) return undefined
     return uncertainByLineOrder.get(lineOrder)?.get(wireField)
+  }
+
+  // Plan §6: only worth labeling a header field with a page when that's
+  // actually informative -- an individually-uncertain field gets its exact
+  // page (real, precise data from uncertain_fields_ocr); everything else only
+  // gets a label when the bill spans more than one page, since "page 1" next
+  // to all ~11 header fields on a single-page bill is pure noise.
+  function headerPageLabel(uncertain: UncertainField | undefined): string | undefined {
+    if (uncertain) return `page ${uncertain.pageNumber}`
+    if (pageNumberStart !== null && pageNumberEnd !== null && pageNumberStart !== pageNumberEnd) {
+      return `pages ${pageNumberStart}–${pageNumberEnd}`
+    }
+    return undefined
+  }
+
+  // Plan §6 bottom clarification line: a human-readable name for one flagged
+  // field, header or line item. Line items are named by row position (the
+  // reviewer's own "row 3," not the internal lineOrder) since that's what's
+  // visible on screen.
+  function describeUncertainField(f: UncertainField): string {
+    if (f.lineOrder === null) {
+      return HEADER_FIELD_LABEL[f.field] ?? f.field.replace(/_/g, ' ')
+    }
+    const rowIndex = lineItems.findIndex((li) => li.lineOrder === f.lineOrder)
+    const rowLabel = rowIndex >= 0 ? `Line ${rowIndex + 1}` : 'Line item'
+    const fieldLabel = LINE_ITEM_FIELD_LABEL[f.field] ?? f.field.replace(/_/g, ' ')
+    return `${rowLabel} ${fieldLabel}`
   }
 
   function headerEdited(key: keyof HeaderFormState): boolean {
@@ -300,6 +368,15 @@ export const ExtractionForm = forwardRef(function ExtractionForm(
 
   const vendorNameUncertain = headerUncertainty('vendorName')
   const vendorNameUncertainIndex = uncertainIndexOf(vendorNameUncertain)
+  const vendorNamePageLabel = headerPageLabel(vendorNameUncertain)
+
+  // Plan §5/§6: whether the whole bill spans more than one page -- drives both
+  // the line-items caption and the multi-page fallback in headerPageLabel.
+  const isMultiPage = pageNumberStart !== null && pageNumberEnd !== null && pageNumberStart !== pageNumberEnd
+
+  // Plan §6 bottom clarification line: which of this bill's flagged fields (if
+  // any) live on the PDF page currently on screen.
+  const currentPageUncertainFields = uncertainFields.filter((f) => f.pageNumber === currentPdfPage)
 
   return (
     <div ref={ref} className="flex h-full min-w-0 flex-1 flex-col gap-4 overflow-y-auto p-1">
@@ -307,6 +384,9 @@ export const ExtractionForm = forwardRef(function ExtractionForm(
         <div className="col-span-2 flex flex-col gap-1.5">
           <Label>
             Vendor
+            {vendorNamePageLabel ? (
+              <span className="ml-1 text-xs font-normal text-muted-foreground">· {vendorNamePageLabel}</span>
+            ) : null}
             {vendorNameUncertain ? (
               <span className="ml-1 text-orange-500" title="Model was uncertain about this value">●</span>
             ) : null}
@@ -326,41 +406,41 @@ export const ExtractionForm = forwardRef(function ExtractionForm(
         <Field label="GSTIN" disabled={disabled} onKeyDown={handleEnter}
           value={header.vendorGstin} onChange={(v) => onHeaderChange('vendorGstin', v)}
           uncertain={headerUncertainty('vendorGstin')} uncertainIndex={uncertainIndexOf(headerUncertainty('vendorGstin'))}
-          edited={headerEdited('vendorGstin')} onJumpToPage={onJumpToPage} />
+          edited={headerEdited('vendorGstin')} onJumpToPage={onJumpToPage} pageLabel={headerPageLabel(headerUncertainty('vendorGstin'))} />
         <Field label="Phone" disabled={disabled} onKeyDown={handleEnter}
           value={header.vendorPhone} onChange={(v) => onHeaderChange('vendorPhone', v)}
           uncertain={headerUncertainty('vendorPhone')} uncertainIndex={uncertainIndexOf(headerUncertainty('vendorPhone'))}
-          edited={headerEdited('vendorPhone')} onJumpToPage={onJumpToPage} />
+          edited={headerEdited('vendorPhone')} onJumpToPage={onJumpToPage} pageLabel={headerPageLabel(headerUncertainty('vendorPhone'))} />
         <Field label="Email" disabled={disabled} onKeyDown={handleEnter}
           value={header.vendorEmail} onChange={(v) => onHeaderChange('vendorEmail', v)}
           uncertain={headerUncertainty('vendorEmail')} uncertainIndex={uncertainIndexOf(headerUncertainty('vendorEmail'))}
-          edited={headerEdited('vendorEmail')} onJumpToPage={onJumpToPage} />
+          edited={headerEdited('vendorEmail')} onJumpToPage={onJumpToPage} pageLabel={headerPageLabel(headerUncertainty('vendorEmail'))} />
         <div className="col-span-2">
           <Field label="Address" disabled={disabled} onKeyDown={handleEnter}
             value={header.vendorAddress} onChange={(v) => onHeaderChange('vendorAddress', v)}
             uncertain={headerUncertainty('vendorAddress')} uncertainIndex={uncertainIndexOf(headerUncertainty('vendorAddress'))}
-            edited={headerEdited('vendorAddress')} onJumpToPage={onJumpToPage} />
+            edited={headerEdited('vendorAddress')} onJumpToPage={onJumpToPage} pageLabel={headerPageLabel(headerUncertainty('vendorAddress'))} />
         </div>
         <Field label="Invoice number" disabled={disabled} onKeyDown={handleEnter}
           value={header.invoiceNumber} onChange={(v) => onHeaderChange('invoiceNumber', v)}
           uncertain={headerUncertainty('invoiceNumber')} uncertainIndex={uncertainIndexOf(headerUncertainty('invoiceNumber'))}
-          edited={headerEdited('invoiceNumber')} onJumpToPage={onJumpToPage} />
+          edited={headerEdited('invoiceNumber')} onJumpToPage={onJumpToPage} pageLabel={headerPageLabel(headerUncertainty('invoiceNumber'))} />
         <Field label="Invoice date" type="date" disabled={disabled} onKeyDown={handleEnter}
           value={header.invoiceDate} onChange={(v) => onHeaderChange('invoiceDate', v)}
           uncertain={headerUncertainty('invoiceDate')} uncertainIndex={uncertainIndexOf(headerUncertainty('invoiceDate'))}
-          edited={headerEdited('invoiceDate')} onJumpToPage={onJumpToPage} warning={invoiceDateWarning} />
+          edited={headerEdited('invoiceDate')} onJumpToPage={onJumpToPage} warning={invoiceDateWarning} pageLabel={headerPageLabel(headerUncertainty('invoiceDate'))} />
         <Field label="Subtotal" inputMode="decimal" disabled={disabled} onKeyDown={handleEnter}
           value={header.subtotal} onChange={(v) => onHeaderChange('subtotal', v)}
           uncertain={headerUncertainty('subtotal')} uncertainIndex={uncertainIndexOf(headerUncertainty('subtotal'))}
-          edited={headerEdited('subtotal')} error={headerError('subtotal')} onJumpToPage={onJumpToPage} />
+          edited={headerEdited('subtotal')} error={headerError('subtotal')} onJumpToPage={onJumpToPage} pageLabel={headerPageLabel(headerUncertainty('subtotal'))} />
         <Field label="Tax amount" inputMode="decimal" disabled={disabled} onKeyDown={handleEnter}
           value={header.taxAmount} onChange={(v) => onHeaderChange('taxAmount', v)}
           uncertain={headerUncertainty('taxAmount')} uncertainIndex={uncertainIndexOf(headerUncertainty('taxAmount'))}
-          edited={headerEdited('taxAmount')} error={headerError('taxAmount')} onJumpToPage={onJumpToPage} />
+          edited={headerEdited('taxAmount')} error={headerError('taxAmount')} onJumpToPage={onJumpToPage} pageLabel={headerPageLabel(headerUncertainty('taxAmount'))} />
         <Field label="Total amount" inputMode="decimal" disabled={disabled} onKeyDown={handleEnter}
           value={header.totalAmount} onChange={(v) => onHeaderChange('totalAmount', v)}
           uncertain={headerUncertainty('totalAmount')} uncertainIndex={uncertainIndexOf(headerUncertainty('totalAmount'))}
-          edited={headerEdited('totalAmount')} error={headerError('totalAmount')} onJumpToPage={onJumpToPage} />
+          edited={headerEdited('totalAmount')} error={headerError('totalAmount')} onJumpToPage={onJumpToPage} pageLabel={headerPageLabel(headerUncertainty('totalAmount'))} />
         <div className="col-span-2 flex flex-col gap-1.5">
           <Label>
             Notes
@@ -385,6 +465,16 @@ export const ExtractionForm = forwardRef(function ExtractionForm(
         <h3 className="text-sm font-medium text-muted-foreground">
           Line items <span className="text-xs">(press 1-9 to jump to a row)</span>
         </h3>
+        {isMultiPage ? (
+          // Plan §6: no per-row/per-cell page data exists beyond individually
+          // uncertain cells (checked -- see task scoping), so this is one
+          // caption for the whole table rather than repeating a label on every
+          // one of 6 columns x N rows. Omitted entirely on a single-page bill,
+          // same reasoning as headerPageLabel above.
+          <p className="-mt-1 text-xs text-muted-foreground">
+            Read from pages {pageNumberStart}–{pageNumberEnd}.
+          </p>
+        ) : null}
         <div className="overflow-x-auto rounded-md border border-border">
           <table className="w-full min-w-[640px] border-collapse text-sm">
             <thead className="bg-muted/50 text-left text-xs uppercase text-muted-foreground">
@@ -428,7 +518,7 @@ export const ExtractionForm = forwardRef(function ExtractionForm(
                   error
                     ? 'This value could not be read as a number and will not be saved -- fix or clear it'
                     : uncertain
-                      ? 'Model was uncertain about this value — click to jump to the source page'
+                      ? `Model was uncertain about this value — click to jump to page ${uncertain.pageNumber}`
                       : lineItemEdited(item.lineOrder, editedKey)
                         ? 'Edited from the original OCR value'
                         : undefined
@@ -581,6 +671,18 @@ export const ExtractionForm = forwardRef(function ExtractionForm(
           </table>
         </div>
       </section>
+
+      {/* Plan §5/§6: the quiet clarification line, at the very bottom of the
+          panel (never a banner blocking the top -- see this file's L2
+          comment and the plan's §5 correction). Nothing renders when this
+          bill has no uncertain fields at all -- there's nothing to clarify. */}
+      {uncertainFields.length > 0 ? (
+        <p className="text-xs text-muted-foreground">
+          {currentPageUncertainFields.length > 0
+            ? `This page has ${currentPageUncertainFields.length} flagged field${currentPageUncertainFields.length === 1 ? '' : 's'}: ${currentPageUncertainFields.map(describeUncertainField).join(', ')}.`
+            : 'No flagged fields on this page.'}
+        </p>
+      ) : null}
     </div>
   )
 })
@@ -599,6 +701,7 @@ function Field({
   error = false,
   warning = null,
   onJumpToPage,
+  pageLabel,
 }: {
   label: string
   value: string
@@ -623,11 +726,18 @@ function Field({
    *  from `error`: this never blocks Save or affects the ring colour. */
   warning?: string | null
   onJumpToPage?: (pageNumber: number) => void
+  /** Plan §6: "page N" for a field individually flagged uncertain, or
+   *  "pages a–b" for the whole bill when it spans more than one page --
+   *  undefined renders nothing (single-page bill, field not uncertain).
+   *  Computed by the caller (headerPageLabel) since it needs the bill's
+   *  pageNumberStart/End, which this presentational component doesn't have. */
+  pageLabel?: string
 }) {
   return (
     <div className="flex flex-col gap-1.5">
       <Label>
         {label}
+        {pageLabel ? <span className="ml-1 text-xs font-normal text-muted-foreground">· {pageLabel}</span> : null}
         {error ? (
           <span className="ml-1 text-red-500" title="This value could not be read as a number and will not be saved">●</span>
         ) : uncertain ? (
@@ -647,7 +757,7 @@ function Field({
           error
             ? 'This value could not be read as a number and will not be saved — fix or clear it'
             : uncertain
-              ? 'Model was uncertain about this value — click to jump to the source page'
+              ? `Model was uncertain about this value — click to jump to page ${uncertain.pageNumber}`
               : edited
                 ? 'Edited from the original OCR value'
                 : undefined

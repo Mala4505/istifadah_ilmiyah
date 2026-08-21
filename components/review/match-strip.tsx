@@ -10,13 +10,16 @@
  * computed server-side in app/(app)/review/page.tsx's loadDocumentDetail):
  *   - Matched: entryId !== null -- static summary + live variance + "Change".
  *   - Suggested: entryId === null && matchCandidates.length > 0 -- one-click
- *     attach on the top candidate, "See N more" reveals the rest.
+ *     attach on the top candidate, plus an always-visible "Search or pick
+ *     another" entry point (MASTER-PLAN §7) that expands to show the other
+ *     ranked candidates (when there are any) and the manual search box.
  *   - Unmatched: entryId === null && matchCandidates.length === 0 -- search
  *     (EntryAttachCombobox) + "No entry expected".
  */
 
 import { useState } from 'react'
 import { toast } from 'sonner'
+import { Search } from 'lucide-react'
 import { toastError } from '@/components/ui/error-toast'
 import { Button } from '@/components/ui/button'
 import { attachExtractionToEntry } from '@/lib/actions/review'
@@ -39,6 +42,7 @@ export function MatchStrip({
   liveTotalAmount,
   matchCandidates,
   onChanged,
+  bare = false,
 }: {
   documentExtractionId: number
   sourceDocumentId: number
@@ -52,10 +56,16 @@ export function MatchStrip({
   liveTotalAmount: number | null
   matchCandidates: MatchCandidate[]
   onChanged: () => void
+  /** Redesign plan §4: when embedded inline in the Connect segment of
+   * ReviewStatusLine, drop this component's own card chrome (border/bg/
+   * padding) so it doesn't render as a nested card-in-a-card. Defaults to
+   * false so any other render site keeps today's standalone-card look. */
+  bare?: boolean
 }) {
   const [expanded, setExpanded] = useState(false)
   const [attachingId, setAttachingId] = useState<number | null>(null)
   const [markingNoEntry, setMarkingNoEntry] = useState(false)
+  const cardClass = bare ? '' : 'rounded-md border border-border bg-background px-2 py-1.5'
 
   function handleAttach(candidateEntryId: number, label: string) {
     setAttachingId(candidateEntryId)
@@ -101,7 +111,7 @@ export function MatchStrip({
             }
 
     return (
-      <div className="flex flex-wrap items-center gap-2 rounded-md border border-border bg-background px-2 py-1.5 text-sm">
+      <div className={`flex flex-wrap items-center gap-2 text-sm ${cardClass}`}>
         <span className="rounded-full border border-emerald-300 bg-emerald-50 px-2 py-0.5 text-xs text-emerald-900 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-200">
           Matched
         </span>
@@ -123,7 +133,7 @@ export function MatchStrip({
   if (matchCandidates.length > 0) {
     const [top, ...rest] = matchCandidates
     return (
-      <div className="flex flex-col gap-2 rounded-md border border-border bg-background px-2 py-1.5 text-sm">
+      <div className={`flex flex-col gap-2 text-sm ${cardClass}`}>
         <div className="flex flex-wrap items-center gap-2">
           <span className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
             Suggested match
@@ -135,11 +145,10 @@ export function MatchStrip({
           <Button type="button" size="sm" onClick={() => handleAttach(top!.entryId, top!.ubblNumber)} disabled={attachingId !== null}>
             {attachingId === top!.entryId ? 'Attaching…' : 'Attach'}
           </Button>
-          {rest.length > 0 ? (
-            <Button type="button" size="sm" variant="ghost" onClick={() => setExpanded((v) => !v)}>
-              {expanded ? 'Hide' : `See ${rest.length} more`}
-            </Button>
-          ) : null}
+          <Button type="button" size="sm" variant="ghost" onClick={() => setExpanded((v) => !v)}>
+            <Search className="h-3.5 w-3.5" />
+            {expanded ? 'Hide' : 'Search or pick another'}
+          </Button>
           <Button
             type="button"
             size="sm"
@@ -153,23 +162,25 @@ export function MatchStrip({
         </div>
         {expanded ? (
           <div className="flex flex-col gap-1.5 border-t border-border pt-2">
-            {rest.map((c) => (
-              <div key={c.entryId} className="flex flex-wrap items-center gap-2">
-                <span className="font-medium">{c.ubblNumber}</span>
-                {c.vendorRaw ? <span className="text-muted-foreground">{c.vendorRaw}</span> : null}
-                {c.amount !== null ? <span className="text-muted-foreground">{formatMoney(c.amount)}</span> : null}
-                <span className="text-xs text-muted-foreground">score {Math.round(c.score * 100)}%</span>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={() => handleAttach(c.entryId, c.ubblNumber)}
-                  disabled={attachingId !== null}
-                >
-                  {attachingId === c.entryId ? 'Attaching…' : 'Attach'}
-                </Button>
-              </div>
-            ))}
+            {rest.length > 0
+              ? rest.map((c) => (
+                  <div key={c.entryId} className="flex flex-wrap items-center gap-2">
+                    <span className="font-medium">{c.ubblNumber}</span>
+                    {c.vendorRaw ? <span className="text-muted-foreground">{c.vendorRaw}</span> : null}
+                    {c.amount !== null ? <span className="text-muted-foreground">{formatMoney(c.amount)}</span> : null}
+                    <span className="text-xs text-muted-foreground">score {Math.round(c.score * 100)}%</span>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => handleAttach(c.entryId, c.ubblNumber)}
+                      disabled={attachingId !== null}
+                    >
+                      {attachingId === c.entryId ? 'Attaching…' : 'Attach'}
+                    </Button>
+                  </div>
+                ))
+              : null}
             <div className="flex flex-wrap items-center gap-2 pt-1">
               <span className="text-xs text-muted-foreground">Not it? Search instead:</span>
               <EntryAttachCombobox documentExtractionId={documentExtractionId} entryDisplayLabel={null} onAttached={onChanged} />
@@ -181,7 +192,7 @@ export function MatchStrip({
   }
 
   return (
-    <div className="flex flex-wrap items-center gap-2 rounded-md border border-border bg-background px-2 py-1.5 text-sm">
+    <div className={`flex flex-wrap items-center gap-2 text-sm ${cardClass}`}>
       <span className="rounded-full border border-border bg-muted px-2 py-0.5 text-xs text-muted-foreground">Unmatched</span>
       <span className="text-muted-foreground">No ledger match yet.</span>
       <EntryAttachCombobox documentExtractionId={documentExtractionId} entryDisplayLabel={null} onAttached={onChanged} />

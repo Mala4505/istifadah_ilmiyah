@@ -487,7 +487,7 @@ export async function getInboxMatchCandidates(): Promise<Record<number, Candidat
 
   const { data: extractionsData } = await supabase
     .from('document_extraction')
-    .select('id, vendor_name_ocr, invoice_date_ocr, total_amount_ocr')
+    .select('id, vendor_name_ocr, invoice_date_ocr, total_amount_ocr, invoice_number_ocr, invoice_number_verified')
     .in('source_document_id', docIds)
   const extractions = extractionsData ?? []
   if (extractions.length === 0) return {}
@@ -501,7 +501,7 @@ export async function getInboxMatchCandidates(): Promise<Record<number, Candidat
 
   const { data: entriesData } = await supabase
     .from('entries')
-    .select('id, department_id, vendor_raw, amount, date, ubbl_number, main_number, admin_head_id, zone_id')
+    .select('id, department_id, vendor_raw, amount, date, invoice_number, ubbl_number, main_number, admin_head_id, zone_id')
     .eq('is_void', false)
     .order('date', { ascending: false, nullsFirst: false })
     .limit(5000)
@@ -513,6 +513,7 @@ export async function getInboxMatchCandidates(): Promise<Record<number, Candidat
       vendorRaw: e.vendor_raw,
       amount: e.amount,
       date: e.date,
+      invoiceNumber: e.invoice_number,
       departmentId: e.department_id,
       ubblNumber: e.ubbl_number,
       mainNumber: e.main_number,
@@ -530,6 +531,8 @@ export async function getInboxMatchCandidates(): Promise<Record<number, Candidat
         vendorName: extraction.vendor_name_ocr as string | null,
         totalAmount: extraction.total_amount_ocr as number | null,
         invoiceDate: extraction.invoice_date_ocr as string | null,
+        invoiceNumber:
+          (extraction.invoice_number_verified as string | null) ?? (extraction.invoice_number_ocr as string | null),
       },
       candidatePool
     ).map((c) => ({

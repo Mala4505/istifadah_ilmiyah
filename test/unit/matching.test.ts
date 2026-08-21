@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   amountProximityScore,
   dateProximityScore,
+  invoiceNumberMatch,
   rankCandidates,
   scoreEntry,
   vendorSimilarity,
@@ -13,6 +14,7 @@ function entry(overrides: Partial<MatchableEntry> & { id: number }): MatchableEn
     vendorRaw: null,
     amount: null,
     date: null,
+    invoiceNumber: null,
     departmentId: null,
     ubblNumber: `UBBL-${overrides.id}`,
     mainNumber: null,
@@ -77,22 +79,71 @@ describe('dateProximityScore', () => {
   })
 })
 
+describe('invoiceNumberMatch', () => {
+  it('is 1 for identical numbers', () => {
+    expect(invoiceNumberMatch('INV-045', 'INV-045')).toBe(1)
+  })
+
+  it('is 1 after normalizing case/punctuation/whitespace differences', () => {
+    expect(invoiceNumberMatch('inv 045', 'INV-045')).toBe(1)
+  })
+
+  it('is 0 for different numbers, even if short or numeric-only', () => {
+    expect(invoiceNumberMatch('120', '121')).toBe(0)
+  })
+
+  it('is 0 when either side normalizes to empty', () => {
+    expect(invoiceNumberMatch('', 'INV-045')).toBe(0)
+    expect(invoiceNumberMatch('---', 'INV-045')).toBe(0)
+  })
+})
+
 describe('scoreEntry / rankCandidates', () => {
-  const doc = { vendorName: 'Sharma Traders', totalAmount: 45000, invoiceDate: '2026-08-10' }
+  const doc = { vendorName: 'Sharma Traders', totalAmount: 45000, invoiceDate: '2026-08-10', invoiceNumber: null }
 
   it('scores a strong all-round match highest', () => {
-    const strong = entry({ id: 1, vendorRaw: 'Sharma Traders', amount: 45000, date: '2026-08-10' })
+    const strong = entry({
+      id: 1,
+      vendorRaw: 'Sharma Traders',
+      amount: 45000,
+      date: '2026-08-10',
+      invoiceNumber: 'INV-045',
+    })
     const weak = entry({ id: 2, vendorRaw: 'Global Event Rentals', amount: 12000, date: '2026-01-01' })
-    const strongScore = scoreEntry(doc, strong).score
+    const strongScore = scoreEntry({ ...doc, invoiceNumber: 'INV-045' }, strong).score
     const weakScore = scoreEntry(doc, weak).score
     expect(strongScore).toBeGreaterThan(weakScore)
     expect(strongScore).toBeGreaterThan(0.9)
   })
 
+  it('without an invoice number on either side, vendor/amount/date alone caps below 1', () => {
+    const strong = entry({ id: 6, vendorRaw: 'Sharma Traders', amount: 45000, date: '2026-08-10' })
+    expect(scoreEntry(doc, strong).score).toBeCloseTo(0.75, 5)
+  })
+
   it('never throws when the document or entry side is missing fields', () => {
     const bare = entry({ id: 3 })
-    expect(() => scoreEntry({ vendorName: null, totalAmount: null, invoiceDate: null }, bare)).not.toThrow()
-    expect(scoreEntry({ vendorName: null, totalAmount: null, invoiceDate: null }, bare).score).toBe(0)
+    expect(() =>
+      scoreEntry({ vendorName: null, totalAmount: null, invoiceDate: null, invoiceNumber: null }, bare)
+    ).not.toThrow()
+    expect(scoreEntry({ vendorName: null, totalAmount: null, invoiceDate: null, invoiceNumber: null }, bare).score).toBe(0)
+  })
+
+  it('a matching invoice number raises the score of an otherwise-partial match', () => {
+    const docWithInvoice = { ...doc, invoiceNumber: 'INV-045' }
+    const partial = entry({ id: 4, vendorRaw: 'Sharma Trader', amount: 46000, date: '2026-08-14' })
+    const withMatchingInvoice = { ...partial, invoiceNumber: 'INV-045' }
+    const withoutInvoice = { ...partial, invoiceNumber: null }
+    expect(scoreEntry(docWithInvoice, withMatchingInvoice).score).toBeGreaterThan(
+      scoreEntry(docWithInvoice, withoutInvoice).score
+    )
+  })
+
+  it('a missing invoice number on either side just scores that dimension 0, never throws or penalizes below the baseline', () => {
+    const strong = entry({ id: 5, vendorRaw: 'Sharma Traders', amount: 45000, date: '2026-08-10' })
+    const withInvoiceOnDocOnly = scoreEntry({ ...doc, invoiceNumber: 'INV-045' }, strong)
+    expect(withInvoiceOnDocOnly.invoiceNumberScore).toBe(0)
+    expect(withInvoiceOnDocOnly.score).toBe(scoreEntry(doc, strong).score)
   })
 
   it('rankCandidates returns only entries at/above the minimum score, highest first, capped at the limit', () => {

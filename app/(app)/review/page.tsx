@@ -291,7 +291,7 @@ async function loadDocumentDetail(
     entryId === null
       ? supabase
           .from('entries')
-          .select('id, department_id, vendor_raw, amount, date, ubbl_number, main_number')
+          .select('id, department_id, vendor_raw, amount, date, invoice_number, ubbl_number, main_number')
           .eq('is_void', false)
           .order('date', { ascending: false, nullsFirst: false })
           .limit(5000)
@@ -367,6 +367,7 @@ async function loadDocumentDetail(
         vendorRaw: e.vendor_raw as string | null,
         amount: e.amount as number | null,
         date: e.date as string | null,
+        invoiceNumber: e.invoice_number as string | null,
         departmentId: e.department_id as number | null,
         ubblNumber: e.ubbl_number as string,
         mainNumber: e.main_number as string | null,
@@ -376,6 +377,8 @@ async function loadDocumentDetail(
         vendorName: extraction.vendor_name_ocr as string | null,
         totalAmount: extraction.total_amount_ocr as number | null,
         invoiceDate: extraction.invoice_date_ocr as string | null,
+        invoiceNumber:
+          (extraction.invoice_number_verified as string | null) ?? (extraction.invoice_number_ocr as string | null),
       },
       candidatePool
     ).map((c) => ({

@@ -1,6 +1,7 @@
 /**
  * Document-to-entry matching (MASTER-PLAN §5 row 6, §11.2 Day 3): "suggested
- * matches on vendor + amount + date proximity."
+ * matches on vendor + amount + date proximity," plus invoice number
+ * (redesign plan §9) where both sides have one.
  *
  * Deliberately computed on read, not persisted — the task brief for this
  * screen is explicit that there is no requirement to store a suggestion,
@@ -28,6 +29,7 @@ export interface MatchableDocument {
   vendorName: string | null
   totalAmount: number | null
   invoiceDate: string | null
+  invoiceNumber: string | null
 }
 
 /** An entry candidate, carrying both the fields scoring reads and the
@@ -38,6 +40,7 @@ export interface MatchableEntry {
   vendorRaw: string | null
   amount: number | null
   date: string | null
+  invoiceNumber: string | null
   departmentId: number | null
   ubblNumber: string
   mainNumber: string | null
@@ -57,14 +60,22 @@ export interface ScoredEntry extends MatchableEntry {
   vendorScore: number
   amountScore: number
   dateScore: number
+  invoiceNumberScore: number
 }
 
-/** Weights sum to 1 — vendor carries the most weight because amount and
- *  date proximity alone produce coincidental matches at this document
- *  volume (two unrelated ₹45,000 invoices three days apart is not rare). */
-const VENDOR_WEIGHT = 0.5
-const AMOUNT_WEIGHT = 0.3
-const DATE_WEIGHT = 0.2
+/** Weights sum to 1 — vendor still carries the most weight because amount
+ *  and date proximity alone produce coincidental matches at this document
+ *  volume (two unrelated ₹45,000 invoices three days apart is not rare).
+ *  Invoice number sits second: when both sides have one and they match, it's
+ *  a sharper signal than vendor-name fuzziness alone (redesign plan §9) —
+ *  but it's still frequently blank on the entries side (a department may
+ *  not have typed one in), so it can't outweigh vendor/amount/date the way
+ *  an exact-match short-circuit would. Missing on either side just scores 0
+ *  for this dimension, same as every other field here — no special-casing. */
+const VENDOR_WEIGHT = 0.4
+const AMOUNT_WEIGHT = 0.2
+const DATE_WEIGHT = 0.15
+const INVOICE_NUMBER_WEIGHT = 0.25
 
 /** Below this combined score a "match" is closer to noise than a signal —
  *  excluded rather than shown as a weak top-3 candidate. Judgment call, not
@@ -129,6 +140,18 @@ export function dateProximityScore(aIso: string, bIso: string): number {
   return Math.max(0, 1 - days / 21)
 }
 
+/** 1 if two invoice numbers are equal after normalization, 0 otherwise —
+ *  unlike vendor names, a partial overlap between two invoice/account
+ *  numbers isn't a meaningful signal, so this is binary rather than fuzzy.
+ *  Normalization strips everything but letters/digits and uppercases, so
+ *  "INV-045" and "inv 045" still count as the same number. */
+export function invoiceNumberMatch(a: string, b: string): number {
+  const na = a.trim().toUpperCase().replace(/[^A-Z0-9]/g, '')
+  const nb = b.trim().toUpperCase().replace(/[^A-Z0-9]/g, '')
+  if (!na || !nb) return 0
+  return na === nb ? 1 : 0
+}
+
 export function scoreEntry(doc: MatchableDocument, entry: MatchableEntry): ScoredEntry {
   const vendorScore =
     doc.vendorName && entry.vendorRaw ? vendorSimilarity(doc.vendorName, entry.vendorRaw) : 0
@@ -138,10 +161,16 @@ export function scoreEntry(doc: MatchableDocument, entry: MatchableEntry): Score
       : 0
   const dateScore =
     doc.invoiceDate && entry.date ? dateProximityScore(doc.invoiceDate, entry.date) : 0
+  const invoiceNumberScore =
+    doc.invoiceNumber && entry.invoiceNumber ? invoiceNumberMatch(doc.invoiceNumber, entry.invoiceNumber) : 0
 
-  const score = vendorScore * VENDOR_WEIGHT + amountScore * AMOUNT_WEIGHT + dateScore * DATE_WEIGHT
+  const score =
+    vendorScore * VENDOR_WEIGHT +
+    amountScore * AMOUNT_WEIGHT +
+    dateScore * DATE_WEIGHT +
+    invoiceNumberScore * INVOICE_NUMBER_WEIGHT
 
-  return { ...entry, score, vendorScore, amountScore, dateScore }
+  return { ...entry, score, vendorScore, amountScore, dateScore, invoiceNumberScore }
 }
 
 /**

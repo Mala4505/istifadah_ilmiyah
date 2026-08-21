@@ -22,8 +22,6 @@ import { toast } from 'sonner'
 import { toastError } from '@/components/ui/error-toast'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { Label } from '@/components/ui/label'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { normalizeUnit } from '@/lib/normalize'
 import {
@@ -48,8 +46,7 @@ import { ClaimBanner } from './claim-banner'
 import { ShortcutsOverlay } from './shortcuts-overlay'
 import { ExceptionDialog } from './exception-dialog'
 import { HubStatusDialog } from './hub-status-dialog'
-import { MatchStrip } from './match-strip'
-import { StageProgress, type StageStatus } from './stage-progress'
+import { ReviewStatusLine, type StageStatus } from './review-status-line'
 
 const NONE = '__none__'
 
@@ -874,31 +871,10 @@ export function ReviewWorkspace({
             {detail.legibility ? ` · ${detail.legibility}` : ''}
           </span>
         ) : null}
-        {detail.uncertainFields.length > 0 ? (
-          <span className="flex items-center gap-1 rounded-full border border-orange-300 bg-orange-50 px-2 py-0.5 text-xs text-orange-900 dark:border-orange-800 dark:bg-orange-950 dark:text-orange-200">
-            <Button
-              type="button"
-              size="sm"
-              variant="ghost"
-              className="h-5 px-1 text-orange-900 hover:bg-orange-100 dark:text-orange-200 dark:hover:bg-orange-900"
-              aria-label="Previous flagged field"
-              onClick={() => stepUncertainField(-1)}
-            >
-              ‹
-            </Button>
-            {uncertainStepIndex !== null ? uncertainStepIndex + 1 : '—'} of {detail.uncertainFields.length} to check
-            <Button
-              type="button"
-              size="sm"
-              variant="ghost"
-              className="h-5 px-1 text-orange-900 hover:bg-orange-100 dark:text-orange-200 dark:hover:bg-orange-900"
-              aria-label="Next flagged field"
-              onClick={() => stepUncertainField(1)}
-            >
-              ›
-            </Button>
-          </span>
-        ) : null}
+        {/* Plan §2/§4: the uncertain-field "N to check" stepper used to live
+            here; it now lives in ReviewStatusLine's Verify segment, wired to
+            the same uncertainStepIndex/stepUncertainField state below -- see
+            that render call. */}
         {/* 5.17: informational only, unlike the uncertain-fields chip above --
             editedFields already exists (1.5/L3's blue ring), this just totals
             it up. No stepper: there's nowhere useful to jump to that the blue
@@ -991,11 +967,21 @@ export function ReviewWorkspace({
         ) : null}
       </div>
 
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <StageProgress verify={verifyStatus} connect={connectStatus} classify={classifyStatus} />
-      </div>
-
-      <MatchStrip
+      {/* Plan §4: one card, one row, three segments (Verify/Connect/Classify)
+          -- replaces StageProgress's chip row, the standalone MatchStrip
+          card, and the standalone bottom Classify bar that used to sit below
+          TallyFooter. Every value/handler here is lifted from this
+          component's own state; ReviewStatusLine owns none of it. */}
+      <ReviewStatusLine
+        verifyStatus={verifyStatus}
+        vendorName={header.vendorName}
+        vendorId={vendorId}
+        onOpenVendorPicker={() => setVendorAutocompleteOpen(true)}
+        uncertainFields={detail.uncertainFields}
+        uncertainStepIndex={uncertainStepIndex}
+        onStepUncertainField={stepUncertainField}
+        formDisabled={formDisabled}
+        connectStatus={connectStatus}
         documentExtractionId={detail.documentExtractionId}
         sourceDocumentId={detail.sourceDocumentId}
         entryId={detail.entryId}
@@ -1004,7 +990,15 @@ export function ReviewWorkspace({
         entryAmount={detail.entryAmount}
         liveTotalAmount={documentTotal}
         matchCandidates={detail.matchCandidates}
-        onChanged={() => router.refresh()}
+        onMatchChanged={() => router.refresh()}
+        classifyStatus={classifyStatus}
+        stage2Done={stage2Done}
+        adminHeadId={adminHeadId}
+        zoneId={zoneId}
+        onAdminHeadChange={setAdminHeadId}
+        onZoneChange={setZoneId}
+        adminHeadOptions={detail.adminHeadOptions}
+        zoneOptions={detail.zoneOptions}
       />
 
       <div ref={paneContainerRef} className="flex min-h-0 flex-1">
@@ -1062,6 +1056,9 @@ export function ReviewWorkspace({
             addingLineItem={addingLineItem}
             onReExtract={requestReExtract}
             onFlagException={() => setExceptionOpen(true)}
+            pageNumberStart={detail.pageNumberStart}
+            pageNumberEnd={detail.pageNumberEnd}
+            currentPdfPage={pdfPageInfo.pageNumber}
             onJumpToPage={(pageNumber) => {
               pdfViewerRef.current?.goToPage(pageNumber)
               // Checklist 3.10: a collapsed spine can't actually show the
@@ -1076,53 +1073,6 @@ export function ReviewWorkspace({
       </div>
 
       <TallyFooter lineItemSum={lineItemSum} documentTotal={documentTotal} entryAmount={detail.entryAmount} />
-
-      <div className="flex flex-wrap items-end gap-3 rounded-md border border-border bg-background px-2 py-1.5">
-        <span className="text-xs font-medium text-muted-foreground">3 Classify</span>
-        {!stage2Done ? (
-          <span className="text-xs text-muted-foreground">Match this bill to an entry first</span>
-        ) : (
-          <>
-            <div className="flex flex-col gap-1">
-              <Label htmlFor="stage3-admin-head-select" className="text-xs">
-                Admin head (H)
-              </Label>
-              <Select value={adminHeadId} onValueChange={setAdminHeadId}>
-                <SelectTrigger id="stage3-admin-head-select" className="h-8 w-56 text-xs">
-                  <SelectValue placeholder="Not set" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={NONE}>Not set</SelectItem>
-                  {detail.adminHeadOptions.map((h) => (
-                    <SelectItem key={h.id} value={String(h.id)}>
-                      {h.head_number}. {h.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="flex flex-col gap-1">
-              <Label htmlFor="stage3-zone-select" className="text-xs">
-                Zone (Z)
-              </Label>
-              <Select value={zoneId} onValueChange={setZoneId}>
-                <SelectTrigger id="stage3-zone-select" className="h-8 w-56 text-xs">
-                  <SelectValue placeholder="Not set" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={NONE}>Not set</SelectItem>
-                  {detail.zoneOptions.map((z) => (
-                    <SelectItem key={z.id} value={String(z.id)}>
-                      {z.zone_number}. {z.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <span className="text-xs text-muted-foreground">Saved with the next Save (Ctrl/Cmd+Enter)</span>
-          </>
-        )}
-      </div>
 
       <Dialog
         open={confirmAction !== null}
