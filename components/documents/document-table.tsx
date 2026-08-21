@@ -9,6 +9,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { DocumentCard, DocumentStageTracker } from './document-card'
 import { formatDateTime, formatMoney } from './format'
 import type { InboxDocumentView } from './types'
+import type { LookupOption } from '@/components/entries/types'
 
 const PAGE_SIZE = 20
 
@@ -40,6 +41,8 @@ export function DocumentTable({
   chosenByDocument,
   onChooseEntry,
   onMutated,
+  adminHeadOptions,
+  zoneOptions,
 }: {
   documents: InboxDocumentView[]
   canAct: boolean
@@ -48,6 +51,9 @@ export function DocumentTable({
   chosenByDocument: Map<number, number | null>
   onChooseEntry: (documentId: number, entryId: number | null) => void
   onMutated: (documentId: number) => void
+  /** Threaded through to DocumentCard for the attach-time zone/admin-head prompt (checklist 5.11). */
+  adminHeadOptions: LookupOption[]
+  zoneOptions: LookupOption[]
 }) {
   const [pageIndex, setPageIndex] = useState(0)
   const [openDocumentId, setOpenDocumentId] = useState<number | null>(null)
@@ -238,6 +244,8 @@ export function DocumentTable({
                   onMutated(openDocument.id)
                   setOpenDocumentId(null)
                 }}
+                adminHeadOptions={adminHeadOptions}
+                zoneOptions={zoneOptions}
               />
               <DialogFooter>
                 <Button variant="outline" size="sm" onClick={() => setOpenDocumentId(null)}>
