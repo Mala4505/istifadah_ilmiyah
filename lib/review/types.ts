@@ -90,6 +90,28 @@ export interface PageStatus {
   classificationConfidence: number | null
 }
 
+/** A ranked ledger-entry candidate for a still-unmatched bill, scored by
+ * `lib/matching.ts`'s `rankCandidates` against this bill's own OCR'd
+ * vendor/amount/date (MASTER-PLAN §7, "suggested" match state). */
+export interface MatchCandidate {
+  entryId: number
+  score: number
+  vendorRaw: string | null
+  amount: number | null
+  date: string | null
+  ubblNumber: string
+  mainNumber: string | null
+}
+
+/** One sibling bill from the same multi-bill PDF, for the bill rail (§7).
+ * `matched` reflects only `document_extraction.entry_id` -- the same
+ * per-bill signal `EntryAttachCombobox` reads/writes. */
+export interface SiblingBill {
+  documentExtractionId: number
+  billIndex: number
+  matched: boolean
+}
+
 export interface ReviewDocumentDetail {
   sourceDocumentId: number
   documentExtractionId: number
@@ -105,6 +127,20 @@ export interface ReviewDocumentDetail {
   entryAmount: number | null
   entryVendorId: number | null
   entryVendorDisplayName: string | null
+  /** Populated only when `entryId !== null` -- the matched entry's
+   * department, and stage-3 (Classify) options scoped to that department
+   * (same pattern as app/(app)/entries/[id]/page.tsx). */
+  entryDepartmentId: number | null
+  entryAdminHeadId: number | null
+  entryZoneId: number | null
+  adminHeadOptions: { id: number; head_number: number; name: string }[]
+  zoneOptions: { id: number; zone_number: number; name: string }[]
+  /** Ranked suggestions when this bill has no ledger match yet; empty
+   * (never computed) once `entryId !== null`. */
+  matchCandidates: MatchCandidate[]
+  /** Every bill sharing this source_document_id, including this one, for
+   * the bill rail on multi-bill PDFs. Empty when `billCount === 1`. */
+  siblingBills: SiblingBill[]
   claimedBy: string | null
   claimedAt: string | null
   claimedByIsMe: boolean

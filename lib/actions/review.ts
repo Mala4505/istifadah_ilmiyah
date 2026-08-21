@@ -300,6 +300,44 @@ export async function attachExtractionToEntry(input: {
   return { ok: true }
 }
 
+/**
+ * Stage 3 (Classify, §8) persistence: admin head + zone, ridden on the same
+ * Cmd/Ctrl-Enter save as everything else (§7's "all three stages commit on
+ * the same save" -- see review-workspace.tsx's handleSave). Deliberately
+ * NOT saveEntryEnrichment (lib/actions/entry-enrichment.ts): that action
+ * unconditionally overwrites cost_center_id and remark on every call, and
+ * this screen never touches either -- reusing it would silently clobber
+ * whatever an entry's detail page had set.
+ */
+export async function saveEntryClassification(input: {
+  entryId: number
+  adminHeadId: number | null
+  zoneId: number | null
+}): Promise<SimpleActionResult> {
+  if (!Number.isInteger(input.entryId)) {
+    return { ok: false, error: 'Invalid entry id.' }
+  }
+
+  const supabase = await createClient()
+  const { data, error } = await supabase
+    .from('entries')
+    .update({ admin_head_id: input.adminHeadId, zone_id: input.zoneId })
+    .eq('id', input.entryId)
+    .select('id')
+
+  if (error) return { ok: false, error: logRawError('review.saveEntryClassification', error.message) }
+  if (!data || data.length === 0) {
+    return {
+      ok: false,
+      error:
+        'No entry was updated. This usually means a viewer role (reviewer/admin required), or the entry is no longer visible to you.',
+    }
+  }
+
+  revalidatePath('/review')
+  return { ok: true }
+}
+
 export interface VendorSearchResult {
   id: number
   displayName: string

@@ -5,14 +5,17 @@ import { Card, CardContent } from '@/components/ui/card'
 import { ReviewWorkspace } from '@/components/review/review-workspace'
 import type {
   LineItemDetail,
+  MatchCandidate,
   OpenExceptionSummary,
   PageStatus,
   QueueEntry,
   ReviewDocumentDetail,
+  SiblingBill,
   UncertainField,
 } from '@/lib/review/types'
 import { friendlyErrorMessage } from '@/lib/friendly-error'
 import { isAdminOrAbove } from '@/lib/auth/roles'
+import { rankCandidates, type MatchableEntry } from '@/lib/matching'
 
 /**
  * /review -- Screen 7, the throughput screen (MASTER-PLAN §5 row 7, §7,
@@ -179,7 +182,7 @@ async function loadDocumentDetail(
   } = await supabase.auth.getUser()
   if (!user) return null
 
-  const [sourceDocRes, extractionRes, lineItemsRes, pagesRes] = await Promise.all([
+  const [sourceDocRes, extractionRes, lineItemsRes, pagesRes, siblingBillsRes] = await Promise.all([
     supabase
       .from('source_document')
       .select('id, entry_id, original_filename, match_status, claimed_by, claimed_at')
@@ -204,6 +207,15 @@ async function loadDocumentDetail(
       .select('page_number, is_financial_document, skip_reason, classification_confidence')
       .eq('source_document_id', sourceDocumentId)
       .order('page_number'),
+    // Bill rail (§7): every bill sharing this source_document_id, so a
+    // multi-bill PDF can show each sibling's match state at a glance. Only
+    // needs sourceDocumentId, already known from the caller -- no reason to
+    // serialize this behind the rest of this document's own data.
+    supabase
+      .from('document_extraction')
+      .select('id, bill_index, entry_id')
+      .eq('source_document_id', sourceDocumentId)
+      .order('bill_index'),
   ])
 
   const sourceDoc = sourceDocRes.data
@@ -217,7 +229,7 @@ async function loadDocumentDetail(
   // fallback here, not the primary read (plan.md D1).
   const entryId = (extraction.entry_id as number | null) ?? (sourceDoc.entry_id as number | null)
 
-  const [runRes, entryRes, exceptionsRes, hubStatusRes] = await Promise.all([
+  const [runRes, entryRes, exceptionsRes, hubStatusRes, matchedRowsRes, candidateEntriesRes] = await Promise.all([
     extraction.current_extraction_run_id
       ? supabase
           .from('ocr_extraction_run')
@@ -228,7 +240,7 @@ async function loadDocumentDetail(
     entryId
       ? supabase
           .from('entries')
-          .select('id, amount, ubbl_number, invoice_number, vendor_id, hub_status_id')
+          .select('id, amount, ubbl_number, invoice_number, vendor_id, hub_status_id, department_id, admin_head_id, zone_id')
           .eq('id', entryId)
           .maybeSingle()
       : Promise.resolve({ data: null }),
@@ -244,6 +256,21 @@ async function loadDocumentDetail(
     entryId
       ? supabase.from('hub_status').select('id, code, label').order('sort_order')
       : Promise.resolve({ data: [] }),
+    // Match-strip "suggested" state (§7): only meaningful when this bill has
+    // no ledger match yet -- same exclusion-pool pattern as
+    // app/(app)/documents/page.tsx's rankCandidates usage. Run alongside the
+    // rest of this batch rather than serialized after it.
+    entryId === null
+      ? supabase.from('source_document').select('entry_id').eq('match_status', 'matched').not('entry_id', 'is', null)
+      : Promise.resolve({ data: [] }),
+    entryId === null
+      ? supabase
+          .from('entries')
+          .select('id, department_id, vendor_raw, amount, date, ubbl_number, main_number')
+          .eq('is_void', false)
+          .order('date', { ascending: false, nullsFirst: false })
+          .limit(5000)
+      : Promise.resolve({ data: [] }),
   ])
 
   const run = runRes.data as { extraction_confidence: number | null; legibility: 'clear' | 'partial' | 'poor' | null; model: string | null } | null
@@ -254,6 +281,9 @@ async function loadDocumentDetail(
     invoice_number: string | null
     vendor_id: number | null
     hub_status_id: number | null
+    department_id: number | null
+    admin_head_id: number | null
+    zone_id: number | null
   } | null
 
   let entryVendorDisplayName: string | null = null
@@ -266,6 +296,81 @@ async function loadDocumentDetail(
     const { data: hs } = await supabase.from('hub_status').select('code').eq('id', entry.hub_status_id).maybeSingle()
     entryHubStatusCode = (hs?.code as string | undefined) ?? null
   }
+
+  // Stage 3 (Classify, §8) options, scoped to the matched entry's
+  // department -- same pattern as app/(app)/entries/[id]/page.tsx.
+  let adminHeadOptions: { id: number; head_number: number; name: string }[] = []
+  let zoneOptions: { id: number; zone_number: number; name: string }[] = []
+  if (entry?.department_id) {
+    const [adminHeadsRes, zonesRes] = await Promise.all([
+      supabase
+        .from('admin_head')
+        .select('id, head_number, name')
+        .eq('department_id', entry.department_id)
+        .eq('is_active', true)
+        .order('head_number'),
+      supabase
+        .from('zone')
+        .select('id, zone_number, name')
+        .eq('department_id', entry.department_id)
+        .eq('is_active', true)
+        .order('zone_number'),
+    ])
+    adminHeadOptions = (adminHeadsRes.data ?? []).map((h) => ({
+      id: h.id as number,
+      head_number: h.head_number as number,
+      name: h.name as string,
+    }))
+    zoneOptions = (zonesRes.data ?? []).map((z) => ({
+      id: z.id as number,
+      zone_number: z.zone_number as number,
+      name: z.name as string,
+    }))
+  }
+
+  // Match-strip "suggested" state (§7): rank this bill's own OCR'd fields
+  // against the same excluded-if-already-matched candidate pool
+  // app/(app)/documents/page.tsx builds for the inbox. Reused, not
+  // reimplemented -- see lib/matching.ts's rankCandidates.
+  let matchCandidates: MatchCandidate[] = []
+  if (entryId === null) {
+    const matchedEntryIds = new Set((matchedRowsRes.data ?? []).map((r) => r.entry_id as number))
+    const candidatePool: MatchableEntry[] = (candidateEntriesRes.data ?? [])
+      .filter((e) => !matchedEntryIds.has(e.id as number))
+      .map((e) => ({
+        id: e.id as number,
+        vendorRaw: e.vendor_raw as string | null,
+        amount: e.amount as number | null,
+        date: e.date as string | null,
+        departmentId: e.department_id as number | null,
+        ubblNumber: e.ubbl_number as string,
+        mainNumber: e.main_number as string | null,
+      }))
+    matchCandidates = rankCandidates(
+      {
+        vendorName: extraction.vendor_name_ocr as string | null,
+        totalAmount: extraction.total_amount_ocr as number | null,
+        invoiceDate: extraction.invoice_date_ocr as string | null,
+      },
+      candidatePool
+    ).map((c) => ({
+      entryId: c.id,
+      score: c.score,
+      vendorRaw: c.vendorRaw,
+      amount: c.amount,
+      date: c.date,
+      ubblNumber: c.ubblNumber,
+      mainNumber: c.mainNumber,
+    }))
+  }
+
+  const siblingBills: SiblingBill[] = (siblingBillsRes.data ?? [])
+    .map((b) => ({
+      documentExtractionId: b.id as number,
+      billIndex: b.bill_index as number,
+      matched: (b.entry_id as number | null) !== null,
+    }))
+    .sort((a, b) => a.billIndex - b.billIndex)
 
   const lineItems: LineItemDetail[] = (lineItemsRes.data ?? []).map((li) => ({
     id: li.id as number,
@@ -332,6 +437,13 @@ async function loadDocumentDetail(
     entryAmount: entry?.amount ?? null,
     entryVendorId: entry?.vendor_id ?? null,
     entryVendorDisplayName,
+    entryDepartmentId: entry?.department_id ?? null,
+    entryAdminHeadId: entry?.admin_head_id ?? null,
+    entryZoneId: entry?.zone_id ?? null,
+    adminHeadOptions,
+    zoneOptions,
+    matchCandidates,
+    siblingBills,
     claimedBy: sourceDoc.claimed_by as string | null,
     claimedAt: sourceDoc.claimed_at as string | null,
     claimedByIsMe: sourceDoc.claimed_by === user.id,
