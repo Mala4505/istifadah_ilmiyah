@@ -4,7 +4,7 @@ import { createClient } from '@/lib/supabase/server'
 import { getStaffContext } from '@/lib/export/auth'
 import { rankCandidates, type MatchableEntry } from '@/lib/matching'
 import { DocumentInbox } from '@/components/documents/document-inbox'
-import type { CandidateEntryView, InboxDocumentView } from '@/components/documents/types'
+import type { CandidateEntryView, DocumentExtractionSummary, InboxDocumentView } from '@/components/documents/types'
 import { isAdminOrAbove } from '@/lib/auth/roles'
 
 /**
@@ -80,17 +80,43 @@ export default async function DocumentsPage() {
 
   // document_extraction is fetched separately (rather than embedded in the
   // select above) so this file never has to guess whether PostgREST returns
-  // a one-to-one embed as an object or a one-row array for a given
-  // supabase-js version — a plain second query + Map is unambiguous either way.
+  // a one-to-many embed as an array in every supabase-js version — a plain
+  // second query + grouped Map is unambiguous either way.
+  //
+  // 1:many per source_document since 20260817000002 (a scanned PDF can
+  // contain several distinct bills) — grouped into a Map<number, Extraction[]>
+  // rather than last-row-wins, so a multi-bill document doesn't silently
+  // drop every bill but one (plan.md D4 / checklist 1.10).
+  interface ExtractionRow {
+    id: number
+    source_document_id: number
+    bill_index: number
+    vendor_name_ocr: string | null
+    invoice_date_ocr: string | null
+    invoice_number_ocr: string | null
+    total_amount_ocr: number | null
+  }
+
   const { data: extractionsData } =
     docIds.length > 0
       ? await supabase
           .from('document_extraction')
-          .select('id, source_document_id, vendor_name_ocr, invoice_date_ocr, invoice_number_ocr, total_amount_ocr')
+          .select(
+            'id, source_document_id, bill_index, vendor_name_ocr, invoice_date_ocr, invoice_number_ocr, total_amount_ocr'
+          )
           .in('source_document_id', docIds)
-      : { data: [] as never[] }
+          .order('bill_index', { ascending: true })
+      : { data: [] as ExtractionRow[] }
 
-  const extractionByDocId = new Map((extractionsData ?? []).map((e) => [e.source_document_id, e]))
+  const extractionsByDocId = new Map<number, ExtractionRow[]>()
+  for (const extraction of extractionsData ?? []) {
+    const existing = extractionsByDocId.get(extraction.source_document_id)
+    if (existing) {
+      existing.push(extraction)
+    } else {
+      extractionsByDocId.set(extraction.source_document_id, [extraction])
+    }
+  }
 
   // Failure reasons are fetched separately, only for documents currently
   // sitting in 'failed' — most documents never fail, so this is a small,
@@ -156,27 +182,40 @@ export default async function DocumentsPage() {
   const departmentNameById = new Map((departmentsData ?? []).map((d) => [d.id, d.name as string]))
 
   const inboxDocuments: InboxDocumentView[] = docs.map((doc) => {
-    const extraction = extractionByDocId.get(doc.id) ?? null
+    const extractions = extractionsByDocId.get(doc.id) ?? []
 
-    const candidates: CandidateEntryView[] = extraction
-      ? rankCandidates(
-          {
-            vendorName: extraction.vendor_name_ocr,
-            totalAmount: extraction.total_amount_ocr,
-            invoiceDate: extraction.invoice_date_ocr,
-          },
-          candidatePool
-        ).map((c) => ({
-          entryId: c.id,
-          score: c.score,
-          vendorRaw: c.vendorRaw,
-          amount: c.amount,
-          date: c.date,
-          ubblNumber: c.ubblNumber,
-          mainNumber: c.mainNumber,
-          departmentName: c.departmentId !== null ? departmentNameById.get(c.departmentId) ?? null : null,
-        }))
-      : []
+    // Ranked once per bill, against that bill's own OCR fields — a 4-bill
+    // PDF must not rank every bill against whichever one happened to be
+    // extracted last (plan.md D4 / checklist 1.13).
+    const bills: DocumentExtractionSummary[] = extractions.map((extraction) => {
+      const candidates: CandidateEntryView[] = rankCandidates(
+        {
+          vendorName: extraction.vendor_name_ocr,
+          totalAmount: extraction.total_amount_ocr,
+          invoiceDate: extraction.invoice_date_ocr,
+        },
+        candidatePool
+      ).map((c) => ({
+        entryId: c.id,
+        score: c.score,
+        vendorRaw: c.vendorRaw,
+        amount: c.amount,
+        date: c.date,
+        ubblNumber: c.ubblNumber,
+        mainNumber: c.mainNumber,
+        departmentName: c.departmentId !== null ? departmentNameById.get(c.departmentId) ?? null : null,
+      }))
+
+      return {
+        id: extraction.id,
+        billIndex: extraction.bill_index,
+        vendorNameOcr: extraction.vendor_name_ocr,
+        invoiceDateOcr: extraction.invoice_date_ocr,
+        invoiceNumberOcr: extraction.invoice_number_ocr,
+        totalAmountOcr: extraction.total_amount_ocr,
+        candidates,
+      }
+    })
 
     return {
       id: doc.id,
@@ -185,16 +224,7 @@ export default async function DocumentsPage() {
       matchStatus: doc.match_status,
       uploadedAt: doc.uploaded_at,
       pageCount: doc.page_count,
-      extraction: extraction
-        ? {
-            id: extraction.id,
-            vendorNameOcr: extraction.vendor_name_ocr,
-            invoiceDateOcr: extraction.invoice_date_ocr,
-            invoiceNumberOcr: extraction.invoice_number_ocr,
-            totalAmountOcr: extraction.total_amount_ocr,
-          }
-        : null,
-      candidates,
+      extraction: bills,
       failureReason: doc.upload_status === 'failed' ? failureReasonByDocId.get(doc.id) ?? null : null,
     }
   })

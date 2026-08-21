@@ -160,11 +160,25 @@ export function DocumentCard({
   const [manualSelection, setManualSelection] = useState<EntrySearchResult | null>(null)
   const [previewPending, setPreviewPending] = useState(false)
   const [extractPending, setExtractPending] = useState(false)
-  const [flagOpen, setFlagOpen] = useState(false)
-  const [flagNote, setFlagNote] = useState('')
-  const [flagPending, setFlagPending] = useState(false)
+  // Keyed by bill (document_extraction.id) — a multi-bill document flags and
+  // corrects each bill independently, so one shared flagOpen/flagNote pair
+  // would mix notes across bills.
+  const [flagStateByBillId, setFlagStateByBillId] = useState<
+    Record<number, { open: boolean; note: string; pending: boolean }>
+  >({})
 
-  const hasExtraction = document.extraction !== null
+  function flagStateFor(billId: number) {
+    return flagStateByBillId[billId] ?? { open: false, note: '', pending: false }
+  }
+
+  function patchFlagState(billId: number, patch: Partial<{ open: boolean; note: string; pending: boolean }>) {
+    setFlagStateByBillId((current) => ({
+      ...current,
+      [billId]: { ...(current[billId] ?? { open: false, note: '', pending: false }), ...patch },
+    }))
+  }
+
+  const hasExtraction = document.extraction.length > 0
   // 'processing' is included alongside 'uploaded'/'failed' because nothing in
   // this codebase reclaims a job whose worker died mid-run (the sweeper
   // described in MASTER-PLAN §3.11 was never implemented) — without this, a
@@ -220,28 +234,27 @@ export function DocumentCard({
     })
   }
 
-  function handleFlagSubmit() {
-    const note = flagNote.trim()
+  function handleFlagSubmit(billId: number) {
+    const note = flagStateFor(billId).note.trim()
     if (!note) {
       toast.error('Describe what looks wrong before flagging.')
       return
     }
-    setFlagPending(true)
+    patchFlagState(billId, { pending: true })
     void (async () => {
       const result = await flagReviewException({
         sourceDocumentId: document.id,
-        documentExtractionId: document.extraction!.id,
+        documentExtractionId: billId,
         entryId: chosenEntryId,
         note,
       })
-      setFlagPending(false)
       if (!result.ok) {
+        patchFlagState(billId, { pending: false })
         toastError(result.error, { context: 'document-card' })
         return
       }
       toast.success('Flagged for a closer look.')
-      setFlagNote('')
-      setFlagOpen(false)
+      patchFlagState(billId, { pending: false, note: '', open: false })
     })()
   }
 
@@ -370,77 +383,108 @@ export function DocumentCard({
             finishes.
           </p>
         ) : (
-          <div className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
-            <Field label="Vendor" value={document.extraction!.vendorNameOcr ?? '—'} />
-            <Field label="Invoice date" value={formatDate(document.extraction!.invoiceDateOcr)} />
-            <Field label="Invoice #" value={document.extraction!.invoiceNumberOcr ?? '—'} />
-            <Field label="Total" value={formatMoney(document.extraction!.totalAmountOcr)} />
-          </div>
-        )}
-
-        {hasExtraction && (
-          <div className="flex flex-col gap-2">
-            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Suggested matches</p>
-            {document.candidates.length === 0 ? (
-              <p className="text-xs text-muted-foreground">
-                No close matches found — this may genuinely have no entry. Search manually or park it below.
-              </p>
-            ) : (
-              <div className="flex flex-col gap-1.5">
-                {document.candidates.map((candidate) => (
-                  <CandidateRow
-                    key={candidate.entryId}
-                    candidate={candidate}
-                    selected={chosenEntryId === candidate.entryId && !showingManualSelection}
-                    onSelect={() => selectCandidate(candidate)}
-                    disabled={!canAct}
-                  />
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-
-        {hasExtraction && (
-          <div className="flex flex-col gap-2">
-            <button
-              type="button"
-              onClick={() => setFlagOpen((v) => !v)}
-              className="flex items-center gap-1.5 self-start text-xs font-medium text-muted-foreground hover:text-foreground"
-            >
-              <Flag className="h-3.5 w-3.5" aria-hidden="true" />
-              {flagOpen ? 'Hide' : 'A field looks wrong?'}
-            </button>
-            {flagOpen && (
-              <div className="flex flex-col gap-2.5 rounded-md border border-border p-3">
-                <a
-                  href={`/review?id=${document.extraction!.id}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1.5 self-start text-xs font-medium text-primary hover:underline"
+          // One block per bill — document_extraction is 1:many per document
+          // since 20260817000002 (a scanned PDF can contain several distinct
+          // bills). Each bill gets its own fields, its own candidates (ranked
+          // against that bill's OCR, not the document's), and its own
+          // "Correct in Review" link, so bill 2 of 4 is never invisible.
+          <div className="flex flex-col gap-4">
+            {document.extraction.map((bill, index) => {
+              const flagState = flagStateFor(bill.id)
+              return (
+                <div
+                  key={bill.id}
+                  className={
+                    document.extraction.length > 1
+                      ? 'flex flex-col gap-3 rounded-md border border-border p-3'
+                      : 'flex flex-col gap-3'
+                  }
                 >
-                  <PenLine className="h-3.5 w-3.5" aria-hidden="true" />
-                  Correct the extracted fields in Review
-                </a>
-                <p className="text-[11px] text-muted-foreground">
-                  Opens the field-by-field review screen in a new tab, where the corrected value is saved as the
-                  record of truth (your place here in the inbox is kept).
-                </p>
-                <div className="h-px bg-border" />
-                <p className="text-[11px] text-muted-foreground">
-                  Not sure of the right value, or want someone else to check first? Leave a note instead:
-                </p>
-                <Textarea
-                  value={flagNote}
-                  onChange={(e) => setFlagNote(e.target.value)}
-                  placeholder="e.g. Total doesn't match the PDF — looks like tax was double-counted."
-                  className="min-h-16 text-sm"
-                />
-                <Button type="button" size="sm" onClick={handleFlagSubmit} disabled={flagPending} className="self-start">
-                  {flagPending ? 'Flagging…' : 'Flag for a closer look'}
-                </Button>
-              </div>
-            )}
+                  {document.extraction.length > 1 && (
+                    <p className="text-xs font-semibold text-foreground">
+                      Bill {index + 1} of {document.extraction.length}
+                    </p>
+                  )}
+
+                  <div className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
+                    <Field label="Vendor" value={bill.vendorNameOcr ?? '—'} />
+                    <Field label="Invoice date" value={formatDate(bill.invoiceDateOcr)} />
+                    <Field label="Invoice #" value={bill.invoiceNumberOcr ?? '—'} />
+                    <Field label="Total" value={formatMoney(bill.totalAmountOcr)} />
+                  </div>
+
+                  <div className="flex flex-col gap-2">
+                    <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                      Suggested matches
+                    </p>
+                    {bill.candidates.length === 0 ? (
+                      <p className="text-xs text-muted-foreground">
+                        No close matches found — this may genuinely have no entry. Search manually or park it below.
+                      </p>
+                    ) : (
+                      <div className="flex flex-col gap-1.5">
+                        {bill.candidates.map((candidate) => (
+                          <CandidateRow
+                            key={candidate.entryId}
+                            candidate={candidate}
+                            selected={chosenEntryId === candidate.entryId && !showingManualSelection}
+                            onSelect={() => selectCandidate(candidate)}
+                            disabled={!canAct}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex flex-col gap-2">
+                    <button
+                      type="button"
+                      onClick={() => patchFlagState(bill.id, { open: !flagState.open })}
+                      className="flex items-center gap-1.5 self-start text-xs font-medium text-muted-foreground hover:text-foreground"
+                    >
+                      <Flag className="h-3.5 w-3.5" aria-hidden="true" />
+                      {flagState.open ? 'Hide' : 'A field looks wrong?'}
+                    </button>
+                    {flagState.open && (
+                      <div className="flex flex-col gap-2.5 rounded-md border border-border p-3">
+                        <a
+                          href={`/review?id=${bill.id}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1.5 self-start text-xs font-medium text-primary hover:underline"
+                        >
+                          <PenLine className="h-3.5 w-3.5" aria-hidden="true" />
+                          Correct the extracted fields in Review
+                        </a>
+                        <p className="text-[11px] text-muted-foreground">
+                          Opens the field-by-field review screen in a new tab, where the corrected value is saved as
+                          the record of truth (your place here in the inbox is kept).
+                        </p>
+                        <div className="h-px bg-border" />
+                        <p className="text-[11px] text-muted-foreground">
+                          Not sure of the right value, or want someone else to check first? Leave a note instead:
+                        </p>
+                        <Textarea
+                          value={flagState.note}
+                          onChange={(e) => patchFlagState(bill.id, { note: e.target.value })}
+                          placeholder="e.g. Total doesn't match the PDF — looks like tax was double-counted."
+                          className="min-h-16 text-sm"
+                        />
+                        <Button
+                          type="button"
+                          size="sm"
+                          onClick={() => handleFlagSubmit(bill.id)}
+                          disabled={flagState.pending}
+                          className="self-start"
+                        >
+                          {flagState.pending ? 'Flagging…' : 'Flag for a closer look'}
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )
+            })}
           </div>
         )}
 

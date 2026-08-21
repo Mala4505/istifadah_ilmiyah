@@ -1,7 +1,7 @@
 'use client'
 
-import { useState } from 'react'
-import { ChevronLeft, ChevronRight, Eye } from 'lucide-react'
+import { Fragment, useState } from 'react'
+import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Eye, PenLine } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Dialog, DialogContent, DialogFooter, DialogTitle } from '@/components/ui/dialog'
@@ -51,6 +51,19 @@ export function DocumentTable({
 }) {
   const [pageIndex, setPageIndex] = useState(0)
   const [openDocumentId, setOpenDocumentId] = useState<number | null>(null)
+  // Multi-bill documents (document_extraction is 1:many per source_document
+  // since 20260817000002) expand in place to a per-bill list rather than
+  // collapsing to whichever bill happened to sort last.
+  const [expandedDocumentIds, setExpandedDocumentIds] = useState<Set<number>>(new Set())
+
+  function toggleExpanded(documentId: number) {
+    setExpandedDocumentIds((current) => {
+      const next = new Set(current)
+      if (next.has(documentId)) next.delete(documentId)
+      else next.add(documentId)
+      return next
+    })
+  }
 
   const pageCount = Math.max(1, Math.ceil(documents.length / PAGE_SIZE))
   const clampedPageIndex = Math.min(pageIndex, pageCount - 1)
@@ -74,52 +87,105 @@ export function DocumentTable({
           </TableHeader>
           <TableBody>
             {pageDocuments.map((doc) => {
+              const bills = doc.extraction
+              const isMultiBill = bills.length > 1
+              const isExpanded = expandedDocumentIds.has(doc.id)
+              const colSpan = 5 + (canAct ? 1 : 0)
+
               return (
-                <TableRow key={doc.id}>
-                  {canAct && (
-                    <TableCell>
-                      <Checkbox
-                        checked={selected.has(doc.id)}
-                        onCheckedChange={() => onToggleSelected(doc.id)}
-                        aria-label={`Select ${doc.originalFilename}`}
-                      />
-                    </TableCell>
-                  )}
-                  <TableCell className="max-w-[220px]">
-                    <p className="truncate text-sm font-medium" title={doc.originalFilename}>
-                      {doc.originalFilename}
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      {doc.pageCount ? `${doc.pageCount} page${doc.pageCount === 1 ? '' : 's'}` : '—'}
-                    </p>
-                  </TableCell>
-                  <TableCell className="max-w-[280px]">
-                    {doc.extraction === null ? (
-                      <span className="text-xs text-muted-foreground">Pending extraction</span>
-                    ) : (
-                      <div className="flex flex-col text-xs">
-                        <span className="truncate font-medium" title={doc.extraction.vendorNameOcr ?? '—'}>
-                          {doc.extraction.vendorNameOcr ?? '—'}
-                        </span>
-                        <span className="text-muted-foreground">
-                          {doc.extraction.invoiceNumberOcr ?? '—'} &middot; {formatMoney(doc.extraction.totalAmountOcr)}
-                        </span>
-                      </div>
+                <Fragment key={doc.id}>
+                  <TableRow>
+                    {canAct && (
+                      <TableCell>
+                        <Checkbox
+                          checked={selected.has(doc.id)}
+                          onCheckedChange={() => onToggleSelected(doc.id)}
+                          aria-label={`Select ${doc.originalFilename}`}
+                        />
+                      </TableCell>
                     )}
-                  </TableCell>
-                  <TableCell>
-                    <DocumentStageTracker uploadStatus={doc.uploadStatus} uploadedAt={doc.uploadedAt} size="sm" />
-                  </TableCell>
-                  <TableCell>
-                    <span className="text-xs text-muted-foreground">{formatDateTime(doc.uploadedAt)}</span>
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <Button variant="outline" size="sm" onClick={() => setOpenDocumentId(doc.id)}>
-                      <Eye className="h-3.5 w-3.5" aria-hidden="true" />
-                      <span className="ml-1.5">Review</span>
-                    </Button>
-                  </TableCell>
-                </TableRow>
+                    <TableCell className="max-w-[220px]">
+                      <p className="truncate text-sm font-medium" title={doc.originalFilename}>
+                        {doc.originalFilename}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {doc.pageCount ? `${doc.pageCount} page${doc.pageCount === 1 ? '' : 's'}` : '—'}
+                      </p>
+                    </TableCell>
+                    <TableCell className="max-w-[280px]">
+                      {bills.length === 0 ? (
+                        <span className="text-xs text-muted-foreground">Pending extraction</span>
+                      ) : isMultiBill ? (
+                        <button
+                          type="button"
+                          onClick={() => toggleExpanded(doc.id)}
+                          className="flex items-center gap-1 text-xs font-medium text-primary hover:underline"
+                        >
+                          {isExpanded ? (
+                            <ChevronUp className="h-3.5 w-3.5" aria-hidden="true" />
+                          ) : (
+                            <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />
+                          )}
+                          {bills.length} bills
+                        </button>
+                      ) : (
+                        (() => {
+                          const bill = bills[0]!
+                          return (
+                            <div className="flex flex-col text-xs">
+                              <span className="truncate font-medium" title={bill.vendorNameOcr ?? '—'}>
+                                {bill.vendorNameOcr ?? '—'}
+                              </span>
+                              <span className="text-muted-foreground">
+                                {bill.invoiceNumberOcr ?? '—'} &middot; {formatMoney(bill.totalAmountOcr)}
+                              </span>
+                            </div>
+                          )
+                        })()
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <DocumentStageTracker uploadStatus={doc.uploadStatus} uploadedAt={doc.uploadedAt} size="sm" />
+                    </TableCell>
+                    <TableCell>
+                      <span className="text-xs text-muted-foreground">{formatDateTime(doc.uploadedAt)}</span>
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <Button variant="outline" size="sm" onClick={() => setOpenDocumentId(doc.id)}>
+                        <Eye className="h-3.5 w-3.5" aria-hidden="true" />
+                        <span className="ml-1.5">Review</span>
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                  {isMultiBill && isExpanded && (
+                    <TableRow className="bg-muted/20 hover:bg-muted/20">
+                      <TableCell colSpan={colSpan} className="py-2">
+                        <div className="flex flex-col gap-1.5 pl-1">
+                          {bills.map((bill, index) => (
+                            <div
+                              key={bill.id}
+                              className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border border-border bg-background px-3 py-1.5 text-xs"
+                            >
+                              <span className="font-semibold text-muted-foreground">Bill {index + 1}</span>
+                              <span className="font-medium">{bill.vendorNameOcr ?? '(no vendor)'}</span>
+                              <span className="text-muted-foreground">{bill.invoiceNumberOcr ?? '—'}</span>
+                              <span className="text-muted-foreground">{formatMoney(bill.totalAmountOcr)}</span>
+                              <a
+                                href={`/review?id=${bill.id}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="ml-auto inline-flex items-center gap-1 font-medium text-primary hover:underline"
+                              >
+                                <PenLine className="h-3 w-3" aria-hidden="true" />
+                                Correct in Review
+                              </a>
+                            </div>
+                          ))}
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </Fragment>
               )
             })}
           </TableBody>

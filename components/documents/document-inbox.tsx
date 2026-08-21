@@ -33,7 +33,7 @@ export function DocumentInbox({
   const router = useRouter()
   const [documents, setDocuments] = useState(initialDocuments)
   const [chosenByDocument, setChosenByDocument] = useState<Map<number, number | null>>(
-    () => new Map(initialDocuments.map((d) => [d.id, d.candidates[0]?.entryId ?? null]))
+    () => new Map(initialDocuments.map((d) => [d.id, d.extraction[0]?.candidates[0]?.entryId ?? null]))
   )
   const [selected, setSelected] = useState<Set<number>>(new Set())
   const [bulkPending, setBulkPending] = useState(false)
@@ -44,7 +44,10 @@ export function DocumentInbox({
     setChosenByDocument((current) => {
       const next = new Map<number, number | null>()
       for (const doc of initialDocuments) {
-        next.set(doc.id, current.has(doc.id) ? current.get(doc.id) ?? null : doc.candidates[0]?.entryId ?? null)
+        next.set(
+          doc.id,
+          current.has(doc.id) ? current.get(doc.id) ?? null : doc.extraction[0]?.candidates[0]?.entryId ?? null
+        )
       }
       return next
     })
