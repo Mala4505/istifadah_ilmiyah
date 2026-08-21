@@ -24,6 +24,7 @@ import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { normalizeUnit } from '@/lib/normalize'
 import {
   addLineItem,
@@ -182,6 +183,12 @@ export function ReviewWorkspace({
   const [lineItems, setLineItems] = useState<LineItemFormState[]>(() => buildLineItemState(detail))
   const [vendorId, setVendorId] = useState<number | null>(detail.entryVendorId)
   const [vendorAutocompleteOpen, setVendorAutocompleteOpen] = useState(false)
+
+  // Redesign plan §2: PdfViewer owns pageNumber/numPages internally and only
+  // exposed an imperative nextPage/prevPage/goToPage handle before this --
+  // the nav cluster's Page group needs the current position too, so PdfViewer
+  // reports it back here on every change via onPageInfoChange.
+  const [pdfPageInfo, setPdfPageInfo] = useState({ pageNumber: 1, numPages: 0 })
 
   // Checklist 4.2: the toolbar's "N of M to check" stepper. Fields carry a
   // stable `data-uncertain-index` (their position in detail.uncertainFields,
@@ -832,45 +839,32 @@ export function ReviewWorkspace({
         <Button type="button" size="sm" variant="outline" onClick={() => setExceptionOpen(true)} disabled={formDisabled}>
           Flag exception (E)
         </Button>
-        <Button type="button" size="sm" variant="outline" onClick={requestReExtract} disabled={reExtracting}>
-          {/* Named because this control forces Sonnet, unlike the Documents
-              inbox's "Extract now (Haiku)" — and Sonnet costs materially
-              more per document, so the choice should be deliberate. */}
-          {reExtracting ? 'Re-extracting…' : 'Re-extract with Sonnet (Shift+R)'}
-        </Button>
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          onClick={openHubStatus}
-          disabled={!detail.canSetHubStatus || formDisabled}
-        >
-          Hub status (S)
-        </Button>
+        {/* Plan §3: Re-extract/Hub status are deliberate, occasional
+            overrides -- moved behind "More" so they stop competing for
+            attention with Save/Flag on every ordinary bill. Handlers,
+            disabled conditions and labels below are unchanged from before. */}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button type="button" variant="outline" size="sm">
+              More
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start">
+            <DropdownMenuItem onClick={requestReExtract} disabled={reExtracting}>
+              {/* Named because this control forces Sonnet, unlike the
+                  Documents inbox's "Extract now (Haiku)" — and Sonnet costs
+                  materially more per document, so the choice should be
+                  deliberate. */}
+              {reExtracting ? 'Re-extracting…' : 'Re-extract with Sonnet (Shift+R)'}
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={openHubStatus} disabled={!detail.canSetHubStatus || formDisabled}>
+              Hub status (S)
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
         <Button type="button" size="sm" variant="ghost" className="ml-auto" onClick={() => setShortcutsOpen(true)}>
           Shortcuts (?)
         </Button>
-        <Button
-          type="button"
-          size="sm"
-          variant="ghost"
-          disabled={prevId === null}
-          onClick={() => requestGoToDocument(prevId)}
-        >
-          ← Prev doc (PgUp)
-        </Button>
-        <Button
-          type="button"
-          size="sm"
-          variant="ghost"
-          disabled={nextId === null}
-          onClick={() => requestGoToDocument(nextId)}
-        >
-          Next doc (PgDn) →
-        </Button>
-        <span className="text-xs text-muted-foreground">
-          Document {currentIndex + 1} of {queue.length}
-        </span>
         {detail.extractionConfidence !== null || detail.model || detail.legibility ? (
           <span
             className={`rounded-full border px-2 py-0.5 text-xs ${CONFIDENCE_BADGE_CLASSES[tint]}`}
@@ -921,10 +915,60 @@ export function ReviewWorkspace({
         ) : null}
       </div>
 
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <StageProgress verify={verifyStatus} connect={connectStatus} classify={classifyStatus} />
+      {/* Plan §2: one card, three adjacent groups (Bill / Page / This PDF) --
+          replaces the toolbar's Prev/Next-doc buttons, pdf-viewer.tsx's own
+          page-nav row, and the sibling-bill row that used to live paired
+          with StageProgress below. */}
+      <div className="flex flex-wrap items-center gap-2 rounded-md border border-border bg-background px-2 py-1.5">
+        <span className="text-xs text-muted-foreground">
+          Document {currentIndex + 1} of {queue.length}
+        </span>
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          disabled={prevId === null}
+          onClick={() => requestGoToDocument(prevId)}
+        >
+          ← Prev doc (PgUp)
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          disabled={nextId === null}
+          onClick={() => requestGoToDocument(nextId)}
+        >
+          Next doc (PgDn) →
+        </Button>
+
+        <div className="h-4 w-px bg-border" />
+
+        <span className="text-xs text-muted-foreground">
+          {pdfPageInfo.numPages > 0 ? `Page ${pdfPageInfo.pageNumber} / ${pdfPageInfo.numPages}` : '—'}
+        </span>
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          disabled={pdfPageInfo.pageNumber <= 1}
+          onClick={() => pdfViewerRef.current?.prevPage()}
+        >
+          ← Prev page
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          disabled={pdfPageInfo.pageNumber >= pdfPageInfo.numPages}
+          onClick={() => pdfViewerRef.current?.nextPage()}
+        >
+          Next page →
+        </Button>
+
         {detail.billCount > 1 ? (
-          <div className="flex flex-wrap items-center gap-1.5">
+          <>
+            <div className="h-4 w-px bg-border" />
             <span className="text-xs text-muted-foreground">Bills in this PDF:</span>
             {detail.siblingBills.map((bill) => (
               <button
@@ -943,8 +987,12 @@ export function ReviewWorkspace({
                 {bill.billIndex + 1}
               </button>
             ))}
-          </div>
+          </>
         ) : null}
+      </div>
+
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <StageProgress verify={verifyStatus} connect={connectStatus} classify={classifyStatus} />
       </div>
 
       <MatchStrip
@@ -970,6 +1018,7 @@ export function ReviewWorkspace({
             pages={detail.pages}
             uncertainFields={detail.uncertainFields}
             collapsed={paneMode === 'collapsed'}
+            onPageInfoChange={(pageNumber, numPages) => setPdfPageInfo({ pageNumber, numPages })}
           />
         </div>
 
