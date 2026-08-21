@@ -7,6 +7,17 @@ import { withApiLogging } from '@/lib/api-log'
 import { isAdminOrAbove } from '@/lib/auth/roles'
 
 export const runtime = 'nodejs'
+// A commit is one Postgres transaction (see lib/import/run-import.ts's header
+// comment) doing budget-head/vendor/status resolution, an entries upsert, and
+// a row-log write per row — roughly half a dozen round trips per row over the
+// session pooler. A few hundred rows at tens of ms each stays well under a
+// minute, but a large workbook (thousands of rows) can run past that. The
+// ingest route's 60s fits a single document; this is a bulk multi-row
+// operation, so it gets a more generous ceiling. 180s stays comfortably
+// under Vercel Pro's 300s cap (so a genuine runaway still fails loud rather
+// than silently hitting a platform-wide limit first) while giving several
+// times the ingest route's budget for the larger unit of work.
+export const maxDuration = 180
 
 /**
  * Import endpoint (MASTER-PLAN §10, §3.6, §4.4c). Accepts a multipart file

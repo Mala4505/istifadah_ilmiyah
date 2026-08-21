@@ -119,7 +119,11 @@ export function ImportWorkspace({
       }
       onCommitted?.()
     } catch {
-      setFormError('Could not reach the server.')
+      // Unlike a dry run (rolled back server-side, always safe to retry), a
+      // commit that loses its response mid-flight may have already committed
+      // its transaction. Blindly resubmitting risks a duplicate import, so
+      // this steers toward checking batch history instead of retrying.
+      setFormError('The import may still be running. Check batch history before retrying.')
     } finally {
       setRunning('idle')
     }
@@ -141,6 +145,15 @@ export function ImportWorkspace({
 
   const activeResult = committed ?? preview
   const activeRows: RowLogEntry[] = activeResult?.rowLog ?? []
+  // The commit button is only reachable once a dry run's preview is on
+  // screen (it lives in the `activeResult` block below, gated on
+  // `!committed`), so `preview.rowCount` — a real count already returned by
+  // the dry run, not a live/incrementing figure — is available whenever a
+  // commit can actually be triggered. Fall back to a generic label only for
+  // the case that stops being true.
+  const commitLabel = preview?.rowCount
+    ? `Committing ${preview.rowCount.toLocaleString()} rows…`
+    : 'Committing…'
 
   return (
     <Card>
@@ -212,15 +225,21 @@ export function ImportWorkspace({
           </div>
         )}
 
-        {running === 'dry_run' && (
+        {(running === 'dry_run' || running === 'commit') && (
           <div className="flex flex-col gap-2">
+            {running === 'commit' && <p className="text-sm text-muted-foreground">{commitLabel}</p>}
             <Skeleton className="h-4 w-64" />
             <Skeleton className="h-24 w-full" />
           </div>
         )}
 
         {activeResult && (
-          <div className="flex flex-col gap-4 border-t border-border pt-4">
+          <div
+            className={cn(
+              'flex flex-col gap-4 border-t border-border pt-4',
+              running === 'commit' && 'pointer-events-none opacity-40'
+            )}
+          >
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="flex items-center gap-2">
                 <BatchStatusBadge status={activeResult.status} />
@@ -231,7 +250,7 @@ export function ImportWorkspace({
               </div>
               {!committed && activeResult.status !== 'failed' && (
                 <Button onClick={handleCommit} disabled={running !== 'idle'}>
-                  {running === 'commit' ? 'Committing…' : 'Commit this import'}
+                  {running === 'commit' ? commitLabel : 'Commit this import'}
                 </Button>
               )}
             </div>
