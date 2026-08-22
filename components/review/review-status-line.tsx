@@ -5,8 +5,17 @@
  * Replaces three separate places (StageProgress's chip row, a standalone
  * MatchStrip card, and a standalone Classify bar at the page bottom) with one
  * card, one row, three segments -- each carrying its step's real control, not
- * just a status label. Supersedes the old stage-progress.tsx entirely (its
- * StageChip styling lives on here as SegmentLabel).
+ * just a status label. Supersedes the old stage-progress.tsx entirely.
+ *
+ * Redesign plan §4 (second pass): the three segments used to be bordered
+ * flex-1 boxes side by side, each with its own "1 Verify" pill. Now it's one
+ * horizontal stepper -- a numbered/check circle + label per step, connected
+ * by a thin line that's the flex-growing element (not the controls, which
+ * stay their natural/fixed width) so the row reads as one continuous line
+ * spanning the full width instead of three boxes. `overflow-x-auto` is the
+ * fallback on narrow viewports -- the row stays one line and scrolls instead
+ * of wrapping into a stack, since a wrapped stepper stops reading as a
+ * stepper.
  *
  * This component owns no state of its own -- every value and handler is
  * lifted from review-workspace.tsx (vendorAutocompleteOpen, the uncertain-
@@ -14,9 +23,9 @@
  * exactly one source of truth for each, same as before this file existed.
  */
 
+import { Check, ChevronsUpDown, Search } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Combobox } from '@/components/ui/combobox'
-import { Label } from '@/components/ui/label'
 import type { MatchCandidate, UncertainField } from '@/lib/review/types'
 import { MatchStrip } from './match-strip'
 
@@ -27,21 +36,27 @@ const NONE = '__none__'
 
 export type StageStatus = 'done' | 'current' | 'blocked'
 
-function SegmentLabel({ index, label, status }: { index: number; label: string; status: StageStatus }) {
+function StepCircle({ index, status }: { index: number; status: StageStatus }) {
   const styles =
     status === 'done'
-      ? 'border-emerald-300 bg-emerald-50 text-emerald-900 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-200'
+      ? 'border-emerald-500 bg-emerald-500 text-white dark:border-emerald-600 dark:bg-emerald-600'
       : status === 'current'
-        ? 'border-blue-300 bg-blue-50 text-blue-900 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-200'
+        ? 'border-primary bg-primary text-primary-foreground'
         : 'border-border bg-muted text-muted-foreground'
 
   return (
-    <span className={`flex shrink-0 items-center gap-1.5 rounded-full border px-2 py-0.5 text-xs font-medium ${styles}`}>
-      <span className="font-semibold">{index}</span>
-      {label}
-      {status === 'done' ? ' ✓' : null}
+    <span
+      className={`flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-full border text-[11px] font-semibold leading-none ${styles}`}
+    >
+      {status === 'done' ? <Check className="h-3 w-3" aria-hidden="true" /> : index}
     </span>
   )
+}
+
+// The stretching element between steps -- flex-1 so IT fills leftover width,
+// not the step controls either side of it (plan §4's explicit ask).
+function Connector() {
+  return <div aria-hidden="true" className="h-px min-w-3 flex-1 bg-border" />
 }
 
 export function ReviewStatusLine({
@@ -105,41 +120,45 @@ export function ReviewStatusLine({
   zoneOptions: { id: number; zone_number: number; name: string }[]
 }) {
   return (
-    <div className="flex flex-col divide-y divide-border rounded-md border border-border bg-background text-sm lg:flex-row lg:divide-x lg:divide-y-0">
+    <div className="flex w-full items-center gap-2 overflow-x-auto rounded-md border border-border bg-background px-3 py-2 text-sm">
       {/* Verify */}
-      <div className="flex flex-1 flex-wrap items-center gap-2 px-2 py-1.5">
-        <SegmentLabel index={1} label="Verify" status={verifyStatus} />
-        <span className="truncate font-medium">{vendorName || 'Vendor not set'}</span>
-        <span
-          className={`shrink-0 rounded-full border px-2 py-0.5 text-xs ${
-            vendorId !== null
-              ? 'border-emerald-300 bg-emerald-50 text-emerald-900 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-200'
-              : 'border-amber-300 bg-amber-50 text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200'
-          }`}
+      <div className="flex shrink-0 items-center gap-2">
+        <StepCircle index={1} status={verifyStatus} />
+        <span className="text-xs font-medium text-muted-foreground">Verify</span>
+        <Button
+          type="button"
+          variant="outline"
+          onClick={onOpenVendorPicker}
+          disabled={formDisabled}
+          title="Change vendor (/)"
+          className="h-8 w-44 justify-between gap-1.5 px-2 text-xs font-normal"
         >
-          {vendorId !== null ? 'Linked vendor' : 'New / unconfirmed vendor'}
-        </span>
-        <Button type="button" size="sm" variant="outline" onClick={onOpenVendorPicker} disabled={formDisabled}>
-          Change vendor (/)
+          <span className="flex min-w-0 items-center gap-1.5">
+            <Search className="h-3.5 w-3.5 shrink-0 opacity-50" aria-hidden="true" />
+            <span className={`truncate ${vendorId === null ? 'text-amber-700 dark:text-amber-400' : ''}`}>
+              {vendorName || 'Vendor not set'}
+            </span>
+          </span>
+          <ChevronsUpDown className="ml-1 h-3.5 w-3.5 shrink-0 opacity-50" aria-hidden="true" />
         </Button>
         {uncertainFields.length > 0 ? (
-          <span className="flex shrink-0 items-center gap-1 rounded-full border border-orange-300 bg-orange-50 px-2 py-0.5 text-xs text-orange-900 dark:border-orange-800 dark:bg-orange-950 dark:text-orange-200">
+          <span className="flex shrink-0 items-center gap-0.5 text-xs text-orange-700 dark:text-orange-400">
             <Button
               type="button"
               size="sm"
               variant="ghost"
-              className="h-5 px-1 text-orange-900 hover:bg-orange-100 dark:text-orange-200 dark:hover:bg-orange-900"
+              className="h-5 w-5 p-0 text-orange-700 hover:bg-orange-100 dark:text-orange-400 dark:hover:bg-orange-900"
               aria-label="Previous flagged field"
               onClick={() => onStepUncertainField(-1)}
             >
               &lsaquo;
             </Button>
-            {uncertainStepIndex !== null ? uncertainStepIndex + 1 : '—'} of {uncertainFields.length} to check
+            {uncertainStepIndex !== null ? uncertainStepIndex + 1 : '—'}/{uncertainFields.length}
             <Button
               type="button"
               size="sm"
               variant="ghost"
-              className="h-5 px-1 text-orange-900 hover:bg-orange-100 dark:text-orange-200 dark:hover:bg-orange-900"
+              className="h-5 w-5 p-0 text-orange-700 hover:bg-orange-100 dark:text-orange-400 dark:hover:bg-orange-900"
               aria-label="Next flagged field"
               onClick={() => onStepUncertainField(1)}
             >
@@ -149,76 +168,71 @@ export function ReviewStatusLine({
         ) : null}
       </div>
 
+      <Connector />
+
       {/* Connect */}
-      <div className="flex flex-1 flex-wrap items-center gap-2 px-2 py-1.5">
-        <SegmentLabel index={2} label="Connect" status={connectStatus} />
-        <div className="min-w-0 flex-1">
-          <MatchStrip
-            bare
-            documentExtractionId={documentExtractionId}
-            sourceDocumentId={sourceDocumentId}
-            entryId={entryId}
-            entryUbblNumber={entryUbblNumber}
-            entryVendorDisplayName={entryVendorDisplayName}
-            entryAmount={entryAmount}
-            liveTotalAmount={liveTotalAmount}
-            matchCandidates={matchCandidates}
-            onChanged={onMatchChanged}
-          />
-        </div>
+      <div className="flex shrink-0 items-center gap-2">
+        <StepCircle index={2} status={connectStatus} />
+        <span className="text-xs font-medium text-muted-foreground">Connect</span>
+        <MatchStrip
+          bare
+          documentExtractionId={documentExtractionId}
+          sourceDocumentId={sourceDocumentId}
+          entryId={entryId}
+          entryUbblNumber={entryUbblNumber}
+          entryVendorDisplayName={entryVendorDisplayName}
+          entryAmount={entryAmount}
+          liveTotalAmount={liveTotalAmount}
+          matchCandidates={matchCandidates}
+          onChanged={onMatchChanged}
+        />
       </div>
+
+      <Connector />
 
       {/* Classify -- only reachable once Connect is done (stage2Done); before
           that, a single line of placeholder text instead of two grayed-out
           selects (plan §4, "nothing renders that the reviewer can't act on
           yet"). */}
-      <div className="flex flex-1 flex-wrap items-center gap-2 px-2 py-1.5">
-        <SegmentLabel index={3} label="Classify" status={classifyStatus} />
+      <div className="flex shrink-0 items-center gap-2">
+        <StepCircle index={3} status={classifyStatus} />
+        <span className="text-xs font-medium text-muted-foreground">Classify</span>
         {!stage2Done ? (
-          <span className="text-xs text-muted-foreground">unlocks once this bill is connected, above</span>
+          <span className="text-xs text-muted-foreground">unlocks once connected</span>
         ) : (
           <>
-            <div className="flex flex-col gap-1">
-              <Label htmlFor="stage3-admin-head-select" className="text-xs">
-                Admin head (H)
-              </Label>
-              <Combobox
-                id="stage3-admin-head-select"
-                value={adminHeadId}
-                onValueChange={onAdminHeadChange}
-                placeholder="Not set"
-                searchPlaceholder="Search admin heads…"
-                options={[
-                  { value: NONE, label: 'Not set', searchValue: 'not set' },
-                  ...adminHeadOptions.map((h) => ({
-                    value: String(h.id),
-                    label: `${h.head_number}. ${h.name}`,
-                    searchValue: `${h.head_number}. ${h.name}`,
-                  })),
-                ]}
-              />
-            </div>
-            <div className="flex flex-col gap-1">
-              <Label htmlFor="stage3-zone-select" className="text-xs">
-                Zone (Z)
-              </Label>
-              <Combobox
-                id="stage3-zone-select"
-                value={zoneId}
-                onValueChange={onZoneChange}
-                placeholder="Not set"
-                searchPlaceholder="Search zones…"
-                options={[
-                  { value: NONE, label: 'Not set', searchValue: 'not set' },
-                  ...zoneOptions.map((z) => ({
-                    value: String(z.id),
-                    label: `${z.zone_number}. ${z.name}`,
-                    searchValue: `${z.zone_number}. ${z.name}`,
-                  })),
-                ]}
-              />
-            </div>
-            <span className="text-xs text-muted-foreground">Saved with the next Save (Ctrl/Cmd+Enter)</span>
+            <Combobox
+              id="stage3-admin-head-select"
+              value={adminHeadId}
+              onValueChange={onAdminHeadChange}
+              placeholder="Admin head (H)"
+              searchPlaceholder="Search admin heads…"
+              className="w-36"
+              options={[
+                { value: NONE, label: 'Not set', searchValue: 'not set' },
+                ...adminHeadOptions.map((h) => ({
+                  value: String(h.id),
+                  label: `${h.head_number}. ${h.name}`,
+                  searchValue: `${h.head_number}. ${h.name}`,
+                })),
+              ]}
+            />
+            <Combobox
+              id="stage3-zone-select"
+              value={zoneId}
+              onValueChange={onZoneChange}
+              placeholder="Zone (Z)"
+              searchPlaceholder="Search zones…"
+              className="w-32"
+              options={[
+                { value: NONE, label: 'Not set', searchValue: 'not set' },
+                ...zoneOptions.map((z) => ({
+                  value: String(z.id),
+                  label: `${z.zone_number}. ${z.name}`,
+                  searchValue: `${z.zone_number}. ${z.name}`,
+                })),
+              ]}
+            />
           </>
         )}
       </div>

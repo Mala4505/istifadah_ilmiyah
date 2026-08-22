@@ -19,7 +19,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition, type PointerEvent as ReactPointerEvent } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
-import { RefreshCw } from 'lucide-react'
+import { ChevronLeft, ChevronRight, RefreshCw } from 'lucide-react'
 import { toastError } from '@/components/ui/error-toast'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -36,7 +36,7 @@ import {
   type SaveVerificationInput,
   type VendorSearchResult,
 } from '@/lib/actions/review'
-import { confidenceTint, type ConfidenceTint, type ReviewDocumentDetail } from '@/lib/review/types'
+import { type ReviewDocumentDetail } from '@/lib/review/types'
 import { type Keymap, isSafeShortcutTarget, matchLineDigit, matchesBinding } from '@/lib/shortcuts/config'
 import { PdfViewer, type PdfViewerHandle } from './pdf-viewer'
 import {
@@ -54,17 +54,6 @@ import { HubStatusDialog } from './hub-status-dialog'
 import { ReviewStatusLine, type StageStatus } from './review-status-line'
 
 const NONE = '__none__'
-
-// L3 (plan §11): confidence used to tint every field in the form; it now
-// lives only here, as one toolbar badge, colour-matched to confidenceTint's
-// same 0.9/0.7 thresholds so the badge and the (removed) field tint would
-// never have disagreed.
-const CONFIDENCE_BADGE_CLASSES: Record<ConfidenceTint, string> = {
-  green: 'border-emerald-300 bg-emerald-50 text-emerald-900 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-200',
-  amber: 'border-amber-300 bg-amber-50 text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200',
-  red: 'border-red-300 bg-red-50 text-red-900 dark:border-red-800 dark:bg-red-950 dark:text-red-200',
-  none: 'border-border bg-background text-muted-foreground',
-}
 
 // L1 (checklist 3.4-3.6): the PDF/form split is a working style, not a
 // per-document decision -- a reviewer who works Collapsed stays Collapsed
@@ -225,7 +214,11 @@ export function ReviewWorkspace({
   shortcutsEnabled,
 }: {
   detail: ReviewDocumentDetail
-  queue: { documentExtractionId: number }[]
+  // Widened for the Document nav (redesign point 4): QueueEntry
+  // (lib/review/types.ts) already carries sourceDocumentId per row -- this
+  // prop just needed to stop narrowing it away so distinct source PDFs can
+  // be walked here without a second query.
+  queue: { documentExtractionId: number; sourceDocumentId: number }[]
   currentIndex: number
   prevId: number | null
   nextId: number | null
@@ -511,6 +504,33 @@ export function ReviewWorkspace({
       cancelled = true
     }
   }, [detail.sourceDocumentId])
+
+  // Redesign point 4: "Document N of M" nav, distinct from "Bill N of M" --
+  // jumps straight to the next/previous UPLOADED PDF (sourceDocumentId)
+  // instead of stepping through every bill inside the current one first.
+  // `queue` is already ordered by severity/confidence/amount (review/page.tsx);
+  // "distinct" here just means first-occurrence order within that same
+  // ordering, so a multi-bill PDF's several queue rows collapse to one entry.
+  const documentNav = useMemo(() => {
+    const order: number[] = []
+    const seen = new Set<number>()
+    for (const q of queue) {
+      if (!seen.has(q.sourceDocumentId)) {
+        seen.add(q.sourceDocumentId)
+        order.push(q.sourceDocumentId)
+      }
+    }
+    const index = order.indexOf(detail.sourceDocumentId)
+    if (index === -1) return null // e.g. the out-of-scope-id path in review/page.tsx
+    const firstExtractionIdFor = (sourceDocumentId: number) =>
+      queue.find((q) => q.sourceDocumentId === sourceDocumentId)?.documentExtractionId ?? null
+    return {
+      index,
+      total: order.length,
+      prevId: index > 0 ? firstExtractionIdFor(order[index - 1]!) : null,
+      nextId: index < order.length - 1 ? firstExtractionIdFor(order[index + 1]!) : null,
+    }
+  }, [queue, detail.sourceDocumentId])
 
   function goToDocument(id: number | null) {
     if (id === null) {
@@ -935,9 +955,26 @@ export function ReviewWorkspace({
     return () => window.removeEventListener('beforeunload', handleBeforeUnload)
   }, [dirty])
 
-  const tint = confidenceTint(detail.extractionConfidence)
   const lineItemSum = lineItems.length > 0 ? lineItems.reduce((sum, li) => sum + (parseNum(li.amount) ?? 0), 0) : null
   const documentTotal = parseNum(header.totalAmount)
+
+  // Redesign point 2: confidence/model/legibility/edited-count/bill-position
+  // used to be five-plus separately-colored pills competing for attention.
+  // Only the open-exceptions pill stays an actual colored badge below (that's
+  // the one thing genuinely asking the reviewer to act) -- these are now
+  // plain informational text, concatenated with the same " · " separator the
+  // old confidence pill used internally.
+  const toolbarInfoParts: string[] = []
+  if (detail.extractionConfidence !== null) {
+    toolbarInfoParts.push(`${Math.round(detail.extractionConfidence * 100)}% confidence`)
+  } else if (detail.model || detail.legibility) {
+    toolbarInfoParts.push('Confidence unknown')
+  }
+  if (detail.model) toolbarInfoParts.push(detail.model)
+  if (detail.legibility) toolbarInfoParts.push(detail.legibility)
+  if (editedFieldCount > 0) toolbarInfoParts.push(`${editedFieldCount} changed from OCR`)
+  if (detail.billCount > 1) toolbarInfoParts.push(`Bill ${detail.billIndex + 1} of ${detail.billCount} in this PDF`)
+  const toolbarInfoText = toolbarInfoParts.join(' · ')
   // 5.19: 'checking' was missing here -- the ClaimBanner visually gates the
   // form while "Checking claim…" is in flight, but the inputs themselves
   // stayed live underneath it, so a fast typist could get edits in before the
@@ -964,20 +1001,14 @@ export function ReviewWorkspace({
         isPending={takingOver}
       />
 
-      {detail.openExceptions.length > 0 ? (
-        <div className="flex flex-wrap gap-2">
-          {detail.openExceptions.map((ex) => (
-            <span
-              key={ex.id}
-              className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200"
-              title={ex.description ?? undefined}
-            >
-              {ex.severity.toUpperCase()} · {ex.exceptionType.replace(/_/g, ' ')}
-            </span>
-          ))}
-        </div>
-      ) : null}
-
+      {/* Redesign (top-chrome mockup, approved): the old toolbar row and
+          nav-cluster row merge into ONE row here -- Save/Flag/More, Bill nav,
+          Document nav, the open-exceptions pill (the only badge left with an
+          actual call to action), then everything else as plain right-aligned
+          muted text. Page-nav (Prev/Next page + "Page N/M") and the
+          sibling-bill circular-pill picker are gone entirely: the PdfViewer's
+          own thumbnail rail already covers page navigation, and the sibling
+          picker was extra, per the design review. */}
       <div className="flex flex-wrap items-center gap-2 rounded-md border border-border bg-background px-2 py-1.5">
         <Button type="button" size="sm" onClick={handleSave} disabled={isSaving || formDisabled}>
           {isSaving ? 'Saving…' : 'Save (Ctrl/Cmd+Enter)'}
@@ -986,9 +1017,9 @@ export function ReviewWorkspace({
           Flag exception (E)
         </Button>
         {/* Plan §3: Re-extract/Hub status are deliberate, occasional
-            overrides -- moved behind "More" so they stop competing for
-            attention with Save/Flag on every ordinary bill. Handlers,
-            disabled conditions and labels below are unchanged from before. */}
+            overrides -- kept behind "More" so they don't compete for
+            attention with Save/Flag on every ordinary bill. Shortcuts (?)
+            folds in here too now, freeing up a toolbar slot for Document nav. */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button type="button" variant="outline" size="sm">
@@ -1006,117 +1037,91 @@ export function ReviewWorkspace({
             <DropdownMenuItem onClick={openHubStatus} disabled={!detail.canSetHubStatus || formDisabled}>
               Hub status (S)
             </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => setShortcutsOpen(true)}>Shortcuts (?)</DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
-        <Button type="button" size="sm" variant="ghost" className="ml-auto" onClick={() => setShortcutsOpen(true)}>
-          Shortcuts (?)
+
+        <div className="h-5 w-px bg-border" />
+
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          className="h-8 w-8 p-0"
+          disabled={prevId === null}
+          onClick={() => requestGoToDocument(prevId)}
+          aria-label="Previous bill"
+          title="Previous bill (PgUp)"
+        >
+          <ChevronLeft className="h-4 w-4" />
         </Button>
-        {detail.extractionConfidence !== null || detail.model || detail.legibility ? (
-          <span
-            className={`rounded-full border px-2 py-0.5 text-xs ${CONFIDENCE_BADGE_CLASSES[tint]}`}
-          >
-            {detail.extractionConfidence !== null ? `${Math.round(detail.extractionConfidence * 100)}% confidence` : 'Confidence unknown'}
-            {detail.model ? ` · ${detail.model}` : ''}
-            {detail.legibility ? ` · ${detail.legibility}` : ''}
-          </span>
-        ) : null}
-        {/* Plan §2/§4: the uncertain-field "N to check" stepper used to live
-            here; it now lives in ReviewStatusLine's Verify segment, wired to
-            the same uncertainStepIndex/stepUncertainField state below -- see
-            that render call. */}
-        {/* 5.17: informational only, unlike the uncertain-fields chip above --
-            editedFields already exists (1.5/L3's blue ring), this just totals
-            it up. No stepper: there's nowhere useful to jump to that the blue
-            rings on the form don't already show at a glance. */}
-        {editedFieldCount > 0 ? (
-          <span className="rounded-full border border-blue-300 bg-blue-50 px-2 py-0.5 text-xs text-blue-900 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-200">
-            {editedFieldCount} changed from OCR
-          </span>
-        ) : null}
-        {detail.billCount > 1 ? (
-          <span className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
-            Bill {detail.billIndex + 1} of {detail.billCount} in this PDF
-          </span>
-        ) : null}
-      </div>
-
-      {/* Plan §2: one card, three adjacent groups (Bill / Page / This PDF) --
-          replaces the toolbar's Prev/Next-doc buttons, pdf-viewer.tsx's own
-          page-nav row, and the sibling-bill row that used to live paired
-          with StageProgress below. */}
-      <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-background px-2 py-1.5">
-        <div className="flex items-center gap-2">
-          <Button
-            type="button"
-            size="sm"
-            variant="ghost"
-            disabled={prevId === null}
-            onClick={() => requestGoToDocument(prevId)}
-          >
-            ← Prev bill (PgUp)
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="ghost"
-            disabled={nextId === null}
-            onClick={() => requestGoToDocument(nextId)}
-          >
-            Next bill (PgDn) →
-          </Button>
-        </div>
-
         <span className="text-xs text-muted-foreground">
           {currentIndex < 0 ? 'Bill (outside current queue)' : `Bill ${currentIndex + 1} of ${queue.length}`}
         </span>
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          className="h-8 w-8 p-0"
+          disabled={nextId === null}
+          onClick={() => requestGoToDocument(nextId)}
+          aria-label="Next bill"
+          title="Next bill (PgDn)"
+        >
+          <ChevronRight className="h-4 w-4" />
+        </Button>
 
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-muted-foreground">
-            {pdfPageInfo.numPages > 0 ? `Page ${pdfPageInfo.pageNumber} / ${pdfPageInfo.numPages}` : '—'}
+        <div className="h-5 w-px bg-border" />
+
+        {/* Redesign point 4: "Document N of M" -- jumps across distinct
+            uploaded PDFs (sourceDocumentId), not just bills inside the
+            current one. Computed from `queue`'s sourceDocumentId in
+            documentNav above; routed through the same requestGoToDocument
+            Prev/Next bill already use (deliberate -- see requestGoToDocument's
+            doc comment and app/(app)/review/page.tsx's header comment for
+            the single-route/server-reload rationale). */}
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          className="h-8 w-8 p-0"
+          disabled={documentNav === null || documentNav.prevId === null}
+          onClick={() => requestGoToDocument(documentNav?.prevId ?? null)}
+          aria-label="Previous document"
+          title="Previous document"
+        >
+          <ChevronLeft className="h-4 w-4" />
+        </Button>
+        <span className="text-xs text-muted-foreground">
+          {documentNav ? `Document ${documentNav.index + 1} of ${documentNav.total}` : 'Document (outside current queue)'}
+        </span>
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          className="h-8 w-8 p-0"
+          disabled={documentNav === null || documentNav.nextId === null}
+          onClick={() => requestGoToDocument(documentNav?.nextId ?? null)}
+          aria-label="Next document"
+          title="Next document"
+        >
+          <ChevronRight className="h-4 w-4" />
+        </Button>
+
+        {/* Redesign point 2: the ONE pill that stays an actual colored badge
+            -- open exceptions are the one thing genuinely asking the
+            reviewer to act. Everything else in this row is plain text. */}
+        {detail.openExceptions.map((ex) => (
+          <span
+            key={ex.id}
+            className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200"
+            title={ex.description ?? undefined}
+          >
+            {ex.severity.toUpperCase()} · {ex.exceptionType.replace(/_/g, ' ')}
           </span>
-          <Button
-            type="button"
-            size="sm"
-            variant="ghost"
-            disabled={pdfPageInfo.pageNumber <= 1}
-            onClick={() => pdfViewerRef.current?.prevPage()}
-          >
-            ← Prev page
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="ghost"
-            disabled={pdfPageInfo.pageNumber >= pdfPageInfo.numPages}
-            onClick={() => pdfViewerRef.current?.nextPage()}
-          >
-            Next page →
-          </Button>
-        </div>
+        ))}
 
-        {detail.billCount > 1 ? (
-          <div className="flex w-full flex-wrap items-center gap-2">
-            <div className="h-4 w-px bg-border" />
-            <span className="text-xs text-muted-foreground">Bills in this PDF:</span>
-            {detail.siblingBills.map((bill) => (
-              <button
-                key={bill.documentExtractionId}
-                type="button"
-                onClick={() => requestGoToDocument(bill.documentExtractionId)}
-                title={bill.matched ? 'Matched' : 'Unmatched'}
-                className={`flex h-6 min-w-6 items-center justify-center rounded-full border px-1.5 text-xs ${
-                  bill.documentExtractionId === detail.documentExtractionId
-                    ? 'border-primary bg-primary text-primary-foreground'
-                    : bill.matched
-                      ? 'border-emerald-300 bg-emerald-50 text-emerald-900 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-200'
-                      : 'border-border bg-background text-muted-foreground'
-                }`}
-              >
-                {bill.billIndex + 1}
-              </button>
-            ))}
-          </div>
-        ) : null}
+        {toolbarInfoText ? <span className="ml-auto text-xs text-muted-foreground">{toolbarInfoText}</span> : null}
       </div>
 
       {/* Plan §4: one card, one row, three segments (Verify/Connect/Classify)

@@ -188,7 +188,7 @@ export default async function ReviewPage({
         <ReviewWorkspace
           key={`${detail.documentExtractionId}:${detail.currentExtractionRunId ?? 'none'}`}
           detail={detail}
-          queue={queue.map((q) => ({ documentExtractionId: q.documentExtractionId }))}
+          queue={queue.map((q) => ({ documentExtractionId: q.documentExtractionId, sourceDocumentId: q.sourceDocumentId }))}
           currentIndex={-1}
           prevId={null}
           nextId={null}
@@ -224,7 +224,7 @@ export default async function ReviewPage({
       <ReviewWorkspace
         key={`${detail.documentExtractionId}:${detail.currentExtractionRunId ?? 'none'}`}
         detail={detail}
-        queue={queue.map((q) => ({ documentExtractionId: q.documentExtractionId }))}
+        queue={queue.map((q) => ({ documentExtractionId: q.documentExtractionId, sourceDocumentId: q.sourceDocumentId }))}
         currentIndex={currentIndex}
         prevId={prevId}
         nextId={nextId}
