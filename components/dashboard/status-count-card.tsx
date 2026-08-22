@@ -23,6 +23,56 @@ export type StatusCount = {
 }
 
 /**
+ * One badge-variant map keyed by semantic state, shared across every status
+ * dimension this card renders — Status, Audit status, and Hub status alike
+ * (§7.4, docs/pre-deploy-findings-and-plan.md: "'Not set' is amber under
+ * Audit status and plain outline under Hub status. 'Approved' is light green
+ * while 'Paid' — also a terminal positive state — is solid dark olive.").
+ * Before this, the page passed in two *different* label-sniffing functions
+ * per dimension (components/entries/format.ts's statusBadgeVariant for
+ * Status/Audit status, hubStatusBadgeVariant for Hub status), so the same
+ * underlying meaning could render two different colours depending on which
+ * dimension happened to produce it. One function, one meaning, one colour.
+ *
+ * Deliberately NOT imported from components/entries/format.ts — that file
+ * carries its own independent badge map for the Entries table (a parallel
+ * fix in progress there), and importing it here would couple the two pieces
+ * of parallel work. This map is local to the dashboard and free to diverge.
+ *
+ * Driven by code first (the small, real code set: not_set/pending/sent_main/
+ * approved/tax_invoice_upload_pending_paid/paid for Status & Audit status;
+ * not_set/awaiting_verification/awaiting_validation for Hub status — see
+ * 20260808000009_entry_status.sql, 20260814000008_audit_status_labels.sql,
+ * 20260808000010_hub_status.sql), with a label-substring fallback for
+ * whatever an unseen future status code turns out to be (the Departmental/
+ * Audit imports auto-insert any status code they haven't seen before).
+ * Order matters: 'Tax Invoice Upload Pending (Paid)' contains both "pending"
+ * and "(Paid)" but is NOT terminal (is_terminal=false) — checking the
+ * in-progress state first keeps it out of the terminal/positive bucket.
+ */
+type SemanticStatusState = 'not-set' | 'positive' | 'warning' | 'neutral'
+
+const SEMANTIC_STATUS_BADGE_VARIANT: Record<SemanticStatusState, BadgeProps['variant']> = {
+  'not-set': 'outline',
+  positive: 'success',
+  warning: 'warning',
+  neutral: 'secondary',
+}
+
+function semanticStatusState(code: string, label: string): SemanticStatusState {
+  const c = code.toLowerCase()
+  const l = label.toLowerCase()
+  if (c === 'not_set' || l === 'not set') return 'not-set'
+  if (c.startsWith('awaiting') || /pending|sent|awaiting|progress/.test(l)) return 'warning'
+  if (/approve|paid|complete|done|verified|validated/.test(l)) return 'positive'
+  return 'neutral'
+}
+
+export function dashboardStatusBadgeVariant(code: string, label: string): BadgeProps['variant'] {
+  return SEMANTIC_STATUS_BADGE_VARIANT[semanticStatusState(code, label)]
+}
+
+/**
  * Compact per-dimension status-count card for the Dashboard (distinct from
  * and in addition to the five stat tiles above it). Every badge with a real
  * `id` links to `/entries` pre-filtered to that status value, using the
@@ -95,7 +145,9 @@ export function StatusCountCard({
               </div>
             )}
 
-            <p className="text-xs text-muted-foreground">{formatNumber(total)} total</p>
+            <p className="text-xs text-muted-foreground">
+              <span className="font-mono">{formatNumber(total)}</span> total
+            </p>
           </>
         )}
       </CardContent>

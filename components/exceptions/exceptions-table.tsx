@@ -9,6 +9,9 @@ import { cn } from '@/lib/utils'
 export interface ExceptionRow {
   id: number
   entry_id: number | null
+  document_extraction_id: number | null
+  import_batch_id: number | null
+  source_document_id: number | null
   exception_type: string
   severity: string
   amount_at_risk: number | null
@@ -104,7 +107,10 @@ export function ExceptionsTable({ exceptions, canResolve }: { exceptions: Except
                     )}
                   </TableCell>
                   <TableCell className="text-right tabular-nums">{formatINR(exception.amount_at_risk)}</TableCell>
-                  <TableCell className="max-w-[24rem] text-sm text-muted-foreground">
+                  <TableCell
+                    className="max-w-[24rem] truncate text-sm text-muted-foreground"
+                    title={exception.description ?? undefined}
+                  >
                     {exception.description ?? '—'}
                   </TableCell>
                   <TableCell>
@@ -133,6 +139,10 @@ export function ExceptionsTable({ exceptions, canResolve }: { exceptions: Except
                         exceptionId={exception.id}
                         amountAtRisk={exception.amount_at_risk}
                         description={exception.description}
+                        exceptionType={exception.exception_type}
+                        entryId={exception.entry_id}
+                        documentExtractionId={exception.document_extraction_id}
+                        sourceDocumentId={exception.source_document_id}
                       />
                     )}
                   </TableCell>

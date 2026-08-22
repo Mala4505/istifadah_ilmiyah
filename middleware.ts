@@ -32,6 +32,13 @@ export async function middleware(request: NextRequest) {
   const supabase = publicEnv.NEXT_PUBLIC_SUPABASE_URL // https://<ref>.supabase.co
   const supabaseWs = supabase.replace('https://', 'wss://')
 
+  // Report-only while tuning the policy (MASTER-PLAN §4.4b "roll it out
+  // report-only first"); flip via CSP_REPORT_ONLY=false once the review
+  // screen and document viewer have run clean for a few days of real use.
+  const header = serverEnv.CSP_REPORT_ONLY
+    ? 'Content-Security-Policy-Report-Only'
+    : 'Content-Security-Policy'
+
   const csp = `
     default-src 'self';
     script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${isDev ? " 'unsafe-eval'" : ''};
@@ -44,15 +51,8 @@ export async function middleware(request: NextRequest) {
     base-uri 'self';
     form-action 'self';
     frame-ancestors 'none';
-    upgrade-insecure-requests;
+    ${serverEnv.CSP_REPORT_ONLY ? '' : 'upgrade-insecure-requests;'}
   `.replace(/\s{2,}/g, ' ').trim()
-
-  // Report-only while tuning the policy (MASTER-PLAN §4.4b "roll it out
-  // report-only first"); flip via CSP_REPORT_ONLY=false once the review
-  // screen and document viewer have run clean for a few days of real use.
-  const header = serverEnv.CSP_REPORT_ONLY
-    ? 'Content-Security-Policy-Report-Only'
-    : 'Content-Security-Policy'
 
   const requestHeaders = new Headers(request.headers)
   requestHeaders.set('x-nonce', nonce)

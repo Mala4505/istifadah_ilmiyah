@@ -10,6 +10,11 @@ import { EntryNotFound } from '@/components/entries/detail/entry-not-found'
 import { HubStatusSection } from '@/components/entries/detail/hub-status-section'
 import { ImportFieldsPanel } from '@/components/entries/detail/import-fields-panel'
 import { LinkedDocuments, type LinkedDocumentView } from '@/components/entries/detail/linked-documents'
+import {
+  EntryIssues,
+  type EntryExceptionIssueRow,
+  type EntryFlagIssueRow,
+} from '@/components/entries/detail/entry-issues'
 import type {
   AdminHeadOption,
   AdvanceEntrySummary,
@@ -21,6 +26,8 @@ import type {
 } from '@/components/entries/detail/types'
 import { createClient } from '@/lib/supabase/server'
 import { getSelectedEventId } from '@/lib/events/current'
+import { getStaffContext } from '@/lib/export/auth'
+import { isAdminOrAbove } from '@/lib/auth/roles'
 
 export const dynamic = 'force-dynamic'
 
@@ -46,6 +53,14 @@ export default async function EntryDetailPage({
   const {
     data: { user },
   } = await supabase.auth.getUser()
+
+  // §3.3 — resolving an exception/flag from this page's Issues card is
+  // gated the same way the /exceptions queue gates it (isAdminOrAbove);
+  // the actual enforcement is RLS (reconciliation_exception_update /
+  // flags_update, both private.is_reviewer_or_admin()), this only controls
+  // whether the resolve UI renders.
+  const staff = await getStaffContext()
+  const canResolveIssues = staff !== null && isAdminOrAbove(staff.role)
 
   const { data: entryData, error: entryError } = await supabase
     .from('v_entry_enriched')
@@ -265,6 +280,75 @@ export default async function EntryDetailPage({
     }
   })
 
+  // §3.3 — this entry's open issues. Two categories, queried separately
+  // rather than through v_open_issues: that view's output columns don't
+  // include source_document_id, only entry_id, so a document-level
+  // exception with a null entry_id (raised at ingest/extraction — Phase 0
+  // §0.3) would never surface through a plain entry_id filter on the view.
+  // Querying reconciliation_exception directly for both the entry-linked
+  // rows and the document-linked rows (via linkedSourceDocIds, the same set
+  // LinkedDocuments above is built from) is the only way to actually reach
+  // that second category.
+  interface RawExceptionRow {
+    id: number
+    exception_type: string
+    severity: string
+    description: string | null
+    amount_at_risk: number | null
+    entry_id: number | null
+    document_extraction_id: number | null
+    source_document_id: number | null
+  }
+  const EXCEPTION_ROW_SELECT =
+    'id, exception_type, severity, description, amount_at_risk, entry_id, document_extraction_id, source_document_id'
+  const [entryExceptionsResult, docExceptionsResult, entryFlagsResult] = await Promise.all([
+    supabase
+      .from('reconciliation_exception')
+      .select(EXCEPTION_ROW_SELECT)
+      .eq('entry_id', id)
+      .eq('status', 'open')
+      .returns<RawExceptionRow[]>(),
+    linkedSourceDocIds.length > 0
+      ? supabase
+          .from('reconciliation_exception')
+          .select(EXCEPTION_ROW_SELECT)
+          .in('source_document_id', linkedSourceDocIds)
+          .eq('status', 'open')
+          .returns<RawExceptionRow[]>()
+      : Promise.resolve({ data: [] as RawExceptionRow[], error: null }),
+    supabase
+      .from('flags')
+      .select('id, flag_type, severity, description, amount_at_risk')
+      .eq('entry_id', id)
+      .eq('status', 'open'),
+  ])
+
+  const filenameByDocId = new Map((linkedDocsData ?? []).map((d) => [d.id, d.original_filename]))
+  const seenExceptionIds = new Set<number>()
+  const entryIssueExceptions: EntryExceptionIssueRow[] = []
+  for (const row of [...(entryExceptionsResult.data ?? []), ...(docExceptionsResult.data ?? [])]) {
+    if (seenExceptionIds.has(row.id)) continue
+    seenExceptionIds.add(row.id)
+    entryIssueExceptions.push({
+      id: row.id,
+      exceptionType: row.exception_type,
+      severity: row.severity,
+      description: row.description,
+      amountAtRisk: row.amount_at_risk,
+      entryId: row.entry_id,
+      documentExtractionId: row.document_extraction_id,
+      sourceDocumentId: row.source_document_id,
+      sourceDocumentFilename: row.source_document_id !== null ? filenameByDocId.get(row.source_document_id) ?? null : null,
+    })
+  }
+  const entryIssueFlags: EntryFlagIssueRow[] = (entryFlagsResult.data ?? []).map((row) => ({
+    id: row.id,
+    flagType: row.flag_type,
+    severity: row.severity,
+    description: row.description,
+    amountAtRisk: row.amount_at_risk,
+  }))
+
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center gap-3">
@@ -284,7 +368,14 @@ export default async function EntryDetailPage({
 
       <ImportFieldsPanel entry={entry} vendorConfirmed={vendorConfirmed} budgetHeadRaw={budgetHeadRaw} />
 
-      <LinkedDocuments entryId={entry.id} documents={linkedDocuments} />
+      <LinkedDocuments entryId={entry.id} documents={linkedDocuments} entryAmount={entry.amount} />
+
+      <EntryIssues
+        entryId={entry.id}
+        exceptions={entryIssueExceptions}
+        flags={entryIssueFlags}
+        canResolve={canResolveIssues}
+      />
 
       <HubStatusSection
         entryId={entry.id}

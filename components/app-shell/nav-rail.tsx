@@ -27,7 +27,19 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { signOut } from '@/lib/actions/auth'
 import { isAdminOrAbove, isSuperadmin } from '@/lib/auth/roles'
 
-const COLLAPSE_STORAGE_KEY = 'nav-rail-collapsed'
+/**
+ * Collapse preference cookie (Task 7.8). Read server-side in
+ * app/(app)/layout.tsx (mirrors how `active_event_id` is read, e.g.
+ * lib/events/current.ts's getSelectedEventId) and passed down as
+ * `initialCollapsed` so the very first client render already matches the
+ * saved preference -- no expanded-then-collapsed flash while a
+ * post-mount effect used to read localStorage. Written directly via
+ * `document.cookie` on toggle (not a server action): this is a
+ * per-browser UI preference, not data, so there is nothing to gate or
+ * revalidate a route tree over.
+ */
+export const NAV_RAIL_COLLAPSED_COOKIE = 'nav_rail_collapsed'
+const COLLAPSE_COOKIE_MAX_AGE = 60 * 60 * 24 * 365
 
 // Persistent left rail (MASTER-PLAN §5 "Navigation"). Settings and Export
 // are admin-only per §4.4c's role table, and each is hidden outright from
@@ -60,11 +72,18 @@ function initialsFor(name: string): string {
 
 export function NavRail({
   user,
+  initialCollapsed,
 }: {
   user: { displayName: string; role: string | null; itsNumber: string | null }
+  initialCollapsed: boolean
 }) {
   const pathname = usePathname()
-  const [collapsed, setCollapsed] = useState(false)
+  // /review forces collapsed even on the very first render (matches the
+  // effect below), so a fresh load of /review doesn't briefly show expanded
+  // before the effect runs.
+  const [collapsed, setCollapsed] = useState(() =>
+    pathname.startsWith('/review') ? true : initialCollapsed
+  )
 
   const isAdmin = isAdminOrAbove(user.role)
   const isSuperadminUser = isSuperadmin(user.role)
@@ -80,9 +99,13 @@ export function NavRail({
   // pathname leaves /review so the next visit auto-collapses again.
   const reviewOverrideRef = useRef(false)
 
-  // Auto-collapse on /review, restore the persisted preference elsewhere.
-  // Runs on mount too (pathname is already known then), so a fresh load of
-  // /review starts collapsed without waiting for a manual toggle.
+  // The last real (non-/review-forced) preference, used to restore the
+  // rail when navigating away from /review during the same client-side
+  // session (the layout stays mounted across soft navigations, so
+  // `initialCollapsed` alone would go stale after a manual toggle).
+  const lastPreferenceRef = useRef(initialCollapsed)
+
+  // Auto-collapse on /review, restore the last real preference elsewhere.
   useEffect(() => {
     const onReview = pathname.startsWith('/review')
     if (onReview) {
@@ -91,8 +114,7 @@ export function NavRail({
       }
     } else {
       reviewOverrideRef.current = false
-      const stored = window.localStorage.getItem(COLLAPSE_STORAGE_KEY)
-      setCollapsed(stored === 'true')
+      setCollapsed(lastPreferenceRef.current)
     }
   }, [pathname])
 
@@ -107,8 +129,9 @@ export function NavRail({
       reviewOverrideRef.current = !next
       setCollapsed(next)
     } else {
+      lastPreferenceRef.current = next
       setCollapsed(next)
-      window.localStorage.setItem(COLLAPSE_STORAGE_KEY, String(next))
+      document.cookie = `${NAV_RAIL_COLLAPSED_COOKIE}=${next}; path=/; max-age=${COLLAPSE_COOKIE_MAX_AGE}`
     }
   }
 

@@ -16,10 +16,36 @@
  */
 
 import { revalidatePath } from 'next/cache'
+import { cookies } from 'next/headers'
 import { Pool } from 'pg'
 import { serverEnv } from '@/lib/env.server'
 import { logRawError } from '@/lib/friendly-error'
 import { requireAdminOrAbove } from '@/lib/export/auth'
+import { ACTIVE_EVENT_COOKIE } from '@/lib/events/current'
+
+export type SimpleActionResult = { ok: true } | { ok: false; error: string }
+
+/**
+ * Restores event switching (Task 6.2) -- deleted in 2352822 along with the
+ * nav-rail switcher that called it, which broke read-only past-event
+ * browsing entirely (no way to switch away from the current event). Now
+ * called from the minimal Settings -> Events switcher
+ * (components/app-shell/event-switcher.tsx) instead of a rail control.
+ * Cookie shape mirrors setReviewQueueScope (lib/actions/review.ts:619):
+ * same `path`/`maxAge`.
+ *
+ * Gated admin-or-above -- unlike the original (reachable from the nav rail
+ * by any signed-in staff), its only caller now is the admin-gated Settings
+ * page, so the action gates itself the same way rather than relying on that
+ * page being the sole entry point.
+ */
+export async function setActiveEvent(eventId: number): Promise<SimpleActionResult> {
+  const gate = await requireAdminOrAbove()
+  if (!gate.ok) return { ok: false, error: adminGateMessage(gate.reason) }
+
+  ;(await cookies()).set(ACTIVE_EVENT_COOKIE, String(eventId), { path: '/', maxAge: 60 * 60 * 24 * 365 })
+  return { ok: true }
+}
 
 export interface CreateEventInput {
   name: string

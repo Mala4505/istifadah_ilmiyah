@@ -1018,7 +1018,7 @@ export function ReviewWorkspace({
   const classifyStatus: StageStatus = !stage2Done ? 'blocked' : stage3Done ? 'done' : 'current'
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-2">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2">
       <ClaimBanner
         status={claimState}
         claimedByDisplayName={claimInfo?.displayName ?? null}
@@ -1214,7 +1214,7 @@ export function ReviewWorkspace({
         </div>
       ) : null}
 
-      <div ref={paneContainerRef} className="flex min-h-0 flex-1">
+      <div ref={paneContainerRef} className="flex min-h-0 min-w-0 flex-1">
         <div
           className="min-h-0 min-w-0 flex-shrink-0"
           style={{ width: paneMode === 'collapsed' ? COLLAPSED_PANE_WIDTH_PX : `${splitPercent}%` }}

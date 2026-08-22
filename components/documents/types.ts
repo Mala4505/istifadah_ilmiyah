@@ -36,6 +36,14 @@ export interface DocumentExtractionSummary {
   invoiceDateOcr: string | null
   invoiceNumberOcr: string | null
   totalAmountOcr: number | null
+  /**
+   * `document_extraction.verified_at` — set by the Review screen on every
+   * save (`/review?id=<bill_id>`, reachable pre-attach from this bill's own
+   * "Correct the extracted fields in Review" link). Non-null here is a real,
+   * expected state for a still-unmatched document, not a data anomaly — a
+   * bill can be reviewed before its document is ever attached to an entry.
+   */
+  verifiedAt: string | null
   candidates: CandidateEntryView[]
 }
 

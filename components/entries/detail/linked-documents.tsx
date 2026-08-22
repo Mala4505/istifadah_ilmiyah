@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Button } from '@/components/ui/button'
 import { detachDocumentFromEntry, getDocumentPreviewUrl } from '@/lib/actions/documents'
 import { formatINR, formatDate } from '@/lib/reports/format'
+import { cn } from '@/lib/utils'
 
 export interface LinkedDocumentView {
   id: number
@@ -26,9 +27,27 @@ export interface LinkedDocumentView {
  * the match so it's visible AT A GLANCE why this file is attached to this
  * entry, plus a way to view the original and undo a wrong attach.
  */
-export function LinkedDocuments({ entryId, documents }: { entryId: number; documents: LinkedDocumentView[] }) {
+export function LinkedDocuments({
+  entryId,
+  documents,
+  entryAmount,
+}: {
+  entryId: number
+  documents: LinkedDocumentView[]
+  entryAmount: number | null
+}) {
   const [pendingId, setPendingId] = useState<number | null>(null)
   const [rows, setRows] = useState(documents)
+
+  // §3.2 (docs/pre-deploy-findings-and-plan.md) — this card used to list each
+  // bill's OCR'd total with no arithmetic tying them to the entry's own
+  // amount, so the tally had to be done by eye. Every number here is already
+  // on the page; this just adds them up. Bills with no OCR'd total (still in
+  // review, or extraction failed) are excluded from the sum but counted
+  // separately so the footer doesn't silently imply a false total.
+  const billsWithTotal = rows.filter((d) => d.totalAmountOcr !== null)
+  const sumOfTotals = billsWithTotal.reduce((sum, d) => sum + (d.totalAmountOcr ?? 0), 0)
+  const difference = entryAmount !== null ? entryAmount - sumOfTotals : null
 
   function handlePreview(documentId: number) {
     void (async () => {
@@ -106,6 +125,36 @@ export function LinkedDocuments({ entryId, documents }: { entryId: number; docum
               </div>
             </div>
           ))}
+
+          <div className="flex flex-col gap-1 border-t border-border pt-3 text-sm sm:flex-row sm:flex-wrap sm:items-baseline sm:justify-between sm:gap-x-4">
+            <span className="text-muted-foreground">
+              {rows.length} bill{rows.length === 1 ? '' : 's'} attached
+              {billsWithTotal.length !== rows.length && (
+                <> · {billsWithTotal.length} of {rows.length} with a read total</>
+              )}
+            </span>
+            <span className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
+              <span>
+                <span className="text-muted-foreground">Sum of bills: </span>
+                <span className="font-medium tabular-nums">{formatINR(sumOfTotals)}</span>
+              </span>
+              <span>
+                <span className="text-muted-foreground">Entry amount: </span>
+                <span className="font-medium tabular-nums">{formatINR(entryAmount)}</span>
+              </span>
+              <span>
+                <span className="text-muted-foreground">Difference: </span>
+                <span
+                  className={cn(
+                    'font-medium tabular-nums',
+                    difference !== null && difference !== 0 && 'text-destructive'
+                  )}
+                >
+                  {difference === null ? '—' : formatINR(difference)}
+                </span>
+              </span>
+            </span>
+          </div>
         </CardContent>
       )}
     </Card>

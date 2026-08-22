@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation'
+import { cookies } from 'next/headers'
 import { createClient } from '@/lib/supabase/server'
-import { NavRail } from '@/components/app-shell/nav-rail'
+import { NavRail, NAV_RAIL_COLLAPSED_COOKIE } from '@/components/app-shell/nav-rail'
 import { CommandPalette } from '@/components/app-shell/command-palette'
 
 // Authenticated app shell wrapping every screen in MASTER-PLAN §5 except
@@ -22,6 +23,12 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     .eq('id', user.id)
     .maybeSingle()
 
+  // Task 7.8: read the rail's collapse preference here, server-side, so the
+  // client's first render already matches it -- see nav-rail.tsx's cookie
+  // doc comment.
+  const cookieStore = await cookies()
+  const initialCollapsed = cookieStore.get(NAV_RAIL_COLLAPSED_COOKIE)?.value === 'true'
+
   return (
     <div className="flex min-h-screen bg-background">
       <NavRail
@@ -30,6 +37,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           role: profile?.role ?? null,
           itsNumber: profile?.its_number ?? null,
         }}
+        initialCollapsed={initialCollapsed}
       />
       <main className="min-w-0 flex-1 p-6">{children}</main>
       <CommandPalette />

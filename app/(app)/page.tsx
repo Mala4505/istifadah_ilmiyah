@@ -4,8 +4,7 @@ import { ScanLine, TriangleAlert, Wallet, UploadCloud, FileScan, ArrowRight, Lis
 import { createClient } from '@/lib/supabase/server'
 import { getSelectedEventId } from '@/lib/events/current'
 import { StatTile } from '@/components/dashboard/stat-tile'
-import { StatusCountCard, type StatusCount } from '@/components/dashboard/status-count-card'
-import { statusBadgeVariant, hubStatusBadgeVariant } from '@/components/entries/format'
+import { StatusCountCard, dashboardStatusBadgeVariant, type StatusCount } from '@/components/dashboard/status-count-card'
 import { ImportWorkspace } from '@/components/import/import-workspace'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -48,13 +47,28 @@ async function loadDashboardData() {
   // OR rows whose event can't be resolved at all (a vendor-level flag with
   // no entry/document/batch to attribute to any single event), never drop
   // them outright.
+  //
+  // Phase 6 §6.1: five more query sites on this page were missed by the
+  // original event-scoping pass and silently summed across every event --
+  // v_review_queue, v_budget_vs_actual, import_batch, source_document, and
+  // v_entry_status_counts. All five now filter the same way Reports'
+  // loadReportsData does (app/(app)/reports/page.tsx) -- a plain
+  // `.eq('event_id', selectedEventId)`, not the OR-null form v_open_issues
+  // needs, because each resolves event_id through a column that is `not
+  // null` on its base table (entries/source_document/import_batch/
+  // budget_allocation all got `event_id ... not null` in
+  // 20260822000005_event_scoping.sql) rather than through a best-effort
+  // multi-table coalesce. v_entry_status_counts's event_id column is added by
+  // a parallel migration (20260822000011_analytics_event_scoping.sql) landing
+  // alongside this change -- filtering here assumes it exists.
   const selectedEventId = await getSelectedEventId(supabase)
 
   const [reviewQueueRes, openIssuesRes, budgetRes, importsRes, unmatchedDocsRes, profileRes, statusCountsRes] =
     await Promise.all([
       supabase
         .from('v_review_queue')
-        .select('document_extraction_id', { count: 'exact', head: true }),
+        .select('document_extraction_id', { count: 'exact', head: true })
+        .eq('event_id', selectedEventId),
       selectedEventId === null
         ? supabase.from('v_open_issues').select('amount_at_risk, event_id').returns<OpenIssueRow[]>()
         : supabase
@@ -65,15 +79,18 @@ async function loadDashboardData() {
       supabase
         .from('v_budget_vs_actual')
         .select('budget_head_id, actual_amount, approved_amount, budget_status_note')
+        .eq('event_id', selectedEventId)
         .returns<BudgetVsActualRow[]>(),
       supabase
         .from('import_batch')
         .select('id, row_count, mode, status')
+        .eq('event_id', selectedEventId)
         .gte('started_at', startOfToday.toISOString())
         .returns<ImportBatchRow[]>(),
       supabase
         .from('source_document')
         .select('id', { count: 'exact', head: true })
+        .eq('event_id', selectedEventId)
         .in('match_status', ['unmatched', 'suggested']),
       (async () => {
         const {
@@ -85,6 +102,7 @@ async function loadDashboardData() {
       supabase
         .from('v_entry_status_counts')
         .select('dimension, status_id, status_code, status_label, sort_order, entry_count')
+        .eq('event_id', selectedEventId)
         .returns<EntryStatusCountRow[]>(),
     ])
 
@@ -138,6 +156,15 @@ async function loadDashboardData() {
 export default async function DashboardPage() {
   const data = await loadDashboardData()
 
+  // §7.5 (docs/pre-deploy-findings-and-plan.md): "The tile reads ₹2.32 Cr
+  // with the subtitle '10 of 10 heads have no approved budget'. If nothing
+  // has a budget, nothing can be burning -- that figure is just spend to
+  // date." When every head is missing an approved amount, the denominator
+  // for "burn" doesn't exist at all -- rename the tile rather than keep
+  // labelling a plain spend total as a burn rate against a budget that isn't
+  // there.
+  const allHeadsLackApprovedBudget = data.totalHeads > 0 && data.headsWithoutApprovedBudget === data.totalHeads
+
   return (
     <div className="flex flex-col gap-6">
       <div>
@@ -177,18 +204,20 @@ export default async function DashboardPage() {
           error={data.openIssuesError}
         />
         <StatTile
-          label="Budget burn"
+          label={allHeadsLackApprovedBudget ? 'Spend to date' : 'Budget burn'}
           value={formatINRCompact(data.totalActualSpend)}
           hint={
             data.totalHeads === 0
               ? 'No budget heads allocated yet'
-              : data.headsWithoutApprovedBudget > 0
-                ? `${data.headsWithoutApprovedBudget} of ${data.totalHeads} heads have no approved budget`
-                : `Across ${data.totalHeads} budget heads`
+              : allHeadsLackApprovedBudget
+                ? `No approved budget on any of ${data.totalHeads} heads yet — spend so far, not a burn rate`
+                : data.headsWithoutApprovedBudget > 0
+                  ? `${data.headsWithoutApprovedBudget} of ${data.totalHeads} heads have no approved budget`
+                  : `Across ${data.totalHeads} budget heads`
           }
           href="/reports#budget-vs-actual"
           icon={Wallet}
-          tone={data.headsWithoutApprovedBudget > 0 ? 'warning' : 'default'}
+          tone={!allHeadsLackApprovedBudget && data.headsWithoutApprovedBudget > 0 ? 'warning' : 'default'}
           error={data.budgetError}
         />
         {/* Running an import is admin-only (§4.4c), and /import refuses
@@ -246,7 +275,7 @@ export default async function DashboardPage() {
               icon={ListChecks}
               rows={data.statusCounts}
               paramKey="st"
-              variantFor={(_code, label) => statusBadgeVariant(label)}
+              variantFor={dashboardStatusBadgeVariant}
               emptyHint="No entries imported yet."
             />
             <StatusCountCard
@@ -254,7 +283,7 @@ export default async function DashboardPage() {
               icon={ShieldCheck}
               rows={data.auditStatusCounts}
               paramKey="ast"
-              variantFor={(_code, label) => statusBadgeVariant(label)}
+              variantFor={dashboardStatusBadgeVariant}
               emptyHint="No Audit-portal data linked yet."
             />
             <StatusCountCard
@@ -262,7 +291,7 @@ export default async function DashboardPage() {
               icon={Tag}
               rows={data.hubStatusCounts}
               paramKey="hs"
-              variantFor={(code) => hubStatusBadgeVariant(code)}
+              variantFor={dashboardStatusBadgeVariant}
               emphasizeCodes={['awaiting_verification', 'awaiting_validation']}
               emptyHint="No entries imported yet."
             />
@@ -272,8 +301,14 @@ export default async function DashboardPage() {
 
       <div className="flex flex-col gap-3">
         <h2 className="text-sm font-semibold text-muted-foreground">Getting data in — two steps</h2>
-        <div className="grid gap-4 lg:grid-cols-2">
-          <div className="flex flex-col gap-2">
+        {/* §7.8: step 1's dropzone card and step 2's single-button card used to
+            read as visually lopsided (a tall card next to a short one, so the
+            row looked unfinished). items-stretch + h-full on both columns
+            makes step 2 match step 1's height whatever that turns out to be,
+            and the added "what happens" list gives the short card comparable
+            content weight instead of just whitespace. */}
+        <div className="grid items-stretch gap-4 lg:grid-cols-2">
+          <div className="flex h-full flex-col gap-2">
             <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
               <span className="flex h-5 w-5 items-center justify-center rounded-full bg-accent text-[11px] font-semibold text-accent-foreground">
                 1
@@ -283,7 +318,7 @@ export default async function DashboardPage() {
             {data.isAdmin ? (
               <ImportWorkspace isAdmin={data.isAdmin} />
             ) : (
-              <Card>
+              <Card className="h-full">
                 <CardHeader>
                   <CardTitle className="text-base">Import ledger data</CardTitle>
                   <CardDescription>
@@ -295,14 +330,14 @@ export default async function DashboardPage() {
             )}
           </div>
 
-          <div className="flex flex-col gap-2">
+          <div className="flex h-full flex-col gap-2">
             <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
               <span className="flex h-5 w-5 items-center justify-center rounded-full bg-accent text-[11px] font-semibold text-accent-foreground">
                 2
               </span>
               Upload &amp; OCR documents
             </div>
-            <Card>
+            <Card className="flex h-full flex-col">
               <CardHeader>
                 <CardTitle className="text-base">Document inbox</CardTitle>
                 <CardDescription>
@@ -310,7 +345,12 @@ export default async function DashboardPage() {
                   matched to an entry automatically where possible, or attached by hand.
                 </CardDescription>
               </CardHeader>
-              <CardContent>
+              <CardContent className="flex flex-1 flex-col justify-between gap-4">
+                <ul className="space-y-1.5 text-xs text-muted-foreground">
+                  <li>Automatic OCR extraction, usually within a minute of upload</li>
+                  <li>Matched to its ledger entry automatically when vendor and amount line up</li>
+                  <li>Left for manual matching in the inbox when nothing lines up — nothing is dropped silently</li>
+                </ul>
                 <Button asChild variant="outline">
                   <Link href="/documents">
                     Go to document inbox

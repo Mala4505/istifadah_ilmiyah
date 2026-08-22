@@ -1,6 +1,8 @@
 'use client'
 
 import * as React from 'react'
+import Link from 'next/link'
+import { ArrowRight } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { toastError } from '@/components/ui/error-toast'
@@ -17,22 +19,50 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog'
 import { resolveException, type ResolveExceptionOutcome } from '@/lib/actions/exceptions'
+import { getExceptionAction } from '@/components/exceptions/what-to-do'
 
 /**
  * Resolve or dismiss one exception (§5 row 8, §3.10). The note is required
  * before either action can submit — enforced here in the UI (disabled
  * submit) AND in the server action (rejects an empty note independently),
  * so this is defense in depth, not the only gate.
+ *
+ * §4.1: beyond bookkeeping, this now surfaces a per-type "what to do" hint
+ * and (where a real destination exists) a link to the thing that actually
+ * needs fixing — see components/exceptions/what-to-do.ts for the mapping
+ * and the reasoning behind each destination/fallback.
  */
 export function ResolveExceptionDialog({
   exceptionId,
   amountAtRisk,
   description,
+  exceptionType = '',
+  entryId = null,
+  documentExtractionId = null,
+  sourceDocumentId = null,
 }: {
   exceptionId: number
   amountAtRisk: number | null
   description: string | null
+  /**
+   * Optional (default ''), not because the hint is meaningless without it —
+   * every caller should pass the real type — but because other in-flight
+   * work adds call sites of this dialog (e.g. an entry-page Issues card)
+   * that may not thread every id through on day one. An unset type just
+   * falls through to the generic "review the description" hint below
+   * rather than failing to compile.
+   */
+  exceptionType?: string
+  entryId?: number | null
+  documentExtractionId?: number | null
+  sourceDocumentId?: number | null
 }) {
+  const action = getExceptionAction({
+    exception_type: exceptionType,
+    entry_id: entryId,
+    document_extraction_id: documentExtractionId,
+    source_document_id: sourceDocumentId,
+  })
   const router = useRouter()
   const [open, setOpen] = React.useState(false)
   const [note, setNote] = React.useState('')
@@ -79,6 +109,21 @@ export function ResolveExceptionDialog({
               )}
             </DialogDescription>
           </DialogHeader>
+
+          <div className="flex flex-col gap-2 rounded-md border border-border bg-muted/30 p-3">
+            <p className="text-sm">
+              <span className="font-medium">What to do: </span>
+              {action.whatToDo}
+            </p>
+            {action.destination && (
+              <Button asChild size="sm" variant="secondary" className="w-fit">
+                <Link href={action.destination.href}>
+                  {action.destination.label}
+                  <ArrowRight className="ml-1.5 h-3.5 w-3.5" aria-hidden="true" />
+                </Link>
+              </Button>
+            )}
+          </div>
 
           <div className="flex gap-2">
             <Button

@@ -100,6 +100,36 @@ function StageIcon({ state, className }: { state: StageState; className: string 
   return <Circle className={`${className} text-muted-foreground/40`} aria-hidden="true" />
 }
 
+/**
+ * "N of M bills reviewed" (plan §3.1 / "done when a partly-reviewed PDF is
+ * visually distinguishable from an untouched one and from a finished one").
+ * `document_extraction.verified_at` is written by the Review screen on every
+ * save, reachable pre-attach via this card's own "Correct the extracted
+ * fields in Review" link — so a non-null value here on a still-unmatched
+ * document is expected, not an anomaly. Renders nothing until extraction has
+ * produced at least one bill; `stagesFor`'s "Extracted" stage already covers
+ * the zero-bill case.
+ */
+export function ReviewProgressBadge({ bills, size = 'default' }: { bills: InboxDocumentView['extraction']; size?: 'default' | 'sm' }) {
+  if (bills.length === 0) return null
+  const reviewedCount = bills.filter((b) => b.verifiedAt !== null).length
+  const allReviewed = reviewedCount === bills.length
+  const textSize = size === 'sm' ? 'text-[10px]' : 'text-xs'
+  if (allReviewed) {
+    return (
+      <Badge variant="outline" className={`gap-1 border-emerald-600/30 bg-emerald-600/10 text-emerald-700 ${textSize}`}>
+        <CheckCircle2 className="h-3 w-3" aria-hidden="true" />
+        All {bills.length} bill{bills.length === 1 ? '' : 's'} reviewed
+      </Badge>
+    )
+  }
+  return (
+    <span className={`${textSize} text-muted-foreground`}>
+      {reviewedCount} of {bills.length} bill{bills.length === 1 ? '' : 's'} reviewed
+    </span>
+  )
+}
+
 /** Reused by document-table.tsx (`size="sm"`) so the stage-to-icon mapping isn't duplicated. */
 export function DocumentStageTracker({
   uploadStatus,
@@ -448,8 +478,9 @@ export function DocumentCard({
             </p>
           </div>
         </div>
-        <div className="flex-shrink-0">
+        <div className="flex flex-shrink-0 flex-col items-end gap-1.5">
           <DocumentStageTracker uploadStatus={document.uploadStatus} uploadedAt={document.uploadedAt} />
+          <ReviewProgressBadge bills={document.extraction} />
         </div>
       </CardHeader>
 
@@ -516,6 +547,32 @@ export function DocumentCard({
           // against that bill's OCR, not the document's), and its own
           // "Correct in Review" link, so bill 2 of 4 is never invisible.
           <div className="flex flex-col gap-4">
+            {document.extraction.length > 1 &&
+              (() => {
+                // §7.6: what a multi-bill PDF is worth used to be visible
+                // only by reading and adding up every bill block below — this
+                // states it up front. Same "sum whichever bills have a read
+                // total, say so when partial" convention as
+                // components/entries/detail/linked-documents.tsx's
+                // sumOfTotals.
+                const billsWithTotal = document.extraction.filter((b) => b.totalAmountOcr !== null)
+                const billsTotal = billsWithTotal.reduce((sum, b) => sum + (b.totalAmountOcr ?? 0), 0)
+                return (
+                  <div className="flex items-center justify-between gap-3 rounded-md border border-border bg-muted/30 px-3 py-2 text-xs">
+                    <span className="text-muted-foreground">{document.extraction.length} bills in this PDF</span>
+                    <span>
+                      <span className="text-muted-foreground">Total: </span>
+                      <span className="font-medium tabular-nums">{formatMoney(billsTotal)}</span>
+                      {billsWithTotal.length !== document.extraction.length && (
+                        <span className="text-muted-foreground">
+                          {' '}
+                          ({billsWithTotal.length} of {document.extraction.length} read)
+                        </span>
+                      )}
+                    </span>
+                  </div>
+                )
+              })()}
             {document.extraction.map((bill, index) => {
               const flagState = flagStateFor(bill.id)
               return (
@@ -528,8 +585,14 @@ export function DocumentCard({
                   }
                 >
                   {document.extraction.length > 1 && (
-                    <p className="text-xs font-semibold text-foreground">
+                    <p className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
                       Bill {index + 1} of {document.extraction.length}
+                      {bill.verifiedAt !== null && (
+                        <span className="inline-flex items-center gap-1 text-[10px] font-medium text-emerald-700">
+                          <CheckCircle2 className="h-3 w-3" aria-hidden="true" />
+                          Reviewed
+                        </span>
+                      )}
                     </p>
                   )}
 

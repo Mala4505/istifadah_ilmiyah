@@ -8,6 +8,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { CreateEventForm, type MasterOption } from '@/components/events/create-event-form'
+import { EventSwitcher } from '@/components/app-shell/event-switcher'
 import { UploadLimitSettings } from '@/components/settings/upload-limit-settings'
 import { UsersTable, type StaffRow } from '@/components/admin/users-table'
 import { CreateUserDialog } from '@/components/admin/create-user-dialog'
@@ -353,11 +354,12 @@ export default async function SettingsPage() {
             <CardHeader>
               <CardTitle>Past events</CardTitle>
               <CardDescription>
-                Read-only history. Switching to a past event (via the rail&apos;s event switcher) puts the app in a
-                view-only state — no new uploads, no verification, no export.
+                Read-only history. Use the switcher below to view a past event — it puts the app in a view-only
+                state: no new uploads, no verification, no export.
               </CardDescription>
             </CardHeader>
-            <CardContent>
+            <CardContent className="flex flex-col gap-4">
+              <EventSwitcher events={events} selectedEventId={selectedEventId} />
               <Table>
                 <TableHeader>
                   <TableRow>

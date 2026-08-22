@@ -109,6 +109,7 @@ export default async function DocumentsPage() {
     invoice_date_ocr: string | null
     invoice_number_ocr: string | null
     total_amount_ocr: number | null
+    verified_at: string | null
   }
 
   const { data: extractionsData } =
@@ -116,7 +117,7 @@ export default async function DocumentsPage() {
       ? await supabase
           .from('document_extraction')
           .select(
-            'id, source_document_id, bill_index, vendor_name_ocr, invoice_date_ocr, invoice_number_ocr, total_amount_ocr'
+            'id, source_document_id, bill_index, vendor_name_ocr, invoice_date_ocr, invoice_number_ocr, total_amount_ocr, verified_at'
           )
           .in('source_document_id', docIds)
           .order('bill_index', { ascending: true })
@@ -229,6 +230,7 @@ export default async function DocumentsPage() {
       invoiceDateOcr: extraction.invoice_date_ocr,
       invoiceNumberOcr: extraction.invoice_number_ocr,
       totalAmountOcr: extraction.total_amount_ocr,
+      verifiedAt: extraction.verified_at,
       candidates: [],
     }))
 

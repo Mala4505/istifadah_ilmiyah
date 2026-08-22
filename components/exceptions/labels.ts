@@ -11,6 +11,21 @@ export const EXCEPTION_TYPE_LABELS: Record<string, string> = {
   new_budget_head: 'New budget head',
   new_vendor: 'New vendor',
   other: 'Other',
+  // Phase 3 (20260814000005)
+  audit_row_unmatched: 'Audit row unmatched',
+  audit_ambiguous_match: 'Audit ambiguous match',
+  // vendor_email + own-GSTIN exclusion (20260814000010)
+  vendor_gstin_is_own_org: 'Vendor GSTIN is our own org',
+  // leaked tool-call tag syntax in OCR text fields
+  ocr_leaked_tag_syntax: 'OCR leaked tag syntax',
+  // ingest/extraction page-count reconciliation
+  page_count_unresolved: 'Page count unresolved',
+  page_count_mismatch: 'Page count mismatch',
+  // GSTIN checksum guard + per-page extraction failure isolation
+  vendor_gstin_invalid_checksum: 'Vendor GSTIN failed checksum',
+  page_extraction_failed: 'Page extraction failed',
+  // GST recipient-compliance check
+  gst_recipient_compliance_missing: 'GST recipient details missing',
 }
 
 /** In CHECK-constraint order (MASTER-PLAN §3.10 migration). */

@@ -136,6 +136,20 @@ type VendorConcentrationRow = {
   pct_of_total_spend: number | null
 }
 
+// Phase 5 §5.2 (docs/pre-deploy-findings-and-plan.md): "Vendor spend" and
+// "Vendor concentration" used to be two sections ranking the same vendors by
+// the same spend, differing only in trailing columns. Merged into one row
+// shape that carries every column from both — built by joining
+// v_vendor_spend (entry-level detail: first/last entry, doc coverage) with
+// v_vendor_concentration (corpus-share detail: % of total, open-flag
+// exposure) on vendor_id, keyed off the spend rows since those are the ones
+// already filtered to entry_count > 0.
+type MergedVendorRow = VendorSpendRow & {
+  pct_of_total_spend: number | null
+  open_flag_count: number
+  open_flag_amount_at_risk: number | null
+}
+
 type SpendByFamilyRow = {
   item_family_id: number
   family_key: string
@@ -262,34 +276,67 @@ async function loadReportsData() {
 async function loadAnalyticsData() {
   const supabase = await createClient()
 
-  // NOTE: these four views have no `event_id` column at all (a pre-existing
-  // gap predating the Phase 6 event-scoping work — see loadReportsData above
-  // for the pattern the rest of this page follows). Left unfiltered exactly
-  // as before the /reports + /analytics merge; not addressed here.
+  // Phase 5 (docs/pre-deploy-findings-and-plan.md §5): these four views
+  // gained an `event_id` output column in 20260822000011, following the same
+  // pattern as the other reporting views (20260822000007, see
+  // loadReportsData above). Filter here at the query site against the same
+  // active-event resolution the rest of the page uses, so the analytics
+  // sections stop mixing every event's flags/vendors/families together.
+  const selectedEvent = await getSelectedEvent(supabase)
+  const eventId = selectedEvent?.id ?? null
+
   const [complianceRes, concentrationRes, familyRes, benchmarkRes] = await Promise.all([
-    supabase
-      .from('v_compliance_summary')
-      .select(
-        'id, flag_type, severity, description, amount_at_risk, status, entry_id, vendor_id, vendor_display_name, department_id, department_name, created_at, last_detected_at, related_entry_ids'
-      )
-      .limit(ROW_CAP)
-      .returns<ComplianceRow[]>(),
+    // v_compliance_summary is sourced straight from `flags` (one row per open
+    // flag, no group-by) — a vendor-level flag with no entry_id (e.g. a
+    // vendor_cluster splitting pattern) resolves to a null event_id, per
+    // 20260822000011's header comment, "same as v_open_issues already
+    // documents for that case." A plain `.eq('event_id', eventId)` would
+    // silently drop those open findings whenever an event is selected —
+    // exactly the Phase 0 §0.2 bug already fixed for v_open_issues above.
+    // Reuse that same eventId-null-vs-not branch here instead.
+    eventId === null
+      ? supabase
+          .from('v_compliance_summary')
+          .select(
+            'id, flag_type, severity, description, amount_at_risk, status, entry_id, vendor_id, vendor_display_name, department_id, department_name, created_at, last_detected_at, related_entry_ids'
+          )
+          .limit(ROW_CAP)
+          .returns<ComplianceRow[]>()
+      : supabase
+          .from('v_compliance_summary')
+          .select(
+            'id, flag_type, severity, description, amount_at_risk, status, entry_id, vendor_id, vendor_display_name, department_id, department_name, created_at, last_detected_at, related_entry_ids'
+          )
+          .or(`event_id.eq.${eventId},event_id.is.null`)
+          .limit(ROW_CAP)
+          .returns<ComplianceRow[]>(),
+    // v_vendor_concentration / v_spend_by_family / v_rate_benchmark are
+    // per-dimension aggregates (vendor / item family / family+unit), not
+    // row-level finding feeds — a plain `.eq('event_id', eventId)` here
+    // matches the same pattern loadReportsData already uses for the other
+    // entity-aggregate views (budget head, department, vendor spend, zone).
+    // A dimension whose only observations can't be traced to any event (see
+    // 20260822000011's header) simply won't surface under a specific event,
+    // which is the same trade-off those other views already make.
     supabase
       .from('v_vendor_concentration')
       .select(
         'vendor_id, display_name, is_confirmed, entry_count, total_amount, open_flag_count, open_flag_amount_at_risk, pct_of_total_spend'
       )
+      .eq('event_id', eventId)
       .order('total_amount', { ascending: false, nullsFirst: false })
       .limit(ROW_CAP)
       .returns<VendorConcentrationRow[]>(),
     supabase
       .from('v_spend_by_family')
       .select('item_family_id, family_key, label, default_unit, is_confirmed, total_spend, observation_count, vendor_count')
+      .eq('event_id', eventId)
       .order('total_spend', { ascending: false })
       .returns<SpendByFamilyRow[]>(),
     supabase
       .from('v_rate_benchmark')
       .select('item_family_id, family_key, family_label, unit_normalized, median_rate, observation_count, vendor_count, min_rate, max_rate')
+      .eq('event_id', eventId)
       .order('observation_count', { ascending: false })
       .returns<RateBenchmarkRow[]>(),
   ])
@@ -318,7 +365,6 @@ const SECTIONS = [
   { id: 'hub-status-ageing', label: 'Hub-status Ageing' },
   { id: 'open-issues', label: 'Open Issues' },
   { id: 'compliance', label: 'Compliance & Leakage' },
-  { id: 'vendor-concentration', label: 'Vendor Concentration' },
   { id: 'spend-by-family', label: 'Spend by Item Family' },
   { id: 'rate-benchmark', label: 'Rate Benchmark' },
 ] as const
@@ -338,6 +384,27 @@ export default async function ReportsPage() {
       note: r.budget_status_note ?? undefined,
     }))
 
+  // Phase 5 §5.1 (docs/pre-deploy-findings-and-plan.md): budget heads carry a
+  // department_id but v_department_budget_vs_actual is the only view that
+  // already resolves department names for the active event, so borrow its
+  // rows as a lookup rather than adding a new query. A head whose department
+  // has no department-level budget imported (or no department at all) falls
+  // back to a numbered/"Unassigned" label rather than disappearing.
+  const departmentNameById = new Map(data.deptBudgetRows.map((d) => [d.department_id, d.department_name]))
+  const budgetDepartmentLabel = (departmentId: number | null) =>
+    departmentId == null
+      ? 'Unassigned'
+      : (departmentNameById.get(departmentId) ?? `Department #${departmentId}`)
+
+  // Group budget heads by department (then by actual spend within each
+  // department) so the flat cross-department list becomes scannable — was
+  // previously sorted by actual_amount alone with no department grouping.
+  const budgetRowsGrouped = [...data.budgetRows].sort((a, b) => {
+    const deptCompare = budgetDepartmentLabel(a.department_id).localeCompare(budgetDepartmentLabel(b.department_id))
+    if (deptCompare !== 0) return deptCompare
+    return (b.actual_amount ?? 0) - (a.actual_amount ?? 0)
+  })
+
   const deptBudgetBarItems: BarListItem[] = data.deptBudgetRows
     .filter((r) => (r.actual_amount ?? 0) > 0)
     .slice(0, 12)
@@ -350,10 +417,29 @@ export default async function ReportsPage() {
       note: r.budget_status_note ?? undefined,
     }))
 
-  const vendorBarItems: BarListItem[] = data.vendorRows.slice(0, 12).map((r) => ({
+  // Phase 5 §5.2: join spend rows (data.vendorRows, already event-scoped)
+  // with concentration rows (analyticsData.vendorRows, now event-scoped too
+  // per this same pass) on vendor_id. Keyed off the spend side since that's
+  // where entry-level detail (first/last entry, doc coverage) lives; a
+  // vendor missing from the concentration side (should be rare — both views
+  // filter to entry_count > 0 over the same event) just falls back to
+  // null/0 for the concentration-only columns instead of being dropped.
+  const concentrationByVendorId = new Map(analyticsData.vendorRows.map((r) => [r.vendor_id, r]))
+  const mergedVendorRows: MergedVendorRow[] = data.vendorRows.map((r) => {
+    const c = concentrationByVendorId.get(r.vendor_id)
+    return {
+      ...r,
+      pct_of_total_spend: c?.pct_of_total_spend ?? null,
+      open_flag_count: c?.open_flag_count ?? 0,
+      open_flag_amount_at_risk: c?.open_flag_amount_at_risk ?? null,
+    }
+  })
+
+  const vendorBarItems: BarListItem[] = mergedVendorRows.slice(0, 12).map((r) => ({
     key: r.vendor_id,
     label: r.display_name,
     value: r.total_amount ?? 0,
+    note: r.pct_of_total_spend != null ? `${r.pct_of_total_spend.toFixed(1)}%` : undefined,
   }))
 
   const zoneBarItems: BarListItem[] = data.zoneRows
@@ -365,7 +451,19 @@ export default async function ReportsPage() {
     }))
 
   const budgetColumns: DataTableColumn<BudgetVsActualRow>[] = [
-    { key: 'head', header: 'Budget Head', render: (r) => r.short_label ?? r.raw_label },
+    {
+      key: 'head',
+      header: 'Budget Head',
+      render: (r) => (
+        <Link
+          href={`/entries?budget_head_id=${r.budget_head_id}`}
+          className="text-primary underline-offset-2 hover:underline"
+        >
+          {r.short_label ?? r.raw_label}
+        </Link>
+      ),
+    },
+    { key: 'department', header: 'Department', render: (r) => budgetDepartmentLabel(r.department_id) },
     { key: 'approved', header: 'Approved', align: 'right', render: (r) => formatINR(r.approved_amount) },
     { key: 'utilised', header: 'Utilised (source)', align: 'right', render: (r) => formatINR(r.utilised_amount) },
     { key: 'actual', header: 'Actual (sum of amounts)', align: 'right', render: (r) => formatINR(r.actual_amount) },
@@ -414,7 +512,7 @@ export default async function ReportsPage() {
     { key: 'entries', header: 'Entries', align: 'right', render: (r) => formatNumber(r.entry_count) },
   ]
 
-  const vendorColumns: DataTableColumn<VendorSpendRow>[] = [
+  const vendorColumns: DataTableColumn<MergedVendorRow>[] = [
     {
       key: 'vendor',
       header: 'Vendor',
@@ -429,6 +527,26 @@ export default async function ReportsPage() {
     { key: 'first', header: 'First Entry', render: (r) => formatDate(r.first_entry_date) },
     { key: 'last', header: 'Last Entry', render: (r) => formatDate(r.last_entry_date) },
     { key: 'coverage', header: 'Doc Coverage', align: 'right', render: (r) => formatPercent(r.document_coverage_pct) },
+    {
+      key: 'pct',
+      header: '% of Total Spend',
+      align: 'right',
+      render: (r) => (r.pct_of_total_spend != null ? `${r.pct_of_total_spend.toFixed(2)}%` : '—'),
+    },
+    {
+      key: 'flags',
+      header: 'Open Flags',
+      align: 'right',
+      render: (r) =>
+        r.open_flag_count > 0 ? (
+          <Link href={`/reports#compliance`} className="text-primary underline-offset-2 hover:underline">
+            {formatNumber(r.open_flag_count)}
+          </Link>
+        ) : (
+          formatNumber(r.open_flag_count)
+        ),
+    },
+    { key: 'risk', header: '₹ at Risk', align: 'right', render: (r) => formatINR(r.open_flag_amount_at_risk) },
   ]
 
   const zoneColumns: DataTableColumn<ZoneSpendRow>[] = [
@@ -481,7 +599,15 @@ export default async function ReportsPage() {
           '—'
         ),
     },
-    { key: 'description', header: 'Description', render: (r) => r.description ?? '—' },
+    {
+      key: 'description',
+      header: 'Description',
+      render: (r) => (
+        <span className="block max-w-[24rem] truncate" title={r.description ?? undefined}>
+          {r.description ?? '—'}
+        </span>
+      ),
+    },
     { key: 'created', header: 'Raised', render: (r) => formatDate(r.created_at) },
   ]
 
@@ -492,13 +618,6 @@ export default async function ReportsPage() {
       return acc
     }, {})
   ).sort((a, b) => b[1] - a[1])
-
-  const vendorConcentrationBarItems: BarListItem[] = analyticsData.vendorRows.slice(0, 12).map((r) => ({
-    key: r.vendor_id,
-    label: r.display_name,
-    value: r.total_amount ?? 0,
-    note: r.pct_of_total_spend != null ? `${r.pct_of_total_spend.toFixed(1)}%` : undefined,
-  }))
 
   const familyBarItems: BarListItem[] = analyticsData.familyRows
     .filter((r) => r.total_spend > 0)
@@ -536,42 +655,16 @@ export default async function ReportsPage() {
         ),
     },
     { key: 'department', header: 'Department', render: (r) => r.department_name ?? '—' },
-    { key: 'description', header: 'Description', render: (r) => r.description ?? '—' },
-    { key: 'detected', header: 'Last Seen', render: (r) => formatDateTime(r.last_detected_at) },
-  ]
-
-  const analyticsVendorColumns: DataTableColumn<VendorConcentrationRow>[] = [
     {
-      key: 'vendor',
-      header: 'Vendor',
+      key: 'description',
+      header: 'Description',
       render: (r) => (
-        <Link href={`/entries?vendor_id=${r.vendor_id}`} className="text-primary underline-offset-2 hover:underline">
-          {r.display_name}
-        </Link>
+        <span className="block max-w-[24rem] truncate" title={r.description ?? undefined}>
+          {r.description ?? '—'}
+        </span>
       ),
     },
-    { key: 'entries', header: 'Entries', align: 'right', render: (r) => formatNumber(r.entry_count) },
-    { key: 'total', header: 'Total Spend', align: 'right', render: (r) => formatINR(r.total_amount) },
-    {
-      key: 'pct',
-      header: '% of Total Spend',
-      align: 'right',
-      render: (r) => (r.pct_of_total_spend != null ? `${r.pct_of_total_spend.toFixed(2)}%` : '—'),
-    },
-    {
-      key: 'flags',
-      header: 'Open Flags',
-      align: 'right',
-      render: (r) =>
-        r.open_flag_count > 0 ? (
-          <Link href={`/reports#compliance`} className="text-primary underline-offset-2 hover:underline">
-            {formatNumber(r.open_flag_count)}
-          </Link>
-        ) : (
-          formatNumber(r.open_flag_count)
-        ),
-    },
-    { key: 'risk', header: '₹ at Risk', align: 'right', render: (r) => formatINR(r.open_flag_amount_at_risk) },
+    { key: 'detected', header: 'Last Seen', render: (r) => formatDateTime(r.last_detected_at) },
   ]
 
   const familyColumns: DataTableColumn<SpendByFamilyRow>[] = [
@@ -635,10 +728,9 @@ export default async function ReportsPage() {
         )}
       </div>
       <p className="max-w-2xl text-sm text-muted-foreground">
-        Budget vs actual, vendor spend, zone spend, Hub-status ageing, and open issues for the
-        selected event, plus compliance & leakage flags, vendor concentration, item-family spend,
-        and rate benchmarking across the whole corpus (refreshed every 15 minutes by the flags-run
-        sweep). CSV export on every section.
+        Budget vs actual, vendor spend, zone spend, Hub-status ageing, open issues, compliance &
+        leakage flags, item-family spend, and rate benchmarking, all for the selected event
+        (flags-run sweeps the corpus every 15 minutes). CSV export on every section.
       </p>
 
       <nav className="flex flex-wrap gap-x-4 gap-y-1 border-b border-border pb-3 text-xs">
@@ -661,8 +753,9 @@ export default async function ReportsPage() {
           <ExportCsvButton
             filename="budget-vs-actual.csv"
             rowCount={data.budgetRows.length}
-            csv={toCsv(data.budgetRows, [
+            csv={toCsv(budgetRowsGrouped, [
               { header: 'Budget Head', value: (r) => r.short_label ?? r.raw_label },
+              { header: 'Department', value: (r) => budgetDepartmentLabel(r.department_id) },
               { header: 'Approved Amount', value: (r) => r.approved_amount },
               { header: 'Utilised Amount (source)', value: (r) => r.utilised_amount },
               { header: 'Actual (sum of amounts)', value: (r) => r.actual_amount },
@@ -681,7 +774,7 @@ export default async function ReportsPage() {
         ) : (
           <>
             <BarList items={budgetBarItems} valueFormatter={formatINRCompact} />
-            <DataTable columns={budgetColumns} rows={data.budgetRows} getRowKey={(r) => r.budget_head_id} />
+            <DataTable columns={budgetColumns} rows={budgetRowsGrouped} getRowKey={(r) => r.budget_head_id} />
           </>
         )}
       </ReportSection>
@@ -728,30 +821,39 @@ export default async function ReportsPage() {
       <ReportSection
         id="vendor-spend"
         title="Vendor spend"
-        description="Entry count, total spend, and document coverage per vendor."
+        description="Entry count, total spend, document coverage, share of total spend, and open-flag exposure per vendor. Merged from the former separate 'Vendor spend' and 'Vendor concentration' sections, which ranked the same vendors by the same spend (§5.2)."
         action={
           <ExportCsvButton
             filename="vendor-spend.csv"
-            rowCount={data.vendorRows.length}
-            csv={toCsv(data.vendorRows, [
+            rowCount={mergedVendorRows.length}
+            csv={toCsv(mergedVendorRows, [
               { header: 'Vendor', value: (r) => r.display_name },
               { header: 'Entries', value: (r) => r.entry_count },
               { header: 'Total Amount', value: (r) => r.total_amount },
               { header: 'First Entry Date', value: (r) => r.first_entry_date },
               { header: 'Last Entry Date', value: (r) => r.last_entry_date },
               { header: 'Document Coverage %', value: (r) => r.document_coverage_pct },
+              { header: '% of Total Spend', value: (r) => r.pct_of_total_spend },
+              { header: 'Open Flags', value: (r) => r.open_flag_count },
+              { header: '₹ at Risk', value: (r) => r.open_flag_amount_at_risk },
             ])}
           />
         }
       >
         {data.errors.vendor ? (
           <EmptyState title="Couldn't load vendor spend" description={data.errors.vendor} />
-        ) : data.vendorRows.length === 0 ? (
+        ) : mergedVendorRows.length === 0 ? (
           <EmptyState title="No vendor spend yet" description="Vendors are created automatically as entries import." />
         ) : (
           <>
+            {analyticsData.errors.concentration && (
+              <p className="text-xs text-destructive">
+                {analyticsData.errors.concentration} — % of total spend, open flags, and ₹ at risk below may be
+                incomplete.
+              </p>
+            )}
             <BarList items={vendorBarItems} valueFormatter={formatINRCompact} />
-            <DataTable columns={vendorColumns} rows={data.vendorRows} getRowKey={(r) => r.vendor_id} />
+            <DataTable columns={vendorColumns} rows={mergedVendorRows} getRowKey={(r) => r.vendor_id} />
           </>
         )}
       </ReportSection>
@@ -907,37 +1009,6 @@ export default async function ReportsPage() {
               ))}
             </div>
             <DataTable columns={complianceColumns} rows={analyticsData.complianceRows} getRowKey={(r) => r.id} />
-          </>
-        )}
-      </ReportSection>
-
-      <ReportSection
-        id="vendor-concentration"
-        title="Vendor concentration"
-        description="Spend, share of total organisational spend, and open-flag exposure per vendor."
-        action={
-          <ExportCsvButton
-            filename="vendor-concentration.csv"
-            rowCount={analyticsData.vendorRows.length}
-            csv={toCsv(analyticsData.vendorRows, [
-              { header: 'Vendor', value: (r) => r.display_name },
-              { header: 'Entries', value: (r) => r.entry_count },
-              { header: 'Total Spend', value: (r) => r.total_amount },
-              { header: '% of Total Spend', value: (r) => r.pct_of_total_spend },
-              { header: 'Open Flags', value: (r) => r.open_flag_count },
-              { header: '₹ at Risk', value: (r) => r.open_flag_amount_at_risk },
-            ])}
-          />
-        }
-      >
-        {analyticsData.errors.concentration ? (
-          <EmptyState title="Couldn't load vendor concentration" description={analyticsData.errors.concentration} />
-        ) : analyticsData.vendorRows.length === 0 ? (
-          <EmptyState title="No vendor spend yet" />
-        ) : (
-          <>
-            <BarList items={vendorConcentrationBarItems} valueFormatter={formatINRCompact} />
-            <DataTable columns={analyticsVendorColumns} rows={analyticsData.vendorRows} getRowKey={(r) => r.vendor_id} />
           </>
         )}
       </ReportSection>
