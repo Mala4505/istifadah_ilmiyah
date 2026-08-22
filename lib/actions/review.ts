@@ -552,6 +552,40 @@ export async function searchReviewVendors(query: string): Promise<VendorSearchRe
 }
 
 /**
+ * event-scoping-and-review-fixes-plan.md §2.4: "stop the vendor overwrite."
+ * Selecting a vendor from the `/` picker (handleVendorSelect in
+ * review-workspace.tsx) no longer overwrites the on-screen OCR vendor name --
+ * it only links vendorId. When the reviewer confirms via the resulting
+ * "record as another spelling?" dialog, this is the write path: it records
+ * the OCR spelling as a `vendor_alias` for the linked vendor, using the exact
+ * same convention as learnVendorAliasesFromAttach above (normalized raw_name,
+ * admin/service-role client because `vendor_alias` denies inserts to
+ * `authenticated` by RLS, `onConflict: 'raw_name', ignoreDuplicates: true` so
+ * an existing alias is never repointed to a different vendor). Never touches
+ * component state -- the OCR field on screen is left exactly as it was
+ * whether the reviewer accepts or declines.
+ */
+export async function confirmVendorAlias(input: {
+  vendorId: number
+  rawName: string
+}): Promise<SimpleActionResult> {
+  if (!Number.isInteger(input.vendorId)) {
+    return { ok: false, error: 'Invalid vendor id.' }
+  }
+
+  const normalized = normalizeVendorName(input.rawName.trim())
+  if (!normalized) return { ok: true }
+
+  const admin = createAdminClient()
+  const { error } = await admin
+    .from('vendor_alias')
+    .upsert({ vendor_id: input.vendorId, raw_name: normalized, source: 'manual' }, { onConflict: 'raw_name', ignoreDuplicates: true })
+
+  if (error) return { ok: false, error: logRawError('review.confirmVendorAlias', error.message) }
+  return { ok: true }
+}
+
+/**
  * Unverified/All toggle (review-page-layout-redesign-plan.md §1). Persisted as
  * a cookie rather than a `?scope=` query param: review-workspace.tsx's
  * Prev/Next navigation does `router.push('/review?id=${id}')` with no scope

@@ -23,10 +23,11 @@ import { toastError } from '@/components/ui/error-toast'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
-import { normalizeUnit } from '@/lib/normalize'
+import { normalizeUnit, normalizeVendorName } from '@/lib/normalize'
 import {
   addLineItem,
   claimReviewDocument,
+  confirmVendorAlias,
   saveEntryClassification,
   saveVerification,
   type SaveVerificationInput,
@@ -309,6 +310,20 @@ export function ReviewWorkspace({
   const [confirmAction, setConfirmAction] = useState<
     { kind: 're-extract' } | { kind: 'navigate'; targetId: number } | null
   >(null)
+
+  // event-scoping-and-review-fixes-plan.md §2.4: "stop the vendor overwrite."
+  // Selecting a vendor from the `/` picker no longer overwrites the on-screen
+  // OCR vendor name -- it only links vendorId (see handleVendorSelect below).
+  // When the OCR spelling differs from the selected vendor's own spelling,
+  // this prompt offers to record the OCR spelling as a vendor_alias instead,
+  // via the new confirmVendorAlias server action. Declining or accepting
+  // either way never touches `header` -- only this dialog's own state.
+  const [vendorAliasPrompt, setVendorAliasPrompt] = useState<{
+    vendorId: number
+    vendorDisplayName: string
+    rawName: string
+  } | null>(null)
+  const [confirmingVendorAlias, setConfirmingVendorAlias] = useState(false)
 
   // Stage 3 (Classify, §8) -- string state + NONE sentinel, same pattern as
   // components/entries/detail/enrichment-form.tsx. Saved via
@@ -656,8 +671,30 @@ export function ReviewWorkspace({
   }
 
   function handleVendorSelect(vendor: VendorSearchResult) {
+    // §2.4: linking a vendor must never overwrite what OCR actually read off
+    // the bill -- header.vendorName (and vendorGstin) stay exactly as
+    // extracted, regardless of which vendor gets linked.
     setVendorId(vendor.id)
-    setHeader((h) => ({ ...h, vendorName: vendor.displayName, vendorGstin: vendor.gstin ?? h.vendorGstin }))
+
+    const rawName = header.vendorName.trim()
+    if (!rawName) return // nothing to learn from an empty OCR field
+
+    const normalizedOcr = normalizeVendorName(rawName)
+    const normalizedVendor = normalizeVendorName(vendor.displayName)
+    if (!normalizedOcr || normalizedOcr === normalizedVendor) return // already the same spelling
+
+    setVendorAliasPrompt({ vendorId: vendor.id, vendorDisplayName: vendor.displayName, rawName })
+  }
+
+  async function handleConfirmVendorAlias() {
+    if (!vendorAliasPrompt) return
+    setConfirmingVendorAlias(true)
+    const result = await confirmVendorAlias({ vendorId: vendorAliasPrompt.vendorId, rawName: vendorAliasPrompt.rawName })
+    setConfirmingVendorAlias(false)
+    setVendorAliasPrompt(null)
+    if (!result.ok) {
+      toastError(result.error, { context: 'review-workspace' })
+    }
   }
 
   function openHubStatus() {
@@ -1103,6 +1140,32 @@ export function ReviewWorkspace({
             </Button>
             <Button type="button" variant="destructive" onClick={confirmPendingAction}>
               {confirmAction?.kind === 're-extract' ? 'Re-extract anyway' : 'Discard and continue'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={vendorAliasPrompt !== null}
+        onOpenChange={(open) => {
+          if (!open) setVendorAliasPrompt(null)
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              Record &lsquo;{vendorAliasPrompt?.rawName}&rsquo; as another spelling of {vendorAliasPrompt?.vendorDisplayName}?
+            </DialogTitle>
+            <DialogDescription>
+              This only teaches future bills to match this vendor faster. The vendor name on this bill stays exactly as OCR read it.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setVendorAliasPrompt(null)} disabled={confirmingVendorAlias}>
+              No
+            </Button>
+            <Button type="button" onClick={handleConfirmVendorAlias} disabled={confirmingVendorAlias}>
+              Yes, record it
             </Button>
           </DialogFooter>
         </DialogContent>
