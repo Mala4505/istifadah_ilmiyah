@@ -900,55 +900,58 @@ export function ReviewWorkspace({
           replaces the toolbar's Prev/Next-doc buttons, pdf-viewer.tsx's own
           page-nav row, and the sibling-bill row that used to live paired
           with StageProgress below. */}
-      <div className="flex flex-wrap items-center gap-2 rounded-md border border-border bg-background px-2 py-1.5">
-        <span className="text-xs text-muted-foreground">
-          Document {currentIndex + 1} of {queue.length}
-        </span>
-        <Button
-          type="button"
-          size="sm"
-          variant="ghost"
-          disabled={prevId === null}
-          onClick={() => requestGoToDocument(prevId)}
-        >
-          ← Prev doc (PgUp)
-        </Button>
-        <Button
-          type="button"
-          size="sm"
-          variant="ghost"
-          disabled={nextId === null}
-          onClick={() => requestGoToDocument(nextId)}
-        >
-          Next doc (PgDn) →
-        </Button>
-
-        <div className="h-4 w-px bg-border" />
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-background px-2 py-1.5">
+        <div className="flex items-center gap-2">
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            disabled={prevId === null}
+            onClick={() => requestGoToDocument(prevId)}
+          >
+            ← Prev bill (PgUp)
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            disabled={nextId === null}
+            onClick={() => requestGoToDocument(nextId)}
+          >
+            Next bill (PgDn) →
+          </Button>
+        </div>
 
         <span className="text-xs text-muted-foreground">
-          {pdfPageInfo.numPages > 0 ? `Page ${pdfPageInfo.pageNumber} / ${pdfPageInfo.numPages}` : '—'}
+          {currentIndex < 0 ? 'Bill (outside current queue)' : `Bill ${currentIndex + 1} of ${queue.length}`}
         </span>
-        <Button
-          type="button"
-          size="sm"
-          variant="ghost"
-          disabled={pdfPageInfo.pageNumber <= 1}
-          onClick={() => pdfViewerRef.current?.prevPage()}
-        >
-          ← Prev page
-        </Button>
-        <Button
-          type="button"
-          size="sm"
-          variant="ghost"
-          disabled={pdfPageInfo.pageNumber >= pdfPageInfo.numPages}
-          onClick={() => pdfViewerRef.current?.nextPage()}
-        >
-          Next page →
-        </Button>
+
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-muted-foreground">
+            {pdfPageInfo.numPages > 0 ? `Page ${pdfPageInfo.pageNumber} / ${pdfPageInfo.numPages}` : '—'}
+          </span>
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            disabled={pdfPageInfo.pageNumber <= 1}
+            onClick={() => pdfViewerRef.current?.prevPage()}
+          >
+            ← Prev page
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            disabled={pdfPageInfo.pageNumber >= pdfPageInfo.numPages}
+            onClick={() => pdfViewerRef.current?.nextPage()}
+          >
+            Next page →
+          </Button>
+        </div>
 
         {detail.billCount > 1 ? (
-          <>
+          <div className="flex w-full flex-wrap items-center gap-2">
             <div className="h-4 w-px bg-border" />
             <span className="text-xs text-muted-foreground">Bills in this PDF:</span>
             {detail.siblingBills.map((bill) => (
@@ -968,7 +971,7 @@ export function ReviewWorkspace({
                 {bill.billIndex + 1}
               </button>
             ))}
-          </>
+          </div>
         ) : null}
       </div>
 

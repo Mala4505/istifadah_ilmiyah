@@ -172,7 +172,7 @@ function PageHeader({
       <h1 className="text-xl font-semibold tracking-tight">Review queue</h1>
       {position !== undefined && total !== undefined ? (
         <span className="text-sm text-muted-foreground">
-          Document {position} of {total}
+          Bill {position} of {total}
         </span>
       ) : null}
       {scope !== undefined ? <QueueScopeToggle current={scope} /> : null}
