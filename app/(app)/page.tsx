@@ -2,6 +2,7 @@ import { friendlyDataError } from '@/lib/friendly-error'
 import Link from 'next/link'
 import { ScanLine, TriangleAlert, Wallet, UploadCloud, FileScan, ArrowRight, ListChecks, ShieldCheck, Tag } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
+import { getSelectedEventId } from '@/lib/events/current'
 import { StatTile } from '@/components/dashboard/stat-tile'
 import { StatusCountCard, type StatusCount } from '@/components/dashboard/status-count-card'
 import { statusBadgeVariant, hubStatusBadgeVariant } from '@/components/entries/format'
@@ -16,7 +17,7 @@ import { isAdminOrAbove } from '@/lib/auth/roles'
 // its own joins. Every tile links to its filtered list per §5's note.
 export const dynamic = 'force-dynamic'
 
-type OpenIssueRow = { amount_at_risk: number | null }
+type OpenIssueRow = { amount_at_risk: number | null; event_id: number | null }
 type BudgetVsActualRow = {
   budget_head_id: number
   actual_amount: number | null
@@ -39,12 +40,28 @@ async function loadDashboardData() {
   const startOfToday = new Date()
   startOfToday.setHours(0, 0, 0, 0)
 
+  // Phase 0 §0.2 (docs/pre-deploy-findings-and-plan.md): this tile used to
+  // read v_open_issues completely unfiltered by event, while Reports read it
+  // filtered and Exceptions read the base table with a broken filter (§0.1)
+  // -- three different counts for the same backlog. Event-scoped here the
+  // same way Reports and Exceptions now are: keep rows in the active event
+  // OR rows whose event can't be resolved at all (a vendor-level flag with
+  // no entry/document/batch to attribute to any single event), never drop
+  // them outright.
+  const selectedEventId = await getSelectedEventId(supabase)
+
   const [reviewQueueRes, openIssuesRes, budgetRes, importsRes, unmatchedDocsRes, profileRes, statusCountsRes] =
     await Promise.all([
       supabase
         .from('v_review_queue')
         .select('document_extraction_id', { count: 'exact', head: true }),
-      supabase.from('v_open_issues').select('amount_at_risk').returns<OpenIssueRow[]>(),
+      selectedEventId === null
+        ? supabase.from('v_open_issues').select('amount_at_risk, event_id').returns<OpenIssueRow[]>()
+        : supabase
+            .from('v_open_issues')
+            .select('amount_at_risk, event_id')
+            .or(`event_id.eq.${selectedEventId},event_id.is.null`)
+            .returns<OpenIssueRow[]>(),
       supabase
         .from('v_budget_vs_actual')
         .select('budget_head_id, actual_amount, approved_amount, budget_status_note')

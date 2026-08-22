@@ -260,6 +260,7 @@ async function handlePOST(request: NextRequest) {
 
   if (duplicateOf !== null) {
     await admin.from('reconciliation_exception').insert({
+      source_document_id: documentId,
       exception_type: 'duplicate_document_hash',
       severity: 'low',
       description:
@@ -275,6 +276,7 @@ async function handlePOST(request: NextRequest) {
   // that now instead of leaving it silent.
   if (pageCountUnresolved) {
     await admin.from('reconciliation_exception').insert({
+      source_document_id: documentId,
       exception_type: 'page_count_unresolved',
       severity: 'low',
       description:

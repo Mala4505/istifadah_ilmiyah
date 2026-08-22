@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { CheckCircle2, GitCompareArrows } from 'lucide-react'
+import type { SupabaseClient } from '@supabase/supabase-js'
 import { Card, CardContent } from '@/components/ui/card'
 import { FriendlyError } from '@/components/ui/friendly-error'
 import { friendlyDataError } from '@/lib/friendly-error'
@@ -27,6 +28,74 @@ import { formatDate, formatINR } from '@/lib/reports/format'
 // severity-grouped table that wasn't built to also host report-shaped data.
 export const dynamic = 'force-dynamic'
 
+type RawExceptionRow = ExceptionRow & {
+  document_extraction_id: number | null
+  import_batch_id: number | null
+  source_document_id: number | null
+}
+
+function uniqueIds(ids: (number | null)[]): number[] {
+  return Array.from(new Set(ids.filter((id): id is number => id !== null)))
+}
+
+/**
+ * Resolves each exception's event the same way v_open_issues does
+ * (20260814000007's coalesce chain, extended by 20260822000010 §0.3):
+ * entries.event_id via entry_id, else source_document.event_id via
+ * document_extraction_id, else import_batch.event_id via import_batch_id,
+ * else source_document.event_id via source_document_id directly. Rows that
+ * still resolve to no event are KEPT, not dropped (§0.1 — the previous
+ * `entry_id !== null && eventEntryIds.has(entry_id)` filter dropped every
+ * row without an entry_id, which was 33 of 34 open exceptions).
+ */
+async function resolveEventIds(
+  supabase: SupabaseClient,
+  rows: RawExceptionRow[]
+): Promise<Map<number, number | null>> {
+  const entryIds = uniqueIds(rows.map((r) => r.entry_id))
+  const docExtractionIds = uniqueIds(rows.map((r) => r.document_extraction_id))
+  const importBatchIds = uniqueIds(rows.map((r) => r.import_batch_id))
+  const directSourceDocIds = uniqueIds(rows.map((r) => r.source_document_id))
+
+  const [entryRes, docExtractionRes, importBatchRes] = await Promise.all([
+    entryIds.length > 0
+      ? supabase.from('entries').select('id, event_id').in('id', entryIds)
+      : Promise.resolve({ data: [] as { id: number; event_id: number }[] }),
+    docExtractionIds.length > 0
+      ? supabase.from('document_extraction').select('id, source_document_id').in('id', docExtractionIds)
+      : Promise.resolve({ data: [] as { id: number; source_document_id: number }[] }),
+    importBatchIds.length > 0
+      ? supabase.from('import_batch').select('id, event_id').in('id', importBatchIds)
+      : Promise.resolve({ data: [] as { id: number; event_id: number }[] }),
+  ])
+
+  const entryEventMap = new Map((entryRes.data ?? []).map((r) => [r.id as number, r.event_id as number]))
+  const docExtractionSourceDocMap = new Map(
+    (docExtractionRes.data ?? []).map((r) => [r.id as number, r.source_document_id as number])
+  )
+  const importBatchEventMap = new Map((importBatchRes.data ?? []).map((r) => [r.id as number, r.event_id as number]))
+
+  const sourceDocIdsNeeded = uniqueIds([...directSourceDocIds, ...Array.from(docExtractionSourceDocMap.values())])
+  const { data: sourceDocRows } =
+    sourceDocIdsNeeded.length > 0
+      ? await supabase.from('source_document').select('id, event_id').in('id', sourceDocIdsNeeded)
+      : { data: [] as { id: number; event_id: number }[] }
+  const sourceDocEventMap = new Map((sourceDocRows ?? []).map((r) => [r.id as number, r.event_id as number]))
+
+  const resolved = new Map<number, number | null>()
+  for (const r of rows) {
+    const viaEntry = r.entry_id !== null ? entryEventMap.get(r.entry_id) : undefined
+    const viaDocExtraction =
+      r.document_extraction_id !== null
+        ? sourceDocEventMap.get(docExtractionSourceDocMap.get(r.document_extraction_id) ?? -1)
+        : undefined
+    const viaImportBatch = r.import_batch_id !== null ? importBatchEventMap.get(r.import_batch_id) : undefined
+    const viaSourceDocument = r.source_document_id !== null ? sourceDocEventMap.get(r.source_document_id) : undefined
+    resolved.set(r.id, viaEntry ?? viaDocExtraction ?? viaImportBatch ?? viaSourceDocument ?? null)
+  }
+  return resolved
+}
+
 /**
  * Queue tab (MASTER-PLAN §3.10, §5 row 8, §11.1 Day 5). Sorted by
  * severity then ₹ at risk descending, filterable by exception_type and by
@@ -38,18 +107,19 @@ export const dynamic = 'force-dynamic'
  * 20260819000003 — dept lost this), enforced both by hiding the action here
  * and by RLS in lib/actions/exceptions.ts.
  *
- * Event-scoping: reconciliation_exception carries no event_id column of its
- * own (same limitation the Reconciliation-report tab's loader documents
- * below), so — mirroring that tab's pattern — the fetched rows are filtered
- * down in application code by cross-referencing entry_id against
- * entries.event_id after the query returns.
+ * Event-scoping (§0.1/§0.2): reconciliation_exception carries no event_id
+ * column of its own, so the fetched rows are filtered down in application
+ * code via resolveEventIds above — the same coalesce chain v_open_issues
+ * uses. Rows with no resolvable event stay visible regardless of the active
+ * event, matching the view and matching Dashboard/Reports (§0.2 — all three
+ * surfaces must agree on the same open-exception count).
  */
 async function loadQueueData(params: { status: string; type: string }) {
   const supabase = await createClient()
   let query = supabase
     .from('reconciliation_exception')
     .select(
-      'id, entry_id, exception_type, severity, amount_at_risk, description, status, resolution_note, resolved_at, created_at'
+      'id, entry_id, document_extraction_id, import_batch_id, source_document_id, exception_type, severity, amount_at_risk, description, status, resolution_note, resolved_at, created_at'
     )
 
   if (params.status !== 'all') {
@@ -62,23 +132,15 @@ async function loadQueueData(params: { status: string; type: string }) {
   const { data, error } = await query
 
   const selectedEventId = await getSelectedEventId(supabase)
-  const rawExceptions = (data ?? []) as ExceptionRow[]
+  const rawExceptions = (data ?? []) as RawExceptionRow[]
 
-  let exceptions = rawExceptions
-  if (selectedEventId !== null) {
-    const candidateEntryIds = Array.from(
-      new Set(rawExceptions.map((r) => r.entry_id).filter((id): id is number => id !== null))
-    )
-    let eventEntryIds = new Set<number>()
-    if (candidateEntryIds.length > 0) {
-      const { data: entryEventRows } = await supabase
-        .from('entries')
-        .select('id')
-        .eq('event_id', selectedEventId)
-        .in('id', candidateEntryIds)
-      eventEntryIds = new Set((entryEventRows ?? []).map((r) => r.id as number))
-    }
-    exceptions = rawExceptions.filter((r) => r.entry_id !== null && eventEntryIds.has(r.entry_id))
+  let exceptions: RawExceptionRow[] = rawExceptions
+  if (selectedEventId !== null && rawExceptions.length > 0) {
+    const eventIdByRow = await resolveEventIds(supabase, rawExceptions)
+    exceptions = rawExceptions.filter((r) => {
+      const resolved = eventIdByRow.get(r.id)
+      return resolved === null || resolved === undefined || resolved === selectedEventId
+    })
   }
 
   return { exceptions, error }

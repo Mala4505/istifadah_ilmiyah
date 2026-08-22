@@ -644,6 +644,7 @@ export async function finalizeSourceDocumentExtraction(
   if (ingestPageCount !== null && ingestPageCount !== classifiedPageCount) {
     await admin.from('reconciliation_exception').upsert(
       {
+        source_document_id: sourceDocumentId,
         exception_type: 'page_count_mismatch',
         severity: 'low',
         description:
@@ -791,6 +792,7 @@ async function recordPageExtractionFailure(
 
   const { error: exceptionError } = await admin.from('reconciliation_exception').upsert(
     {
+      source_document_id: sourceDocumentId,
       exception_type: 'page_extraction_failed',
       severity: 'medium',
       description:

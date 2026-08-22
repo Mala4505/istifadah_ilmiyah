@@ -212,12 +212,24 @@ async function loadReportsData() {
       .order('days_in_status', { ascending: false })
       .limit(ROW_CAP)
       .returns<HubAgeingRow[]>(),
-    supabase
-      .from('v_open_issues')
-      .select('source_table, id, entry_id, issue_type, severity, amount_at_risk, description, status, created_at')
-      .eq('event_id', eventId)
-      .limit(ROW_CAP)
-      .returns<OpenIssueRow[]>(),
+    // Phase 0 §0.2: was `.eq('event_id', eventId)`, which silently dropped
+    // every row whose event can't be resolved (document-/batch-level
+    // exceptions with no traceable event, and vendor-level flags) — the same
+    // class of bug that made the Exceptions queue, Dashboard and Reports
+    // digest disagree by ~30x on the same backlog. Keep those rows
+    // regardless of the active event, matching Dashboard and Exceptions.
+    eventId === null
+      ? supabase
+          .from('v_open_issues')
+          .select('source_table, id, entry_id, issue_type, severity, amount_at_risk, description, status, created_at')
+          .limit(ROW_CAP)
+          .returns<OpenIssueRow[]>()
+      : supabase
+          .from('v_open_issues')
+          .select('source_table, id, entry_id, issue_type, severity, amount_at_risk, description, status, created_at')
+          .or(`event_id.eq.${eventId},event_id.is.null`)
+          .limit(ROW_CAP)
+          .returns<OpenIssueRow[]>(),
   ])
 
   const vendorRows = (vendorRes.data ?? []).filter((r) => r.entry_count > 0)
