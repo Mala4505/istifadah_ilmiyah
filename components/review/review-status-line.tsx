@@ -15,8 +15,8 @@
  */
 
 import { Button } from '@/components/ui/button'
+import { Combobox } from '@/components/ui/combobox'
 import { Label } from '@/components/ui/label'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import type { MatchCandidate, UncertainField } from '@/lib/review/types'
 import { MatchStrip } from './match-strip'
 
@@ -182,37 +182,41 @@ export function ReviewStatusLine({
               <Label htmlFor="stage3-admin-head-select" className="text-xs">
                 Admin head (H)
               </Label>
-              <Select value={adminHeadId} onValueChange={onAdminHeadChange}>
-                <SelectTrigger id="stage3-admin-head-select" className="h-8 w-48 text-xs">
-                  <SelectValue placeholder="Not set" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={NONE}>Not set</SelectItem>
-                  {adminHeadOptions.map((h) => (
-                    <SelectItem key={h.id} value={String(h.id)}>
-                      {h.head_number}. {h.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <Combobox
+                id="stage3-admin-head-select"
+                value={adminHeadId}
+                onValueChange={onAdminHeadChange}
+                placeholder="Not set"
+                searchPlaceholder="Search admin heads…"
+                options={[
+                  { value: NONE, label: 'Not set', searchValue: 'not set' },
+                  ...adminHeadOptions.map((h) => ({
+                    value: String(h.id),
+                    label: `${h.head_number}. ${h.name}`,
+                    searchValue: `${h.head_number}. ${h.name}`,
+                  })),
+                ]}
+              />
             </div>
             <div className="flex flex-col gap-1">
               <Label htmlFor="stage3-zone-select" className="text-xs">
                 Zone (Z)
               </Label>
-              <Select value={zoneId} onValueChange={onZoneChange}>
-                <SelectTrigger id="stage3-zone-select" className="h-8 w-48 text-xs">
-                  <SelectValue placeholder="Not set" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={NONE}>Not set</SelectItem>
-                  {zoneOptions.map((z) => (
-                    <SelectItem key={z.id} value={String(z.id)}>
-                      {z.zone_number}. {z.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <Combobox
+                id="stage3-zone-select"
+                value={zoneId}
+                onValueChange={onZoneChange}
+                placeholder="Not set"
+                searchPlaceholder="Search zones…"
+                options={[
+                  { value: NONE, label: 'Not set', searchValue: 'not set' },
+                  ...zoneOptions.map((z) => ({
+                    value: String(z.id),
+                    label: `${z.zone_number}. ${z.name}`,
+                    searchValue: `${z.zone_number}. ${z.name}`,
+                  })),
+                ]}
+              />
             </div>
             <span className="text-xs text-muted-foreground">Saved with the next Save (Ctrl/Cmd+Enter)</span>
           </>
