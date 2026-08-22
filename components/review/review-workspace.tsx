@@ -532,6 +532,22 @@ export function ReviewWorkspace({
     }
   }, [queue, detail.sourceDocumentId])
 
+  // 2.3: on Save, work this PDF to completion before letting the
+  // (severity-ordered, possibly cross-document) global queue take over --
+  // the lowest bill_index among this document's still-unverified siblings
+  // (excluding this bill itself, which detail.siblingBills still shows as
+  // unverified since it reflects state as of this page load, before the
+  // save that's about to happen). null once every other bill in this
+  // document is already verified, which is when handleSave below falls back
+  // to the queue and shows the "document complete" toast.
+  const nextSiblingId = useMemo(() => {
+    const unverified = detail.siblingBills.filter(
+      (b) => b.documentExtractionId !== detail.documentExtractionId && b.verifiedAt === null
+    )
+    if (unverified.length === 0) return null
+    return unverified.reduce((min, b) => (b.billIndex < min.billIndex ? b : min)).documentExtractionId
+  }, [detail.siblingBills, detail.documentExtractionId])
+
   function goToDocument(id: number | null) {
     if (id === null) {
       toast.info('No more documents in that direction.')
@@ -695,8 +711,18 @@ export function ReviewWorkspace({
           ? `Saved -- ${result.rateReferenceRowsInserted} rate reference row(s) recorded.`
           : 'Saved.'
       )
-      if (nextId !== null) router.push(`/review?id=${nextId}`)
-      else router.push('/review')
+      // 2.3: prefer the next unverified bill in THIS document over whatever
+      // the severity-ordered global queue would send us to next -- the
+      // queue's own nextId (used by the manual "Next bill" nav button
+      // above) can point at an entirely different PDF, which fought the
+      // "work one PDF to completion" workflow. Only fall back to the queue
+      // once this document has nothing left to verify.
+      if (nextSiblingId !== null) {
+        router.push(`/review?id=${nextSiblingId}`)
+      } else {
+        toast.success('Document complete -- every bill in this PDF has been reviewed.')
+        router.push('/review')
+      }
     })
   }
 
@@ -1196,6 +1222,8 @@ export function ReviewWorkspace({
           <PdfViewer
             ref={pdfViewerRef}
             sourceDocumentId={detail.sourceDocumentId}
+            documentExtractionId={detail.documentExtractionId}
+            pageNumberStart={detail.pageNumberStart}
             pages={detail.pages}
             uncertainFields={detail.uncertainFields}
             collapsed={paneMode === 'collapsed'}

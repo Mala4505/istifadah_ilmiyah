@@ -156,7 +156,7 @@ export default async function ReviewPage({
     // -review-fixes-plan.md §2.11).
     let outOfScopeQuery = supabase
       .from('v_review_queue_all')
-      .select('document_extraction_id, source_document_id, bill_count')
+      .select('document_extraction_id, source_document_id')
       .eq('document_extraction_id', requestedId as number)
     if (selectedEventId !== null) {
       outOfScopeQuery = outOfScopeQuery.eq('event_id', selectedEventId)
@@ -174,7 +174,6 @@ export default async function ReviewPage({
       supabase,
       outOfScopeRow.source_document_id as number,
       outOfScopeRow.document_extraction_id as number,
-      outOfScopeRow.bill_count as number,
       selectedEventId
     )
 
@@ -204,7 +203,6 @@ export default async function ReviewPage({
     supabase,
     current.sourceDocumentId,
     current.documentExtractionId,
-    current.billCount,
     selectedEventId
   )
 
@@ -278,7 +276,6 @@ async function loadDocumentDetail(
   supabase: SupabaseServerClient,
   sourceDocumentId: number,
   documentExtractionId: number,
-  billCount: number,
   selectedEventId: number | null
 ): Promise<ReviewDocumentDetail | null> {
   const {
@@ -523,6 +520,7 @@ async function loadDocumentDetail(
       documentExtractionId: b.id as number,
       billIndex: b.bill_index as number,
       matched: (b.entry_id as number | null) !== null,
+      verifiedAt: b.verified_at as string | null,
     }))
     .sort((a, b) => a.billIndex - b.billIndex)
 
@@ -616,7 +614,11 @@ async function loadDocumentDetail(
     sourceDocumentId,
     documentExtractionId,
     billIndex: extraction.bill_index as number,
-    billCount,
+    // 2.2: sourced from the sibling-bills query above -- every
+    // document_extraction row for this source_document_id, unfiltered by
+    // verified_at, so the denominator never drops as bills get verified
+    // (unlike v_review_queue's bill_count, which excludes verified bills).
+    billCount: (siblingBillsRes.data ?? []).length,
     pageNumberStart: extraction.page_number_start as number | null,
     pageNumberEnd: extraction.page_number_end as number | null,
     originalFilename: sourceDoc.original_filename as string,

@@ -88,6 +88,14 @@ export const PdfViewer = forwardRef<
   PdfViewerHandle,
   {
     sourceDocumentId: number
+    // 2.1: identifies the bill currently being reviewed, distinct from
+    // sourceDocumentId -- several bills of one multi-bill PDF share the same
+    // sourceDocumentId, so this is what the page-reset effect below keys off
+    // to notice "the bill changed" even when the underlying PDF didn't.
+    documentExtractionId: number
+    // 2.1: this bill's own first page (document_extraction.page_number_start)
+    // -- seeds/resets pageNumber below instead of always opening on page 1.
+    pageNumberStart?: number | null
     pages?: PageStatus[]
     uncertainFields?: UncertainField[]
     collapsed?: boolean
@@ -96,7 +104,10 @@ export const PdfViewer = forwardRef<
     // and numPages otherwise live only in this component's own state.
     onPageInfoChange?: (pageNumber: number, numPages: number) => void
   }
->(function PdfViewer({ sourceDocumentId, pages = [], uncertainFields = [], collapsed = false, onPageInfoChange }, ref) {
+>(function PdfViewer(
+  { sourceDocumentId, documentExtractionId, pageNumberStart, pages = [], uncertainFields = [], collapsed = false, onPageInfoChange },
+  ref
+) {
   const router = useRouter()
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -116,7 +127,9 @@ export const PdfViewer = forwardRef<
   // actual value is never read.
   const [retryNonce, setRetryNonce] = useState(0)
   const [numPages, setNumPages] = useState(0)
-  const [pageNumber, setPageNumber] = useState(1)
+  // 2.1: seeded from this bill's own first page rather than hard-coded to 1
+  // -- the effect below re-seeds this on every bill change (see its comment).
+  const [pageNumber, setPageNumber] = useState(pageNumberStart ?? 1)
   // Manual zoom multiplier on top of the fit-width base scale computed below
   // -- 1 means "exactly fit the pane," not "no zoom applied at a fixed pixel
   // size" like the old fixed-scale render did.
@@ -193,12 +206,23 @@ export const PdfViewer = forwardRef<
     []
   )
 
+  // 2.1: seed/reset pageNumber to this bill's own first page whenever the
+  // bill changes. Keyed on documentExtractionId -- not sourceDocumentId
+  // (shared by every bill of one multi-bill PDF, so it wouldn't fire when
+  // stepping between them) and not pageNumberStart alone (two different
+  // bills could coincidentally start on the same page number, which
+  // wouldn't register as a dependency change and so wouldn't re-fire this
+  // effect). A separate effect from the document-load one below so a fresh
+  // pdf.js load isn't required just to move between bills of the same PDF.
+  useEffect(() => {
+    setPageNumber(pageNumberStart ?? 1)
+  }, [documentExtractionId, pageNumberStart])
+
   // Load the document whenever the target document changes.
   useEffect(() => {
     let cancelled = false
     setLoading(true)
     setError(null)
-    setPageNumber(1)
     setRotation(0)
 
     void (async () => {
