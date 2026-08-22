@@ -3,6 +3,13 @@
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 import { logRawError } from '@/lib/friendly-error'
+import { getSelectedEvent, isEventMutable } from '@/lib/events/current'
+
+// Phase 6 Step 2 (docs/event-scoping-and-review-fixes-plan.md §1.6): past
+// events are browsable read-only. Every mutation in this file is gated on
+// the currently-selected event still being the current one before it
+// touches the database.
+const EVENT_READONLY_ERROR = 'This event is read-only — switch to the current event to make changes.'
 
 export interface SaveEntryEnrichmentInput {
   entryId: number
@@ -42,6 +49,11 @@ export async function saveEntryEnrichment(
   }
 
   const supabase = await createClient()
+
+  const selectedEvent = await getSelectedEvent(supabase)
+  if (!isEventMutable(selectedEvent)) {
+    return { success: false, error: EVENT_READONLY_ERROR }
+  }
 
   const { data, error } = await supabase
     .from('entries')
@@ -99,6 +111,11 @@ export async function setEntryClassification(
   }
 
   const supabase = await createClient()
+
+  const selectedEvent = await getSelectedEvent(supabase)
+  if (!isEventMutable(selectedEvent)) {
+    return { success: false, error: EVENT_READONLY_ERROR }
+  }
 
   const { data, error } = await supabase
     .from('entries')
@@ -191,6 +208,11 @@ export async function bulkSaveEntryEnrichment(
 
   const supabase = await createClient()
 
+  const selectedEvent = await getSelectedEvent(supabase)
+  if (!isEventMutable(selectedEvent)) {
+    return { success: false, updatedCount: 0, requestedCount, error: EVENT_READONLY_ERROR }
+  }
+
   const { data, error } = await supabase.from('entries').update(patch).in('id', cleanIds).select('id')
 
   if (error) {
@@ -249,6 +271,11 @@ export async function setSettlesEntry(
   }
 
   const supabase = await createClient()
+
+  const selectedEvent = await getSelectedEvent(supabase)
+  if (!isEventMutable(selectedEvent)) {
+    return { success: false, error: EVENT_READONLY_ERROR }
+  }
 
   const { data, error } = await supabase
     .from('entries')

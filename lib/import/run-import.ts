@@ -44,7 +44,9 @@
 
 import { Pool, types, type PoolClient } from 'pg'
 import * as XLSX from 'xlsx'
+import { cookies } from 'next/headers'
 import { serverEnv } from '@/lib/env.server'
+import { ACTIVE_EVENT_COOKIE } from '@/lib/events/current'
 import { normalizeVendorName } from '@/lib/normalize'
 import {
   INITIAL_DEPARTMENTAL_CONTEXT,
@@ -95,6 +97,72 @@ export function getPool(): Pool {
     pool = new Pool({ connectionString: serverEnv.DATABASE_URL, max: 5 })
   }
   return pool
+}
+
+// ---------------------------------------------------------------------------
+// Event scoping (Phase 6 Step 2 §1) -- every import writer resolves the
+// selected event through THIS function, not lib/events/current.ts's
+// getSelectedEventId, because that helper needs a supabase-js SupabaseClient
+// and every caller in this file (and run-portal-import.ts /
+// run-department-budget-import.ts, which share this module's `pg` pool) only
+// ever holds a raw `pg` connection. The resolution POLICY is kept byte-for-
+// byte identical to getSelectedEventId's: read the active_event_id cookie,
+// fall back to the row where is_current = true when the cookie is unset,
+// unparsable, or points at a deleted event.
+// ---------------------------------------------------------------------------
+
+interface SelectedEventRow {
+  id: number
+  is_current: boolean
+}
+
+/** Thrown by resolveMutableEventId specifically for "the selected event
+ *  exists but isn't the current one" -- distinguished from a generic Error
+ *  (e.g. "no event configured", a genuine misconfiguration) so a caller that
+ *  wants to answer with a specific HTTP status (409, not 500) can do so
+ *  without string-matching a message. See app/api/import/route.ts. */
+export class EventNotMutableError extends Error {}
+
+/**
+ * Resolves the selected event against the given `pg` client/pool and asserts
+ * it is mutable (doc §1.6: "switching to a past event puts the app in a
+ * view-only state -- no new uploads, no verification, no export"). Every
+ * import entry point (runImport, runPortalImport,
+ * runDepartmentBudgetImport) calls this BEFORE opening its transaction or
+ * writing any row, so a blocked import leaves no trace -- same early-exit
+ * shape as this file's own "sheet not found" check. Throws a plain,
+ * already-human-readable Error (not a raw DB error) on failure, since
+ * nothing here needs lib/friendly-error.ts's classifier -- the message is
+ * already prose.
+ */
+export async function resolveMutableEventId(client: PoolClient | Pool): Promise<number> {
+  const cookieStore = await cookies()
+  const raw = cookieStore.get(ACTIVE_EVENT_COOKIE)?.value
+  const parsedCookie = raw ? Number(raw) : NaN
+
+  let row: SelectedEventRow | undefined
+  if (Number.isFinite(parsedCookie)) {
+    const byCookie = await client.query<SelectedEventRow>(
+      'select id, is_current from public.event where id = $1',
+      [parsedCookie]
+    )
+    row = byCookie.rows[0]
+  }
+  if (!row) {
+    const current = await client.query<SelectedEventRow>(
+      'select id, is_current from public.event where is_current = true limit 1'
+    )
+    row = current.rows[0]
+  }
+  if (!row) {
+    throw new Error('No event is configured yet. Contact an admin before running an import.')
+  }
+  if (!row.is_current) {
+    throw new EventNotMutableError(
+      'The selected event is closed to new imports -- switch to the current event before importing.'
+    )
+  }
+  return row.id
 }
 
 // ---------------------------------------------------------------------------
@@ -223,10 +291,36 @@ export function newCaches(): ResolverCaches {
   }
 }
 
+/**
+ * Registers a department as active in the current import's event. Mirrors
+ * registerEventBudgetHead below exactly, for the same reason: resolveDepartment
+ * (immediately below) get-or-creates department rows during import, which
+ * the Phase 6 plan's own framing missed (it assumed department/admin_head/
+ * zone were "pre-curated, never auto-created during import" -- true for
+ * admin_head/zone, but not for department, per this function's pre-existing
+ * get-or-create behavior). Without this, a department resolved or created
+ * during import would silently fail to appear in this event's
+ * event-scoped dropdowns even though its entries/budget_allocation rows
+ * were correctly stamped with this event's id.
+ */
+async function registerEventDepartment(
+  client: PoolClient,
+  eventId: number,
+  departmentId: number
+): Promise<void> {
+  await client.query(
+    `insert into public.event_department (event_id, department_id)
+     values ($1, $2)
+     on conflict do nothing`,
+    [eventId, departmentId]
+  )
+}
+
 async function resolveDepartment(
   client: PoolClient,
   caches: ResolverCaches,
-  name: string
+  name: string,
+  eventId: number
 ): Promise<number> {
   const cached = caches.departmentByName.get(name)
   if (cached !== undefined) return cached
@@ -237,6 +331,10 @@ async function resolveDepartment(
   )
   if (existing.rows[0]) {
     caches.departmentByName.set(name, existing.rows[0].id)
+    // Resolved an EXISTING row -- may be from a prior year and new to this
+    // one, so membership is asserted every time, not only on first-ever
+    // creation. See registerEventDepartment's header comment.
+    await registerEventDepartment(client, eventId, existing.rows[0].id)
     return existing.rows[0].id
   }
 
@@ -251,7 +349,40 @@ async function resolveDepartment(
   )
   const id = created.rows[0]!.id
   caches.departmentByName.set(name, id)
+  // Brand-new row -- obviously active in the event that just created it.
+  await registerEventDepartment(client, eventId, id)
   return id
+}
+
+/**
+ * Registers a budget_head as active in the current import's event (doc §1.2
+ * refinement, resolved with the user 2026-08-22 -- see this file's own
+ * header note and 20260822000005_event_scoping.sql's comment). Unlike
+ * department/admin_head/zone, which are pre-curated and get their
+ * event_<master> membership seeded at event-creation time
+ * (lib/actions/events.ts's createEvent), budget_head rows are discovered
+ * DURING this very import -- matched on exact raw_label, so the same label
+ * naturally resolves to the same shared row year over year. That means
+ * event_budget_head membership can't rely on manual carry-forward alone: a
+ * budget head that already existed from a prior year but is new to THIS
+ * year's import still needs to be marked active in THIS event, and a
+ * brand-new head obviously does too. Called from both branches of
+ * resolveBudgetHead below. `on conflict do nothing` because the same head
+ * resolved twice in one run (cache miss on a second raw_label that happens
+ * to collide, or a re-import of an already-registered head) is the same
+ * fact repeated, not a new one.
+ */
+async function registerEventBudgetHead(
+  client: PoolClient,
+  eventId: number,
+  budgetHeadId: number
+): Promise<void> {
+  await client.query(
+    `insert into public.event_budget_head (event_id, budget_head_id)
+     values ($1, $2)
+     on conflict do nothing`,
+    [eventId, budgetHeadId]
+  )
 }
 
 async function resolveBudgetHead(
@@ -259,7 +390,8 @@ async function resolveBudgetHead(
   caches: ResolverCaches,
   rawLabel: string,
   departmentId: number | null,
-  batchId: number
+  batchId: number,
+  eventId: number
 ): Promise<{ id: number; created: boolean }> {
   const cached = caches.budgetHeadByRawLabel.get(rawLabel)
   if (cached !== undefined) return { id: cached.id, created: false }
@@ -273,6 +405,10 @@ async function resolveBudgetHead(
       id: existing.rows[0].id,
       departmentId: existing.rows[0].department_id,
     })
+    // Resolved an EXISTING row -- may be from a prior year and new to this
+    // one, so membership is asserted every time, not only on first-ever
+    // creation. See registerEventBudgetHead's header comment.
+    await registerEventBudgetHead(client, eventId, existing.rows[0].id)
     return { id: existing.rows[0].id, created: false }
   }
 
@@ -285,6 +421,8 @@ async function resolveBudgetHead(
   )
   const id = created.rows[0]!.id
   caches.budgetHeadByRawLabel.set(rawLabel, { id, departmentId })
+  // Brand-new row -- obviously active in the event that just created it.
+  await registerEventBudgetHead(client, eventId, id)
   return { id, created: true }
 }
 
@@ -421,6 +559,20 @@ export async function runImport(params: RunImportParams): Promise<ImportResult> 
   })
 
   const client = await getPool().connect()
+
+  // Resolved -- and its mutability asserted -- BEFORE the transaction opens
+  // and before any row is written, so a blocked import (viewing a past
+  // event) leaves no trace at all, same early-exit shape as the sheet-not-
+  // found check above. If this throws, the client must still be released:
+  // it hasn't entered the try/finally below yet.
+  let eventId: number
+  try {
+    eventId = await resolveMutableEventId(client)
+  } catch (err) {
+    client.release()
+    throw err
+  }
+
   const caches = newCaches()
   const rowLog: ImportRowLogEntry[] = []
   const exceptions: ImportExceptionSummary[] = []
@@ -435,8 +587,8 @@ export async function runImport(params: RunImportParams): Promise<ImportResult> 
     // together for a dry run — see the file-header comment.
     const batchInsert = await client.query<{ id: number }>(
       `insert into public.import_batch
-         (source_system, source_filename, file_hash_sha256, sheet_name, mode, imported_by, status)
-       values ($1, $2, $3, $4, $5, $6, 'processing')
+         (source_system, source_filename, file_hash_sha256, sheet_name, mode, imported_by, event_id, status)
+       values ($1, $2, $3, $4, $5, $6, $7, 'processing')
        returning id`,
       [
         params.sourceSystem,
@@ -445,6 +597,7 @@ export async function runImport(params: RunImportParams): Promise<ImportResult> 
         sheetName,
         params.mode,
         params.importedBy,
+        eventId,
       ]
     )
     const batchId = batchInsert.rows[0]!.id
@@ -472,8 +625,8 @@ export async function runImport(params: RunImportParams): Promise<ImportResult> 
         let departmentId: number | null = null
 
         if (row.budgetHead) {
-          departmentId = row.department ? await resolveDepartment(client, caches, row.department) : null
-          const resolved = await resolveBudgetHead(client, caches, row.budgetHead, departmentId, batchId)
+          departmentId = row.department ? await resolveDepartment(client, caches, row.department, eventId) : null
+          const resolved = await resolveBudgetHead(client, caches, row.budgetHead, departmentId, batchId, eventId)
           budgetHeadId = resolved.id
           budgetHeadCreated = resolved.created
         }
@@ -482,11 +635,12 @@ export async function runImport(params: RunImportParams): Promise<ImportResult> 
         if (row.allocation && budgetHeadId !== null) {
           await client.query(
             `insert into public.budget_allocation
-               (budget_head_id, import_batch_id, as_of, request_amount, approved_amount, utilised_amount, balance_amount)
-             values ($1, $2, current_date, $3, $4, $5, $6)`,
+               (budget_head_id, import_batch_id, event_id, as_of, request_amount, approved_amount, utilised_amount, balance_amount)
+             values ($1, $2, $3, current_date, $4, $5, $6, $7)`,
             [
               budgetHeadId,
               batchId,
+              eventId,
               row.allocation.requestAmount,
               row.allocation.approvedAmount,
               row.allocation.utilisedAmount,
@@ -555,9 +709,9 @@ export async function runImport(params: RunImportParams): Promise<ImportResult> 
                type, ubbl_number, main_number, department_id, budget_head_id, invoice_number,
                vendor_id, vendor_raw, date, amount, variance_reason,
                status_id, audit_status_id, status_raw, audit_status_raw,
-               budget_head_raw, source, import_batch_id, updated_at
+               budget_head_raw, source, import_batch_id, event_id, updated_at
              ) values (
-               $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, 'import', $17, now()
+               $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, 'import', $17, $18, now()
              )
              on conflict (ubbl_number) do update set
                main_number       = coalesce(excluded.main_number, entries.main_number),
@@ -595,6 +749,7 @@ export async function runImport(params: RunImportParams): Promise<ImportResult> 
               entry.auditStatusRaw,
               row.budgetHead,
               batchId,
+              eventId,
             ]
           )
           entryId = upserted.rows[0]!.id
@@ -792,8 +947,8 @@ export async function runImport(params: RunImportParams): Promise<ImportResult> 
     const finalBatch = await client.query<{ id: number }>(
       `insert into public.import_batch
          (source_system, source_filename, file_hash_sha256, sheet_name, mode, imported_by,
-          status, row_count, summary_jsonb, completed_at)
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, now())
+          event_id, status, row_count, summary_jsonb, completed_at)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, now())
        returning id`,
       [
         params.sourceSystem,
@@ -802,6 +957,7 @@ export async function runImport(params: RunImportParams): Promise<ImportResult> 
         sheetName,
         params.mode,
         params.importedBy,
+        eventId,
         status,
         rawRows.length,
         JSON.stringify(summary),
@@ -825,10 +981,10 @@ export async function runImport(params: RunImportParams): Promise<ImportResult> 
 
     const failedBatch = await client.query<{ id: number }>(
       `insert into public.import_batch
-         (source_system, source_filename, file_hash_sha256, mode, imported_by, status, error_message, completed_at)
-       values ($1, $2, $3, $4, $5, 'failed', $6, now())
+         (source_system, source_filename, file_hash_sha256, mode, imported_by, event_id, status, error_message, completed_at)
+       values ($1, $2, $3, $4, $5, $6, 'failed', $7, now())
        returning id`,
-      [params.sourceSystem, params.filename, params.fileHashSha256, params.mode, params.importedBy, message]
+      [params.sourceSystem, params.filename, params.fileHashSha256, params.mode, params.importedBy, eventId, message]
     )
 
     return {

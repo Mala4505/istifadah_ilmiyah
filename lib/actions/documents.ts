@@ -7,6 +7,7 @@ import { extractAndPersist } from '@/lib/jobs/handlers/extract'
 import { logRawError } from '@/lib/friendly-error'
 import { rankCandidates, type MatchableEntry } from '@/lib/matching'
 import { normalizeVendorName } from '@/lib/normalize'
+import { getSelectedEventId } from '@/lib/events/current'
 import type { CandidateEntryView } from '@/components/documents/types'
 
 /**
@@ -525,7 +526,25 @@ export async function getInboxMatchCandidates(): Promise<Record<number, Candidat
       zoneId: e.zone_id,
     }))
 
-  const { data: departmentsData } = await supabase.from('department').select('id, name')
+  // Phase 6 Step 2 §1: department names shown alongside a candidate are
+  // scoped to the SELECTED event's event_department membership, not the
+  // full shared department table -- a department retired in a prior year
+  // (present on an old entry's department_id, but untouched by the current
+  // year's carry-forward) shouldn't be relabeled as if it were still active.
+  // A department with no membership row simply comes back with no name
+  // (departmentNameById.get returns undefined -> null below), which is
+  // cosmetic only -- it never affects which entries are actually candidates.
+  const selectedEventId = await getSelectedEventId(supabase)
+  const { data: eventDepartmentRows } =
+    selectedEventId !== null
+      ? await supabase.from('event_department').select('department_id').eq('event_id', selectedEventId)
+      : { data: [] as { department_id: number }[] }
+  const activeDepartmentIds = (eventDepartmentRows ?? []).map((r) => r.department_id as number)
+
+  const { data: departmentsData } =
+    activeDepartmentIds.length > 0
+      ? await supabase.from('department').select('id, name').in('id', activeDepartmentIds)
+      : { data: [] as { id: number; name: string }[] }
   const departmentNameById = new Map((departmentsData ?? []).map((d) => [d.id as number, d.name as string]))
 
   // Redesign plan §10: batch-resolve every extraction's normalized OCR

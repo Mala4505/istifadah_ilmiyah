@@ -1,6 +1,7 @@
 'use server'
 
 import { createClient } from '@/lib/supabase/server'
+import { getSelectedEventId } from '@/lib/events/current'
 
 /**
  * Attach-time zone/admin-head pre-fill (import-review-ux-checklist.md 5.11,
@@ -31,7 +32,15 @@ export async function getRecentClassificationDefaults(
   }
 
   const supabase = await createClient()
-  const { data, error } = await supabase
+
+  // Phase 6 Step 2 (docs/event-scoping-and-review-fixes-plan.md §1): scoped
+  // to the currently-selected event so a pre-fill never reaches back into a
+  // previous year's classification -- the whole point of "clean slate" per
+  // event (§1.1). Falls back to unscoped only if no event can be resolved
+  // at all, which should never happen once the Phase 6 backfill has run.
+  const selectedEventId = await getSelectedEventId(supabase)
+
+  let query = supabase
     .from('entries')
     .select('admin_head_id, zone_id')
     .eq('vendor_raw', trimmedVendor)
@@ -40,7 +49,12 @@ export async function getRecentClassificationDefaults(
     .or('admin_head_id.not.is.null,zone_id.not.is.null')
     .order('date', { ascending: false })
     .limit(1)
-    .maybeSingle()
+
+  if (selectedEventId !== null) {
+    query = query.eq('event_id', selectedEventId)
+  }
+
+  const { data, error } = await query.maybeSingle()
 
   if (error || !data) {
     return null

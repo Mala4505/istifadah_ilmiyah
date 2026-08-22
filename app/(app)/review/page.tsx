@@ -19,6 +19,8 @@ import { friendlyErrorMessage } from '@/lib/friendly-error'
 import { isAdminOrAbove } from '@/lib/auth/roles'
 import { rankCandidates, type MatchableEntry } from '@/lib/matching'
 import { normalizeVendorName } from '@/lib/normalize'
+import { loadStaffKeymapPreferences } from '@/lib/shortcuts/load'
+import { getSelectedEventId } from '@/lib/events/current'
 
 /**
  * /review -- Screen 7, the throughput screen (MASTER-PLAN §5 row 7, §7,
@@ -61,6 +63,10 @@ export default async function ReviewPage({
   const supabase = await createClient()
   const { id: idParam } = await searchParams
 
+  // Plan §2.1: per-user keymap + master enable/disable, resolved server-side
+  // so ReviewWorkspace's shortcut handler never has to guess at defaults.
+  const { keymap, shortcutsEnabled } = await loadStaffKeymapPreferences(supabase, staff.userId)
+
   // Unverified/All toggle (review-page-layout-redesign-plan.md §1): the
   // position counter and Prev/Next used to silently span the whole document
   // set via v_review_queue -- which is actually already unverified-only
@@ -71,11 +77,23 @@ export default async function ReviewPage({
   // review-workspace.tsx's Prev/Next needing to carry a scope param through.
   const scope = (await cookies()).get('review_queue_scope')?.value === 'all' ? 'all' : 'pending'
 
-  const { data: queueRows, error: queueError } = await supabase
+  // Phase 6 Step 2 (event-scoping-and-review-fixes-plan.md §1): the queue is
+  // scoped to whichever event is currently selected (cookie-backed, defaults
+  // to the is_current event -- lib/events/current.ts) so switching events
+  // presents a clean slate rather than mixing years together. Filtered here
+  // at the query site rather than inside the view itself -- see
+  // 20260822000006_review_queue_event_scoping.sql's doc comment for why.
+  const selectedEventId = await getSelectedEventId(supabase)
+
+  let queueQuery = supabase
     .from(scope === 'all' ? 'v_review_queue_all' : 'v_review_queue')
     .select(
       'document_extraction_id, source_document_id, original_filename, extraction_confidence, max_open_severity_rank, open_issue_count, queue_amount, bill_index, page_number_start, page_number_end, bill_count'
     )
+  if (selectedEventId !== null) {
+    queueQuery = queueQuery.eq('event_id', selectedEventId)
+  }
+  const { data: queueRows, error: queueError } = await queueQuery
     .order('max_open_severity_rank', { ascending: false })
     .order('extraction_confidence', { ascending: true, nullsFirst: true })
     .order('queue_amount', { ascending: false, nullsFirst: false })
@@ -136,14 +154,18 @@ export default async function ReviewPage({
     // 'pending'. Load it directly from the unscoped superset view instead of
     // bouncing the reviewer all the way back to queue[0] (event-scoping-and
     // -review-fixes-plan.md §2.11).
-    const { data: outOfScopeRow } = await supabase
+    let outOfScopeQuery = supabase
       .from('v_review_queue_all')
       .select('document_extraction_id, source_document_id, bill_count')
       .eq('document_extraction_id', requestedId as number)
-      .maybeSingle()
+    if (selectedEventId !== null) {
+      outOfScopeQuery = outOfScopeQuery.eq('event_id', selectedEventId)
+    }
+    const { data: outOfScopeRow } = await outOfScopeQuery.maybeSingle()
 
     if (!outOfScopeRow) {
-      // Id doesn't exist, or isn't visible under RLS -- fall back to the
+      // Id doesn't exist, isn't visible under RLS, or belongs to a
+      // different event than the one currently selected -- fall back to the
       // original behavior rather than crashing.
       redirect(`/review?id=${queue[0]!.documentExtractionId}`)
     }
@@ -152,7 +174,8 @@ export default async function ReviewPage({
       supabase,
       outOfScopeRow.source_document_id as number,
       outOfScopeRow.document_extraction_id as number,
-      outOfScopeRow.bill_count as number
+      outOfScopeRow.bill_count as number,
+      selectedEventId
     )
 
     if (!detail) {
@@ -169,13 +192,21 @@ export default async function ReviewPage({
           currentIndex={-1}
           prevId={null}
           nextId={null}
+          keymap={keymap}
+          shortcutsEnabled={shortcutsEnabled}
         />
       </div>
     )
   }
 
   const current = queue[currentIndex]!
-  const detail = await loadDocumentDetail(supabase, current.sourceDocumentId, current.documentExtractionId, current.billCount)
+  const detail = await loadDocumentDetail(
+    supabase,
+    current.sourceDocumentId,
+    current.documentExtractionId,
+    current.billCount,
+    selectedEventId
+  )
 
   if (!detail) {
     // The document left the queue between the list query and the detail
@@ -197,6 +228,8 @@ export default async function ReviewPage({
         currentIndex={currentIndex}
         prevId={prevId}
         nextId={nextId}
+        keymap={keymap}
+        shortcutsEnabled={shortcutsEnabled}
       />
     </div>
   )
@@ -245,7 +278,8 @@ async function loadDocumentDetail(
   supabase: SupabaseServerClient,
   sourceDocumentId: number,
   documentExtractionId: number,
-  billCount: number
+  billCount: number,
+  selectedEventId: number | null
 ): Promise<ReviewDocumentDetail | null> {
   const {
     data: { user },
@@ -274,7 +308,7 @@ async function loadDocumentDetail(
       .order('line_order'),
     supabase
       .from('document_page')
-      .select('page_number, is_financial_document, skip_reason, classification_confidence')
+      .select('page_number, is_financial_document, skip_reason, classification_confidence, skip_source')
       .eq('source_document_id', sourceDocumentId)
       .order('page_number'),
     // Bill rail (§7): every bill sharing this source_document_id, so a
@@ -387,23 +421,49 @@ async function loadDocumentDetail(
   }
 
   // Stage 3 (Classify, §8) options, scoped to the matched entry's
-  // department -- same pattern as app/(app)/entries/[id]/page.tsx.
+  // department -- same pattern as app/(app)/entries/[id]/page.tsx. Also
+  // scoped to the selected event's membership (event-scoping-and-review-
+  // fixes-plan.md §1.1): master admin_head/zone rows are shared across
+  // events, only membership (event_admin_head/event_zone) is per-event, so a
+  // reviewer viewing 1449 H should only see 1449 H's heads/zones, not every
+  // head/zone that ever existed. Two-step lookup (membership ids, then
+  // `.in()`) rather than an embedded-resource join, to not depend on
+  // PostgREST inferring the right relationship direction.
   let adminHeadOptions: { id: number; head_number: number; name: string }[] = []
   let zoneOptions: { id: number; zone_number: number; name: string }[] = []
   if (entry?.department_id) {
+    const [activeAdminHeadIdsRes, activeZoneIdsRes] = await Promise.all([
+      selectedEventId !== null
+        ? supabase.from('event_admin_head').select('admin_head_id').eq('event_id', selectedEventId)
+        : Promise.resolve({ data: null }),
+      selectedEventId !== null
+        ? supabase.from('event_zone').select('zone_id').eq('event_id', selectedEventId)
+        : Promise.resolve({ data: null }),
+    ])
+    const activeAdminHeadIds = activeAdminHeadIdsRes.data
+      ? (activeAdminHeadIdsRes.data as { admin_head_id: number }[]).map((r) => r.admin_head_id)
+      : null
+    const activeZoneIds = activeZoneIdsRes.data
+      ? (activeZoneIdsRes.data as { zone_id: number }[]).map((r) => r.zone_id)
+      : null
+
+    let adminHeadQuery = supabase
+      .from('admin_head')
+      .select('id, head_number, name')
+      .eq('department_id', entry.department_id)
+      .eq('is_active', true)
+    if (activeAdminHeadIds !== null) adminHeadQuery = adminHeadQuery.in('id', activeAdminHeadIds)
+
+    let zoneQuery = supabase
+      .from('zone')
+      .select('id, zone_number, name')
+      .eq('department_id', entry.department_id)
+      .eq('is_active', true)
+    if (activeZoneIds !== null) zoneQuery = zoneQuery.in('id', activeZoneIds)
+
     const [adminHeadsRes, zonesRes] = await Promise.all([
-      supabase
-        .from('admin_head')
-        .select('id, head_number, name')
-        .eq('department_id', entry.department_id)
-        .eq('is_active', true)
-        .order('head_number'),
-      supabase
-        .from('zone')
-        .select('id, zone_number, name')
-        .eq('department_id', entry.department_id)
-        .eq('is_active', true)
-        .order('zone_number'),
+      adminHeadQuery.order('head_number'),
+      zoneQuery.order('zone_number'),
     ])
     adminHeadOptions = (adminHeadsRes.data ?? []).map((h) => ({
       id: h.id as number,
@@ -488,6 +548,7 @@ async function loadDocumentDetail(
     isFinancialDocument: p.is_financial_document as boolean | null,
     skipReason: p.skip_reason as string | null,
     classificationConfidence: p.classification_confidence as number | null,
+    skipSource: (p.skip_source as string | null) === 'manual' ? 'manual' : 'model',
   }))
 
   // uncertain_fields_ocr is jsonb -- shaped by extractionUncertainFieldSchema

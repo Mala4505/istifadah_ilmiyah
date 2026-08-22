@@ -4,6 +4,13 @@ import { revalidatePath } from 'next/cache'
 import { z } from 'zod'
 import { createClient } from '@/lib/supabase/server'
 import { logRawError } from '@/lib/friendly-error'
+import { getSelectedEvent, isEventMutable } from '@/lib/events/current'
+
+// Phase 6 Step 2 (docs/event-scoping-and-review-fixes-plan.md §1.6): past
+// events are browsable read-only. Every mutation in this file is gated on
+// the currently-selected event still being the current one before it
+// touches the database.
+const EVENT_READONLY_ERROR = 'This event is read-only — switch to the current event to make changes.'
 
 /**
  * Typed entries — the path a department-scoped account uses instead of an
@@ -64,6 +71,11 @@ export async function createManualEntry(input: CreateManualEntryInput): Promise<
     data: { user },
   } = await supabase.auth.getUser()
   if (!user) return { ok: false, error: 'You need to sign in to add an entry.' }
+
+  const selectedEvent = await getSelectedEvent(supabase)
+  if (!selectedEvent || !isEventMutable(selectedEvent)) {
+    return { ok: false, error: EVENT_READONLY_ERROR }
+  }
 
   const { data: profile, error: profileError } = await supabase
     .from('staff_profile')
@@ -134,6 +146,7 @@ export async function createManualEntry(input: CreateManualEntryInput): Promise<
         amount: fields.amount,
         budget_head_id: fields.budgetHeadId,
         remark: fields.remark || null,
+        event_id: selectedEvent.id,
       })
       .select('id, ubbl_number')
       .single()
@@ -195,6 +208,12 @@ export async function replaceProvisionalUbblNumber(input: {
   }
 
   const supabase = await createClient()
+
+  const selectedEvent = await getSelectedEvent(supabase)
+  if (!isEventMutable(selectedEvent)) {
+    return { ok: false, error: EVENT_READONLY_ERROR }
+  }
+
   const { data, error } = await supabase
     .from('entries')
     .update({ ubbl_number: parsed.data })

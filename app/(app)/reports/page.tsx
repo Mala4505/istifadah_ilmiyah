@@ -1,6 +1,7 @@
 import { friendlyDataError } from '@/lib/friendly-error'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
+import { getSelectedEvent } from '@/lib/events/current'
 import { ReportSection } from '@/components/reports/report-section'
 import { DataTable, type DataTableColumn } from '@/components/reports/data-table'
 import { BarList, type BarListItem } from '@/components/reports/bar-list'
@@ -98,12 +99,24 @@ type OpenIssueRow = {
 async function loadReportsData() {
   const supabase = await createClient()
 
+  // Phase 6 Step 2 (docs/event-scoping-and-review-fixes-plan.md §1): every
+  // report below reads an aggregate view that now exposes `event_id` as a
+  // plain output column (20260822000007) rather than baking the filter into
+  // the view itself, matching Stream A's v_review_queue precedent -- the
+  // views stay reusable for a future cross-event comparison mode (§1.6,
+  // explicitly out of scope for this pass). Filtering happens here, at the
+  // query site, against whichever event the active_event_id cookie
+  // resolves to (current event by default).
+  const selectedEvent = await getSelectedEvent(supabase)
+  const eventId = selectedEvent?.id ?? null
+
   const [budgetRes, deptBudgetRes, vendorRes, zoneRes, ageingRes, issuesRes] = await Promise.all([
     supabase
       .from('v_budget_vs_actual')
       .select(
         'budget_head_id, raw_label, short_label, department_id, approved_amount, utilised_amount, balance_amount, actual_amount, entry_count, pct_of_approved, budget_status_note'
       )
+      .eq('event_id', eventId)
       .order('actual_amount', { ascending: false, nullsFirst: false })
       .returns<BudgetVsActualRow[]>(),
     supabase
@@ -111,6 +124,7 @@ async function loadReportsData() {
       .select(
         'department_id, department_name, as_of, budget_amount, actual_amount, entry_count, pct_of_budget, budget_status_note'
       )
+      .eq('event_id', eventId)
       .order('actual_amount', { ascending: false, nullsFirst: false })
       .returns<DepartmentBudgetVsActualRow[]>(),
     supabase
@@ -118,23 +132,27 @@ async function loadReportsData() {
       .select(
         'vendor_id, display_name, entry_count, total_amount, first_entry_date, last_entry_date, entries_with_documents, document_coverage_pct'
       )
+      .eq('event_id', eventId)
       .order('total_amount', { ascending: false, nullsFirst: false })
       .limit(ROW_CAP)
       .returns<VendorSpendRow[]>(),
     supabase
       .from('v_zone_spend')
       .select('zone_id, zone_name, zone_number, department_id, entry_count, total_amount')
+      .eq('event_id', eventId)
       .order('total_amount', { ascending: false, nullsFirst: false })
       .returns<ZoneSpendRow[]>(),
     supabase
       .from('v_hub_status_ageing')
       .select('entry_id, department_id, ubbl_number, hub_status_code, hub_status_label, hub_status_changed_at, days_in_status, age_bucket')
+      .eq('event_id', eventId)
       .order('days_in_status', { ascending: false })
       .limit(ROW_CAP)
       .returns<HubAgeingRow[]>(),
     supabase
       .from('v_open_issues')
       .select('source_table, id, entry_id, issue_type, severity, amount_at_risk, description, status, created_at')
+      .eq('event_id', eventId)
       .limit(ROW_CAP)
       .returns<OpenIssueRow[]>(),
   ])
@@ -143,6 +161,7 @@ async function loadReportsData() {
   const ageingRows = ageingRes.data ?? []
 
   return {
+    eventName: selectedEvent?.name ?? null,
     budgetRows: budgetRes.data ?? [],
     deptBudgetRows: deptBudgetRes.data ?? [],
     vendorRows,
@@ -340,10 +359,15 @@ export default async function ReportsPage() {
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center gap-3">
         <h1 className="text-xl font-semibold tracking-tight">Reports</h1>
+        {data.eventName && (
+          <span className="rounded-full border border-border px-2 py-0.5 text-xs text-muted-foreground">
+            {data.eventName}
+          </span>
+        )}
       </div>
       <p className="max-w-2xl text-sm text-muted-foreground">
         Budget vs actual by head, department budget vs actual, vendor spend, spend by zone,
-        Hub-status ageing, and the open-issues digest. CSV export on every section.
+        Hub-status ageing, and the open-issues digest for the selected event. CSV export on every section.
       </p>
 
       <nav className="flex flex-wrap gap-x-4 gap-y-1 border-b border-border pb-3 text-xs">

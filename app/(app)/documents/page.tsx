@@ -7,6 +7,7 @@ import { DocumentInbox } from '@/components/documents/document-inbox'
 import type { DocumentExtractionSummary, InboxDocumentView } from '@/components/documents/types'
 import type { LookupOption } from '@/components/entries/types'
 import { isAdminOrAbove } from '@/lib/auth/roles'
+import { getSelectedEventId } from '@/lib/events/current'
 
 /** A stalled queue is "the oldest queued job has been waiting longer than this" (checklist 2.15, D8) — long enough that a normal extraction backlog doesn't false-positive. */
 const STALLED_QUEUE_THRESHOLD_MS = 10 * 60 * 1000
@@ -60,11 +61,20 @@ export default async function DocumentsPage() {
   const canAct = isAdminOrAbove(staff.role)
   const supabase = await createClient()
 
-  const { data: docsData, error: docsError } = await supabase
+  // Phase 6 Step 2 §1: the inbox is scoped to whichever event is currently
+  // selected (cookie, defaulting to the current event) -- a reviewer parked
+  // on a past event must not see the current event's unmatched documents
+  // mixed into a supposedly read-only, past-event view, and vice versa.
+  const selectedEventId = await getSelectedEventId(supabase)
+
+  let docsQuery = supabase
     .from('source_document')
     .select('id, original_filename, upload_status, match_status, uploaded_at, page_count')
     .in('match_status', ['unmatched', 'suggested'])
-    .order('uploaded_at', { ascending: false })
+  if (selectedEventId !== null) {
+    docsQuery = docsQuery.eq('event_id', selectedEventId)
+  }
+  const { data: docsData, error: docsError } = await docsQuery.order('uploaded_at', { ascending: false })
 
   if (docsError) {
     return (
@@ -145,16 +155,46 @@ export default async function DocumentsPage() {
     }
   }
 
+  // Phase 6 Step 2 §1.1: admin_head/zone are shared master rows across
+  // events -- only which of them are ACTIVE in the selected event varies
+  // (event_admin_head/event_zone membership). Resolved as a separate id
+  // lookup rather than a PostgREST embed/join, matching the same
+  // two-step shape used for department in lib/actions/documents.ts's
+  // getInboxMatchCandidates.
+  const [eventAdminHeadResult, eventZoneResult] = await Promise.all([
+    selectedEventId !== null
+      ? supabase.from('event_admin_head').select('admin_head_id').eq('event_id', selectedEventId)
+      : Promise.resolve({ data: [] as { admin_head_id: number }[] }),
+    selectedEventId !== null
+      ? supabase.from('event_zone').select('zone_id').eq('event_id', selectedEventId)
+      : Promise.resolve({ data: [] as { zone_id: number }[] }),
+  ])
+  const activeAdminHeadIds = (eventAdminHeadResult.data ?? []).map((r) => r.admin_head_id as number)
+  const activeZoneIds = (eventZoneResult.data ?? []).map((r) => r.zone_id as number)
+
   // Fetched once here rather than per-document: the attach-time zone/admin-
   // head prompt (checklist 5.11/5.12, plan §8 Z2) needs the full option
   // lists in the client to populate its dropdowns (5.11, department-scoped
   // client-side by document-card.tsx) and to feed BulkEnrichmentDialog
   // (5.12, unfiltered — a bulk selection can span departments). Same
   // shape/labeling convention as components/entries/entries-explorer.tsx's
-  // filter options.
+  // filter options. Now additionally scoped to the selected event's
+  // membership, on top of the pre-existing is_active flag -- a head/zone
+  // retired from THIS event's carry-forward shouldn't appear even if its
+  // own is_active flag (a separate, master-level concept) is still true.
   const [adminHeadLookupResult, zoneLookupResult, costCenterLookupResult] = await Promise.all([
-    supabase.from('admin_head').select('id, department_id, head_number, name').eq('is_active', true).order('head_number'),
-    supabase.from('zone').select('id, department_id, zone_number, name').eq('is_active', true).order('zone_number'),
+    supabase
+      .from('admin_head')
+      .select('id, department_id, head_number, name')
+      .eq('is_active', true)
+      .in('id', activeAdminHeadIds)
+      .order('head_number'),
+    supabase
+      .from('zone')
+      .select('id, department_id, zone_number, name')
+      .eq('is_active', true)
+      .in('id', activeZoneIds)
+      .order('zone_number'),
     supabase.from('cost_center').select('id, name').order('name'),
   ])
   const adminHeadOptions: LookupOption[] = (adminHeadLookupResult.data ?? []).map((h) => ({

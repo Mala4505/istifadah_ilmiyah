@@ -9,6 +9,7 @@ import { ExportCsvButton } from '@/components/reports/export-csv-button'
 import { toCsv } from '@/lib/reports/csv'
 import { SeverityBadge } from '@/components/reports/severity-badge'
 import { formatDate, formatINR } from '@/lib/reports/format'
+import { getSelectedEventId } from '@/lib/events/current'
 
 // Screen 9 — Reconciliation (MASTER-PLAN §5, day 6). "The report the org
 // currently produces by hand." Reads from v_department_audit_variance
@@ -63,7 +64,20 @@ const VARIANCE_TOLERANCE = 1 // ₹1 — matches the review queue's tolerance (�
 async function loadReconciliationData() {
   const supabase = await createClient()
 
-  const [varianceRes, deptRes, vendorRes, budgetHeadRes, exceptionRes, budgetVsActualRes] =
+  // Phase 6 Step 2 (docs/event-scoping-and-review-fixes-plan.md §1). The
+  // department lookup and `v_budget_vs_actual` (rewritten with an `event_id`
+  // output column by the parallel reports/export stream,
+  // 20260822000007_reports_export_event_scoping.sql) can be filtered
+  // directly. `v_department_audit_variance` and `reconciliation_exception`
+  // cannot: neither carries an `event_id` column (doc §1.2:
+  // reconciliation_exception "inherits event via its parent, no column of
+  // its own", and the variance view is a thin, pre-event-scoping projection
+  // of `entries` that isn't rewritten by this stream) -- so both are
+  // event-scoped here by cross-referencing their `entry_id` against
+  // `entries.event_id` in application code instead of in the query itself.
+  const selectedEventId = await getSelectedEventId(supabase)
+
+  const [varianceRes, deptRes, vendorRes, budgetHeadRes, exceptionRes, budgetVsActualRes, deptMembershipRes] =
     await Promise.all([
       supabase
         .from('v_department_audit_variance')
@@ -83,15 +97,48 @@ async function loadReconciliationData() {
         .eq('exception_type', 'allocation_sum_mismatch')
         .order('amount_at_risk', { ascending: false, nullsFirst: false })
         .returns<AllocationExceptionRow[]>(),
-      supabase
-        .from('v_budget_vs_actual')
-        .select('budget_head_id, raw_label, short_label, utilised_amount, actual_amount, entry_count')
-        .returns<BudgetVsActualRow[]>(),
+      selectedEventId === null
+        ? supabase
+            .from('v_budget_vs_actual')
+            .select('budget_head_id, raw_label, short_label, utilised_amount, actual_amount, entry_count')
+            .returns<BudgetVsActualRow[]>()
+        : supabase
+            .from('v_budget_vs_actual')
+            .select('budget_head_id, raw_label, short_label, utilised_amount, actual_amount, entry_count')
+            .eq('event_id', selectedEventId)
+            .returns<BudgetVsActualRow[]>(),
+      selectedEventId === null
+        ? Promise.resolve({ data: [] as { department_id: number }[] })
+        : supabase.from('event_department').select('department_id').eq('event_id', selectedEventId),
     ])
 
-  const unmatched = varianceRes.data ?? []
+  const rawUnmatched = varianceRes.data ?? []
+  const rawExceptionRows = exceptionRes.data ?? []
 
-  const exceptionRows = exceptionRes.data ?? []
+  // One lookup covering both: which of the entry ids referenced by either
+  // result actually belong to the selected event.
+  const candidateEntryIds = Array.from(
+    new Set<number>([
+      ...rawUnmatched.map((r) => r.entry_id),
+      ...rawExceptionRows.map((r) => r.entry_id).filter((id): id is number => id !== null),
+    ])
+  )
+  let eventEntryIds: Set<number> | null = null
+  if (selectedEventId !== null && candidateEntryIds.length > 0) {
+    const { data: entryEventRows } = await supabase
+      .from('entries')
+      .select('id')
+      .eq('event_id', selectedEventId)
+      .in('id', candidateEntryIds)
+    eventEntryIds = new Set((entryEventRows ?? []).map((r) => r.id as number))
+  }
+
+  const unmatched = eventEntryIds === null ? rawUnmatched : rawUnmatched.filter((r) => eventEntryIds!.has(r.entry_id))
+  const exceptionRows =
+    eventEntryIds === null
+      ? rawExceptionRows
+      : rawExceptionRows.filter((r) => r.entry_id !== null && eventEntryIds!.has(r.entry_id))
+
   const allocationSource: 'exceptions' | 'computed' = exceptionRows.length > 0 ? 'exceptions' : 'computed'
   const computedAllocationMismatches = (budgetVsActualRes.data ?? []).filter((r) => {
     if (r.utilised_amount === null) return false
@@ -99,9 +146,14 @@ async function loadReconciliationData() {
     return Math.abs(actual - r.utilised_amount) > VARIANCE_TOLERANCE
   })
 
+  const departmentMemberIds = new Set((deptMembershipRes.data ?? []).map((r) => r.department_id))
+  const deptRows = (deptRes.data ?? []).filter(
+    (d) => selectedEventId === null || departmentMemberIds.has(d.id)
+  )
+
   return {
     unmatched,
-    deptMap: new Map((deptRes.data ?? []).map((d) => [d.id, d.name])),
+    deptMap: new Map(deptRows.map((d) => [d.id, d.name])),
     vendorMap: new Map((vendorRes.data ?? []).map((v) => [v.id, v.display_name])),
     budgetHeadMap: new Map((budgetHeadRes.data ?? []).map((b) => [b.id, b.short_label ?? b.raw_label])),
     allocationSource,

@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server'
 import { createHash } from 'node:crypto'
 import * as XLSX from 'xlsx'
 import { createClient } from '@/lib/supabase/server'
-import { runImport } from '@/lib/import/run-import'
+import { EventNotMutableError, runImport } from '@/lib/import/run-import'
 import { withApiLogging } from '@/lib/api-log'
 import { isAdminOrAbove } from '@/lib/auth/roles'
 
@@ -118,6 +118,15 @@ async function handlePOST(request: NextRequest) {
 
     return NextResponse.json(result, { status: result.status === 'failed' ? 500 : 200 })
   } catch (error) {
+    // Phase 6 Step 2 §1.6: a past/non-current event is read-only -- no new
+    // imports. runImport blocks this itself (lib/import/run-import.ts's
+    // resolveMutableEventId), before writing any row; this just gives that
+    // specific, already-human-readable rejection its own status code
+    // (409, not the generic 500 every other import failure gets) rather
+    // than a route-level re-implementation of the same check.
+    if (error instanceof EventNotMutableError) {
+      return NextResponse.json({ error: error.message }, { status: 409 })
+    }
     const message = error instanceof Error ? error.message : String(error)
     return NextResponse.json({ error: `Import failed: ${message}` }, { status: 500 })
   }

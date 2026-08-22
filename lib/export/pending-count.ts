@@ -16,14 +16,31 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { getSelectedEventId } from '@/lib/events/current'
 
+/**
+ * Phase 6 Step 2 (docs/event-scoping-and-review-fixes-plan.md §1): the badge
+ * should count only the selected event's pending entries, same as every
+ * other event-scoped query -- a nav badge showing a stale year's pending
+ * count while browsing a different one would be actively misleading. Scoped
+ * with the SAME client the caller passed in (session-bound for the nav
+ * rail, admin for /export's global count -- see the module doc above), so
+ * the active_event_id cookie resolves identically either way.
+ */
 export async function getPendingExportCount(supabase: SupabaseClient): Promise<number> {
-  const { count, error } = await supabase
+  const eventId = await getSelectedEventId(supabase)
+
+  let query = supabase
     .from('entries')
     .select('id', { count: 'exact', head: true })
     .is('hub_status_exported_at', null)
     .neq('hub_status_id', 1)
     .eq('is_void', false)
+  if (eventId !== null) {
+    query = query.eq('event_id', eventId)
+  }
+
+  const { count, error } = await query
 
   if (error) {
     throw new Error(`getPendingExportCount: ${error.message}`)

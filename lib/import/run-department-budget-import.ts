@@ -29,7 +29,7 @@
  */
 
 import * as XLSX from 'xlsx'
-import { getPool, writeRowLog, type ImportRowLogEntry } from '@/lib/import/run-import'
+import { getPool, resolveMutableEventId, writeRowLog, type ImportRowLogEntry } from '@/lib/import/run-import'
 import {
   AMOUNT_KEYS,
   DEPARTMENT_KEYS,
@@ -76,6 +76,17 @@ export async function runDepartmentBudgetImport(
   })
 
   const client = await getPool().connect()
+
+  // Same early-exit-before-any-write shape as run-import.ts's runImport --
+  // see resolveMutableEventId's own header comment.
+  let eventId: number
+  try {
+    eventId = await resolveMutableEventId(client)
+  } catch (err) {
+    client.release()
+    throw err
+  }
+
   const rowLog: ImportRowLogEntry[] = []
   const departmentIdsSeenThisBatch = new Map<number, string>() // id -> the raw name that resolved to it, for a friendlier duplicate message
 
@@ -84,10 +95,10 @@ export async function runDepartmentBudgetImport(
 
     const batchInsert = await client.query<{ id: number }>(
       `insert into public.import_batch
-         (source_system, source_filename, file_hash_sha256, sheet_name, mode, imported_by, status)
-       values ('department_budget', $1, $2, $3, $4, $5, 'processing')
+         (source_system, source_filename, file_hash_sha256, sheet_name, mode, imported_by, event_id, status)
+       values ('department_budget', $1, $2, $3, $4, $5, $6, 'processing')
        returning id`,
-      [params.filename, params.fileHashSha256, sheetName, params.mode, params.importedBy]
+      [params.filename, params.fileHashSha256, sheetName, params.mode, params.importedBy, eventId]
     )
     const batchId = batchInsert.rows[0]!.id
 
@@ -190,9 +201,9 @@ export async function runDepartmentBudgetImport(
 
         await client.query(
           `insert into public.department_budget_allocation
-             (department_id, import_batch_id, as_of, budget_amount)
-           values ($1, $2, current_date, $3)`,
-          [matched.id, batchId, budgetAmount]
+             (department_id, import_batch_id, event_id, as_of, budget_amount)
+           values ($1, $2, $3, current_date, $4)`,
+          [matched.id, batchId, eventId, budgetAmount]
         )
         departmentIdsSeenThisBatch.set(matched.id, matched.name)
 
@@ -251,8 +262,8 @@ export async function runDepartmentBudgetImport(
     const finalBatch = await client.query<{ id: number }>(
       `insert into public.import_batch
          (source_system, source_filename, file_hash_sha256, sheet_name, mode, imported_by,
-          status, row_count, summary_jsonb, completed_at)
-       values ('department_budget', $1, $2, $3, $4, $5, $6, $7, $8, now())
+          event_id, status, row_count, summary_jsonb, completed_at)
+       values ('department_budget', $1, $2, $3, $4, $5, $6, $7, $8, $9, now())
        returning id`,
       [
         params.filename,
@@ -260,6 +271,7 @@ export async function runDepartmentBudgetImport(
         sheetName,
         params.mode,
         params.importedBy,
+        eventId,
         status,
         rawRows.length,
         JSON.stringify(summary),
@@ -282,10 +294,10 @@ export async function runDepartmentBudgetImport(
 
     const failedBatch = await client.query<{ id: number }>(
       `insert into public.import_batch
-         (source_system, source_filename, file_hash_sha256, mode, imported_by, status, error_message, completed_at)
-       values ('department_budget', $1, $2, $3, $4, 'failed', $5, now())
+         (source_system, source_filename, file_hash_sha256, mode, imported_by, event_id, status, error_message, completed_at)
+       values ('department_budget', $1, $2, $3, $4, $5, 'failed', $6, now())
        returning id`,
-      [params.filename, params.fileHashSha256, params.mode, params.importedBy, message]
+      [params.filename, params.fileHashSha256, params.mode, params.importedBy, eventId, message]
     )
 
     return {

@@ -15,6 +15,10 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { getSignedUrl } from '@/lib/storage'
 import { logRawError } from '@/lib/friendly-error'
 import { normalizeVendorName } from '@/lib/normalize'
+import { getStaffContext } from '@/lib/export/auth'
+import { isAdminOrAbove } from '@/lib/auth/roles'
+import { reExtractFieldScoped, reExtractPageScoped } from '@/lib/jobs/handlers/rescope-extract'
+import { getSelectedEvent, isEventMutable } from '@/lib/events/current'
 
 const CLAIM_STALE_AFTER_MS = 15 * 60 * 1000 // §7: "Claims expire after 15 minutes of inactivity"
 
@@ -80,6 +84,17 @@ export async function saveVerification(input: SaveVerificationInput): Promise<Sa
   } = await supabase.auth.getUser()
   if (!user) {
     return { ok: false, error: 'You must be signed in.' }
+  }
+
+  // event-scoping-and-review-fixes-plan.md §1.6: past events are browsable
+  // read-only -- no new uploads, no verification, no export. Gated on the
+  // currently SELECTED event (not this document's own event_id): the queue
+  // itself is already filtered to the selected event
+  // (app/(app)/review/page.tsx), so a document reachable here belongs to it
+  // by construction.
+  const selectedEvent = await getSelectedEvent(supabase)
+  if (!isEventMutable(selectedEvent)) {
+    return { ok: false, error: 'This event is closed to edits. Switch to the current event to verify documents.' }
   }
 
   const { data, error } = await supabase
@@ -308,6 +323,15 @@ export async function attachExtractionToEntry(input: {
   }
 
   const supabase = await createClient()
+
+  // event-scoping-and-review-fixes-plan.md §1.6: same guard as
+  // saveVerification above -- attaching a bill to an entry is a ledger
+  // mutation, so it's blocked while a past (non-current) event is selected.
+  const selectedEvent = await getSelectedEvent(supabase)
+  if (!isEventMutable(selectedEvent)) {
+    return { ok: false, error: 'This event is closed to edits. Switch to the current event to attach documents.' }
+  }
+
   const { data, error } = await supabase
     .from('document_extraction')
     .update({ entry_id: input.entryId })
@@ -595,4 +619,185 @@ export async function confirmVendorAlias(input: {
 export async function setReviewQueueScope(scope: 'pending' | 'all'): Promise<{ ok: true }> {
   ;(await cookies()).set('review_queue_scope', scope, { path: '/', maxAge: 60 * 60 * 24 * 365 })
   return { ok: true }
+}
+
+/**
+ * Phase 4 (event-scoping-and-review-fixes-plan.md §2.5): a reviewer manually
+ * overriding the model's per-page classification -- skip a page the model
+ * kept (skip: true), or unskip one the model dismissed (skip: false, usually
+ * followed by `reExtractPage` below to actually OCR it). Writes the SAME
+ * columns a fresh model classification would (`is_financial_document`,
+ * `skip_reason`), plus `skip_source: 'manual'` so the UI can badge this as a
+ * human decision -- `reExtractPageScoped` resets `skip_source` back to
+ * 'model' once a fresh model read supersedes it (see that function's doc
+ * comment). A plain session-bound update, RLS-gated by the existing
+ * `document_page_update` policy (`is_reviewer_or_admin()` +
+ * `can_see_source_document()`, 20260808000026_rls_policies.sql) -- no new
+ * policy needed, same pattern as saveEntryClassification above.
+ */
+export async function setPageSkipOverride(input: {
+  sourceDocumentId: number
+  pageNumber: number
+  skip: boolean
+}): Promise<SimpleActionResult> {
+  if (!Number.isInteger(input.sourceDocumentId) || !Number.isInteger(input.pageNumber)) {
+    return { ok: false, error: 'Invalid document or page number.' }
+  }
+
+  const supabase = await createClient()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+  if (!user) {
+    return { ok: false, error: 'You must be signed in.' }
+  }
+
+  const { data, error } = await supabase
+    .from('document_page')
+    .update({
+      is_financial_document: !input.skip,
+      skip_reason: input.skip ? 'manual' : null,
+      skip_source: 'manual',
+      manually_set_by: user.id,
+      manually_set_at: new Date().toISOString(),
+    })
+    .eq('source_document_id', input.sourceDocumentId)
+    .eq('page_number', input.pageNumber)
+    .select('page_number')
+
+  if (error) return { ok: false, error: logRawError('review.setPageSkipOverride', error.message) }
+  if (!data || data.length === 0) {
+    return {
+      ok: false,
+      error:
+        'No page was updated. This usually means a viewer role (reviewer/admin required), or the page is no longer visible to you.',
+    }
+  }
+
+  revalidatePath('/review')
+  return { ok: true }
+}
+
+export type ReExtractPageResult =
+  | { ok: true; created: boolean; documentExtractionId: number | null; billCount: number; lineItemCount: number }
+  | { ok: false; error: string }
+
+/**
+ * Phase 4 §2.5/§2.6: "OCR a page the model skipped" (or re-run a single-page
+ * bill's own OCR). Delegates the actual pipeline call + persistence to
+ * `reExtractPageScoped` (lib/jobs/handlers/rescope-extract.ts) -- this
+ * wrapper only owns the auth gate (same isAdminOrAbove check as the existing
+ * whole-document `/api/documents/reescalate` route, since this also runs a
+ * paid Claude call through the admin client, bypassing RLS) and cache
+ * revalidation. Behaves like a scoped version of the existing "Re-extract"
+ * button: on success the caller should `router.refresh()` (see
+ * review-workspace.tsx's `handleReExtract`) rather than patch local state --
+ * a newly-discovered bill has no prior local state to patch, and an existing
+ * single-page bill's full OCR read genuinely does replace everything on
+ * screen for it, same as today's whole-document re-extract.
+ */
+export async function reExtractPage(input: {
+  sourceDocumentId: number
+  pageNumber: number
+}): Promise<ReExtractPageResult> {
+  if (!Number.isInteger(input.sourceDocumentId) || !Number.isInteger(input.pageNumber)) {
+    return { ok: false, error: 'Invalid document or page number.' }
+  }
+
+  const staff = await getStaffContext()
+  if (!staff) return { ok: false, error: 'You must be signed in.' }
+  if (!staff.isActive) return { ok: false, error: 'Your account is pending activation.' }
+  if (!isAdminOrAbove(staff.role)) {
+    return { ok: false, error: 'Re-running extraction is an admin action.' }
+  }
+
+  try {
+    const admin = createAdminClient()
+    const result = await reExtractPageScoped(admin, {
+      sourceDocumentId: input.sourceDocumentId,
+      pageNumber: input.pageNumber,
+      triggeredBy: staff.userId,
+    })
+    revalidatePath('/review')
+    return { ok: true, ...result }
+  } catch (err) {
+    return {
+      ok: false,
+      error: logRawError('review.reExtractPage', err instanceof Error ? err.message : String(err)),
+    }
+  }
+}
+
+/**
+ * Header-only field names `reExtractField` accepts -- a deliberate v1 subset
+ * of `UNCERTAIN_FIELD_NAMES` (lib/extraction-schema.ts) that excludes the
+ * five `line_item_*` names. A line item's re-read can come back with a
+ * different `line_order` than the one already saved (re-extraction has no
+ * guarantee of stable ordering across two independent runs), so matching a
+ * re-read line item back to the correct existing row is a real design
+ * problem this pass does not solve -- surfacing it as a type-level omission
+ * here (rather than a runtime check) so the UI (review-workspace.tsx) can
+ * only ever offer this for a header field in the first place.
+ */
+export type ReExtractableHeaderField =
+  | 'vendor_name'
+  | 'vendor_gstin'
+  | 'vendor_phone'
+  | 'vendor_email'
+  | 'vendor_address'
+  | 'invoice_number'
+  | 'invoice_date'
+  | 'subtotal'
+  | 'tax_amount'
+  | 'total_amount'
+
+export type ReExtractFieldResult =
+  | { ok: true; newValue: string | number | null }
+  | { ok: false; error: string }
+
+/**
+ * Phase 4 §2.6: re-extract ONE flagged header field, writing back only that
+ * field's `_ocr` column. Everything else on the bill -- every other `_ocr`
+ * column, every `_verified` column, `current_extraction_run_id`, line items
+ * -- is left exactly as it was, which is what lets a reviewer's in-progress,
+ * unsaved edits to sibling fields survive this call. That guarantee is why
+ * this action deliberately does NOT `revalidatePath`/expect a
+ * `router.refresh()` the way every other write action here does: a refresh
+ * would re-fetch ReviewDocumentDetail and, because `currentExtractionRunId`
+ * is part of the workspace's React `key` (lib/review/types.ts's doc
+ * comment), remount the whole form and discard those same unsaved edits --
+ * exactly the outcome this feature exists to avoid. The caller
+ * (review-workspace.tsx) must instead take `newValue` from the result and
+ * patch its own local header state for that one field, the same way
+ * `handleAddLineItem` appends to local `lineItems` state without a refresh.
+ */
+export async function reExtractField(input: {
+  documentExtractionId: number
+  field: ReExtractableHeaderField
+}): Promise<ReExtractFieldResult> {
+  if (!Number.isInteger(input.documentExtractionId)) {
+    return { ok: false, error: 'Invalid document extraction id.' }
+  }
+
+  const staff = await getStaffContext()
+  if (!staff) return { ok: false, error: 'You must be signed in.' }
+  if (!staff.isActive) return { ok: false, error: 'Your account is pending activation.' }
+  if (!isAdminOrAbove(staff.role)) {
+    return { ok: false, error: 'Re-running extraction is an admin action.' }
+  }
+
+  try {
+    const admin = createAdminClient()
+    const result = await reExtractFieldScoped(admin, {
+      documentExtractionId: input.documentExtractionId,
+      field: input.field,
+      triggeredBy: staff.userId,
+    })
+    return { ok: true, newValue: result.newValue }
+  } catch (err) {
+    return {
+      ok: false,
+      error: logRawError('review.reExtractField', err instanceof Error ? err.message : String(err)),
+    }
+  }
 }

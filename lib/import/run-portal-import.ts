@@ -47,6 +47,7 @@ import type { PoolClient } from 'pg'
 import {
   getPool,
   newCaches,
+  resolveMutableEventId,
   resolveStatus,
   resolveVendor,
   writeRowLog,
@@ -266,20 +267,31 @@ export async function runPortalImport(
   })
 
   const client = await getPool().connect()
+
+  // Same early-exit-before-any-write shape as run-import.ts's runImport --
+  // see resolveMutableEventId's own header comment.
+  let eventId: number
+  try {
+    eventId = await resolveMutableEventId(client)
+  } catch (err) {
+    client.release()
+    throw err
+  }
+
   const caches = newCaches()
   const rowLog: ImportRowLogEntry[] = []
   const exceptions: ImportExceptionSummary[] = []
   const warnings = [...parsed.warnings]
 
   const batchColumns = `(source_system, source_filename, file_hash_sha256, mode, imported_by,
-                         ingest_method, scrape_payload_jsonb, source_url, status)`
+                         ingest_method, scrape_payload_jsonb, source_url, event_id, status)`
 
   try {
     await client.query('BEGIN')
 
     const batchInsert = await client.query<{ id: number }>(
       `insert into public.import_batch ${batchColumns}
-       values ($1, $2, $3, $4, $5, 'scrape', $6, $7, 'processing')
+       values ($1, $2, $3, $4, $5, 'scrape', $6, $7, $8, 'processing')
        returning id`,
       [
         sourceSystem,
@@ -289,6 +301,7 @@ export async function runPortalImport(
         params.importedBy,
         JSON.stringify(payload),
         payload.sourceUrl ?? null,
+        eventId,
       ]
     )
     const batchId = batchInsert.rows[0]!.id
@@ -311,7 +324,7 @@ export async function runPortalImport(
         if (sourceSystem === 'audit') {
           await importAuditRow(client, caches, batchId, row, rowLog, exceptions)
         } else {
-          await importDepartmentalRow(client, caches, batchId, row, rowLog, exceptions)
+          await importDepartmentalRow(client, caches, batchId, eventId, row, rowLog, exceptions)
         }
       } catch (rowError) {
         const message = rowError instanceof Error ? rowError.message : String(rowError)
@@ -363,8 +376,8 @@ export async function runPortalImport(
     const finalBatch = await client.query<{ id: number }>(
       `insert into public.import_batch
          (source_system, source_filename, file_hash_sha256, mode, imported_by,
-          ingest_method, scrape_payload_jsonb, source_url, status, row_count, summary_jsonb, completed_at)
-       values ($1, $2, $3, $4, $5, 'scrape', $6, $7, $8, $9, $10, now())
+          ingest_method, scrape_payload_jsonb, source_url, event_id, status, row_count, summary_jsonb, completed_at)
+       values ($1, $2, $3, $4, $5, 'scrape', $6, $7, $8, $9, $10, $11, now())
        returning id`,
       [
         sourceSystem,
@@ -374,6 +387,7 @@ export async function runPortalImport(
         params.importedBy,
         JSON.stringify(payload),
         payload.sourceUrl ?? null,
+        eventId,
         status,
         parsed.rows.length,
         JSON.stringify(summary),
@@ -399,8 +413,8 @@ export async function runPortalImport(
     const failedBatch = await client.query<{ id: number }>(
       `insert into public.import_batch
          (source_system, source_filename, file_hash_sha256, mode, imported_by,
-          ingest_method, source_url, status, error_message, completed_at)
-       values ($1, $2, $3, $4, $5, 'scrape', $6, 'failed', $7, now())
+          ingest_method, source_url, event_id, status, error_message, completed_at)
+       values ($1, $2, $3, $4, $5, 'scrape', $6, $7, 'failed', $8, now())
        returning id`,
       [
         sourceSystem,
@@ -409,6 +423,7 @@ export async function runPortalImport(
         params.mode,
         params.importedBy,
         payload.sourceUrl ?? null,
+        eventId,
         message,
       ]
     )
@@ -756,6 +771,7 @@ async function importDepartmentalRow(
   client: PoolClient,
   caches: ResolverCaches,
   batchId: number,
+  eventId: number,
   row: ParsedPortalRow,
   rowLog: ImportRowLogEntry[],
   exceptions: ImportExceptionSummary[]
@@ -808,8 +824,8 @@ async function importDepartmentalRow(
     `insert into public.entries (
        type, ubbl_number, main_number, invoice_number, vendor_id, vendor_raw,
        date, amount, status_id, audit_status_id, status_raw, audit_status_raw,
-       source, import_batch_id, updated_at
-     ) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'import', $13, now())
+       source, import_batch_id, event_id, updated_at
+     ) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'import', $13, $14, now())
      on conflict (ubbl_number) do update set
        main_number      = coalesce(excluded.main_number, entries.main_number),
        invoice_number   = coalesce(excluded.invoice_number, entries.invoice_number),
@@ -838,6 +854,7 @@ async function importDepartmentalRow(
       row.status?.raw ?? null,
       row.auditStatus?.raw ?? null,
       batchId,
+      eventId,
     ]
   )
   const entryId = upserted.rows[0]!.id

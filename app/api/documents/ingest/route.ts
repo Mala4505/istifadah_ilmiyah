@@ -7,6 +7,8 @@ import { putDocument } from '@/lib/storage'
 import { getPdfPageCount, looksLikePdf, sha256Hex } from '@/lib/pdf'
 import { runJobById } from '@/lib/jobs/drain'
 import { serverEnv } from '@/lib/env.server'
+import { getSelectedEvent, isEventMutable } from '@/lib/events/current'
+import { getMaxUploadPages } from '@/lib/upload-limits'
 
 /**
  * `documents-ingest` (MASTER-PLAN §8 point 2, §3.8, §11.2 Day 1).
@@ -74,6 +76,30 @@ async function handlePOST(request: NextRequest) {
     return NextResponse.json({ error: 'Your account is pending activation.' }, { status: 403 })
   }
 
+  // Everything below writes source_document/document_page rows stamped with
+  // the selected event's id -- so the event is resolved and its mutability
+  // asserted FIRST (Phase 6 Step 2 §1.6: "switching to a past event puts the
+  // app in a view-only state -- no new uploads"), before any storage upload
+  // or DB write is attempted. `admin` is created here (rather than at its
+  // former spot further down) so this same client serves both this check
+  // and every write later in the route.
+  const admin = createAdminClient()
+  const selectedEvent = await getSelectedEvent(admin)
+  if (!isEventMutable(selectedEvent)) {
+    return NextResponse.json(
+      { error: 'This event is closed to new uploads. Switch to the current event before uploading.' },
+      { status: 409 }
+    )
+  }
+  const eventId = selectedEvent!.id
+
+  // Kicked off now, awaited later (right before it's needed, after pageCount
+  // is known) -- a single indexed-row read, cheap enough that running it
+  // concurrently with the formData parse / hash / page-count work below
+  // hides its latency entirely rather than adding a network round trip to
+  // the request's critical path.
+  const maxUploadPagesPromise = getMaxUploadPages(admin)
+
   let form: FormData
   try {
     form = await request.formData()
@@ -137,13 +163,36 @@ async function handlePOST(request: NextRequest) {
     pageCountUnresolved = pageCount === null
   }
 
+  // Page-limit validation (docs/ocr-execution-decision.md follow-up): reject
+  // a PDF too large to finish extraction within the platform's request time
+  // limit BEFORE any storage write or document_page row exists — the
+  // opposite of today's silent failure mode, where an oversized upload
+  // times out after already being stored, gets stuck at upload_status
+  // 'processing', and (per that doc's trace) never completes even after
+  // three auto-retries, since each retry restarts from page 1 rather than
+  // resuming. Skipped when pageCount is null (server-side parse AND the
+  // client-declared fallback both failed) — there is nothing to compare
+  // against, and pageCountUnresolved's own exception already flags that
+  // case; this must not invent a second, contradictory failure mode for it.
+  if (pageCount !== null) {
+    const maxUploadPages = await maxUploadPagesPromise
+    if (pageCount > maxUploadPages) {
+      return NextResponse.json(
+        {
+          error:
+            `This PDF has ${pageCount} pages. Uploads over ${maxUploadPages} pages currently can't ` +
+            'complete in one pass — please split it into smaller files.',
+        },
+        { status: 422 }
+      )
+    }
+  }
+
   const entryIdRaw = form.get('entryId')
   const entryId =
     typeof entryIdRaw === 'string' && entryIdRaw.trim() !== '' && Number.isInteger(Number(entryIdRaw))
       ? Number(entryIdRaw)
       : null
-
-  const admin = createAdminClient()
 
   // §8 point 2: a hash collision is a SOFT warning. The same bill legitimately
   // gets re-scanned, so the upload proceeds and an exception row is raised for
@@ -178,6 +227,7 @@ async function handlePOST(request: NextRequest) {
       upload_status: 'uploaded',
       match_status: entryId === null ? 'unmatched' : 'matched',
       uploaded_by: staff.userId,
+      event_id: eventId,
     })
     .select('id')
     .single()

@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { isSuperadmin } from '@/lib/auth/roles'
+import { getSelectedEventId } from '@/lib/events/current'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Badge } from '@/components/ui/badge'
@@ -75,6 +76,18 @@ export default async function AdminPage() {
     )
   }
 
+  // Phase 6 Step 2 (docs/event-scoping-and-review-fixes-plan.md §1): the
+  // department/admin-head/zone master-data tables below, and the budget-head
+  // mapping dropdown (BudgetHeadTable's `heads`), are filtered through this
+  // event's membership tables. This screen has no UI to create new
+  // department/admin_head/zone/budget_head rows -- the Master Data tab is
+  // explicitly documented as read-only ("editing them is a migration, not an
+  // admin action") and BudgetHeadTable only maps an existing budget_head onto
+  // an existing head -- so there is no create-time membership row to insert
+  // here, unlike lib/import/run-import.ts's auto-created budget_head rows
+  // (20260822000005's header, a follow-up for the import path, not this one).
+  const selectedEventId = await getSelectedEventId(supabase)
+
   const [
     { data: departmentsData },
     { data: staffData },
@@ -83,6 +96,9 @@ export default async function AdminPage() {
     { data: zonesData },
     { data: vendorsData },
     { data: hubStatusesData },
+    { data: departmentMembershipData },
+    { data: headMembershipData },
+    { data: zoneMembershipData },
   ] = await Promise.all([
     supabase.from('department').select('id, name').order('name'),
     supabase
@@ -107,12 +123,30 @@ export default async function AdminPage() {
       .from('hub_status')
       .select('id, code, label, sort_order, is_exportable, is_terminal')
       .order('sort_order'),
+    selectedEventId === null
+      ? Promise.resolve({ data: [] as { department_id: number }[] })
+      : supabase.from('event_department').select('department_id').eq('event_id', selectedEventId),
+    selectedEventId === null
+      ? Promise.resolve({ data: [] as { admin_head_id: number }[] })
+      : supabase.from('event_admin_head').select('admin_head_id').eq('event_id', selectedEventId),
+    selectedEventId === null
+      ? Promise.resolve({ data: [] as { zone_id: number }[] })
+      : supabase.from('event_zone').select('zone_id').eq('event_id', selectedEventId),
   ])
 
-  const departments = (departmentsData ?? []).map((department) => ({
-    id: department.id as number,
-    name: department.name as string,
-  }))
+  // Falls back to "no filtering" when there's no resolvable event (should
+  // not happen once the Phase 6 backfill has run) rather than emptying
+  // every master-data table and the budget-head mapping dropdown.
+  const departmentMemberIds = new Set((departmentMembershipData ?? []).map((r) => r.department_id))
+  const headMemberIds = new Set((headMembershipData ?? []).map((r) => r.admin_head_id))
+  const zoneMemberIds = new Set((zoneMembershipData ?? []).map((r) => r.zone_id))
+
+  const departments = (departmentsData ?? [])
+    .filter((department) => selectedEventId === null || departmentMemberIds.has(department.id as number))
+    .map((department) => ({
+      id: department.id as number,
+      name: department.name as string,
+    }))
 
   const staff: StaffRow[] = (staffData ?? []).map((row) => ({
     id: row.id as string,
@@ -133,19 +167,23 @@ export default async function AdminPage() {
     headId: row.head_id as number | null,
   }))
 
-  const heads: HeadOption[] = (headsData ?? []).map((row) => ({
-    id: row.id as number,
-    departmentId: row.department_id as number,
-    headNumber: row.head_number as number,
-    name: row.name as string,
-  }))
+  const heads: HeadOption[] = (headsData ?? [])
+    .filter((row) => selectedEventId === null || headMemberIds.has(row.id as number))
+    .map((row) => ({
+      id: row.id as number,
+      departmentId: row.department_id as number,
+      headNumber: row.head_number as number,
+      name: row.name as string,
+    }))
 
-  const zones = (zonesData ?? []).map((row) => ({
-    id: row.id as number,
-    departmentId: row.department_id as number,
-    zoneNumber: row.zone_number as number,
-    name: row.name as string,
-  }))
+  const zones = (zonesData ?? [])
+    .filter((row) => selectedEventId === null || zoneMemberIds.has(row.id as number))
+    .map((row) => ({
+      id: row.id as number,
+      departmentId: row.department_id as number,
+      zoneNumber: row.zone_number as number,
+      name: row.name as string,
+    }))
 
   const vendors: VendorRow[] = (vendorsData ?? []).map((row) => ({
     id: row.id as number,

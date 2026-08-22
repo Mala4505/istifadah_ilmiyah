@@ -15,6 +15,8 @@ import {
   LineChart,
   Download,
   Settings,
+  Keyboard,
+  CalendarRange,
   LogOut,
   ChevronLeft,
   ChevronRight,
@@ -27,6 +29,8 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { signOut } from '@/lib/actions/auth'
 import { isAdminOrAbove, isSuperadmin } from '@/lib/auth/roles'
+import { EventSwitcher } from '@/components/app-shell/event-switcher'
+import type { Event } from '@/lib/events/types'
 
 const COLLAPSE_STORAGE_KEY = 'nav-rail-collapsed'
 
@@ -49,6 +53,8 @@ const NAV_ITEMS = [
   { label: 'Reconciliation', href: '/reconciliation', icon: GitCompareArrows },
   { label: 'Reports', href: '/reports', icon: FileBarChart },
   { label: 'Analytics', href: '/analytics', icon: LineChart },
+  { label: 'Settings', href: '/settings', icon: Keyboard },
+  { label: 'Events', href: '/events', icon: CalendarRange, adminOnly: true },
   { label: 'Export', href: '/export', icon: Download, adminOnly: true },
   { label: 'Admin', href: '/admin', icon: Settings, superadminOnly: true },
 ] as const
@@ -62,8 +68,12 @@ function initialsFor(name: string): string {
 
 export function NavRail({
   user,
+  events,
+  selectedEvent,
 }: {
   user: { displayName: string; role: string | null; itsNumber: string | null }
+  events: Event[]
+  selectedEvent: Event | null
 }) {
   const pathname = usePathname()
   const [collapsed, setCollapsed] = useState(false)
@@ -184,6 +194,13 @@ export function NavRail({
             )
           })}
         </ul>
+
+        {/* Event switcher: sibling of the account popover below, same
+            footer treatment (doc §1.3's app-shell header switcher — this
+            app has no header bar, only the rail, so it lives here). */}
+        <div className={cn('border-t border-border', collapsed ? 'p-2' : 'p-3')}>
+          <EventSwitcher events={events} selectedEvent={selectedEvent} collapsed={collapsed} />
+        </div>
 
         {/* Account footer: one row (avatar, and name/role when expanded)
             that opens a popover for everything else — shortcut hint, theme

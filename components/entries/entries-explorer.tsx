@@ -82,6 +82,37 @@ function sortToSearchParams(sort: EntriesSort): URLSearchParams {
   return sp
 }
 
+// Phase 6 Step 2 (docs/event-scoping-and-review-fixes-plan.md §1): the
+// department/admin_head/zone dropdowns below are filtered through the
+// per-event membership tables so a switch to a new event presents its own
+// "clean slate" (§1.1) rather than every master row that has ever existed.
+//
+// This is a Client Component (filter state lives in the URL via
+// useSearchParams), so it can't call next/headers' cookies() the way
+// lib/events/current.ts's getSelectedEventId does — that helper is
+// server-only. `active_event_id` (lib/events/current.ts's
+// ACTIVE_EVENT_COOKIE) is written without `httpOnly` (lib/actions/events.ts's
+// setActiveEvent), so it's readable here; this mirrors getSelectedEventId's
+// exact fallback logic (cookie, verified against a live event row, else the
+// current event) against the browser client instead.
+function readActiveEventIdCookie(): number | null {
+  if (typeof document === 'undefined') return null
+  const match = document.cookie.match(/(?:^|;\s*)active_event_id=([^;]*)/)
+  if (!match) return null
+  const parsed = Number(decodeURIComponent(match[1] ?? ''))
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+async function resolveSelectedEventId(supabase: ReturnType<typeof createClient>): Promise<number | null> {
+  const cookieId = readActiveEventIdCookie()
+  if (cookieId !== null) {
+    const { data } = await supabase.from('event').select('id').eq('id', cookieId).maybeSingle()
+    if (data) return data.id as number
+  }
+  const { data: current } = await supabase.from('event').select('id').eq('is_current', true).maybeSingle()
+  return (current?.id as number | undefined) ?? null
+}
+
 function searchParamsToSort(sp: URLSearchParams): EntriesSort {
   const column = sp.get('sort')
   const direction = sp.get('dir')
@@ -127,11 +158,45 @@ export function EntriesExplorer() {
   useEffect(() => {
     let cancelled = false
     async function loadOptions() {
+      const selectedEventId = await resolveSelectedEventId(supabase)
+
+      // Membership ids fetched first (department_id/admin_head_id/zone_id
+      // arrays), then used to filter the master-row queries below — cheap at
+      // this app's volumes, and keeps every dropdown source-of-truth query
+      // parallel with the rest instead of nesting round trips.
+      const [deptMembership, headMembership, zoneMembership] =
+        selectedEventId === null
+          ? [{ data: [] as { department_id: number }[] }, { data: [] as { admin_head_id: number }[] }, { data: [] as { zone_id: number }[] }]
+          : await Promise.all([
+              supabase.from('event_department').select('department_id').eq('event_id', selectedEventId),
+              supabase.from('event_admin_head').select('admin_head_id').eq('event_id', selectedEventId),
+              supabase.from('event_zone').select('zone_id').eq('event_id', selectedEventId),
+            ])
+      const departmentMemberIds = (deptMembership.data ?? []).map((r) => r.department_id)
+      const adminHeadMemberIds = (headMembership.data ?? []).map((r) => r.admin_head_id)
+      const zoneMemberIds = (zoneMembership.data ?? []).map((r) => r.zone_id)
+
       const [dept, bh, adminHead, zone, costCenter, status, hub, userRes] = await Promise.all([
-        supabase.from('department').select('id,name').eq('is_active', true).order('name'),
+        selectedEventId === null
+          ? supabase.from('department').select('id,name').eq('is_active', true).order('name')
+          : supabase.from('department').select('id,name').eq('is_active', true).in('id', departmentMemberIds).order('name'),
         supabase.from('budget_head').select('id,raw_label,short_label,department_id').order('raw_label'),
-        supabase.from('admin_head').select('id,name,head_number,department_id').eq('is_active', true).order('head_number'),
-        supabase.from('zone').select('id,name,zone_number,department_id').eq('is_active', true).order('zone_number'),
+        selectedEventId === null
+          ? supabase.from('admin_head').select('id,name,head_number,department_id').eq('is_active', true).order('head_number')
+          : supabase
+              .from('admin_head')
+              .select('id,name,head_number,department_id')
+              .eq('is_active', true)
+              .in('id', adminHeadMemberIds)
+              .order('head_number'),
+        selectedEventId === null
+          ? supabase.from('zone').select('id,name,zone_number,department_id').eq('is_active', true).order('zone_number')
+          : supabase
+              .from('zone')
+              .select('id,name,zone_number,department_id')
+              .eq('is_active', true)
+              .in('id', zoneMemberIds)
+              .order('zone_number'),
         supabase.from('cost_center').select('id,name').order('name'),
         supabase.from('entry_status').select('id,code,label,source_system').order('sort_order'),
         supabase.from('hub_status').select('id,code,label').order('sort_order'),

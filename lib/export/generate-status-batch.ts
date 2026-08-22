@@ -24,6 +24,7 @@ import * as XLSX from 'xlsx'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { putDocument, getSignedUrl } from '@/lib/storage'
 import { hubStatusToExportRow, type HubStatusEntry } from '@/lib/module-mapping'
+import { getSelectedEvent, isEventMutable } from '@/lib/events/current'
 
 export type ExportTargetSystem = 'departmental' | 'audit' | 'both'
 export type ExportBatchStatus = 'generated' | 'delivered' | 'acknowledged' | 'failed'
@@ -70,16 +71,34 @@ export async function generateStatusExportBatch(
   const supabase = createAdminClient()
 
   try {
+    // 0. Phase 6 Step 2 (docs/event-scoping-and-review-fixes-plan.md §1.6):
+    //    a past event is browsable read-only -- no new uploads, no
+    //    verification, no export. Checked first, before the pending-queue
+    //    read or any other work, so a blocked generation never gets far
+    //    enough to build the .xlsx or touch the database.
+    const selectedEvent = await getSelectedEvent(supabase)
+    if (!isEventMutable(selectedEvent)) {
+      return {
+        ok: false,
+        error:
+          'Exports can only be generated for the current event. Switch to the current event and try again.',
+      }
+    }
+    const eventId = selectedEvent!.id
+
     // 1. The pending queue (§3.7 flow, §3.4 entries_pending_export_idx):
     //    hub_status_exported_at is null and hub_status_id <> 1 ('not_set').
     //    JUDGEMENT CALL: also excludes is_void = true. Not stated explicitly in §3.7,
     //    but consistent with §3.4's "voided, never removed" semantics — a decision
     //    made on an entry that has since been voided should not leave the building.
+    //    Scoped to the selected (current) event -- a status export batch is a
+    //    per-event artifact, same as the entries feeding it.
     const { data: pendingEntries, error: entriesError } = await supabase
       .from('entries')
       .select(
         'id, ubbl_number, main_number, hub_status_id, hub_status_note, hub_status_changed_at, hub_status_changed_by, updated_at'
       )
+      .eq('event_id', eventId)
       .is('hub_status_exported_at', null)
       .neq('hub_status_id', 1)
       .eq('is_void', false)
@@ -156,6 +175,7 @@ export async function generateStatusExportBatch(
         row_count: snapshots.length,
         status: 'generated',
         generated_by: input.generatedBy,
+        event_id: eventId,
       })
       .select('id')
       .single()

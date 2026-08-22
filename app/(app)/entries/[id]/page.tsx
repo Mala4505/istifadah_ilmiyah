@@ -20,6 +20,7 @@ import type {
   ZoneOption,
 } from '@/components/entries/detail/types'
 import { createClient } from '@/lib/supabase/server'
+import { getSelectedEventId } from '@/lib/events/current'
 
 export const dynamic = 'force-dynamic'
 
@@ -36,6 +37,11 @@ export default async function EntryDetailPage({
   }
 
   const supabase = await createClient()
+
+  // Phase 6 Step 2 (docs/event-scoping-and-review-fixes-plan.md §1): the
+  // admin-head/zone dropdowns below are filtered through this event's
+  // membership tables, same as the entries list explorer.
+  const selectedEventId = await getSelectedEventId(supabase)
 
   const {
     data: { user },
@@ -79,6 +85,8 @@ export default async function EntryDetailPage({
     entryCoreResult,
     vendorResult,
     linkedAdvanceResult,
+    adminHeadMembershipResult,
+    zoneMembershipResult,
   ] = await Promise.all([
     entry.department_id
       ? supabase
@@ -115,10 +123,25 @@ export default async function EntryDetailPage({
           .eq('id', entry.settles_entry_id)
           .maybeSingle()
       : Promise.resolve({ data: null, error: null }),
+    selectedEventId === null
+      ? Promise.resolve({ data: [] as { admin_head_id: number }[], error: null })
+      : supabase.from('event_admin_head').select('admin_head_id').eq('event_id', selectedEventId),
+    selectedEventId === null
+      ? Promise.resolve({ data: [] as { zone_id: number }[], error: null })
+      : supabase.from('event_zone').select('zone_id').eq('event_id', selectedEventId),
   ])
 
-  const adminHeadOptions = (adminHeadsResult.data ?? []) as AdminHeadOption[]
-  const zoneOptions = (zonesResult.data ?? []) as ZoneOption[]
+  // Membership sets default to "no filtering" when there's no resolvable
+  // event (should not happen once the Phase 6 backfill has run) rather than
+  // silently emptying every dropdown.
+  const adminHeadMemberIds = new Set((adminHeadMembershipResult.data ?? []).map((r) => r.admin_head_id as number))
+  const zoneMemberIds = new Set((zoneMembershipResult.data ?? []).map((r) => r.zone_id as number))
+  const adminHeadOptions = (adminHeadsResult.data ?? []).filter(
+    (h) => selectedEventId === null || adminHeadMemberIds.has(h.id as number)
+  ) as AdminHeadOption[]
+  const zoneOptions = (zonesResult.data ?? []).filter(
+    (z) => selectedEventId === null || zoneMemberIds.has(z.id as number)
+  ) as ZoneOption[]
   const costCenterOptions = (costCentersResult.data ?? []) as CostCenterOption[]
   const hubStatusOptions = (hubStatusResult.data ?? []) as HubStatusOption[]
   const changeLogRows = (changeLogResult.data ?? []) as ChangeLogRow[]
