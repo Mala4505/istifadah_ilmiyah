@@ -17,12 +17,14 @@
  */
 
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
-import { ZoomIn, ZoomOut, RotateCw, ChevronLeft, ChevronRight } from 'lucide-react'
+import { useRouter } from 'next/navigation'
+import { ZoomIn, ZoomOut, RotateCw, ChevronLeft, ChevronRight, Eye, EyeOff, RefreshCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { FriendlyError } from '@/components/ui/friendly-error'
 import { logRawError } from '@/lib/friendly-error'
-import { getReviewDocumentUrl } from '@/lib/actions/review'
+import { toastError } from '@/components/ui/error-toast'
+import { getReviewDocumentUrl, reExtractPage, setPageSkipOverride } from '@/lib/actions/review'
 import type { PageStatus, UncertainField } from '@/lib/review/types'
 
 /** "bank_cheque" -> "Bank cheque", for the skipped-page tooltip/label. */
@@ -94,8 +96,14 @@ export const PdfViewer = forwardRef<
     onPageInfoChange?: (pageNumber: number, numPages: number) => void
   }
 >(function PdfViewer({ sourceDocumentId, pages = [], uncertainFields = [], collapsed = false, onPageInfoChange }, ref) {
+  const router = useRouter()
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
+  // Phase 4 (§2.5/§2.6): the one page whose skip-toggle or "OCR this page"
+  // action is currently in flight -- deliberately a single page number, not a
+  // whole-rail spinner, so working one page never disables the rest of the
+  // thumbnail rail (spec: "don't block the whole rail").
+  const [busyPageNumber, setBusyPageNumber] = useState<number | null>(null)
   // 5.20 (checklist Phase 5, plan §13): bumped by the Retry button below to
   // re-run the URL-fetch/pdf.js-load effect without needing a full remount --
   // it's a dependency of that effect purely to force it to re-fire, its
@@ -332,6 +340,44 @@ export const PdfViewer = forwardRef<
     await page.render({ canvasContext: context, viewport }).promise
   }
 
+  // Phase 4 §2.5: reviewer override of the model's per-page classification --
+  // skip a page the model kept, or unskip one it dismissed. On success the
+  // page's classification (and, for an unskip, any newly-discovered bill)
+  // only shows up after a fresh server read, so this refreshes rather than
+  // patching local state -- unlike reExtractField (review-workspace.tsx),
+  // there is no in-progress form state on this component to protect.
+  async function handleToggleSkip(n: number, currentlySkipped: boolean) {
+    setBusyPageNumber(n)
+    try {
+      const result = await setPageSkipOverride({ sourceDocumentId, pageNumber: n, skip: !currentlySkipped })
+      if (!result.ok) {
+        toastError(result.error, { context: 'pdf-viewer' })
+        return
+      }
+      router.refresh()
+    } finally {
+      setBusyPageNumber(null)
+    }
+  }
+
+  // Phase 4 §2.5/§2.6: OCR a single page the model skipped (or re-run a
+  // single-page bill's own OCR). Same refresh-on-success reasoning as
+  // handleToggleSkip above -- a newly-discovered bill has no prior local
+  // state here to patch.
+  async function handleReExtractPage(n: number) {
+    setBusyPageNumber(n)
+    try {
+      const result = await reExtractPage({ sourceDocumentId, pageNumber: n })
+      if (!result.ok) {
+        toastError(result.error, { context: 'pdf-viewer' })
+        return
+      }
+      router.refresh()
+    } finally {
+      setBusyPageNumber(null)
+    }
+  }
+
   // L1 (checklist 3.7): one JSX tree for both toolbar states, not two
   // early-returned branches -- the content wrapper (contentRef, observed by
   // the ResizeObserver above) and the <canvas> itself (canvasRef, painted by
@@ -425,42 +471,103 @@ export const PdfViewer = forwardRef<
               const status = pageStatusByNumber.get(n)
               const skipped = status?.isFinancialDocument === false
               const skipLabel = status?.skipReason ? formatSkipReason(status.skipReason) : null
+              // Phase 4 (§2.5): 'manual' once a reviewer has overridden this
+              // page's classification via setPageSkipOverride -- distinguishes
+              // "the model skipped this" from "a reviewer skipped this" in the
+              // tooltip, without a separate badge (nice-to-have per the plan).
+              const manualOverride = status?.skipSource === 'manual'
+              const isBusy = busyPageNumber === n
               return (
-                <button
-                  key={n}
-                  type="button"
-                  onClick={() => setPageNumber(n)}
-                  title={skipped ? `Skipped${skipLabel ? `: ${skipLabel}` : ''} -- not extracted as a bill` : undefined}
-                  className={`relative rounded border p-1 text-[10px] transition-colors ${
-                    n === pageNumber ? 'border-primary bg-primary/10' : 'border-border hover:bg-accent'
-                  } ${skipped ? 'opacity-60' : ''}`}
-                >
-                  {skipped ? (
-                    <span className="absolute right-0.5 top-0.5 rounded-sm bg-muted-foreground/80 px-1 text-[8px] font-medium leading-tight text-background">
-                      Skipped
-                    </span>
-                  ) : null}
-                  <canvas
-                    ref={(el) => {
-                      // This inline arrow function is a new reference every render, so
-                      // React detaches/reattaches it (calling this callback again with
-                      // the same `el`) on every re-render, not just on real mount --
-                      // L1's ResizeObserver-driven re-renders (checklist 3.8) made that
-                      // frequent enough to stack up concurrent render() calls on the
-                      // same thumbnail canvas, which pdf.js forbids. Only (re-)render
-                      // when the element genuinely changed.
-                      if (el && thumbCanvasRefs.current.get(n) !== el) {
-                        thumbCanvasRefs.current.set(n, el)
-                        void renderThumbnail(n)
-                      }
+                // Phase 4 (§2.5/§2.6): wrapped in its own relative div (rather
+                // than making the skip-toggle/OCR buttons descendants of the
+                // thumbnail's own <button>) so those controls can be real
+                // <button> elements of their own -- nesting interactive
+                // buttons inside a button is invalid HTML and unreliable to
+                // click. e.stopPropagation() on each keeps a click on them
+                // from also firing the thumbnail's own onClick (page
+                // navigation).
+                <div key={n} className="relative">
+                  <button
+                    type="button"
+                    onClick={() => setPageNumber(n)}
+                    title={
+                      skipped
+                        ? `Skipped${skipLabel ? `: ${skipLabel}` : ''}${manualOverride ? ' (set by a reviewer)' : ''} -- not extracted as a bill`
+                        : undefined
+                    }
+                    className={`relative w-full rounded border p-1 text-[10px] transition-colors ${
+                      n === pageNumber ? 'border-primary bg-primary/10' : 'border-border hover:bg-accent'
+                    } ${skipped ? 'opacity-60' : ''}`}
+                  >
+                    {skipped ? (
+                      <span className="absolute right-0.5 top-0.5 rounded-sm bg-muted-foreground/80 px-1 text-[8px] font-medium leading-tight text-background">
+                        Skipped
+                      </span>
+                    ) : null}
+                    <canvas
+                      ref={(el) => {
+                        // This inline arrow function is a new reference every render, so
+                        // React detaches/reattaches it (calling this callback again with
+                        // the same `el`) on every re-render, not just on real mount --
+                        // L1's ResizeObserver-driven re-renders (checklist 3.8) made that
+                        // frequent enough to stack up concurrent render() calls on the
+                        // same thumbnail canvas, which pdf.js forbids. Only (re-)render
+                        // when the element genuinely changed.
+                        if (el && thumbCanvasRefs.current.get(n) !== el) {
+                          thumbCanvasRefs.current.set(n, el)
+                          void renderThumbnail(n)
+                        }
+                      }}
+                      className="mx-auto max-w-full"
+                    />
+                    <div className="mt-0.5 text-center">
+                      {n}
+                      {skipped && skipLabel ? <div className="truncate text-[8px] text-muted-foreground">{skipLabel}</div> : null}
+                    </div>
+                  </button>
+
+                  {/* Phase 4 §2.5: skip a page the model kept, or unskip one
+                      it dismissed -- setPageSkipOverride, refreshed on
+                      success (see handleToggleSkip above). */}
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      void handleToggleSkip(n, skipped)
                     }}
-                    className="mx-auto max-w-full"
-                  />
-                  <div className="mt-0.5 text-center">
-                    {n}
-                    {skipped && skipLabel ? <div className="truncate text-[8px] text-muted-foreground">{skipLabel}</div> : null}
-                  </div>
-                </button>
+                    disabled={isBusy}
+                    title={skipped ? 'Include this page (undo skip)' : 'Skip this page'}
+                    aria-label={skipped ? 'Include this page' : 'Skip this page'}
+                    className="absolute left-0.5 top-0.5 z-10 h-4 w-4 rounded-sm bg-background/90 p-0 text-muted-foreground hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
+                  >
+                    {skipped ? <Eye className="h-3 w-3" /> : <EyeOff className="h-3 w-3" />}
+                  </Button>
+
+                  {/* Phase 4 §2.6: OCR a page the model skipped --
+                      reExtractPage, refreshed on success (see
+                      handleReExtractPage above). Only offered once a page is
+                      actually skipped -- an included page already gets OCR'd
+                      as part of the whole-document flow. */}
+                  {skipped ? (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        void handleReExtractPage(n)
+                      }}
+                      disabled={isBusy}
+                      title="OCR this page"
+                      aria-label="OCR this page"
+                      className="absolute bottom-0.5 right-0.5 z-10 h-4 w-4 rounded-sm bg-background/90 p-0 text-muted-foreground hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
+                    >
+                      <RefreshCw className={`h-3 w-3 ${isBusy ? 'animate-spin' : ''}`} />
+                    </Button>
+                  ) : null}
+                </div>
               )
             })}
           </div>

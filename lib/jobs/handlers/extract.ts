@@ -1230,7 +1230,7 @@ async function submitExtractionBatchAndEnqueuePoll(sourceDocumentId: number): Pr
   }
 }
 
-async function insertRun(
+export async function insertRun(
   admin: AdminClient,
   sourceDocumentId: number,
   attempt: ExtractionAttempt,

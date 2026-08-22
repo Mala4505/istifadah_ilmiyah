@@ -19,6 +19,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition, type PointerEvent as ReactPointerEvent } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
+import { RefreshCw } from 'lucide-react'
 import { toastError } from '@/components/ui/error-toast'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -28,12 +29,15 @@ import {
   addLineItem,
   claimReviewDocument,
   confirmVendorAlias,
+  reExtractField,
   saveEntryClassification,
   saveVerification,
+  type ReExtractableHeaderField,
   type SaveVerificationInput,
   type VendorSearchResult,
 } from '@/lib/actions/review'
 import { confidenceTint, type ConfidenceTint, type ReviewDocumentDetail } from '@/lib/review/types'
+import { type Keymap, isSafeShortcutTarget, matchLineDigit, matchesBinding } from '@/lib/shortcuts/config'
 import { PdfViewer, type PdfViewerHandle } from './pdf-viewer'
 import {
   ExtractionForm,
@@ -127,6 +131,55 @@ function todayLocalDateString(): string {
 
 const HEADER_AMOUNT_FIELDS: (keyof HeaderFormState)[] = ['subtotal', 'taxAmount', 'totalAmount']
 
+// Phase 4 (§2.6): maps an uncertain field's wire name (detail.uncertainFields'
+// `field`, matching UNCERTAIN_FIELD_NAMES in lib/extraction-schema.ts) to (a)
+// which HeaderFormState key reExtractField's result should patch and (b) the
+// literal ReExtractableHeaderField value the action itself expects -- these
+// happen to be spelled identically (both are the same snake_case wire name),
+// so one lookup covers both call sites below. Deliberately only the 10 header
+// names reExtractField accepts (lib/actions/review.ts's doc comment on
+// ReExtractableHeaderField) -- the five line_item_* wire names have no entry
+// here, which is what keeps the affordance from ever being offered on a line
+// item (headerFieldForUncertain returns undefined for those).
+const UNCERTAIN_FIELD_TO_HEADER_KEY: Partial<Record<string, keyof HeaderFormState>> = {
+  vendor_name: 'vendorName',
+  vendor_gstin: 'vendorGstin',
+  vendor_phone: 'vendorPhone',
+  vendor_email: 'vendorEmail',
+  vendor_address: 'vendorAddress',
+  invoice_number: 'invoiceNumber',
+  invoice_date: 'invoiceDate',
+  subtotal: 'subtotal',
+  tax_amount: 'taxAmount',
+  total_amount: 'totalAmount',
+}
+
+// Human-readable labels for the same wire names, for the re-extract strip's
+// button text/toasts -- a local copy rather than importing extraction-form's
+// own (unexported) HEADER_FIELD_LABEL, since that file is out of scope for
+// this change.
+const UNCERTAIN_FIELD_LABEL: Record<string, string> = {
+  vendor_name: 'Vendor name',
+  vendor_gstin: 'GSTIN',
+  vendor_phone: 'Phone',
+  vendor_email: 'Email',
+  vendor_address: 'Address',
+  invoice_number: 'Invoice number',
+  invoice_date: 'Invoice date',
+  subtotal: 'Subtotal',
+  tax_amount: 'Tax amount',
+  total_amount: 'Total amount',
+}
+
+/** Whether an uncertain-field wire name is one of the 10 header fields
+ *  reExtractField accepts, narrowing the string to ReExtractableHeaderField
+ *  when true. line_item_* names (and anything else unrecognised) return
+ *  false -- v1 deliberately offers no re-extract affordance for those (see
+ *  ReExtractableHeaderField's doc comment, lib/actions/review.ts). */
+function isReExtractableHeaderField(field: string): field is ReExtractableHeaderField {
+  return field in UNCERTAIN_FIELD_TO_HEADER_KEY
+}
+
 function buildHeaderState(detail: ReviewDocumentDetail): HeaderFormState {
   const h = detail.header
   return {
@@ -168,12 +221,16 @@ export function ReviewWorkspace({
   currentIndex,
   prevId,
   nextId,
+  keymap,
+  shortcutsEnabled,
 }: {
   detail: ReviewDocumentDetail
   queue: { documentExtractionId: number }[]
   currentIndex: number
   prevId: number | null
   nextId: number | null
+  keymap: Keymap
+  shortcutsEnabled: boolean
 }) {
   const router = useRouter()
   const formContainerRef = useRef<HTMLDivElement>(null)
@@ -293,6 +350,15 @@ export function ReviewWorkspace({
     return { header: headerSet, lineItems: lineItemsMap }
   }, [header, lineItems])
 
+  // Phase 4 (§2.6): the subset of detail.uncertainFields that (a) are header
+  // fields (lineOrder === null -- a line item's uncertain entry has a
+  // lineOrder) and (b) are in reExtractField's v1 subset (the 10 header wire
+  // names, not the 5 line_item_* ones). Drives the re-extract strip below.
+  const reExtractableUncertainFields = useMemo(
+    () => detail.uncertainFields.filter((f) => f.lineOrder === null && isReExtractableHeaderField(f.field)),
+    [detail.uncertainFields]
+  )
+
   const validationErrorCount =
     validationErrors.header.size +
     [...validationErrors.lineItems.values()].reduce((sum, s) => sum + s.size, 0)
@@ -361,6 +427,11 @@ export function ReviewWorkspace({
   const [hubStatusOpen, setHubStatusOpen] = useState(false)
   const [reExtracting, setReExtracting] = useState(false)
   const [addingLineItem, setAddingLineItem] = useState(false)
+  // Phase 4 (§2.6): the one uncertain header field currently being
+  // re-extracted (its wire name, e.g. 'vendor_name'), or null. Keyed by field
+  // name rather than a single boolean so re-extracting one field never
+  // disables the affordance on any other flagged field.
+  const [reExtractingField, setReExtractingField] = useState<string | null>(null)
 
   const [isSaving, startSaving] = useTransition()
 
@@ -633,6 +704,33 @@ export function ReviewWorkspace({
     }
   }
 
+  // Phase 4 (§2.6): re-extract ONE flagged header field. Deliberately does
+  // NOT call router.refresh() -- reExtractField's own doc comment
+  // (lib/actions/review.ts) spells out why: a refresh would re-fetch
+  // ReviewDocumentDetail and, because currentExtractionRunId is part of this
+  // workspace's React key, remount the whole form and discard any unsaved
+  // edits to every OTHER field -- exactly the bug this feature exists to
+  // avoid. Instead this patches only that one key of local `header` state,
+  // leaving everything else (including that same field's own dirty/edited
+  // status relative to the ORIGINAL ocr baseline) untouched.
+  async function handleReExtractField(wireField: string) {
+    if (!isReExtractableHeaderField(wireField)) return
+    const headerKey = UNCERTAIN_FIELD_TO_HEADER_KEY[wireField]
+    if (!headerKey) return
+    setReExtractingField(wireField)
+    try {
+      const result = await reExtractField({ documentExtractionId: detail.documentExtractionId, field: wireField })
+      if (!result.ok) {
+        toastError(result.error, { context: 'review-workspace' })
+        return
+      }
+      setHeader((h) => ({ ...h, [headerKey]: numToStr(result.newValue) }))
+      toast.success(`Re-extracted ${(UNCERTAIN_FIELD_LABEL[wireField] ?? wireField).toLowerCase()}.`)
+    } finally {
+      setReExtractingField(null)
+    }
+  }
+
   // 5.21: the empty-line-items state's "Add a row" action. Inserts one blank
   // row server-side (lib/actions/review.ts's addLineItem, RLS-gated the same
   // way flagReviewException's insert is) and appends it to local state in
@@ -714,10 +812,12 @@ export function ReviewWorkspace({
     setHubStatusOpen(true)
   }
 
-  // Global keyboard contract (§7). Digits/arrows/PageUp/PageDown/E/R/S//
-  // only act outside a focused text field -- typing amounts and notes is
-  // never intercepted. Cmd/Ctrl-Enter saves everywhere, including inside a
-  // field.
+  // Global keyboard contract (§7, remapped per plan §2.1). Cmd/Ctrl-Enter
+  // saves everywhere, including inside a field. Everything else only fires
+  // when focus sits somewhere "safe" (isSafeShortcutTarget -- body, or an
+  // element explicitly opted in via data-shortcut-safe): an allowlist,
+  // replacing the old denylist that let a click landing on a button or
+  // label leave shortcuts armed.
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
       if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
@@ -726,23 +826,11 @@ export function ReviewWorkspace({
         return
       }
 
-      const active = document.activeElement as HTMLElement | null
-      const isEditable =
-        !!active &&
-        (['INPUT', 'TEXTAREA', 'SELECT'].includes(active.tagName) ||
-          active.isContentEditable ||
-          active.getAttribute('role') === 'combobox')
-      if (isEditable) return
+      if (!isSafeShortcutTarget(document.activeElement)) return
 
-      if (e.key === '?') {
-        e.preventDefault()
-        setShortcutsOpen((v) => !v)
-        return
-      }
-      // Document navigation: PageDown/PageUp (§7 keyboard contract, remapped
-      // from J/K so the arrow keys below are free for page turning within
-      // the current document -- the two operations reviewers do most, split
-      // onto two adjacent physical keys instead of one.
+      // Always-on navigation: PageUp/PageDown/arrow-key PDF paging are core
+      // navigation, not "shortcuts" a user would think to disable via the
+      // master toggle, so these run regardless of shortcutsEnabled.
       if (e.key === 'PageDown') {
         e.preventDefault()
         requestGoToDocument(nextId)
@@ -765,13 +853,24 @@ export function ReviewWorkspace({
         pdfViewerRef.current?.prevPage()
         return
       }
+
+      // Configurable commands, gated by the master enable/disable (plan
+      // §2.1). Each trigger is looked up in the resolved keymap rather than
+      // hardcoded, so a staff member's remaps take effect immediately.
+      if (!shortcutsEnabled) return
+
+      if (matchesBinding(e, keymap.toggleHelp)) {
+        e.preventDefault()
+        setShortcutsOpen((v) => !v)
+        return
+      }
       // PDF pane mode (L1, checklist 3.5): Split -> Collapsed -> Document -> Split.
-      if (e.key === '\\') {
+      if (matchesBinding(e, keymap.cyclePane)) {
         e.preventDefault()
         cyclePaneMode()
         return
       }
-      if (e.key.toLowerCase() === 'e') {
+      if (matchesBinding(e, keymap.openException)) {
         e.preventDefault()
         setExceptionOpen(true)
         return
@@ -780,36 +879,37 @@ export function ReviewWorkspace({
       // forces a new Sonnet run and, via review/page.tsx's run-id key,
       // remounts the whole workspace from the database -- previously a
       // single unmodified `r` silently discarded every unsaved correction.
-      // Shift+R plus a confirm-when-dirty gate makes that a deliberate
-      // choice instead of a typo.
-      if (e.shiftKey && e.key.toLowerCase() === 'r') {
+      // Shift+R (default) plus a confirm-when-dirty gate makes that a
+      // deliberate choice instead of a typo.
+      if (matchesBinding(e, keymap.reExtract)) {
         e.preventDefault()
         requestReExtract()
         return
       }
-      if (e.key.toLowerCase() === 's') {
+      if (matchesBinding(e, keymap.openHubStatus)) {
         e.preventDefault()
         openHubStatus()
         return
       }
-      if (e.key === '/') {
+      if (matchesBinding(e, keymap.openVendorAutocomplete)) {
         e.preventDefault()
         setVendorAutocompleteOpen(true)
         return
       }
-      if (e.key.toLowerCase() === 'z') {
+      if (matchesBinding(e, keymap.focusZone)) {
         e.preventDefault()
         document.getElementById('stage3-zone-select')?.focus()
         return
       }
-      if (e.key.toLowerCase() === 'h') {
+      if (matchesBinding(e, keymap.focusAdminHead)) {
         e.preventDefault()
         document.getElementById('stage3-admin-head-select')?.focus()
         return
       }
-      if (/^[1-9]$/.test(e.key)) {
+      const lineIndex = matchLineDigit(e, keymap.jumpToLineDigit)
+      if (lineIndex !== null) {
         e.preventDefault()
-        const target = formContainerRef.current?.querySelector<HTMLElement>(`[data-line-jump-index="${e.key}"]`)
+        const target = formContainerRef.current?.querySelector<HTMLElement>(`[data-line-jump-index="${lineIndex}"]`)
         target?.focus()
       }
     }
@@ -1053,6 +1153,36 @@ export function ReviewWorkspace({
         zoneOptions={detail.zoneOptions}
       />
 
+      {/* Phase 4 (§2.6): one small button per flagged header field, re-running
+          OCR for just that field (reExtractField) without discarding unsaved
+          edits to any other field -- see handleReExtractField's comment for
+          why this never calls router.refresh(). Line-item uncertain fields
+          have no entry here at all (reExtractableUncertainFields already
+          filters them out), matching reExtractField's own v1 scope. */}
+      {reExtractableUncertainFields.length > 0 ? (
+        <div className="flex flex-wrap items-center gap-1.5 rounded-md border border-orange-200 bg-orange-50/60 px-2 py-1.5 dark:border-orange-900 dark:bg-orange-950/30">
+          <span className="text-xs text-muted-foreground">Re-extract a flagged field:</span>
+          {reExtractableUncertainFields.map((f) => {
+            const busy = reExtractingField === f.field
+            return (
+              <Button
+                key={f.field}
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-6 gap-1 px-2 text-xs"
+                disabled={busy || formDisabled}
+                onClick={() => void handleReExtractField(f.field)}
+                title={`Re-run OCR for ${(UNCERTAIN_FIELD_LABEL[f.field] ?? f.field).toLowerCase()} only`}
+              >
+                <RefreshCw className={`h-3 w-3 ${busy ? 'animate-spin' : ''}`} />
+                {UNCERTAIN_FIELD_LABEL[f.field] ?? f.field.replace(/_/g, ' ')}
+              </Button>
+            )
+          })}
+        </div>
+      ) : null}
+
       <div ref={paneContainerRef} className="flex min-h-0 flex-1">
         <div
           className="min-h-0 min-w-0 flex-shrink-0"
@@ -1181,7 +1311,7 @@ export function ReviewWorkspace({
         </DialogContent>
       </Dialog>
 
-      <ShortcutsOverlay open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
+      <ShortcutsOverlay open={shortcutsOpen} onOpenChange={setShortcutsOpen} keymap={keymap} />
       <ExceptionDialog
         open={exceptionOpen}
         onOpenChange={setExceptionOpen}

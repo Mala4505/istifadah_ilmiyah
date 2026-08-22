@@ -92,6 +92,11 @@ export interface PageStatus {
   isFinancialDocument: boolean | null
   skipReason: string | null
   classificationConfidence: number | null
+  /** Phase 4 (§2.5): 'manual' once a reviewer has explicitly set this page's
+   *  skip state via setPageSkipOverride (lib/actions/review.ts) -- 'model'
+   *  is both the default and what a fresh classification (including a
+   *  scoped re-OCR, §2.6) resets it back to. */
+  skipSource: 'model' | 'manual'
 }
 
 /** A ranked ledger-entry candidate for a still-unmatched bill, scored by
