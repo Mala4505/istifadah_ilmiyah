@@ -634,6 +634,30 @@ export async function setReviewQueueScope(scope: 'pending' | 'all'): Promise<{ o
  * `document_page_update` policy (`is_reviewer_or_admin()` +
  * `can_see_source_document()`, 20260808000026_rls_policies.sql) -- no new
  * policy needed, same pattern as saveEntryClassification above.
+ *
+ * Bug found in a later session review (2026-08-22): skip: true used to only
+ * touch document_page, so a page that had already produced a bill kept that
+ * bill fully live in document_extraction -- dimmed thumbnail, unchanged
+ * review queue. Fixed below by deleting the bill this page already produced
+ * (single-page bills only -- a page inside an existing multi-page bill is
+ * left alone, same "out of scope, don't partially unwind a shared bill"
+ * reasoning `reExtractPageScoped` already applies). Needs the new
+ * `document_extraction_delete` RLS policy (20260822000009) --
+ * document_extraction had select/update policies only before this.
+ * document_extraction_line_item and reconciliation_exception both
+ * cascade-delete off document_extraction_id, so the bill's line items and
+ * any exceptions raised against it (e.g. gst_recipient_compliance_missing)
+ * go with it automatically. The one thing that does NOT cascade is
+ * rate_reference.line_item_id (`on delete no action`, by design -- it is a
+ * persistent rate-benchmark table, not meant to silently lose history) --
+ * if this bill was already verified and saved once, a rate_reference row
+ * may already reference one of its line items, and the delete below fails
+ * with a foreign-key violation. Treated as a real "can't do this" case, not
+ * a bug: caught specifically so the reviewer gets a plain-English reason
+ * instead of a raw Postgres error, and the page's own skip flag is
+ * deliberately NOT applied when this happens -- a visual-only skip with the
+ * bill still live underneath is exactly the bug this fix exists to close,
+ * so failing the whole action here is more honest than a partial one.
  */
 export async function setPageSkipOverride(input: {
   sourceDocumentId: number
@@ -650,6 +674,40 @@ export async function setPageSkipOverride(input: {
   } = await supabase.auth.getUser()
   if (!user) {
     return { ok: false, error: 'You must be signed in.' }
+  }
+
+  if (input.skip) {
+    const { data: existingBills, error: existingBillsError } = await supabase
+      .from('document_extraction')
+      .select('id, page_number_start, page_number_end')
+      .eq('source_document_id', input.sourceDocumentId)
+
+    if (existingBillsError) {
+      return { ok: false, error: logRawError('review.setPageSkipOverride', existingBillsError.message) }
+    }
+
+    const containingBill = (existingBills ?? []).find(
+      (b) => (b.page_number_start as number) <= input.pageNumber && input.pageNumber <= (b.page_number_end as number)
+    )
+
+    // Only a bill made up of exactly this one page is safe to remove here --
+    // a multi-page bill's other pages are still real, so this page's own
+    // skip toggle is applied (below) without touching that shared bill.
+    if (containingBill && containingBill.page_number_start === containingBill.page_number_end) {
+      const { error: deleteError } = await supabase.from('document_extraction').delete().eq('id', containingBill.id)
+
+      if (deleteError) {
+        if (deleteError.code === '23503') {
+          return {
+            ok: false,
+            error:
+              'This page already produced a bill that has been reviewed and saved, and rate data from it ' +
+              'is now referenced elsewhere -- it can\'t be removed automatically. Ask an admin to remove it.',
+          }
+        }
+        return { ok: false, error: logRawError('review.setPageSkipOverride', deleteError.message) }
+      }
+    }
   }
 
   const { data, error } = await supabase

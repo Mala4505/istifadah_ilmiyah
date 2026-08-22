@@ -213,7 +213,37 @@ function buildSystemPrompt(communityGstin: string | null, communityName: string 
     'and null in a numeric field, and reflect uncertainty via the confidence fields rather than guessing. ' +
     'Every field value must be plain text transcribed from the document — never emit tag-like syntax ' +
     '(anything shaped like `<...>` or `</...>`) inside a field, even if it resembles formatting you have ' +
-    'seen elsewhere; that is never part of a real invoice.'
+    'seen elsewhere; that is never part of a real invoice. ' +
+    // Worked examples below, illustrating the rules just stated rather than
+    // adding new ones — deliberately unconditional (unlike the
+    // communityGstin/communityName blocks further down) so the identical,
+    // cacheable prefix (this function + buildExtractionTool's schema,
+    // combined by buildCachedSystemPrompt's single cache_control breakpoint)
+    // reliably clears claude-haiku-4-5's cache-eligibility floor of 4,096
+    // tokens on every call, not just ones where an env var happens to be
+    // set. Measured without this addition: ~4,039 tokens (from a
+    // successful cache write on claude-sonnet-5, whose own floor is only
+    // 1,024 — Haiku silently never cached at all, 57 tokens short, with no
+    // error either way; platform.claude.com/docs/en/build-with-claude/prompt-caching).
+    // Confirm the real number on the next production run
+    // (ocr_extraction_run.raw_response_jsonb -> usage -> cache_creation_input_tokens
+    // should be non-zero) rather than trusting this comment's estimate.
+    'For example: a three-page scan where page 1 shows a vendor letterhead, GSTIN, invoice number, and ' +
+    'the first several line items, page 2 continues the same table with more rows and a subtotal but no ' +
+    'new letterhead, and page 3 shows a completely different vendor\'s letterhead with its own invoice ' +
+    'number and totals — pages 1 and 2 form ONE bill (page 2 has continues_previous_bill: true), and page ' +
+    '3 is a SEPARATE bill (continues_previous_bill: false) even though all three pages came from the same ' +
+    'scanned document. A page showing only a bank cheque photograph, or a passbook page listing account ' +
+    'transactions, is not a bill even though it contains numbers, dates, and amounts — classify it ' +
+    'is_financial_document: false with the appropriate skip_reason, and do not attempt to read a vendor ' +
+    'name, invoice number, or line items from it. Likewise, a vendor\'s phone number or email address ' +
+    'printed in a footer below the line-item table describes how to reach the vendor, not a charge — it ' +
+    'belongs in vendor_phone/vendor_email, never as a line-item row of its own, even when it visually ' +
+    'sits inside the same block as the table. When a document shows two separate address/identity blocks ' +
+    '— one for the party issuing the bill and a second, usually smaller or lower on the page, for the ' +
+    'party it is billed to — read the issuing party into the vendor_* fields and the billed-to party into ' +
+    'buyer_gstin/buyer_name; copying the wrong block into the wrong field is one of the most common ' +
+    'mistakes on this kind of document, so double-check which block is which before extracting either one.'
 
   let prompt = base
 
@@ -365,7 +395,14 @@ function parseExtractionMessage(
       inputTokens: response.usage.input_tokens,
       outputTokens: response.usage.output_tokens,
     },
-    costUsd: estimateCostUsd(model, response.usage.input_tokens, response.usage.output_tokens, batched),
+    costUsd: estimateCostUsd(
+      model,
+      response.usage.input_tokens,
+      response.usage.output_tokens,
+      batched,
+      response.usage.cache_creation_input_tokens ?? 0,
+      response.usage.cache_read_input_tokens ?? 0
+    ),
     rawResponse: response,
   }
 }
@@ -576,21 +613,48 @@ const MODEL_RATES_USD_PER_MTOK: Record<ModelId, { input: number; output: number 
 }
 
 /**
+ * Prompt-cache multipliers on top of the base input rate (a 5-minute TTL is
+ * the only kind this codebase ever requests -- buildCachedSystemPrompt's
+ * `cache_control: { type: 'ephemeral' }` has no `ttl` override). A write
+ * costs MORE than a plain input token, not less -- confirmed against
+ * Anthropic's published pricing (platform.claude.com/docs/en/build-with-claude/prompt-caching)
+ * rather than assumed.
+ */
+const CACHE_WRITE_MULTIPLIER = 1.25
+const CACHE_READ_MULTIPLIER = 0.1
+
+/**
  * Estimates the USD cost of a call using the §6.1 rate card. Pass
  * `batched: true` for the Batch API's 50% discount — used for every real
  * OCR run per §6.3 point 1; the non-batched rate is what a single
  * synchronous `extractDocument` call (dev/testing, manual re-escalation)
  * actually costs.
+ *
+ * `cacheCreationInputTokens`/`cacheReadInputTokens` default to 0 (every
+ * caller before this fix passed only the first four args, and a call with
+ * no caching involved should cost exactly what it always did). Bug fixed
+ * here: `response.usage.input_tokens` does NOT include cached tokens when
+ * caching is used -- Anthropic reports them separately, at their own
+ * (cheaper-on-read, more-expensive-on-write) rates -- so a caller that only
+ * ever passed `input_tokens` was silently undercounting every cache-write
+ * call and overcounting the discount on every cache-read call. Both are
+ * billed off the SAME base input rate as a normal input token, just scaled
+ * by the multipliers above -- there is no separate per-model cache rate
+ * card to look up.
  */
 export function estimateCostUsd(
   model: ModelId,
   inputTokens: number,
   outputTokens: number,
-  batched = false
+  batched = false,
+  cacheCreationInputTokens = 0,
+  cacheReadInputTokens = 0
 ): number {
   const rates = MODEL_RATES_USD_PER_MTOK[model]
   const discount = batched ? 0.5 : 1
   const inputCost = (inputTokens / 1_000_000) * rates.input * discount
+  const cacheWriteCost = (cacheCreationInputTokens / 1_000_000) * rates.input * CACHE_WRITE_MULTIPLIER * discount
+  const cacheReadCost = (cacheReadInputTokens / 1_000_000) * rates.input * CACHE_READ_MULTIPLIER * discount
   const outputCost = (outputTokens / 1_000_000) * rates.output * discount
-  return inputCost + outputCost
+  return inputCost + cacheWriteCost + cacheReadCost + outputCost
 }
