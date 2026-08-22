@@ -123,11 +123,55 @@ export default async function ReviewPage({
   const requestedId = idParam ? Number(idParam) : null
   const currentIndex = requestedId !== null ? queue.findIndex((q) => q.documentExtractionId === requestedId) : -1
 
-  if (currentIndex === -1) {
-    // No id, or a stale/invalid one (e.g. just-verified, or another
-    // reviewer's bookmark) -- canonicalize to the top of the queue rather
-    // than rendering nothing.
+  if (requestedId === null && currentIndex === -1) {
+    // No id at all (or a non-numeric one) -- canonicalize to the top of the
+    // queue rather than rendering nothing.
     redirect(`/review?id=${queue[0]!.documentExtractionId}`)
+  }
+
+  if (currentIndex === -1) {
+    // A real, specific id was requested but it isn't in *this scoped*
+    // queue -- e.g. a sibling-bill chip (review-workspace.tsx) linked to a
+    // bill that's already verified while this reviewer's scope cookie is
+    // 'pending'. Load it directly from the unscoped superset view instead of
+    // bouncing the reviewer all the way back to queue[0] (event-scoping-and
+    // -review-fixes-plan.md §2.11).
+    const { data: outOfScopeRow } = await supabase
+      .from('v_review_queue_all')
+      .select('document_extraction_id, source_document_id, bill_count')
+      .eq('document_extraction_id', requestedId as number)
+      .maybeSingle()
+
+    if (!outOfScopeRow) {
+      // Id doesn't exist, or isn't visible under RLS -- fall back to the
+      // original behavior rather than crashing.
+      redirect(`/review?id=${queue[0]!.documentExtractionId}`)
+    }
+
+    const detail = await loadDocumentDetail(
+      supabase,
+      outOfScopeRow.source_document_id as number,
+      outOfScopeRow.document_extraction_id as number,
+      outOfScopeRow.bill_count as number
+    )
+
+    if (!detail) {
+      redirect(`/review?id=${queue[0]!.documentExtractionId}`)
+    }
+
+    return (
+      <div className="flex h-[calc(100vh-3rem)] flex-col gap-3">
+        <PageHeader total={queue.length} scope={scope} />
+        <ReviewWorkspace
+          key={`${detail.documentExtractionId}:${detail.currentExtractionRunId ?? 'none'}`}
+          detail={detail}
+          queue={queue.map((q) => ({ documentExtractionId: q.documentExtractionId }))}
+          currentIndex={-1}
+          prevId={null}
+          nextId={null}
+        />
+      </div>
+    )
   }
 
   const current = queue[currentIndex]!
