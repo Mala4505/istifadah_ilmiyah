@@ -1,10 +1,8 @@
 'use server'
 
 /**
- * Server actions backing event selection and creation (Phase 6 Step 1,
- * docs/event-scoping-and-review-fixes-plan.md §1). `setActiveEvent` mirrors
- * `setReviewQueueScope` (lib/actions/review.ts:598) exactly -- same cookie
- * shape, same `path`/`maxAge`.
+ * Server action backing event creation (Phase 6 Step 1,
+ * docs/event-scoping-and-review-fixes-plan.md §1).
  *
  * `createEvent` needs to flip `event.is_current` off the old row and onto
  * the new one, plus seed four membership tables, as a single atomic step
@@ -18,25 +16,10 @@
  */
 
 import { revalidatePath } from 'next/cache'
-import { cookies } from 'next/headers'
 import { Pool } from 'pg'
 import { serverEnv } from '@/lib/env.server'
 import { logRawError } from '@/lib/friendly-error'
 import { requireAdminOrAbove } from '@/lib/export/auth'
-import { ACTIVE_EVENT_COOKIE } from '@/lib/events/current'
-
-export type SimpleActionResult = { ok: true } | { ok: false; error: string }
-
-/**
- * Cookie setter for the active event -- same shape as
- * `setReviewQueueScope`: `path: '/'`, one-year `maxAge`. Any signed-in staff
- * member may switch which event they're viewing; only `createEvent` (below)
- * is admin-gated.
- */
-export async function setActiveEvent(eventId: number): Promise<SimpleActionResult> {
-  ;(await cookies()).set(ACTIVE_EVENT_COOKIE, String(eventId), { path: '/', maxAge: 60 * 60 * 24 * 365 })
-  return { ok: true }
-}
 
 export interface CreateEventInput {
   name: string
@@ -139,10 +122,11 @@ export async function createEvent(input: CreateEventInput): Promise<CreateEventR
 
     await client.query('commit')
 
-    // Layout-level: NavRail's event switcher (fed from app/(app)/layout.tsx)
-    // and the /events history list both need the new row to appear.
+    // Layout-level: every screen that fetches the selected/current event
+    // needs the new row to appear, and the event history list (now a tab on
+    // /settings) needs to show it too.
     revalidatePath('/', 'layout')
-    revalidatePath('/events')
+    revalidatePath('/settings')
 
     return { ok: true, eventId }
   } catch (error) {

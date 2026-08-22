@@ -10,13 +10,10 @@ import {
   FileStack,
   ScanLine,
   TriangleAlert,
-  GitCompareArrows,
   FileBarChart,
-  LineChart,
   Download,
   Settings,
   Keyboard,
-  CalendarRange,
   LogOut,
   ChevronLeft,
   ChevronRight,
@@ -29,17 +26,15 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { signOut } from '@/lib/actions/auth'
 import { isAdminOrAbove, isSuperadmin } from '@/lib/auth/roles'
-import { EventSwitcher } from '@/components/app-shell/event-switcher'
-import type { Event } from '@/lib/events/types'
 
 const COLLAPSE_STORAGE_KEY = 'nav-rail-collapsed'
 
-// Persistent left rail (MASTER-PLAN §5 "Navigation"). Export is admin-only
-// and Admin is superadmin-only per §4.4c's role table, and each is hidden
-// outright from anyone below that role — the page itself already blocks
-// lower roles server-side, so showing the link only ever produced a click
-// that led to a refusal. (/import has no rail entry at all — it is reached
-// from the dashboard's imports tile, which is gated the same way.)
+// Persistent left rail (MASTER-PLAN §5 "Navigation"). Settings and Export
+// are admin-only per §4.4c's role table, and each is hidden outright from
+// anyone below that role — the page itself already blocks lower roles
+// server-side, so showing the link only ever produced a click that led to a
+// refusal. (/import has no rail entry at all — it is reached from the
+// dashboard's imports tile, which is gated the same way.)
 //
 // This is presentation only. RLS in the database, and each page's own
 // server-side gate, remain the real access boundary — a hidden link is not a
@@ -50,13 +45,10 @@ const NAV_ITEMS = [
   { label: 'Documents', href: '/documents', icon: FileStack },
   { label: 'Review', href: '/review', icon: ScanLine },
   { label: 'Exceptions', href: '/exceptions', icon: TriangleAlert },
-  { label: 'Reconciliation', href: '/reconciliation', icon: GitCompareArrows },
   { label: 'Reports', href: '/reports', icon: FileBarChart },
-  { label: 'Analytics', href: '/analytics', icon: LineChart },
-  { label: 'Settings', href: '/settings', icon: Keyboard },
-  { label: 'Events', href: '/events', icon: CalendarRange, adminOnly: true },
+  { label: 'Shortcuts', href: '/shortcuts', icon: Keyboard },
+  { label: 'Settings', href: '/settings', icon: Settings, adminOnly: true },
   { label: 'Export', href: '/export', icon: Download, adminOnly: true },
-  { label: 'Admin', href: '/admin', icon: Settings, superadminOnly: true },
 ] as const
 
 function initialsFor(name: string): string {
@@ -68,12 +60,8 @@ function initialsFor(name: string): string {
 
 export function NavRail({
   user,
-  events,
-  selectedEvent,
 }: {
   user: { displayName: string; role: string | null; itsNumber: string | null }
-  events: Event[]
-  selectedEvent: Event | null
 }) {
   const pathname = usePathname()
   const [collapsed, setCollapsed] = useState(false)
@@ -194,13 +182,6 @@ export function NavRail({
             )
           })}
         </ul>
-
-        {/* Event switcher: sibling of the account popover below, same
-            footer treatment (doc §1.3's app-shell header switcher — this
-            app has no header bar, only the rail, so it lives here). */}
-        <div className={cn('border-t border-border', collapsed ? 'p-2' : 'p-3')}>
-          <EventSwitcher events={events} selectedEvent={selectedEvent} collapsed={collapsed} />
-        </div>
 
         {/* Account footer: one row (avatar, and name/role when expanded)
             that opens a popover for everything else — shortcut hint, theme

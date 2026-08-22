@@ -1,14 +1,34 @@
+import Link from 'next/link'
+import { CheckCircle2, GitCompareArrows } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { FriendlyError } from '@/components/ui/friendly-error'
+import { friendlyDataError } from '@/lib/friendly-error'
 import { createClient } from '@/lib/supabase/server'
 import { getStaffContext } from '@/lib/export/auth'
+import { getSelectedEventId } from '@/lib/events/current'
 import { severityRank } from '@/components/exceptions/labels'
 import { ExceptionsFilters } from '@/components/exceptions/exceptions-filters'
 import { ExceptionsTable, type ExceptionRow } from '@/components/exceptions/exceptions-table'
 import { isAdminOrAbove } from '@/lib/auth/roles'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { ReportSection } from '@/components/reports/report-section'
+import { DataTable, type DataTableColumn } from '@/components/reports/data-table'
+import { EmptyState as ReportEmptyState } from '@/components/reports/empty-state'
+import { ExportCsvButton } from '@/components/reports/export-csv-button'
+import { toCsv } from '@/lib/reports/csv'
+import { SeverityBadge } from '@/components/reports/severity-badge'
+import { formatDate, formatINR } from '@/lib/reports/format'
+
+// Screen 9 / /exceptions merge (nav-simplification plan). This page now
+// hosts both the exceptions work queue (filter, resolve/dismiss — via
+// lib/actions/exceptions.ts) and the read-only reconciliation report that
+// used to live at /reconciliation ("the report the org currently produces
+// by hand"), split across two tabs since ExceptionsTable is a queue-specific,
+// severity-grouped table that wasn't built to also host report-shaped data.
+export const dynamic = 'force-dynamic'
 
 /**
- * /exceptions (MASTER-PLAN §3.10, §5 row 8, §11.1 Day 5). Sorted by
+ * Queue tab (MASTER-PLAN §3.10, §5 row 8, §11.1 Day 5). Sorted by
  * severity then ₹ at risk descending, filterable by exception_type and by
  * status (open by default — resolved/dismissed stay visible as the audit
  * trail, per §3.10's resolution_note/resolved_by/resolved_at columns).
@@ -17,7 +37,207 @@ import { isAdminOrAbove } from '@/lib/auth/roles'
  * only is_staff()); resolving requires admin or above (§4.4c,
  * 20260819000003 — dept lost this), enforced both by hiding the action here
  * and by RLS in lib/actions/exceptions.ts.
+ *
+ * Event-scoping: reconciliation_exception carries no event_id column of its
+ * own (same limitation the Reconciliation-report tab's loader documents
+ * below), so — mirroring that tab's pattern — the fetched rows are filtered
+ * down in application code by cross-referencing entry_id against
+ * entries.event_id after the query returns.
  */
+async function loadQueueData(params: { status: string; type: string }) {
+  const supabase = await createClient()
+  let query = supabase
+    .from('reconciliation_exception')
+    .select(
+      'id, entry_id, exception_type, severity, amount_at_risk, description, status, resolution_note, resolved_at, created_at'
+    )
+
+  if (params.status !== 'all') {
+    query = query.eq('status', params.status)
+  }
+  if (params.type !== 'all') {
+    query = query.eq('exception_type', params.type)
+  }
+
+  const { data, error } = await query
+
+  const selectedEventId = await getSelectedEventId(supabase)
+  const rawExceptions = (data ?? []) as ExceptionRow[]
+
+  let exceptions = rawExceptions
+  if (selectedEventId !== null) {
+    const candidateEntryIds = Array.from(
+      new Set(rawExceptions.map((r) => r.entry_id).filter((id): id is number => id !== null))
+    )
+    let eventEntryIds = new Set<number>()
+    if (candidateEntryIds.length > 0) {
+      const { data: entryEventRows } = await supabase
+        .from('entries')
+        .select('id')
+        .eq('event_id', selectedEventId)
+        .in('id', candidateEntryIds)
+      eventEntryIds = new Set((entryEventRows ?? []).map((r) => r.id as number))
+    }
+    exceptions = rawExceptions.filter((r) => r.entry_id !== null && eventEntryIds.has(r.entry_id))
+  }
+
+  return { exceptions, error }
+}
+
+// Reconciliation-report tab. Reads from v_department_audit_variance (§10.2,
+// renamed 2026-08-11 from v_tenant_main_variance — there is no separate
+// second amount anymore, so this view is deliberately simplified to
+// "missing a Main/Audit-side match" rather than an amount-mismatch
+// comparison; see the view's own header comment) for the unmatched-entries
+// logic; reconciliation_exception for the allocation queue if the importer
+// has written it, falling back to a direct comparison against
+// v_budget_vs_actual's already-computed columns otherwise.
+
+type VarianceRow = {
+  entry_id: number
+  ubbl_number: string
+  main_number: string | null
+  department_id: number | null
+  budget_head_id: number | null
+  vendor_id: number | null
+  date: string | null
+  amount: number | null
+  variance_reason: string | null
+  variance_type: 'main_number_missing'
+}
+
+type DepartmentRow = { id: number; name: string }
+type VendorRow = { id: number; display_name: string }
+type BudgetHeadRow = { id: number; raw_label: string; short_label: string | null }
+
+type AllocationExceptionRow = {
+  id: number
+  entry_id: number | null
+  exception_type: string
+  severity: string
+  amount_at_risk: number | null
+  description: string | null
+  status: string
+  created_at: string
+}
+
+type BudgetVsActualRow = {
+  budget_head_id: number
+  raw_label: string
+  short_label: string | null
+  utilised_amount: number | null
+  actual_amount: number | null
+  entry_count: number
+}
+
+const VARIANCE_TOLERANCE = 1 // ₹1 — matches the review queue's tolerance (§7)
+
+async function loadReconciliationReportData() {
+  const supabase = await createClient()
+
+  // Phase 6 Step 2 (docs/event-scoping-and-review-fixes-plan.md §1). The
+  // department lookup and `v_budget_vs_actual` (rewritten with an `event_id`
+  // output column by the parallel reports/export stream,
+  // 20260822000007_reports_export_event_scoping.sql) can be filtered
+  // directly. `v_department_audit_variance` and `reconciliation_exception`
+  // cannot: neither carries an `event_id` column (doc §1.2:
+  // reconciliation_exception "inherits event via its parent, no column of
+  // its own", and the variance view is a thin, pre-event-scoping projection
+  // of `entries` that isn't rewritten by this stream) -- so both are
+  // event-scoped here by cross-referencing their `entry_id` against
+  // `entries.event_id` in application code instead of in the query itself.
+  const selectedEventId = await getSelectedEventId(supabase)
+
+  const [varianceRes, deptRes, vendorRes, budgetHeadRes, exceptionRes, budgetVsActualRes, deptMembershipRes] =
+    await Promise.all([
+      supabase
+        .from('v_department_audit_variance')
+        .select(
+          'entry_id, ubbl_number, main_number, department_id, budget_head_id, vendor_id, date, amount, variance_reason, variance_type'
+        )
+        .order('date', { ascending: false, nullsFirst: false })
+        .limit(1000)
+        .returns<VarianceRow[]>(),
+      supabase.from('department').select('id, name').returns<DepartmentRow[]>(),
+      supabase.from('vendor').select('id, display_name').returns<VendorRow[]>(),
+      supabase.from('budget_head').select('id, raw_label, short_label').returns<BudgetHeadRow[]>(),
+      supabase
+        .from('reconciliation_exception')
+        .select('id, entry_id, exception_type, severity, amount_at_risk, description, status, created_at')
+        .eq('status', 'open')
+        .eq('exception_type', 'allocation_sum_mismatch')
+        .order('amount_at_risk', { ascending: false, nullsFirst: false })
+        .returns<AllocationExceptionRow[]>(),
+      selectedEventId === null
+        ? supabase
+            .from('v_budget_vs_actual')
+            .select('budget_head_id, raw_label, short_label, utilised_amount, actual_amount, entry_count')
+            .returns<BudgetVsActualRow[]>()
+        : supabase
+            .from('v_budget_vs_actual')
+            .select('budget_head_id, raw_label, short_label, utilised_amount, actual_amount, entry_count')
+            .eq('event_id', selectedEventId)
+            .returns<BudgetVsActualRow[]>(),
+      selectedEventId === null
+        ? Promise.resolve({ data: [] as { department_id: number }[] })
+        : supabase.from('event_department').select('department_id').eq('event_id', selectedEventId),
+    ])
+
+  const rawUnmatched = varianceRes.data ?? []
+  const rawExceptionRows = exceptionRes.data ?? []
+
+  // One lookup covering both: which of the entry ids referenced by either
+  // result actually belong to the selected event.
+  const candidateEntryIds = Array.from(
+    new Set<number>([
+      ...rawUnmatched.map((r) => r.entry_id),
+      ...rawExceptionRows.map((r) => r.entry_id).filter((id): id is number => id !== null),
+    ])
+  )
+  let eventEntryIds: Set<number> | null = null
+  if (selectedEventId !== null && candidateEntryIds.length > 0) {
+    const { data: entryEventRows } = await supabase
+      .from('entries')
+      .select('id')
+      .eq('event_id', selectedEventId)
+      .in('id', candidateEntryIds)
+    eventEntryIds = new Set((entryEventRows ?? []).map((r) => r.id as number))
+  }
+
+  const unmatched = eventEntryIds === null ? rawUnmatched : rawUnmatched.filter((r) => eventEntryIds!.has(r.entry_id))
+  const exceptionRows =
+    eventEntryIds === null
+      ? rawExceptionRows
+      : rawExceptionRows.filter((r) => r.entry_id !== null && eventEntryIds!.has(r.entry_id))
+
+  const allocationSource: 'exceptions' | 'computed' = exceptionRows.length > 0 ? 'exceptions' : 'computed'
+  const computedAllocationMismatches = (budgetVsActualRes.data ?? []).filter((r) => {
+    if (r.utilised_amount === null) return false
+    const actual = r.actual_amount ?? 0
+    return Math.abs(actual - r.utilised_amount) > VARIANCE_TOLERANCE
+  })
+
+  const departmentMemberIds = new Set((deptMembershipRes.data ?? []).map((r) => r.department_id))
+  const deptRows = (deptRes.data ?? []).filter(
+    (d) => selectedEventId === null || departmentMemberIds.has(d.id)
+  )
+
+  return {
+    unmatched,
+    deptMap: new Map(deptRows.map((d) => [d.id, d.name])),
+    vendorMap: new Map((vendorRes.data ?? []).map((v) => [v.id, v.display_name])),
+    budgetHeadMap: new Map((budgetHeadRes.data ?? []).map((b) => [b.id, b.short_label ?? b.raw_label])),
+    allocationSource,
+    exceptionRows,
+    computedAllocationMismatches,
+    errors: {
+      variance: friendlyDataError(varianceRes.error, 'reconciliation:varianceRes'),
+      exceptions: friendlyDataError(exceptionRes.error, 'reconciliation:exceptionRes'),
+      budgetVsActual: friendlyDataError(budgetVsActualRes.error, 'reconciliation:budgetVsActualRes'),
+    },
+  }
+}
+
 export default async function ExceptionsPage({
   searchParams,
 }: {
@@ -53,53 +273,199 @@ export default async function ExceptionsPage({
     )
   }
 
-  const supabase = await createClient()
-  let query = supabase
-    .from('reconciliation_exception')
-    .select(
-      'id, entry_id, exception_type, severity, amount_at_risk, description, status, resolution_note, resolved_at, created_at'
-    )
-
-  if (status !== 'all') {
-    query = query.eq('status', status)
-  }
-  if (type !== 'all') {
-    query = query.eq('exception_type', type)
-  }
-
-  const { data, error } = await query
-
   const canResolve = isAdminOrAbove(staff.role)
+
+  const [{ exceptions: queueData, error: queueError }, reportData] = await Promise.all([
+    loadQueueData({ status, type }),
+    loadReconciliationReportData(),
+  ])
+
+  const exceptions = queueData
+    .slice()
+    .sort((a, b) => {
+      const rankDiff = severityRank(b.severity) - severityRank(a.severity)
+      if (rankDiff !== 0) return rankDiff
+      const aAmount = a.amount_at_risk ?? -Infinity
+      const bAmount = b.amount_at_risk ?? -Infinity
+      return bAmount - aAmount
+    })
+
+  const unmatchedColumns: DataTableColumn<VarianceRow>[] = [
+    {
+      key: 'ubbl',
+      header: 'UBBL Number',
+      render: (r) => (
+        <Link href={`/entries/${r.entry_id}`} className="text-primary underline-offset-2 hover:underline">
+          {r.ubbl_number}
+        </Link>
+      ),
+    },
+    { key: 'dept', header: 'Department', render: (r) => (r.department_id ? reportData.deptMap.get(r.department_id) ?? '—' : '—') },
+    { key: 'vendor', header: 'Vendor', render: (r) => (r.vendor_id ? reportData.vendorMap.get(r.vendor_id) ?? `#${r.vendor_id}` : '—') },
+    { key: 'date', header: 'Date', render: (r) => formatDate(r.date) },
+    { key: 'amount', header: 'Amount', align: 'right', render: (r) => formatINR(r.amount) },
+  ]
+
+  const exceptionColumns: DataTableColumn<AllocationExceptionRow>[] = [
+    {
+      key: 'entry',
+      header: 'Entry',
+      render: (r) =>
+        r.entry_id ? (
+          <Link href={`/entries/${r.entry_id}`} className="text-primary underline-offset-2 hover:underline">
+            #{r.entry_id}
+          </Link>
+        ) : (
+          '—'
+        ),
+    },
+    { key: 'severity', header: 'Severity', render: (r) => <SeverityBadge severity={r.severity} /> },
+    { key: 'amount', header: '₹ at risk', align: 'right', render: (r) => formatINR(r.amount_at_risk) },
+    { key: 'description', header: 'Description', render: (r) => r.description ?? '—' },
+    { key: 'created', header: 'Raised', render: (r) => formatDate(r.created_at) },
+  ]
+
+  const computedColumns: DataTableColumn<BudgetVsActualRow>[] = [
+    { key: 'head', header: 'Budget Head', render: (r) => r.short_label ?? r.raw_label },
+    { key: 'utilised', header: 'Utilised (source)', align: 'right', render: (r) => formatINR(r.utilised_amount) },
+    { key: 'actual', header: 'Sum of amounts', align: 'right', render: (r) => formatINR(r.actual_amount) },
+    {
+      key: 'diff',
+      header: 'Difference',
+      align: 'right',
+      render: (r) => (
+        <span className="text-destructive">{formatINR((r.actual_amount ?? 0) - (r.utilised_amount ?? 0))}</span>
+      ),
+    },
+    { key: 'entries', header: 'Entries', align: 'right', render: (r) => String(r.entry_count) },
+  ]
 
   return (
     <PageShell>
-      <ExceptionsFilters status={status} type={type} />
+      <Tabs defaultValue="queue">
+        <TabsList>
+          <TabsTrigger value="queue">Queue</TabsTrigger>
+          <TabsTrigger value="report">Reconciliation report</TabsTrigger>
+        </TabsList>
 
-      {error ? (
-        <Card>
-          <CardContent className="pt-6">
-            <p className="text-sm font-medium">Could not load exceptions</p>
-            <FriendlyError message={error.message} />
-          </CardContent>
-        </Card>
-      ) : (
-        (() => {
-          const exceptions = ((data ?? []) as ExceptionRow[])
-            .slice()
-            .sort((a, b) => {
-              const rankDiff = severityRank(b.severity) - severityRank(a.severity)
-              if (rankDiff !== 0) return rankDiff
-              const aAmount = a.amount_at_risk ?? -Infinity
-              const bAmount = b.amount_at_risk ?? -Infinity
-              return bAmount - aAmount
-            })
+        <TabsContent value="queue" className="flex flex-col gap-4">
+          <ExceptionsFilters status={status} type={type} />
 
-          if (exceptions.length === 0) {
-            return <EmptyState isDefaultView={status === 'open' && type === 'all'} />
-          }
-          return <ExceptionsTable exceptions={exceptions} canResolve={canResolve} />
-        })()
-      )}
+          {queueError ? (
+            <Card>
+              <CardContent className="pt-6">
+                <p className="text-sm font-medium">Could not load exceptions</p>
+                <FriendlyError message={queueError.message} />
+              </CardContent>
+            </Card>
+          ) : exceptions.length === 0 ? (
+            <QueueEmptyState isDefaultView={status === 'open' && type === 'all'} />
+          ) : (
+            <ExceptionsTable exceptions={exceptions} canResolve={canResolve} />
+          )}
+        </TabsContent>
+
+        <TabsContent value="report" className="flex flex-col gap-4">
+          <ReportSection
+            title="Missing a Main/Audit-side match"
+            description="Entries with no Main Entry Number recorded yet — nothing to compare against on the Audit side."
+            action={
+              <ExportCsvButton
+                filename="reconciliation-unmatched.csv"
+                rowCount={reportData.unmatched.length}
+                csv={toCsv(reportData.unmatched, [
+                  { header: 'UBBL Number', value: (r) => r.ubbl_number },
+                  { header: 'Department', value: (r) => (r.department_id ? reportData.deptMap.get(r.department_id) : '') },
+                  { header: 'Vendor', value: (r) => (r.vendor_id ? reportData.vendorMap.get(r.vendor_id) : '') },
+                  { header: 'Date', value: (r) => r.date },
+                  { header: 'Amount', value: (r) => r.amount },
+                ])}
+              />
+            }
+          >
+            {reportData.errors.variance ? (
+              <ReportEmptyState title="Couldn't load variance data" description={reportData.errors.variance} />
+            ) : reportData.unmatched.length === 0 ? (
+              <ReportEmptyState
+                icon={CheckCircle2}
+                title="Every entry has a Main-side match"
+                description="No entries missing a Main Entry Number across the entries this account can see."
+              />
+            ) : (
+              <DataTable
+                columns={unmatchedColumns}
+                rows={reportData.unmatched}
+                getRowKey={(r) => r.entry_id}
+                emptyTitle="Nothing unmatched"
+                emptyDescription="Every entry this account can see has a Main-side match."
+              />
+            )}
+          </ReportSection>
+
+          <ReportSection
+            title="Allocation-sum mismatches"
+            description={
+              reportData.allocationSource === 'exceptions'
+                ? 'Open reconciliation_exception rows of type allocation_sum_mismatch — raised by the importer.'
+                : 'No open exception rows yet — computed directly by comparing v_budget_vs_actual\'s reported utilised amount against the sum of amounts per head.'
+            }
+            action={
+              reportData.allocationSource === 'exceptions' ? (
+                <ExportCsvButton
+                  filename="reconciliation-allocation-mismatches.csv"
+                  rowCount={reportData.exceptionRows.length}
+                  csv={toCsv(reportData.exceptionRows, [
+                    { header: 'Entry', value: (r) => r.entry_id },
+                    { header: 'Severity', value: (r) => r.severity },
+                    { header: '₹ at risk', value: (r) => r.amount_at_risk },
+                    { header: 'Description', value: (r) => r.description },
+                    { header: 'Raised', value: (r) => r.created_at },
+                  ])}
+                />
+              ) : (
+                <ExportCsvButton
+                  filename="reconciliation-allocation-mismatches.csv"
+                  rowCount={reportData.computedAllocationMismatches.length}
+                  csv={toCsv(reportData.computedAllocationMismatches, [
+                    { header: 'Budget Head', value: (r) => r.short_label ?? r.raw_label },
+                    { header: 'Utilised (source)', value: (r) => r.utilised_amount },
+                    { header: 'Sum of amounts', value: (r) => r.actual_amount },
+                    { header: 'Difference', value: (r) => (r.actual_amount ?? 0) - (r.utilised_amount ?? 0) },
+                    { header: 'Entries', value: (r) => r.entry_count },
+                  ])}
+                />
+              )
+            }
+          >
+            {reportData.allocationSource === 'exceptions' ? (
+              <DataTable
+                columns={exceptionColumns}
+                rows={reportData.exceptionRows}
+                getRowKey={(r) => r.id}
+                emptyTitle="No open allocation exceptions"
+              />
+            ) : (
+              <DataTable
+                columns={computedColumns}
+                rows={reportData.computedAllocationMismatches}
+                getRowKey={(r) => r.budget_head_id}
+                emptyTitle="Every head's utilised amount matches its entries"
+                emptyDescription={`No difference greater than ₹${VARIANCE_TOLERANCE} between the source-reported utilised amount and the sum of amounts.`}
+              />
+            )}
+          </ReportSection>
+
+          <div className="flex items-start gap-2 text-xs text-muted-foreground">
+            <GitCompareArrows className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+            <p>
+              Reads from <code className="font-mono">v_department_audit_variance</code>,{' '}
+              <code className="font-mono">reconciliation_exception</code>, and{' '}
+              <code className="font-mono">v_budget_vs_actual</code> (§10.2) — RLS-scoped per signed-in user,
+              same as every other screen.
+            </p>
+          </div>
+        </TabsContent>
+      </Tabs>
     </PageShell>
   )
 }
@@ -110,12 +476,16 @@ function PageShell({ children }: { children: React.ReactNode }) {
       <div className="flex flex-wrap items-center gap-3">
         <h1 className="text-xl font-semibold tracking-tight">Exceptions</h1>
       </div>
+      <p className="max-w-2xl text-sm text-muted-foreground">
+        The exceptions queue for resolving/dismissing flagged items, and the reconciliation report the org
+        currently produces by hand — unmatched entries and allocation-sum mismatches.
+      </p>
       {children}
     </div>
   )
 }
 
-function EmptyState({ isDefaultView }: { isDefaultView: boolean }) {
+function QueueEmptyState({ isDefaultView }: { isDefaultView: boolean }) {
   return (
     <div className="flex flex-col items-center gap-1 rounded-md border border-dashed border-border py-10 text-center">
       <p className="text-sm font-medium">{isDefaultView ? 'No open exceptions' : 'No exceptions match these filters'}</p>
