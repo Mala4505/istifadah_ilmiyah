@@ -72,6 +72,15 @@ const UNIT_QUICK_PICKS = ['sqft', 'nos', 'day', 'kg', 'rft']
  * this value will silently fail to save, which is more urgent than either. */
 const UNCERTAIN_RING_CLASS = 'ring-2 ring-orange-500 ring-offset-1 dark:ring-offset-background'
 
+/** event-scoping-and-review-fixes-plan.md §2.7/§2.8: an uncertain field whose
+ *  source page isn't the PDF page currently on screen -- same orange
+ *  language as UNCERTAIN_RING_CLASS, just receded, so a reviewer scanning the
+ *  page they're actually looking at can tell "flagged, and it's here" from
+ *  "flagged, but elsewhere" without the field vanishing from the form
+ *  (removing it outright would jump layout around and lose scroll position/
+ *  in-progress edits -- see this file's header comment on field state). */
+const UNCERTAIN_OFF_PAGE_CLASS = 'ring-1 ring-orange-300 opacity-60 dark:ring-orange-800'
+
 /** A field the reviewer changed from its OCR baseline. Distinct from
  * UNCERTAIN_RING_CLASS so "the model wasn't sure" and "you changed this"
  * never look like the same thing; beaten by both UNCERTAIN_RING_CLASS and
@@ -301,6 +310,17 @@ export const ExtractionForm = forwardRef(function ExtractionForm(
     return undefined
   }
 
+  // §2.7/§2.8: only uncertain_fields_ocr entries carry a source page
+  // (UncertainField.pageNumber) -- header/line-item baselines have no
+  // per-field page of their own, only the whole bill's pageNumberStart/End
+  // (headerPageLabel/isMultiPage below). So this can only ever distinguish
+  // "flagged, on this page" from "flagged, elsewhere" -- a field that was
+  // never flagged uncertain has no known source page at all and stays
+  // visually untouched by page changes either way, rather than inventing one.
+  function isOnCurrentPage(uncertain: UncertainField | undefined): boolean {
+    return uncertain?.pageNumber === currentPdfPage
+  }
+
   // Plan §6 bottom clarification line: a human-readable name for one flagged
   // field, header or line item. Line items are named by row position (the
   // reviewer's own "row 3," not the internal lineOrder) since that's what's
@@ -380,6 +400,7 @@ export const ExtractionForm = forwardRef(function ExtractionForm(
   const vendorNameUncertain = headerUncertainty('vendorName')
   const vendorNameUncertainIndex = uncertainIndexOf(vendorNameUncertain)
   const vendorNamePageLabel = headerPageLabel(vendorNameUncertain)
+  const vendorNameOnCurrentPage = isOnCurrentPage(vendorNameUncertain)
 
   // Plan §5/§6: whether the whole bill spans more than one page -- drives both
   // the line-items caption and the multi-page fallback in headerPageLabel.
@@ -411,25 +432,30 @@ export const ExtractionForm = forwardRef(function ExtractionForm(
             fieldIndex={0}
             uncertain={!!vendorNameUncertain}
             uncertainIndex={vendorNameUncertainIndex}
+            onCurrentPage={vendorNameOnCurrentPage}
             onFocus={() => vendorNameUncertain && onJumpToPage?.(vendorNameUncertain.pageNumber)}
           />
         </div>
         <Field label="GSTIN" disabled={disabled} onKeyDown={handleEnter}
           value={header.vendorGstin} onChange={(v) => onHeaderChange('vendorGstin', v)}
           uncertain={headerUncertainty('vendorGstin')} uncertainIndex={uncertainIndexOf(headerUncertainty('vendorGstin'))}
+          uncertainOnCurrentPage={isOnCurrentPage(headerUncertainty('vendorGstin'))}
           edited={headerEdited('vendorGstin')} onJumpToPage={onJumpToPage} pageLabel={headerPageLabel(headerUncertainty('vendorGstin'))} />
         <Field label="Phone" disabled={disabled} onKeyDown={handleEnter}
           value={header.vendorPhone} onChange={(v) => onHeaderChange('vendorPhone', v)}
           uncertain={headerUncertainty('vendorPhone')} uncertainIndex={uncertainIndexOf(headerUncertainty('vendorPhone'))}
+          uncertainOnCurrentPage={isOnCurrentPage(headerUncertainty('vendorPhone'))}
           edited={headerEdited('vendorPhone')} onJumpToPage={onJumpToPage} pageLabel={headerPageLabel(headerUncertainty('vendorPhone'))} />
         <Field label="Email" disabled={disabled} onKeyDown={handleEnter}
           value={header.vendorEmail} onChange={(v) => onHeaderChange('vendorEmail', v)}
           uncertain={headerUncertainty('vendorEmail')} uncertainIndex={uncertainIndexOf(headerUncertainty('vendorEmail'))}
+          uncertainOnCurrentPage={isOnCurrentPage(headerUncertainty('vendorEmail'))}
           edited={headerEdited('vendorEmail')} onJumpToPage={onJumpToPage} pageLabel={headerPageLabel(headerUncertainty('vendorEmail'))} />
         <div className="col-span-2">
           <Field label="Address" disabled={disabled} onKeyDown={handleEnter}
             value={header.vendorAddress} onChange={(v) => onHeaderChange('vendorAddress', v)}
             uncertain={headerUncertainty('vendorAddress')} uncertainIndex={uncertainIndexOf(headerUncertainty('vendorAddress'))}
+            uncertainOnCurrentPage={isOnCurrentPage(headerUncertainty('vendorAddress'))}
             edited={headerEdited('vendorAddress')} onJumpToPage={onJumpToPage} pageLabel={headerPageLabel(headerUncertainty('vendorAddress'))} />
         </div>
         {gstCharged ? (
@@ -451,22 +477,27 @@ export const ExtractionForm = forwardRef(function ExtractionForm(
         <Field label="Invoice number" disabled={disabled} onKeyDown={handleEnter}
           value={header.invoiceNumber} onChange={(v) => onHeaderChange('invoiceNumber', v)}
           uncertain={headerUncertainty('invoiceNumber')} uncertainIndex={uncertainIndexOf(headerUncertainty('invoiceNumber'))}
+          uncertainOnCurrentPage={isOnCurrentPage(headerUncertainty('invoiceNumber'))}
           edited={headerEdited('invoiceNumber')} onJumpToPage={onJumpToPage} pageLabel={headerPageLabel(headerUncertainty('invoiceNumber'))} />
         <Field label="Invoice date" type="date" disabled={disabled} onKeyDown={handleEnter}
           value={header.invoiceDate} onChange={(v) => onHeaderChange('invoiceDate', v)}
           uncertain={headerUncertainty('invoiceDate')} uncertainIndex={uncertainIndexOf(headerUncertainty('invoiceDate'))}
+          uncertainOnCurrentPage={isOnCurrentPage(headerUncertainty('invoiceDate'))}
           edited={headerEdited('invoiceDate')} onJumpToPage={onJumpToPage} warning={invoiceDateWarning} pageLabel={headerPageLabel(headerUncertainty('invoiceDate'))} />
         <Field label="Subtotal" inputMode="decimal" disabled={disabled} onKeyDown={handleEnter}
           value={header.subtotal} onChange={(v) => onHeaderChange('subtotal', v)}
           uncertain={headerUncertainty('subtotal')} uncertainIndex={uncertainIndexOf(headerUncertainty('subtotal'))}
+          uncertainOnCurrentPage={isOnCurrentPage(headerUncertainty('subtotal'))}
           edited={headerEdited('subtotal')} error={headerError('subtotal')} onJumpToPage={onJumpToPage} pageLabel={headerPageLabel(headerUncertainty('subtotal'))} />
         <Field label="Tax amount" inputMode="decimal" disabled={disabled} onKeyDown={handleEnter}
           value={header.taxAmount} onChange={(v) => onHeaderChange('taxAmount', v)}
           uncertain={headerUncertainty('taxAmount')} uncertainIndex={uncertainIndexOf(headerUncertainty('taxAmount'))}
+          uncertainOnCurrentPage={isOnCurrentPage(headerUncertainty('taxAmount'))}
           edited={headerEdited('taxAmount')} error={headerError('taxAmount')} onJumpToPage={onJumpToPage} pageLabel={headerPageLabel(headerUncertainty('taxAmount'))} />
         <Field label="Total amount" inputMode="decimal" disabled={disabled} onKeyDown={handleEnter}
           value={header.totalAmount} onChange={(v) => onHeaderChange('totalAmount', v)}
           uncertain={headerUncertainty('totalAmount')} uncertainIndex={uncertainIndexOf(headerUncertainty('totalAmount'))}
+          uncertainOnCurrentPage={isOnCurrentPage(headerUncertainty('totalAmount'))}
           edited={headerEdited('totalAmount')} error={headerError('totalAmount')} onJumpToPage={onJumpToPage} pageLabel={headerPageLabel(headerUncertainty('totalAmount'))} />
         <div className="col-span-2 flex flex-col gap-1.5">
           <Label>
@@ -537,7 +568,7 @@ export const ExtractionForm = forwardRef(function ExtractionForm(
                   error
                     ? ERROR_RING_CLASS
                     : uncertain
-                      ? UNCERTAIN_RING_CLASS
+                      ? (isOnCurrentPage(uncertain) ? UNCERTAIN_RING_CLASS : UNCERTAIN_OFF_PAGE_CLASS)
                       : lineItemEdited(item.lineOrder, editedKey)
                         ? EDITED_RING_CLASS
                         : ''
@@ -545,7 +576,9 @@ export const ExtractionForm = forwardRef(function ExtractionForm(
                   error
                     ? 'This value could not be read as a number and will not be saved -- fix or clear it'
                     : uncertain
-                      ? `Model was uncertain about this value — click to jump to page ${uncertain.pageNumber}`
+                      ? isOnCurrentPage(uncertain)
+                        ? `Model was uncertain about this value — click to jump to page ${uncertain.pageNumber}`
+                        : `Model was uncertain about this value on page ${uncertain.pageNumber} — click to jump there`
                       : lineItemEdited(item.lineOrder, editedKey)
                         ? 'Edited from the original OCR value'
                         : undefined
@@ -724,6 +757,7 @@ function Field({
   onKeyDown,
   uncertain,
   uncertainIndex,
+  uncertainOnCurrentPage = true,
   edited = false,
   error = false,
   warning = null,
@@ -742,6 +776,13 @@ function Field({
   /** This field's position in the `uncertainFields` array -- rendered as
    *  `data-uncertain-index` for the toolbar's next/previous stepper. */
   uncertainIndex?: number
+  /** §2.7/§2.8: whether `uncertain`'s source page matches the PDF page
+   *  currently on screen. Defaults true so call sites that never pass it
+   *  (there are none left, but this keeps the prop optional rather than
+   *  forcing every caller to thread a value through) render exactly like
+   *  before this feature existed. Drives UNCERTAIN_OFF_PAGE_CLASS below when
+   *  false -- irrelevant whenever `uncertain` itself is undefined. */
+  uncertainOnCurrentPage?: boolean
   /** True when the live value differs from its OCR baseline. */
   edited?: boolean
   /** Checklist 5.15: true when this value can't be parsed as a number --
@@ -779,12 +820,22 @@ function Field({
         disabled={disabled}
         data-uncertain-index={uncertainIndex}
         data-validation-error={error ? 'true' : undefined}
-        className={error ? ERROR_RING_CLASS : uncertain ? UNCERTAIN_RING_CLASS : edited ? EDITED_RING_CLASS : ''}
+        className={
+          error
+            ? ERROR_RING_CLASS
+            : uncertain
+              ? (uncertainOnCurrentPage ? UNCERTAIN_RING_CLASS : UNCERTAIN_OFF_PAGE_CLASS)
+              : edited
+                ? EDITED_RING_CLASS
+                : ''
+        }
         title={
           error
             ? 'This value could not be read as a number and will not be saved — fix or clear it'
             : uncertain
-              ? `Model was uncertain about this value — click to jump to page ${uncertain.pageNumber}`
+              ? uncertainOnCurrentPage
+                ? `Model was uncertain about this value — click to jump to page ${uncertain.pageNumber}`
+                : `Model was uncertain about this value on page ${uncertain.pageNumber} — click to jump there`
               : edited
                 ? 'Edited from the original OCR value'
                 : undefined

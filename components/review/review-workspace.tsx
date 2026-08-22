@@ -16,7 +16,7 @@
  * document.
  */
 
-import { useEffect, useMemo, useRef, useState, useTransition, type PointerEvent as ReactPointerEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition, type PointerEvent as ReactPointerEvent } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { toastError } from '@/components/ui/error-toast'
@@ -189,6 +189,13 @@ export function ReviewWorkspace({
   // the nav cluster's Page group needs the current position too, so PdfViewer
   // reports it back here on every change via onPageInfoChange.
   const [pdfPageInfo, setPdfPageInfo] = useState({ pageNumber: 1, numPages: 0 })
+  // Stable identity required: PdfViewer's reporting effect depends on this
+  // callback, so an inline arrow here (a fresh reference every render) would
+  // re-fire that effect on every render of *this* component too -- since the
+  // effect's own job is calling setPdfPageInfo, that's an infinite loop.
+  const handlePdfPageInfoChange = useCallback((pageNumber: number, numPages: number) => {
+    setPdfPageInfo({ pageNumber, numPages })
+  }, [])
 
   // Checklist 4.2: the toolbar's "N of M to check" stepper. Fields carry a
   // stable `data-uncertain-index` (their position in detail.uncertainFields,
@@ -1057,7 +1064,7 @@ export function ReviewWorkspace({
             pages={detail.pages}
             uncertainFields={detail.uncertainFields}
             collapsed={paneMode === 'collapsed'}
-            onPageInfoChange={(pageNumber, numPages) => setPdfPageInfo({ pageNumber, numPages })}
+            onPageInfoChange={handlePdfPageInfoChange}
           />
         </div>
 

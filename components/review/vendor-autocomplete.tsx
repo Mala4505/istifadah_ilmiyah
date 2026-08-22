@@ -22,6 +22,11 @@ import { searchReviewVendors, type VendorSearchResult } from '@/lib/actions/revi
  *  input that needs the same orange-ring convention. */
 const UNCERTAIN_RING_CLASS = 'ring-2 ring-orange-500 ring-offset-1 dark:ring-offset-background'
 
+/** Matches extraction-form.tsx's UNCERTAIN_OFF_PAGE_CLASS (event-scoping-
+ *  and-review-fixes-plan.md §2.7/§2.8) -- same local-copy reasoning as
+ *  UNCERTAIN_RING_CLASS above. */
+const UNCERTAIN_OFF_PAGE_CLASS = 'ring-1 ring-orange-300 opacity-60 dark:ring-orange-800'
+
 export const VendorAutocomplete = forwardRef(function VendorAutocomplete(
   {
     value,
@@ -32,6 +37,7 @@ export const VendorAutocomplete = forwardRef(function VendorAutocomplete(
     fieldIndex,
     uncertain = false,
     uncertainIndex,
+    onCurrentPage = true,
     onFocus,
   }: {
     /** Current display text -- usually the OCR/verified vendor_name field. */
@@ -47,6 +53,11 @@ export const VendorAutocomplete = forwardRef(function VendorAutocomplete(
     /** This field's position in the uncertainFields array, rendered as
      *  data-uncertain-index for the toolbar's next/previous stepper. */
     uncertainIndex?: number
+    /** §2.7/§2.8: whether the flagged field's source page matches the PDF
+     *  page currently on screen -- irrelevant when `uncertain` is false.
+     *  Defaults true so the ring reads as before this feature existed unless
+     *  the caller says otherwise. */
+    onCurrentPage?: boolean
     /** Called when the trigger button is focused while flagged uncertain --
      *  the caller uses this to jump the PDF pane to the source page. */
     onFocus?: () => void
@@ -85,8 +96,17 @@ export const VendorAutocomplete = forwardRef(function VendorAutocomplete(
           data-field-index={fieldIndex}
           data-uncertain-index={uncertainIndex}
           aria-expanded={open}
-          className={cn('w-full justify-between font-normal', uncertain && UNCERTAIN_RING_CLASS)}
-          title={uncertain ? 'Model was uncertain about this value — click to jump to the source page' : undefined}
+          className={cn(
+            'w-full justify-between font-normal',
+            uncertain && (onCurrentPage ? UNCERTAIN_RING_CLASS : UNCERTAIN_OFF_PAGE_CLASS)
+          )}
+          title={
+            uncertain
+              ? onCurrentPage
+                ? 'Model was uncertain about this value — click to jump to the source page'
+                : 'Model was uncertain about this value, on another page — click to jump there'
+              : undefined
+          }
           onFocus={onFocus}
           onClick={() => onOpenChange(true)}
         >
