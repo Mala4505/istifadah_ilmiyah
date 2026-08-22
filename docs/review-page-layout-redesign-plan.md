@@ -23,8 +23,8 @@
 | 7 | Simplify the suggested-match UI to one line; relabel the fallback control | Built | Small |
 | 8 | Footer: two labeled cards ("Bill math", "Compared to Entries") with plain-English captions | Built | Small |
 | 9 | Add `invoice_number` as a scored matching factor (real gap found — see §9) | Built — weighted factor, not an exact-match short-circuit | Unknown |
-| 10 | Vendor alias/correction memory to raise suggestion confidence over time | **Idea only, not spec'd** | Large |
-| 11 | Budgeted-vs-actual variance reporting per department | **Explicitly out of scope for this page** — separate initiative | Unknown |
+| 10 | Vendor alias/correction memory to raise suggestion confidence over time | **Spec'd 2026-08-22 — see §10** | Medium |
+| 11 | Department-level budget-vs-actual (Excel-imported department budgets, not per budget_head) | **Spec'd 2026-08-22 — see §11** | Large |
 | 12 | GST recipient-compliance check (buyer GSTIN, buyer name, invoice number required when GST is charged) | **Done** — see §12 | Medium |
 
 ---
@@ -128,15 +128,33 @@ An invoice number, when legible, is usually a far sharper signal than fuzzy vend
 
 ---
 
-## 10. Idea, not spec'd: vendor alias / correction memory
+## 10. Vendor alias / correction memory
 
-Raised as the bigger lever once the layout itself was judged close to a ceiling: if a vendor's OCR'd name consistently differs slightly from how it's entered in Entries, that same near-miss repeats on every one of that vendor's bills with no memory. A per-vendor alias/correction table (learn the mapping once, reuse it on every future match) would raise suggestion confidence over time and cut how often a reviewer needs to manually search — a bigger win than anything left to trim on the page itself, but unscoped. Follow up separately if the user wants it designed.
+**Not actually a from-scratch build — infrastructure already exists.** `public.vendor` and `public.vendor_alias` (`supabase/migrations/20260808000008_vendor_and_alias.sql`) already implement exactly this concept, with a documented resolution rule (normalize → exact match on `vendor.normalized_name` or `vendor_alias.raw_name` → attach; no match → create new unconfirmed vendor + alias; **never fuzzy-auto-merge**) and are already wired into the Excel-import path via `resolveVendor` (`lib/import/run-import.ts:291-332`). `entries.vendor_id` links to it.
+
+**The actual gap:** `document_extraction` has no `vendor_id` — only free-text `vendor_name_ocr`/`_verified`. `lib/matching.ts` scores vendor identity purely by bigram-similarity fuzzy string match (`lib/matching.ts:99-122, 156-157`), never consulting `vendor_alias`. So a vendor whose OCR spelling differs from its Entries spelling gets no benefit from a correction made on a previous bill — the fuzzy score alone has to carry it every time.
+
+**Decided with the user (2026-08-22):**
+- **Trigger — auto-learn from corrections.** When a reviewer attaches a bill to an entry (Connect stage, §4/§7) and that entry has a resolved `vendor_id`, record the bill's normalized OCR vendor name as an alias for that `vendor_id` if no alias row for that raw name already exists. Source: `'ocr'` (reuse the existing `vendor_alias.source` check constraint value — this is the review-time analog of the OCR-sourced aliases the import path can already create). If the reviewer additionally edited `vendor_name_verified` away from the OCR value, that corrected string also gets recorded as an alias for the same `vendor_id`, source `'manual'`.
+- **Usage — score only, no auto-fill.** Do not add a `vendor_id` column to `document_extraction`, do not pre-fill or auto-correct the vendor name field. `lib/matching.ts` changes only: when scoring a candidate entry, first check whether the document's normalized OCR vendor name has an alias row pointing at that entry's `vendor_id`. If yes, treat the vendor sub-score as a confident match (1.0) instead of running it through bigram fuzzy similarity. If no alias match, fall back to today's fuzzy scoring unchanged. This is the same shape as the `invoice_number` addition in §9 — an extra deterministic signal layered next to fuzzy scoring, not a replacement for it.
+- **No UI change.** Not surfaced anywhere on `/review` — purely a backend/matching change, same "not surfaced in the UI" precedent as §9's `invoiceNumberMatch`.
+- **No new migration expected.** `vendor_alias` already has the right shape and RLS; this is a write added to the existing attach/save server action (`lib/actions/documents.ts`) plus a read added to `lib/matching.ts`. Respect the existing unique constraint on `vendor_alias.raw_name` with `on conflict do nothing` — per the table's own rule, never overwrite an existing alias to point at a different vendor.
 
 ---
 
-## 11. Out of scope: budget vs. actuals
+## 11. Department-level budget vs. actual
 
-The user flagged a future need — extracting or importing department budgets, comparing to actuals, flagging overspend — as a separate initiative to discuss later. No design or build work has been done on it here; noted only so it isn't lost.
+**Not a from-scratch build either — a different-grained sibling of an existing feature.** `budget_head`, `budget_allocation`, and the view `v_budget_vs_actual` already exist and are already live on Reports, Reconciliation, and the dashboard (`app/(app)/reports/page.tsx:92`, `app/(app)/reconciliation/page.tsx:87`, `app/(app)/page.tsx:49`) — but that view is scored **per `budget_head`** (the ~42 granular expense-category rows per department), each fed by allocations from the source system's own budget-head dimension via the regular entries Excel import.
+
+**What's actually missing, clarified with the user (2026-08-22):** the department budgets the user wants to track are a **separate set of figures**, not a rollup of the existing per-head allocations — the user will hand over an Excel of department-level budget amounts directly, to be pushed into the database, then compared against this event's actuals (i.e. `entries` already recorded against each department).
+
+**Build spec, locked:**
+- **New table `department_budget_allocation`** — append-only snapshot, same pattern as `budget_allocation`: `id, department_id references department(id), import_batch_id references import_batch(id), as_of date, budget_amount numeric(14,2), created_at`, `unique (department_id, import_batch_id)`. RLS follows the `item_catalog`/`item_alias` template (`supabase/migrations/20260814000001_item_catalog.sql:149-174`): `select` gated on `private.is_staff()`, `update` gated on `private.is_reviewer_or_admin()`, **no insert policy for `authenticated`** (rows are written by the import pipeline running as `service_role`), plus explicit `grant select/update ... to authenticated`.
+- **New view `v_department_budget_vs_actual`** — mirrors `v_budget_vs_actual`'s exact shape (`supabase/migrations/20260811000004_reporting_views_update.sql:90-126`): latest `department_budget_allocation` row per department (`distinct on (department_id) order by as_of desc, id desc`) left-joined against `sum(entries.amount) where is_void = false and department_id is not null group by department_id`; `pct_of_budget` and a `'no budget set'` status note when `budget_amount` is null/0, same null-handling convention as `budget_status_note`.
+- **Import path — reuse the existing conventions, not the full entries pipeline.** The source file is a simple two-column sheet (department name, budget amount) — much smaller than `run-import.ts`'s entries import. Still follow the same discipline already established in this codebase: `xlsx` library, wrapped in one real Postgres transaction, a `dry_run` mode that computes a diff and rolls back, one `import_batch` row per run, one `import_row_log` row per source row (reuse `action` values `inserted|updated|unchanged|error` where they fit). Department resolution: case-insensitive/trimmed match against `department.name`; **do not auto-create new departments** — an unmatched department name is a row-level error in the dry-run preview, not a silent insert (departments are a small, known, curated list, unlike vendors).
+- **UI — an upload+confirm flow**, following the existing `/import` page's dry-run-then-commit shape (check `app/(app)/import/page.tsx` for the pattern already in place) rather than a bare API endpoint with no preview.
+- **Reports UI** — new section on `app/(app)/reports/page.tsx` alongside the existing five (Budget vs Actual, Vendor Spend, Spend by Zone, Hub-status Ageing, Open Issues), styled consistently: section label + plain-CSS bar list (the page's own documented "no new charting library" convention) + CSV export via the existing `ExportCsvButton`/`toCsv`. Department figures render as a table, not a bulleted list, consistent with how master/reference data is shown elsewhere in this app.
+- **Not yet provided:** the actual department-budget spreadsheet. This section specs and builds the pipeline; running a real import happens once the user hands over the file.
 
 ---
 

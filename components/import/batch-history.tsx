@@ -8,6 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Skeleton } from '@/components/ui/skeleton'
 import { BatchStatusBadge } from '@/components/import/row-log-badge'
 import { RowLogTable, type RowLogEntry } from '@/components/import/row-log-table'
+import { DepartmentBudgetRowLogTable } from '@/components/import/department-budget-row-log-table'
 import {
   Table,
   TableBody,
@@ -20,6 +21,7 @@ import {
 interface ImportBatchRow {
   id: number
   source_filename: string
+  source_system: string
   mode: string
   status: string
   row_count: number | null
@@ -27,6 +29,20 @@ interface ImportBatchRow {
   started_at: string
   completed_at: string | null
   error_message: string | null
+}
+
+/** Human label for import_batch.source_system, for the history table's Source column. */
+function sourceSystemLabel(sourceSystem: string): string {
+  switch (sourceSystem) {
+    case 'departmental':
+      return 'Departmental'
+    case 'audit':
+      return 'Audit'
+    case 'department_budget':
+      return 'Dept. budget'
+    default:
+      return sourceSystem
+  }
 }
 
 function formatDateTime(iso: string): string {
@@ -46,6 +62,7 @@ export function BatchHistory({ isAdmin, refreshSignal }: { isAdmin: boolean; ref
   const [batches, setBatches] = useState<ImportBatchRow[] | null>(null)
   const [historyError, setHistoryError] = useState<string | null>(null)
   const [selectedBatch, setSelectedBatch] = useState<number | null>(null)
+  const [selectedBatchSourceSystem, setSelectedBatchSourceSystem] = useState<string | null>(null)
   const [selectedBatchRows, setSelectedBatchRows] = useState<RowLogEntry[] | null>(null)
   const [batchDetailLoading, setBatchDetailLoading] = useState(false)
 
@@ -73,7 +90,8 @@ export function BatchHistory({ isAdmin, refreshSignal }: { isAdmin: boolean; ref
     // to observe.
   }, [isAdmin, loadHistory, refreshSignal])
 
-  async function toggleBatchDetail(batchId: number) {
+  async function toggleBatchDetail(batchId: number, sourceSystem: string) {
+    setSelectedBatchSourceSystem(sourceSystem)
     if (selectedBatch === batchId) {
       setSelectedBatch(null)
       setSelectedBatchRows(null)
@@ -136,7 +154,8 @@ export function BatchHistory({ isAdmin, refreshSignal }: { isAdmin: boolean; ref
               <TableHeader>
                 <TableRow>
                   <TableHead>Started</TableHead>
-                  <TableHead>Source</TableHead>
+                  <TableHead>File</TableHead>
+                  <TableHead>Kind</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead className="text-right">Rows</TableHead>
                 </TableRow>
@@ -146,13 +165,16 @@ export function BatchHistory({ isAdmin, refreshSignal }: { isAdmin: boolean; ref
                   <Fragment key={b.id}>
                     <TableRow
                       className="cursor-pointer"
-                      onClick={() => toggleBatchDetail(b.id)}
+                      onClick={() => toggleBatchDetail(b.id, b.source_system)}
                       aria-expanded={selectedBatch === b.id}
                     >
                       <TableCell className="whitespace-nowrap text-muted-foreground">
                         {formatDateTime(b.started_at)}
                       </TableCell>
                       <TableCell className="max-w-[20rem] truncate">{b.source_filename}</TableCell>
+                      <TableCell className="whitespace-nowrap text-muted-foreground">
+                        {sourceSystemLabel(b.source_system)}
+                      </TableCell>
                       <TableCell>
                         <BatchStatusBadge status={b.status} />
                       </TableCell>
@@ -160,11 +182,13 @@ export function BatchHistory({ isAdmin, refreshSignal }: { isAdmin: boolean; ref
                     </TableRow>
                     {selectedBatch === b.id && (
                       <TableRow>
-                        <TableCell colSpan={4} className="bg-muted/30 p-3">
+                        <TableCell colSpan={5} className="bg-muted/30 p-3">
                           {batchDetailLoading ? (
                             <Skeleton className="h-24 w-full" />
                           ) : b.error_message ? (
                             <FriendlyError message={b.error_message} />
+                          ) : selectedBatchSourceSystem === 'department_budget' ? (
+                            <DepartmentBudgetRowLogTable rows={selectedBatchRows ?? []} />
                           ) : (
                             <RowLogTable rows={selectedBatchRows ?? []} />
                           )}

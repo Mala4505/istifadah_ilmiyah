@@ -165,3 +165,71 @@ describe('scoreEntry / rankCandidates', () => {
     expect(rankCandidates(doc, entries)).toEqual([])
   })
 })
+
+describe('vendor_alias short-circuit (redesign plan §10)', () => {
+  const doc = { vendorName: 'Sharma Traders', totalAmount: 45000, invoiceDate: '2026-08-10', invoiceNumber: null }
+
+  it('scores vendor 1.0 when the alias vendor_id matches the candidate, even if the raw names look unrelated', () => {
+    const candidate = entry({
+      id: 1,
+      vendorRaw: 'Completely Different Spelling Pvt Ltd',
+      amount: 45000,
+      date: '2026-08-10',
+      vendorId: 7,
+    })
+    const scored = scoreEntry({ ...doc, vendorAliasVendorId: 7 }, candidate)
+    expect(scored.vendorScore).toBe(1)
+    // Fuzzy similarity between the two raw strings would have been near 0 --
+    // confirms the alias short-circuit actually bypassed vendorSimilarity
+    // rather than coincidentally agreeing with it.
+    expect(vendorSimilarity(doc.vendorName, candidate.vendorRaw!)).toBeLessThan(0.2)
+  })
+
+  it('falls through to fuzzy scoring unchanged when the alias points at a different vendor', () => {
+    const candidate = entry({ id: 2, vendorRaw: 'Sharma Traders', amount: 45000, date: '2026-08-10', vendorId: 7 })
+    const withMismatchedAlias = scoreEntry({ ...doc, vendorAliasVendorId: 99 }, candidate)
+    const withNoAlias = scoreEntry(doc, candidate)
+    expect(withMismatchedAlias.vendorScore).toBe(withNoAlias.vendorScore)
+    expect(withMismatchedAlias.vendorScore).toBe(1) // still 1 here because the raw names also match exactly
+  })
+
+  it('falls through to fuzzy scoring unchanged when there is no alias at all', () => {
+    const candidate = entry({ id: 3, vendorRaw: 'Sharma Trader', amount: 45000, date: '2026-08-10', vendorId: 7 })
+    const scored = scoreEntry(doc, candidate)
+    expect(scored.vendorScore).toBe(vendorSimilarity(doc.vendorName, candidate.vendorRaw!))
+    expect(scored.vendorScore).toBeGreaterThan(0)
+    expect(scored.vendorScore).toBeLessThan(1)
+  })
+
+  it('falls through to fuzzy scoring unchanged when the candidate has no vendor_id to compare', () => {
+    const candidate = entry({ id: 4, vendorRaw: 'Sharma Trader', amount: 45000, date: '2026-08-10' })
+    const withAliasOnDocOnly = scoreEntry({ ...doc, vendorAliasVendorId: 7 }, candidate)
+    const withNoAlias = scoreEntry(doc, candidate)
+    expect(withAliasOnDocOnly.vendorScore).toBe(withNoAlias.vendorScore)
+  })
+
+  it('never throws when vendorAliasVendorId is explicitly null', () => {
+    const candidate = entry({ id: 5, vendorRaw: 'Sharma Traders', amount: 45000, date: '2026-08-10', vendorId: 7 })
+    expect(() => scoreEntry({ ...doc, vendorAliasVendorId: null }, candidate)).not.toThrow()
+    expect(scoreEntry({ ...doc, vendorAliasVendorId: null }, candidate).vendorScore).toBe(1)
+  })
+
+  it('rankCandidates surfaces an alias-matched candidate above a fuzzy-only near-match', () => {
+    const aliasMatched = entry({
+      id: 10,
+      vendorRaw: 'Totally Unlike Raw String LLC',
+      amount: 30000, // far from the doc's 45000 -- weak on amount
+      date: '2020-01-01', // far from the doc's date -- weak on date
+      vendorId: 42,
+    })
+    const fuzzyOnly = entry({
+      id: 11,
+      vendorRaw: 'Sharma Tradrs', // close but not exact
+      amount: 45000,
+      date: '2026-08-10',
+    })
+    const ranked = rankCandidates({ ...doc, vendorAliasVendorId: 42 }, [aliasMatched, fuzzyOnly])
+    const aliasResult = ranked.find((r) => r.id === 10)!
+    expect(aliasResult.vendorScore).toBe(1)
+  })
+})

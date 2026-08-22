@@ -1,7 +1,8 @@
 /**
  * Document-to-entry matching (MASTER-PLAN §5 row 6, §11.2 Day 3): "suggested
  * matches on vendor + amount + date proximity," plus invoice number
- * (redesign plan §9) where both sides have one.
+ * (redesign plan §9) where both sides have one, plus a learned vendor_alias
+ * short-circuit for the vendor sub-score itself (redesign plan §10).
  *
  * Deliberately computed on read, not persisted — the task brief for this
  * screen is explicit that there is no requirement to store a suggestion,
@@ -30,6 +31,22 @@ export interface MatchableDocument {
   totalAmount: number | null
   invoiceDate: string | null
   invoiceNumber: string | null
+  /**
+   * Redesign plan §10: the `vendor_id` that this document's normalized OCR
+   * vendor name resolves to via a learned `vendor_alias` row, if any —
+   * looked up ONCE per document by the caller (`rankCandidates`'s two call
+   * sites, `lib/actions/documents.ts`'s `getInboxMatchCandidates` and
+   * `app/(app)/review/page.tsx`'s per-bill query), never inside this module.
+   * `lib/matching.ts` stays pure/DB-free by design (see the file header) —
+   * this field is how a DB fact ("we've seen this exact OCR spelling
+   * before, for this vendor") reaches scoring without an I/O call per
+   * candidate entry. `undefined`/`null` means "no alias found" and the
+   * vendor sub-score falls through to the existing fuzzy path unchanged —
+   * same optional-field convention as `MatchableEntry.adminHeadId`/`zoneId`
+   * above, so existing callers/tests that don't know about aliases are
+   * unaffected.
+   */
+  vendorAliasVendorId?: number | null
 }
 
 /** An entry candidate, carrying both the fields scoring reads and the
@@ -53,6 +70,16 @@ export interface MatchableEntry {
    */
   adminHeadId?: number | null
   zoneId?: number | null
+  /**
+   * Redesign plan §10: this entry's resolved vendor identity (`entries.vendor_id`),
+   * carried through so scoring can compare it against
+   * `MatchableDocument.vendorAliasVendorId`. Optional for the same reason as
+   * `adminHeadId`/`zoneId` above — the existing unit tests' `entry()` helper
+   * doesn't set it, and a caller that doesn't fetch `vendor_id` simply never
+   * gets the alias short-circuit, falling through to fuzzy scoring exactly
+   * as before this change.
+   */
+  vendorId?: number | null
 }
 
 export interface ScoredEntry extends MatchableEntry {
@@ -152,9 +179,33 @@ export function invoiceNumberMatch(a: string, b: string): number {
   return na === nb ? 1 : 0
 }
 
+/**
+ * Vendor sub-score for one candidate entry (redesign plan §10): a learned
+ * `vendor_alias` is a deterministic, exact identity signal — when the
+ * document's OCR vendor name has been recorded before (via a prior attach's
+ * `learnVendorAliasesFromAttach`, `lib/actions/review.ts`) as an alias
+ * pointing at THIS candidate's own `vendor_id`, that's a confident match
+ * (1.0), no fuzzy comparison needed. Added as an extra deterministic layer
+ * in front of the existing fuzzy path, same shape as `invoiceNumberMatch`
+ * (§9) — when there's no alias, or the alias points at a different vendor
+ * than this candidate, falls through to `vendorSimilarity` completely
+ * unchanged.
+ */
+function vendorScoreFor(doc: MatchableDocument, entry: MatchableEntry): number {
+  if (
+    doc.vendorAliasVendorId !== null &&
+    doc.vendorAliasVendorId !== undefined &&
+    entry.vendorId !== null &&
+    entry.vendorId !== undefined &&
+    entry.vendorId === doc.vendorAliasVendorId
+  ) {
+    return 1
+  }
+  return doc.vendorName && entry.vendorRaw ? vendorSimilarity(doc.vendorName, entry.vendorRaw) : 0
+}
+
 export function scoreEntry(doc: MatchableDocument, entry: MatchableEntry): ScoredEntry {
-  const vendorScore =
-    doc.vendorName && entry.vendorRaw ? vendorSimilarity(doc.vendorName, entry.vendorRaw) : 0
+  const vendorScore = vendorScoreFor(doc, entry)
   const amountScore =
     doc.totalAmount !== null && entry.amount !== null
       ? amountProximityScore(doc.totalAmount, entry.amount)

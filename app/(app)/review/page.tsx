@@ -18,6 +18,7 @@ import type {
 import { friendlyErrorMessage } from '@/lib/friendly-error'
 import { isAdminOrAbove } from '@/lib/auth/roles'
 import { rankCandidates, type MatchableEntry } from '@/lib/matching'
+import { normalizeVendorName } from '@/lib/normalize'
 
 /**
  * /review -- Screen 7, the throughput screen (MASTER-PLAN §5 row 7, §7,
@@ -254,7 +255,17 @@ async function loadDocumentDetail(
   // fallback here, not the primary read (plan.md D1).
   const entryId = (extraction.entry_id as number | null) ?? (sourceDoc.entry_id as number | null)
 
-  const [runRes, entryRes, exceptionsRes, hubStatusRes, matchedRowsRes, candidateEntriesRes] = await Promise.all([
+  // Redesign plan §10: normalize once here (only needed for the "suggested
+  // match" path below, entryId === null) so the vendor_alias lookup can ride
+  // in the same parallel batch as everything else, rather than serializing
+  // an extra round trip after it.
+  const normalizedOcrVendorName =
+    entryId === null && extraction.vendor_name_ocr
+      ? normalizeVendorName(extraction.vendor_name_ocr as string)
+      : ''
+
+  const [runRes, entryRes, exceptionsRes, hubStatusRes, matchedRowsRes, candidateEntriesRes, vendorAliasRes] =
+    await Promise.all([
     extraction.current_extraction_run_id
       ? supabase
           .from('ocr_extraction_run')
@@ -291,11 +302,20 @@ async function loadDocumentDetail(
     entryId === null
       ? supabase
           .from('entries')
-          .select('id, department_id, vendor_raw, amount, date, invoice_number, ubbl_number, main_number')
+          .select('id, department_id, vendor_raw, vendor_id, amount, date, invoice_number, ubbl_number, main_number')
           .eq('is_void', false)
           .order('date', { ascending: false, nullsFirst: false })
           .limit(5000)
       : Promise.resolve({ data: [] }),
+    // Redesign plan §10: has this document's normalized OCR vendor name been
+    // learned as an alias for some vendor before (via a prior attach's
+    // learnVendorAliasesFromAttach, lib/actions/review.ts)? If so, the
+    // candidate whose own vendor_id matches gets a confident (1.0) vendor
+    // sub-score in lib/matching.ts instead of relying on bigram fuzzy
+    // similarity alone.
+    normalizedOcrVendorName
+      ? supabase.from('vendor_alias').select('vendor_id').eq('raw_name', normalizedOcrVendorName).maybeSingle()
+      : Promise.resolve({ data: null }),
   ])
 
   const run = runRes.data as { extraction_confidence: number | null; legibility: 'clear' | 'partial' | 'poor' | null; model: string | null } | null
@@ -365,6 +385,7 @@ async function loadDocumentDetail(
       .map((e) => ({
         id: e.id as number,
         vendorRaw: e.vendor_raw as string | null,
+        vendorId: e.vendor_id as number | null,
         amount: e.amount as number | null,
         date: e.date as string | null,
         invoiceNumber: e.invoice_number as string | null,
@@ -379,6 +400,7 @@ async function loadDocumentDetail(
         invoiceDate: extraction.invoice_date_ocr as string | null,
         invoiceNumber:
           (extraction.invoice_number_verified as string | null) ?? (extraction.invoice_number_ocr as string | null),
+        vendorAliasVendorId: (vendorAliasRes.data?.vendor_id as number | undefined) ?? null,
       },
       candidatePool
     ).map((c) => ({

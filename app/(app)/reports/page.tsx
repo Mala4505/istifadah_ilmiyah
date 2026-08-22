@@ -41,6 +41,17 @@ type BudgetVsActualRow = {
   budget_status_note: string | null
 }
 
+type DepartmentBudgetVsActualRow = {
+  department_id: number
+  department_name: string
+  as_of: string | null
+  budget_amount: number | null
+  actual_amount: number | null
+  entry_count: number
+  pct_of_budget: number | null
+  budget_status_note: string | null
+}
+
 type VendorSpendRow = {
   vendor_id: number
   display_name: string
@@ -87,7 +98,7 @@ type OpenIssueRow = {
 async function loadReportsData() {
   const supabase = await createClient()
 
-  const [budgetRes, vendorRes, zoneRes, ageingRes, issuesRes] = await Promise.all([
+  const [budgetRes, deptBudgetRes, vendorRes, zoneRes, ageingRes, issuesRes] = await Promise.all([
     supabase
       .from('v_budget_vs_actual')
       .select(
@@ -95,6 +106,13 @@ async function loadReportsData() {
       )
       .order('actual_amount', { ascending: false, nullsFirst: false })
       .returns<BudgetVsActualRow[]>(),
+    supabase
+      .from('v_department_budget_vs_actual')
+      .select(
+        'department_id, department_name, as_of, budget_amount, actual_amount, entry_count, pct_of_budget, budget_status_note'
+      )
+      .order('actual_amount', { ascending: false, nullsFirst: false })
+      .returns<DepartmentBudgetVsActualRow[]>(),
     supabase
       .from('v_vendor_spend')
       .select(
@@ -126,6 +144,7 @@ async function loadReportsData() {
 
   return {
     budgetRows: budgetRes.data ?? [],
+    deptBudgetRows: deptBudgetRes.data ?? [],
     vendorRows,
     zoneRows: zoneRes.data ?? [],
     ageingRows,
@@ -137,6 +156,7 @@ async function loadReportsData() {
     issueRows: issuesRes.data ?? [],
     errors: {
       budget: friendlyDataError(budgetRes.error, 'reports:budgetRes'),
+      deptBudget: friendlyDataError(deptBudgetRes.error, 'reports:deptBudgetRes'),
       vendor: friendlyDataError(vendorRes.error, 'reports:vendorRes'),
       zone: friendlyDataError(zoneRes.error, 'reports:zoneRes'),
       ageing: friendlyDataError(ageingRes.error, 'reports:ageingRes'),
@@ -147,6 +167,7 @@ async function loadReportsData() {
 
 const SECTIONS = [
   { id: 'budget-vs-actual', label: 'Budget vs Actual' },
+  { id: 'department-budget-vs-actual', label: 'Department Budget vs Actual' },
   { id: 'vendor-spend', label: 'Vendor Spend' },
   { id: 'zone-spend', label: 'Spend by Zone' },
   { id: 'hub-status-ageing', label: 'Hub-status Ageing' },
@@ -165,6 +186,18 @@ export default async function ReportsPage() {
       value: r.actual_amount ?? 0,
       marker: r.approved_amount && r.approved_amount > 0 ? r.approved_amount : null,
       markerLabel: r.approved_amount ? `Approved: ${formatINR(r.approved_amount)}` : undefined,
+      note: r.budget_status_note ?? undefined,
+    }))
+
+  const deptBudgetBarItems: BarListItem[] = data.deptBudgetRows
+    .filter((r) => (r.actual_amount ?? 0) > 0)
+    .slice(0, 12)
+    .map((r) => ({
+      key: r.department_id,
+      label: r.department_name,
+      value: r.actual_amount ?? 0,
+      marker: r.budget_amount && r.budget_amount > 0 ? r.budget_amount : null,
+      markerLabel: r.budget_amount ? `Budget: ${formatINR(r.budget_amount)}` : undefined,
       note: r.budget_status_note ?? undefined,
     }))
 
@@ -197,6 +230,36 @@ export default async function ReportsPage() {
           <span className="text-muted-foreground">{r.budget_status_note}</span>
         ) : (
           formatPercent(r.pct_of_approved)
+        ),
+    },
+    { key: 'entries', header: 'Entries', align: 'right', render: (r) => formatNumber(r.entry_count) },
+  ]
+
+  const deptBudgetColumns: DataTableColumn<DepartmentBudgetVsActualRow>[] = [
+    {
+      key: 'department',
+      header: 'Department',
+      render: (r) => (
+        <Link
+          href={`/entries?department_id=${r.department_id}`}
+          className="text-primary underline-offset-2 hover:underline"
+        >
+          {r.department_name}
+        </Link>
+      ),
+    },
+    { key: 'asOf', header: 'As of', render: (r) => formatDate(r.as_of) },
+    { key: 'budget', header: 'Budget', align: 'right', render: (r) => formatINR(r.budget_amount) },
+    { key: 'actual', header: 'Actual (sum of amounts)', align: 'right', render: (r) => formatINR(r.actual_amount) },
+    {
+      key: 'pct',
+      header: '% of Budget',
+      align: 'right',
+      render: (r) =>
+        r.budget_status_note ? (
+          <span className="text-muted-foreground">{r.budget_status_note}</span>
+        ) : (
+          formatPercent(r.pct_of_budget)
         ),
     },
     { key: 'entries', header: 'Entries', align: 'right', render: (r) => formatNumber(r.entry_count) },
@@ -279,8 +342,8 @@ export default async function ReportsPage() {
         <h1 className="text-xl font-semibold tracking-tight">Reports</h1>
       </div>
       <p className="max-w-2xl text-sm text-muted-foreground">
-        Budget vs actual by head, vendor spend, spend by zone, Hub-status ageing, and the open-issues
-        digest. CSV export on every section.
+        Budget vs actual by head, department budget vs actual, vendor spend, spend by zone,
+        Hub-status ageing, and the open-issues digest. CSV export on every section.
       </p>
 
       <nav className="flex flex-wrap gap-x-4 gap-y-1 border-b border-border pb-3 text-xs">
@@ -324,6 +387,45 @@ export default async function ReportsPage() {
           <>
             <BarList items={budgetBarItems} valueFormatter={formatINRCompact} />
             <DataTable columns={budgetColumns} rows={data.budgetRows} getRowKey={(r) => r.budget_head_id} />
+          </>
+        )}
+      </ReportSection>
+
+      <ReportSection
+        id="department-budget-vs-actual"
+        title="Department budget vs actual"
+        description={
+          data.deptBudgetRows.some((r) => r.budget_status_note)
+            ? 'A separate, department-grained figure from Budget vs Actual above — imported directly per department, not rolled up from budget heads. Departments with no budget set show "no budget set" instead of a misleading −100% figure.'
+            : 'A separate, department-grained figure from Budget vs Actual above — imported directly per department, not rolled up from budget heads.'
+        }
+        action={
+          <ExportCsvButton
+            filename="department-budget-vs-actual.csv"
+            rowCount={data.deptBudgetRows.length}
+            csv={toCsv(data.deptBudgetRows, [
+              { header: 'Department', value: (r) => r.department_name },
+              { header: 'As Of', value: (r) => r.as_of },
+              { header: 'Budget Amount', value: (r) => r.budget_amount },
+              { header: 'Actual (sum of amounts)', value: (r) => r.actual_amount },
+              { header: '% of Budget', value: (r) => r.pct_of_budget },
+              { header: 'Note', value: (r) => r.budget_status_note },
+              { header: 'Entries', value: (r) => r.entry_count },
+            ])}
+          />
+        }
+      >
+        {data.errors.deptBudget ? (
+          <EmptyState title="Couldn't load department budget data" description={data.errors.deptBudget} />
+        ) : data.deptBudgetRows.length === 0 ? (
+          <EmptyState
+            title="No department budgets yet"
+            description="Department budgets arrive via the Department budget import on /import — no file has been provided yet."
+          />
+        ) : (
+          <>
+            <BarList items={deptBudgetBarItems} valueFormatter={formatINRCompact} />
+            <DataTable columns={deptBudgetColumns} rows={data.deptBudgetRows} getRowKey={(r) => r.department_id} />
           </>
         )}
       </ReportSection>

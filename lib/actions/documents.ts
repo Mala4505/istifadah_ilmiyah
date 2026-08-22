@@ -6,6 +6,7 @@ import { deleteDocument, getSignedUrl } from '@/lib/storage'
 import { extractAndPersist } from '@/lib/jobs/handlers/extract'
 import { logRawError } from '@/lib/friendly-error'
 import { rankCandidates, type MatchableEntry } from '@/lib/matching'
+import { normalizeVendorName } from '@/lib/normalize'
 import type { CandidateEntryView } from '@/components/documents/types'
 
 /**
@@ -501,7 +502,9 @@ export async function getInboxMatchCandidates(): Promise<Record<number, Candidat
 
   const { data: entriesData } = await supabase
     .from('entries')
-    .select('id, department_id, vendor_raw, amount, date, invoice_number, ubbl_number, main_number, admin_head_id, zone_id')
+    .select(
+      'id, department_id, vendor_raw, vendor_id, amount, date, invoice_number, ubbl_number, main_number, admin_head_id, zone_id'
+    )
     .eq('is_void', false)
     .order('date', { ascending: false, nullsFirst: false })
     .limit(5000)
@@ -511,6 +514,7 @@ export async function getInboxMatchCandidates(): Promise<Record<number, Candidat
     .map((e) => ({
       id: e.id,
       vendorRaw: e.vendor_raw,
+      vendorId: e.vendor_id,
       amount: e.amount,
       date: e.date,
       invoiceNumber: e.invoice_number,
@@ -524,8 +528,38 @@ export async function getInboxMatchCandidates(): Promise<Record<number, Candidat
   const { data: departmentsData } = await supabase.from('department').select('id, name')
   const departmentNameById = new Map((departmentsData ?? []).map((d) => [d.id as number, d.name as string]))
 
+  // Redesign plan §10: batch-resolve every extraction's normalized OCR
+  // vendor name against learned vendor_alias rows in one query, rather than
+  // one round trip per bill -- this function already scores every
+  // unmatched/suggested bill in the inbox in one call, so the same
+  // one-query-for-everything shape used for candidatePool/departmentsData
+  // above applies here too.
+  const normalizedVendorNameByExtractionId = new Map<number, string>()
+  for (const extraction of extractions) {
+    const ocrVendorName = extraction.vendor_name_ocr as string | null
+    if (!ocrVendorName) continue
+    const normalized = normalizeVendorName(ocrVendorName)
+    if (normalized) normalizedVendorNameByExtractionId.set(extraction.id as number, normalized)
+  }
+  const uniqueNormalizedNames = Array.from(new Set(normalizedVendorNameByExtractionId.values()))
+  const aliasVendorIdByNormalizedName = new Map<string, number>()
+  if (uniqueNormalizedNames.length > 0) {
+    const { data: aliasRows } = await supabase
+      .from('vendor_alias')
+      .select('raw_name, vendor_id')
+      .in('raw_name', uniqueNormalizedNames)
+    for (const row of aliasRows ?? []) {
+      aliasVendorIdByNormalizedName.set(row.raw_name as string, row.vendor_id as number)
+    }
+  }
+
   const result: Record<number, CandidateEntryView[]> = {}
   for (const extraction of extractions) {
+    const normalizedVendorName = normalizedVendorNameByExtractionId.get(extraction.id as number)
+    const vendorAliasVendorId = normalizedVendorName
+      ? (aliasVendorIdByNormalizedName.get(normalizedVendorName) ?? null)
+      : null
+
     result[extraction.id as number] = rankCandidates(
       {
         vendorName: extraction.vendor_name_ocr as string | null,
@@ -533,6 +567,7 @@ export async function getInboxMatchCandidates(): Promise<Record<number, Candidat
         invoiceDate: extraction.invoice_date_ocr as string | null,
         invoiceNumber:
           (extraction.invoice_number_verified as string | null) ?? (extraction.invoice_number_ocr as string | null),
+        vendorAliasVendorId,
       },
       candidatePool
     ).map((c) => ({

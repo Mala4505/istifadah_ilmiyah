@@ -14,6 +14,7 @@ import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { getSignedUrl } from '@/lib/storage'
 import { logRawError } from '@/lib/friendly-error'
+import { normalizeVendorName } from '@/lib/normalize'
 
 const CLAIM_STALE_AFTER_MS = 15 * 60 * 1000 // §7: "Claims expire after 15 minutes of inactivity"
 
@@ -291,6 +292,12 @@ export async function flagReviewException(input: {
  * once a source_document produces more than one bill (Phase 2, plan.md
  * §3): single-bill documents keep matching via source_document.entry_id
  * through the existing document-inbox flow, untouched.
+ *
+ * Redesign plan §10: this is also the review page's one write path for
+ * "attach a bill to an entry" (MatchStrip's Attach button, its ranked
+ * candidates, and EntryAttachCombobox's manual search all call this same
+ * function), so it's the single place to learn a vendor_alias from the
+ * correction -- see learnVendorAliasesFromAttach below.
  */
 export async function attachExtractionToEntry(input: {
   documentExtractionId: number
@@ -305,7 +312,7 @@ export async function attachExtractionToEntry(input: {
     .from('document_extraction')
     .update({ entry_id: input.entryId })
     .eq('id', input.documentExtractionId)
-    .select('id')
+    .select('id, vendor_name_ocr, vendor_name_verified')
 
   if (error) return { ok: false, error: logRawError('review.attachExtractionToEntry', error.message) }
   if (!data || data.length === 0) {
@@ -317,7 +324,97 @@ export async function attachExtractionToEntry(input: {
   }
 
   revalidatePath('/review')
+
+  // Best-effort learning step -- awaited so it actually runs before this
+  // server action returns, but never allowed to turn a successful attach
+  // into a failure (see the function's own try/catch).
+  await learnVendorAliasesFromAttach({
+    entryId: input.entryId,
+    vendorNameOcr: data[0]?.vendor_name_ocr as string | null,
+    vendorNameVerified: data[0]?.vendor_name_verified as string | null,
+  })
+
   return { ok: true }
+}
+
+/**
+ * Redesign plan §10: "auto-learn from corrections." When a bill is attached
+ * to an entry that already has a resolved `vendor_id`, record the bill's
+ * OCR vendor name (and, if the reviewer corrected it, the corrected name
+ * too) as a `vendor_alias` for that vendor -- so the NEXT bill from the
+ * same vendor, spelled the same way, gets a confident vendor match in
+ * lib/matching.ts (`vendorScoreFor`) instead of relying on bigram fuzzy
+ * similarity alone. Purely a write for future scoring -- no `vendor_id`
+ * column is added to `document_extraction`, and nothing already on screen
+ * is pre-filled or auto-corrected by this (§10's explicit "score only, no
+ * auto-fill" decision).
+ *
+ * Runs on the admin (service-role) client deliberately: `vendor_alias` has
+ * no insert policy for `authenticated` at all (20260808000026_rls_policies.sql
+ * -- "aliases are recorded by the import/OCR resolution pipeline (service_role)
+ * or the admin vendor-merge tooling; deny-by-default for authenticated"), the
+ * same reason claimReviewDocument above reaches for the admin client to read
+ * staff_profile.
+ *
+ * `raw_name` is written as the NORMALIZED name (normalizeVendorName), not the
+ * literal OCR/typed string -- lib/matching.ts looks an alias up by normalizing
+ * the document's OCR vendor name and matching it against `raw_name` directly,
+ * so the two sides must agree on the same key. `on conflict (raw_name) do
+ * nothing` (via `ignoreDuplicates`) enforces the table's own rule verbatim:
+ * never overwrite an existing alias to point at a different vendor.
+ */
+async function learnVendorAliasesFromAttach(params: {
+  entryId: number
+  vendorNameOcr: string | null
+  vendorNameVerified: string | null
+}): Promise<void> {
+  try {
+    const admin = createAdminClient()
+
+    const { data: entry, error: entryError } = await admin
+      .from('entries')
+      .select('vendor_id')
+      .eq('id', params.entryId)
+      .maybeSingle()
+
+    if (entryError) {
+      logRawError('review.learnVendorAliasesFromAttach', entryError.message)
+      return
+    }
+
+    const vendorId = (entry?.vendor_id as number | null | undefined) ?? null
+    if (vendorId === null) return
+
+    const ocrRaw = params.vendorNameOcr?.trim() ?? ''
+    const normalizedOcr = ocrRaw ? normalizeVendorName(ocrRaw) : ''
+
+    const aliasRows: { vendor_id: number; raw_name: string; source: 'ocr' | 'manual' }[] = []
+    if (normalizedOcr) {
+      aliasRows.push({ vendor_id: vendorId, raw_name: normalizedOcr, source: 'ocr' })
+    }
+
+    // A reviewer correction: vendor_name_verified diverges from vendor_name_ocr.
+    const verifiedRaw = params.vendorNameVerified?.trim() ?? ''
+    if (verifiedRaw && verifiedRaw !== ocrRaw) {
+      const normalizedVerified = normalizeVendorName(verifiedRaw)
+      if (normalizedVerified && normalizedVerified !== normalizedOcr) {
+        aliasRows.push({ vendor_id: vendorId, raw_name: normalizedVerified, source: 'manual' })
+      }
+    }
+
+    if (aliasRows.length === 0) return
+
+    const { error: aliasError } = await admin
+      .from('vendor_alias')
+      .upsert(aliasRows, { onConflict: 'raw_name', ignoreDuplicates: true })
+
+    if (aliasError) {
+      logRawError('review.learnVendorAliasesFromAttach', aliasError.message)
+    }
+  } catch (err) {
+    // Never let a learning-step failure surface as an attach failure.
+    logRawError('review.learnVendorAliasesFromAttach', err instanceof Error ? err.message : String(err))
+  }
 }
 
 /**

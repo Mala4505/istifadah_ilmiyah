@@ -3,6 +3,7 @@
 import { useCallback, useState } from 'react'
 import { ImportWorkspace } from '@/components/import/import-workspace'
 import { PortalReaderWorkspace } from '@/components/import/portal-reader-workspace'
+import { DepartmentBudgetImportWorkspace } from '@/components/import/department-budget-import-workspace'
 import { BatchHistory } from '@/components/import/batch-history'
 
 /**
@@ -29,6 +30,11 @@ export function ImportPageClient({
         <ImportWorkspace isAdmin={isAdmin} onCommitted={bumpHistory} />
         <PortalReaderWorkspace isAdmin={isAdmin} source={portalReaderSource} hubUrl={hubUrl} />
       </div>
+      {/* Department-level budget import (review-page-redesign plan §11) — a
+          separate, department-grained parallel system to the per-budget-head
+          allocations the two cards above feed, so it gets its own row rather
+          than crowding into the grid above. */}
+      <DepartmentBudgetImportWorkspace isAdmin={isAdmin} onCommitted={bumpHistory} />
       <BatchHistory isAdmin={isAdmin} refreshSignal={historyRefreshSignal} />
     </div>
   )
