@@ -317,7 +317,7 @@ async function loadDocumentDetail(
     // serialize this behind the rest of this document's own data.
     supabase
       .from('document_extraction')
-      .select('id, bill_index, entry_id')
+      .select('id, bill_index, entry_id, page_number_start, page_number_end, verified_at')
       .eq('source_document_id', sourceDocumentId)
       .order('bill_index'),
   ])
@@ -543,12 +543,30 @@ async function loadDocumentDetail(
     amount: { ocr: li.amount_ocr as number | null, verified: li.amount_verified as number | null },
   }))
 
+  // Redesign plan (review page rail): a page is "done" once every bill whose
+  // page range covers it has verified_at set. Most pages fall in exactly one
+  // bill's range; a page is only left unverified if ANY covering bill isn't
+  // (every() vacuously true -- and therefore not verified -- for a page no
+  // bill's range covers at all, which matches "nothing to show as done here").
+  const billRanges = (siblingBillsRes.data ?? []).map((b) => ({
+    start: b.page_number_start as number | null,
+    end: b.page_number_end as number | null,
+    verified: (b.verified_at as string | null) !== null,
+  }))
+  function isPageVerified(pageNumber: number): boolean {
+    const covering = billRanges.filter(
+      (r) => r.start !== null && r.end !== null && r.start <= pageNumber && pageNumber <= r.end
+    )
+    return covering.length > 0 && covering.every((r) => r.verified)
+  }
+
   const pages: PageStatus[] = (pagesRes.data ?? []).map((p) => ({
     pageNumber: p.page_number as number,
     isFinancialDocument: p.is_financial_document as boolean | null,
     skipReason: p.skip_reason as string | null,
     classificationConfidence: p.classification_confidence as number | null,
     skipSource: (p.skip_source as string | null) === 'manual' ? 'manual' : 'model',
+    verified: isPageVerified(p.page_number as number),
   }))
 
   // uncertain_fields_ocr is jsonb -- shaped by extractionUncertainFieldSchema

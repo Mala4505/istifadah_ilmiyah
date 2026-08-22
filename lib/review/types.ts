@@ -97,6 +97,13 @@ export interface PageStatus {
    *  is both the default and what a fresh classification (including a
    *  scoped re-OCR, §2.6) resets it back to. */
   skipSource: 'model' | 'manual'
+  /** True once every bill whose page_number_start..page_number_end range
+   *  covers this page has verified_at set -- i.e. this page's own review
+   *  work (whichever document_extraction(s) it belongs to) is done.
+   *  Computed in page.tsx from the sibling-bills query, not stored on
+   *  document_page itself (a page has no single verified state of its own;
+   *  it inherits one from whichever bill(s) span it). */
+  verified: boolean
 }
 
 /** A ranked ledger-entry candidate for a still-unmatched bill, scored by
