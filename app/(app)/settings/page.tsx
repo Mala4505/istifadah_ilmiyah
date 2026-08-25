@@ -76,6 +76,7 @@ function GatedState({ title, body }: { title: string; body: string }) {
 
 type DepartmentOption = { id: number; name: string }
 type ZoneRow = { id: number; departmentId: number; zoneNumber: number; name: string }
+type SubDepartmentRow = { id: number; departmentId: number; name: string; isActive: boolean }
 type HubStatusRow = {
   id: number
   code: string
@@ -91,6 +92,7 @@ interface SuperadminData {
   budgetHeads: BudgetHeadRow[]
   heads: HeadOption[]
   zones: ZoneRow[]
+  subDepartments: SubDepartmentRow[]
   vendors: VendorRow[]
   hubStatuses: HubStatusRow[]
   inactiveStaffCount: number
@@ -113,11 +115,13 @@ async function loadSuperadminData(
     { data: budgetHeadsData },
     { data: headsData },
     { data: zonesData },
+    { data: subDepartmentsData },
     { data: vendorsData },
     { data: hubStatusesData },
     { data: departmentMembershipData },
     { data: headMembershipData },
     { data: zoneMembershipData },
+    { data: subDepartmentMembershipData },
   ] = await Promise.all([
     supabase.from('department').select('id, name').order('name'),
     supabase
@@ -134,6 +138,7 @@ async function loadSuperadminData(
       .order('department_id')
       .order('head_number'),
     supabase.from('zone').select('id, department_id, zone_number, name').order('department_id').order('zone_number'),
+    supabase.from('sub_department').select('id, department_id, name, is_active').order('name'),
     supabase
       .from('vendor')
       .select('id, display_name, normalized_name, gstin, cluster_group_id, is_confirmed')
@@ -151,6 +156,9 @@ async function loadSuperadminData(
     selectedEventId === null
       ? Promise.resolve({ data: [] as { zone_id: number }[] })
       : supabase.from('event_zone').select('zone_id').eq('event_id', selectedEventId),
+    selectedEventId === null
+      ? Promise.resolve({ data: [] as { sub_department_id: number }[] })
+      : supabase.from('event_sub_department').select('sub_department_id').eq('event_id', selectedEventId),
   ])
 
   // Falls back to "no filtering" when there's no resolvable event (should
@@ -159,6 +167,7 @@ async function loadSuperadminData(
   const departmentMemberIds = new Set((departmentMembershipData ?? []).map((r) => r.department_id))
   const headMemberIds = new Set((headMembershipData ?? []).map((r) => r.admin_head_id))
   const zoneMemberIds = new Set((zoneMembershipData ?? []).map((r) => r.zone_id))
+  const subDepartmentMemberIds = new Set((subDepartmentMembershipData ?? []).map((r) => r.sub_department_id))
 
   const departments: DepartmentOption[] = (departmentsData ?? [])
     .filter((department) => selectedEventId === null || departmentMemberIds.has(department.id as number))
@@ -204,6 +213,15 @@ async function loadSuperadminData(
       name: row.name as string,
     }))
 
+  const subDepartments: SubDepartmentRow[] = (subDepartmentsData ?? [])
+    .filter((row) => selectedEventId === null || subDepartmentMemberIds.has(row.id as number))
+    .map((row) => ({
+      id: row.id as number,
+      departmentId: row.department_id as number,
+      name: row.name as string,
+      isActive: row.is_active as boolean,
+    }))
+
   const vendors: VendorRow[] = (vendorsData ?? []).map((row) => ({
     id: row.id as number,
     displayName: row.display_name as string,
@@ -228,6 +246,7 @@ async function loadSuperadminData(
     budgetHeads,
     heads,
     zones,
+    subDepartments,
     vendors,
     hubStatuses,
     inactiveStaffCount: staff.filter((row) => !row.isActive).length,
@@ -283,11 +302,12 @@ export default async function SettingsPage() {
   ])
   const selectedEventId = selectedEvent?.id ?? null
 
-  const [departmentRes, adminHeadRes, zoneRes, budgetHeadRes, superadminData] = await Promise.all([
+  const [departmentRes, adminHeadRes, zoneRes, budgetHeadRes, subDepartmentRes, superadminData] = await Promise.all([
     supabase.from('department').select('id, name').eq('is_active', true).order('name'),
     supabase.from('admin_head').select('id, name, head_number').eq('is_active', true).order('head_number'),
     supabase.from('zone').select('id, name, zone_number').eq('is_active', true).order('zone_number'),
     supabase.from('budget_head').select('id, raw_label, short_label').order('raw_label'),
+    supabase.from('sub_department').select('id, name').eq('is_active', true).order('name'),
     superadmin ? loadSuperadminData(supabase, selectedEventId) : Promise.resolve(null),
   ])
 
@@ -307,20 +327,32 @@ export default async function SettingsPage() {
     id: row.id,
     label: row.short_label ?? row.raw_label,
   }))
+  const eventSubDepartmentOptions: MasterOption[] = (subDepartmentRes.data ?? []).map((row) => ({
+    id: row.id,
+    label: row.name,
+  }))
 
-  let selectedMembership = { departmentIds: [] as number[], adminHeadIds: [] as number[], zoneIds: [] as number[], budgetHeadIds: [] as number[] }
+  let selectedMembership = {
+    departmentIds: [] as number[],
+    adminHeadIds: [] as number[],
+    zoneIds: [] as number[],
+    budgetHeadIds: [] as number[],
+    subDepartmentIds: [] as number[],
+  }
   if (selectedEvent) {
-    const [depMem, headMem, zoneMem, budgetMem] = await Promise.all([
+    const [depMem, headMem, zoneMem, budgetMem, subDepartmentMem] = await Promise.all([
       supabase.from('event_department').select('department_id').eq('event_id', selectedEvent.id),
       supabase.from('event_admin_head').select('admin_head_id').eq('event_id', selectedEvent.id),
       supabase.from('event_zone').select('zone_id').eq('event_id', selectedEvent.id),
       supabase.from('event_budget_head').select('budget_head_id').eq('event_id', selectedEvent.id),
+      supabase.from('event_sub_department').select('sub_department_id').eq('event_id', selectedEvent.id),
     ])
     selectedMembership = {
       departmentIds: (depMem.data ?? []).map((r) => r.department_id),
       adminHeadIds: (headMem.data ?? []).map((r) => r.admin_head_id),
       zoneIds: (zoneMem.data ?? []).map((r) => r.zone_id),
       budgetHeadIds: (budgetMem.data ?? []).map((r) => r.budget_head_id),
+      subDepartmentIds: (subDepartmentMem.data ?? []).map((r) => r.sub_department_id),
     }
   }
 
@@ -404,8 +436,9 @@ export default async function SettingsPage() {
             <CardHeader>
               <CardTitle>Create the next event</CardTitle>
               <CardDescription>
-                Name it, set its dates, then carry forward whichever departments, admin heads, zones and budget
-                heads still apply — pre-ticked from {selectedEvent ? selectedEvent.name : 'the currently selected event'}.
+                Name it, set its dates, then carry forward whichever departments, admin heads, zones, budget
+                heads and sub-departments still apply — pre-ticked from{' '}
+                {selectedEvent ? selectedEvent.name : 'the currently selected event'}.
                 Budgets are never carried forward; they are imported fresh per event.
               </CardDescription>
             </CardHeader>
@@ -415,6 +448,7 @@ export default async function SettingsPage() {
                 adminHeads={eventAdminHeadOptions}
                 zones={eventZoneOptions}
                 budgetHeads={eventBudgetHeadOptions}
+                subDepartments={eventSubDepartmentOptions}
                 initialSelection={selectedMembership}
               />
             </CardContent>
@@ -548,7 +582,7 @@ export default async function SettingsPage() {
 
               <Card>
                 <CardHeader>
-                  <CardTitle>Zone / admin head master</CardTitle>
+                  <CardTitle>Sub-department / zone / admin head master</CardTitle>
                   <CardDescription>
                     Reference dimensions seeded from master data, shown here read-only by design —
                     editing them is a migration, not an admin action. There is deliberately no write
@@ -566,29 +600,32 @@ export default async function SettingsPage() {
                       const departmentZones = superadminData.zones.filter(
                         (zone) => zone.departmentId === department.id,
                       )
+                      const departmentSubDepartments = superadminData.subDepartments.filter(
+                        (subDepartment) => subDepartment.departmentId === department.id,
+                      )
                       return (
                         <div key={department.id} className="flex flex-col gap-2">
                           <h3 className="text-sm font-semibold">{department.name}</h3>
-                          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
                             <div className="flex flex-col gap-1">
                               <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                                Admin heads
+                                Sub-departments
                               </p>
-                              {departmentHeads.length === 0 ? (
+                              {departmentSubDepartments.length === 0 ? (
                                 <p className="text-sm text-muted-foreground">None.</p>
                               ) : (
                                 <Table>
                                   <TableHeader>
                                     <TableRow>
-                                      <TableHead>No.</TableHead>
                                       <TableHead>Name</TableHead>
+                                      <TableHead>Active</TableHead>
                                     </TableRow>
                                   </TableHeader>
                                   <TableBody>
-                                    {departmentHeads.map((head) => (
-                                      <TableRow key={head.id}>
-                                        <TableCell>{head.headNumber}</TableCell>
-                                        <TableCell>{head.name}</TableCell>
+                                    {departmentSubDepartments.map((subDepartment) => (
+                                      <TableRow key={subDepartment.id}>
+                                        <TableCell>{subDepartment.name}</TableCell>
+                                        <TableCell>{subDepartment.isActive ? 'Yes' : 'No'}</TableCell>
                                       </TableRow>
                                     ))}
                                   </TableBody>
@@ -614,6 +651,31 @@ export default async function SettingsPage() {
                                       <TableRow key={zone.id}>
                                         <TableCell>{zone.zoneNumber}</TableCell>
                                         <TableCell>{zone.name}</TableCell>
+                                      </TableRow>
+                                    ))}
+                                  </TableBody>
+                                </Table>
+                              )}
+                            </div>
+                            <div className="flex flex-col gap-1">
+                              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                                Admin heads
+                              </p>
+                              {departmentHeads.length === 0 ? (
+                                <p className="text-sm text-muted-foreground">None.</p>
+                              ) : (
+                                <Table>
+                                  <TableHeader>
+                                    <TableRow>
+                                      <TableHead>No.</TableHead>
+                                      <TableHead>Name</TableHead>
+                                    </TableRow>
+                                  </TableHeader>
+                                  <TableBody>
+                                    {departmentHeads.map((head) => (
+                                      <TableRow key={head.id}>
+                                        <TableCell>{head.headNumber}</TableCell>
+                                        <TableCell>{head.name}</TableCell>
                                       </TableRow>
                                     ))}
                                   </TableBody>

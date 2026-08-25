@@ -25,7 +25,7 @@ import { getSelectedEventId } from '@/lib/events/current'
 export async function getRecentClassificationDefaults(
   vendorRaw: string | null,
   departmentId: number | null
-): Promise<{ adminHeadId: number | null; zoneId: number | null } | null> {
+): Promise<{ adminHeadId: number | null; zoneId: number | null; subDepartmentId: number | null } | null> {
   const trimmedVendor = vendorRaw?.trim()
   if (!trimmedVendor || departmentId === null) {
     return null
@@ -42,11 +42,11 @@ export async function getRecentClassificationDefaults(
 
   let query = supabase
     .from('entries')
-    .select('admin_head_id, zone_id')
+    .select('admin_head_id, zone_id, sub_department_id')
     .eq('vendor_raw', trimmedVendor)
     .eq('department_id', departmentId)
     .eq('is_void', false)
-    .or('admin_head_id.not.is.null,zone_id.not.is.null')
+    .or('admin_head_id.not.is.null,zone_id.not.is.null,sub_department_id.not.is.null')
     .order('date', { ascending: false })
     .limit(1)
 
@@ -60,5 +60,5 @@ export async function getRecentClassificationDefaults(
     return null
   }
 
-  return { adminHeadId: data.admin_head_id, zoneId: data.zone_id }
+  return { adminHeadId: data.admin_head_id, zoneId: data.zone_id, subDepartmentId: data.sub_department_id }
 }

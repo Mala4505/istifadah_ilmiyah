@@ -4,6 +4,7 @@ import { useCallback, useState } from 'react'
 import { ImportWorkspace } from '@/components/import/import-workspace'
 import { PortalReaderWorkspace } from '@/components/import/portal-reader-workspace'
 import { DepartmentBudgetImportWorkspace } from '@/components/import/department-budget-import-workspace'
+import { SubDepartmentBudgetImportWorkspace } from '@/components/import/sub-department-budget-import-workspace'
 import { BatchHistory } from '@/components/import/batch-history'
 
 /**
@@ -35,6 +36,10 @@ export function ImportPageClient({
           allocations the two cards above feed, so it gets its own row rather
           than crowding into the grid above. */}
       <DepartmentBudgetImportWorkspace isAdmin={isAdmin} onCommitted={bumpHistory} />
+      {/* Sub-department budget import (sub-department feature plan) — mirrors
+          the department-budget card above for a three-column sheet, since
+          sub-department names are only unique within a department. */}
+      <SubDepartmentBudgetImportWorkspace isAdmin={isAdmin} onCommitted={bumpHistory} />
       <BatchHistory isAdmin={isAdmin} refreshSignal={historyRefreshSignal} />
     </div>
   )

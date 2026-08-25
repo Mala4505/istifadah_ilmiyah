@@ -9,6 +9,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { BatchStatusBadge } from '@/components/import/row-log-badge'
 import { RowLogTable, type RowLogEntry } from '@/components/import/row-log-table'
 import { DepartmentBudgetRowLogTable } from '@/components/import/department-budget-row-log-table'
+import { SubDepartmentBudgetRowLogTable } from '@/components/import/sub-department-budget-row-log-table'
 import {
   Table,
   TableBody,
@@ -40,6 +41,8 @@ function sourceSystemLabel(sourceSystem: string): string {
       return 'Audit'
     case 'department_budget':
       return 'Dept. budget'
+    case 'sub_department_budget':
+      return 'Sub-dept. budget'
     default:
       return sourceSystem
   }
@@ -189,6 +192,8 @@ export function BatchHistory({ isAdmin, refreshSignal }: { isAdmin: boolean; ref
                             <FriendlyError message={b.error_message} />
                           ) : selectedBatchSourceSystem === 'department_budget' ? (
                             <DepartmentBudgetRowLogTable rows={selectedBatchRows ?? []} />
+                          ) : selectedBatchSourceSystem === 'sub_department_budget' ? (
+                            <SubDepartmentBudgetRowLogTable rows={selectedBatchRows ?? []} />
                           ) : (
                             <RowLogTable rows={selectedBatchRows ?? []} />
                           )}

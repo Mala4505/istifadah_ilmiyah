@@ -20,6 +20,7 @@ export interface EventMembershipSelection {
   adminHeadIds: number[]
   zoneIds: number[]
   budgetHeadIds: number[]
+  subDepartmentIds: number[]
 }
 
 /** One checklist column (doc §1.5: "a carry-forward step with every
@@ -84,12 +85,14 @@ export function CreateEventForm({
   adminHeads,
   zones,
   budgetHeads,
+  subDepartments,
   initialSelection,
 }: {
   departments: MasterOption[]
   adminHeads: MasterOption[]
   zones: MasterOption[]
   budgetHeads: MasterOption[]
+  subDepartments: MasterOption[]
   initialSelection: EventMembershipSelection
 }) {
   const router = useRouter()
@@ -104,6 +107,7 @@ export function CreateEventForm({
   const [adminHeadIds, setAdminHeadIds] = useState(() => new Set(initialSelection.adminHeadIds))
   const [zoneIds, setZoneIds] = useState(() => new Set(initialSelection.zoneIds))
   const [budgetHeadIds, setBudgetHeadIds] = useState(() => new Set(initialSelection.budgetHeadIds))
+  const [subDepartmentIds, setSubDepartmentIds] = useState(() => new Set(initialSelection.subDepartmentIds))
 
   function toggle(set: Set<number>, setter: (next: Set<number>) => void, id: number) {
     const next = new Set(set)
@@ -125,6 +129,7 @@ export function CreateEventForm({
         adminHeadIds: Array.from(adminHeadIds),
         zoneIds: Array.from(zoneIds),
         budgetHeadIds: Array.from(budgetHeadIds),
+        subDepartmentIds: Array.from(subDepartmentIds),
       })
       if (result.ok) {
         toast.success(`Event "${name.trim()}" created.`)
@@ -198,6 +203,13 @@ export function CreateEventForm({
             selected={budgetHeadIds}
             onToggle={(id) => toggle(budgetHeadIds, setBudgetHeadIds, id)}
             onSetAll={(ids) => setBudgetHeadIds(new Set(ids))}
+          />
+          <ChecklistColumn
+            title="Sub-departments"
+            options={subDepartments}
+            selected={subDepartmentIds}
+            onToggle={(id) => toggle(subDepartmentIds, setSubDepartmentIds, id)}
+            onSetAll={(ids) => setSubDepartmentIds(new Set(ids))}
           />
         </div>
       </div>

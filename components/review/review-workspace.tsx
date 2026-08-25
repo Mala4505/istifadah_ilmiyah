@@ -405,6 +405,9 @@ export function ReviewWorkspace({
     detail.entryAdminHeadId ? String(detail.entryAdminHeadId) : NONE
   )
   const [zoneId, setZoneId] = useState<string>(detail.entryZoneId ? String(detail.entryZoneId) : NONE)
+  const [subDepartmentId, setSubDepartmentId] = useState<string>(
+    detail.entrySubDepartmentId ? String(detail.entrySubDepartmentId) : NONE
+  )
 
   // MatchStrip's attach/change actions call router.refresh() rather than
   // navigating (no key change), so this component doesn't remount when
@@ -415,7 +418,8 @@ export function ReviewWorkspace({
   useEffect(() => {
     setAdminHeadId(detail.entryAdminHeadId ? String(detail.entryAdminHeadId) : NONE)
     setZoneId(detail.entryZoneId ? String(detail.entryZoneId) : NONE)
-  }, [detail.entryId, detail.entryAdminHeadId, detail.entryZoneId])
+    setSubDepartmentId(detail.entrySubDepartmentId ? String(detail.entrySubDepartmentId) : NONE)
+  }, [detail.entryId, detail.entryAdminHeadId, detail.entryZoneId, detail.entrySubDepartmentId])
 
   const [claimState, setClaimState] = useState<'checking' | 'mine' | 'blocked'>('checking')
   const [claimInfo, setClaimInfo] = useState<{ displayName: string; claimedAt: string } | null>(null)
@@ -712,10 +716,11 @@ export function ReviewWorkspace({
           entryId: detail.entryId,
           adminHeadId: adminHeadId === NONE ? null : Number(adminHeadId),
           zoneId: zoneId === NONE ? null : Number(zoneId),
+          subDepartmentId: subDepartmentId === NONE ? null : Number(subDepartmentId),
         })
         if (!classificationResult.ok) {
           toastError(classificationResult.error, {
-            title: 'Saved, but admin head/zone could not be saved.',
+            title: 'Saved, but admin head/zone/sub-department could not be saved.',
             context: 'review-workspace',
           })
         }
@@ -969,6 +974,11 @@ export function ReviewWorkspace({
         document.getElementById('stage3-admin-head-select')?.focus()
         return
       }
+      if (matchesBinding(e, keymap.focusSubDepartment)) {
+        e.preventDefault()
+        document.getElementById('stage3-sub-department-select')?.focus()
+        return
+      }
       const lineIndex = matchLineDigit(e, keymap.jumpToLineDigit)
       if (lineIndex !== null) {
         e.preventDefault()
@@ -1029,7 +1039,7 @@ export function ReviewWorkspace({
   // (Verify) has no hard gate of its own, it just reads as "done" once
   // there's a match to move past.
   const stage2Done = detail.entryId !== null
-  const stage3Done = stage2Done && adminHeadId !== NONE && zoneId !== NONE
+  const stage3Done = stage2Done && adminHeadId !== NONE && zoneId !== NONE && subDepartmentId !== NONE
   const verifyStatus: StageStatus = stage2Done ? 'done' : 'current'
   const connectStatus: StageStatus = stage2Done ? 'done' : 'current'
   const classifyStatus: StageStatus = !stage2Done ? 'blocked' : stage3Done ? 'done' : 'current'
@@ -1199,6 +1209,9 @@ export function ReviewWorkspace({
         onZoneChange={setZoneId}
         adminHeadOptions={detail.adminHeadOptions}
         zoneOptions={detail.zoneOptions}
+        subDepartmentId={subDepartmentId}
+        onSubDepartmentChange={setSubDepartmentId}
+        subDepartmentOptions={detail.subDepartmentOptions}
       />
 
       {/* Phase 4 (§2.6): one small button per flagged header field, re-running

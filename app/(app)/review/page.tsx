@@ -360,7 +360,9 @@ async function loadDocumentDetail(
     entryId
       ? supabase
           .from('entries')
-          .select('id, amount, ubbl_number, invoice_number, vendor_id, hub_status_id, department_id, admin_head_id, zone_id')
+          .select(
+            'id, amount, ubbl_number, invoice_number, vendor_id, hub_status_id, department_id, admin_head_id, zone_id, sub_department_id'
+          )
           .eq('id', entryId)
           .maybeSingle()
       : Promise.resolve({ data: null }),
@@ -413,6 +415,7 @@ async function loadDocumentDetail(
     department_id: number | null
     admin_head_id: number | null
     zone_id: number | null
+    sub_department_id: number | null
   } | null
 
   let entryVendorDisplayName: string | null = null
@@ -437,13 +440,17 @@ async function loadDocumentDetail(
   // PostgREST inferring the right relationship direction.
   let adminHeadOptions: { id: number; head_number: number; name: string }[] = []
   let zoneOptions: { id: number; zone_number: number; name: string }[] = []
+  let subDepartmentOptions: { id: number; name: string }[] = []
   if (entry?.department_id) {
-    const [activeAdminHeadIdsRes, activeZoneIdsRes] = await Promise.all([
+    const [activeAdminHeadIdsRes, activeZoneIdsRes, activeSubDepartmentIdsRes] = await Promise.all([
       selectedEventId !== null
         ? supabase.from('event_admin_head').select('admin_head_id').eq('event_id', selectedEventId)
         : Promise.resolve({ data: null }),
       selectedEventId !== null
         ? supabase.from('event_zone').select('zone_id').eq('event_id', selectedEventId)
+        : Promise.resolve({ data: null }),
+      selectedEventId !== null
+        ? supabase.from('event_sub_department').select('sub_department_id').eq('event_id', selectedEventId)
         : Promise.resolve({ data: null }),
     ])
     const activeAdminHeadIds = activeAdminHeadIdsRes.data
@@ -451,6 +458,9 @@ async function loadDocumentDetail(
       : null
     const activeZoneIds = activeZoneIdsRes.data
       ? (activeZoneIdsRes.data as { zone_id: number }[]).map((r) => r.zone_id)
+      : null
+    const activeSubDepartmentIds = activeSubDepartmentIdsRes.data
+      ? (activeSubDepartmentIdsRes.data as { sub_department_id: number }[]).map((r) => r.sub_department_id)
       : null
 
     let adminHeadQuery = supabase
@@ -467,9 +477,17 @@ async function loadDocumentDetail(
       .eq('is_active', true)
     if (activeZoneIds !== null) zoneQuery = zoneQuery.in('id', activeZoneIds)
 
-    const [adminHeadsRes, zonesRes] = await Promise.all([
+    let subDepartmentQuery = supabase
+      .from('sub_department')
+      .select('id, name')
+      .eq('department_id', entry.department_id)
+      .eq('is_active', true)
+    if (activeSubDepartmentIds !== null) subDepartmentQuery = subDepartmentQuery.in('id', activeSubDepartmentIds)
+
+    const [adminHeadsRes, zonesRes, subDepartmentsRes] = await Promise.all([
       adminHeadQuery.order('head_number'),
       zoneQuery.order('zone_number'),
+      subDepartmentQuery.order('name'),
     ])
     adminHeadOptions = (adminHeadsRes.data ?? []).map((h) => ({
       id: h.id as number,
@@ -480,6 +498,10 @@ async function loadDocumentDetail(
       id: z.id as number,
       zone_number: z.zone_number as number,
       name: z.name as string,
+    }))
+    subDepartmentOptions = (subDepartmentsRes.data ?? []).map((s) => ({
+      id: s.id as number,
+      name: s.name as string,
     }))
   }
 
@@ -643,8 +665,10 @@ async function loadDocumentDetail(
     entryDepartmentId: entry?.department_id ?? null,
     entryAdminHeadId: entry?.admin_head_id ?? null,
     entryZoneId: entry?.zone_id ?? null,
+    entrySubDepartmentId: entry?.sub_department_id ?? null,
     adminHeadOptions,
     zoneOptions,
+    subDepartmentOptions,
     matchCandidates,
     siblingBills,
     claimedBy: sourceDoc.claimed_by as string | null,

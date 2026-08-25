@@ -161,8 +161,10 @@ export interface ReviewDocumentDetail {
   entryDepartmentId: number | null
   entryAdminHeadId: number | null
   entryZoneId: number | null
+  entrySubDepartmentId: number | null
   adminHeadOptions: { id: number; head_number: number; name: string }[]
   zoneOptions: { id: number; zone_number: number; name: string }[]
+  subDepartmentOptions: { id: number; name: string }[]
   /** Ranked suggestions when this bill has no ledger match yet; empty
    * (never computed) once `entryId !== null`. */
   matchCandidates: MatchCandidate[]

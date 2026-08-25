@@ -5,7 +5,7 @@
  * docs/event-scoping-and-review-fixes-plan.md §1).
  *
  * `createEvent` needs to flip `event.is_current` off the old row and onto
- * the new one, plus seed four membership tables, as a single atomic step
+ * the new one, plus seed five membership tables, as a single atomic step
  * against the partial unique index (`event_one_current`,
  * 20260822000005_event_scoping.sql) that allows only one `is_current = true`
  * row. supabase-js/PostgREST has no multi-statement transaction control, so
@@ -59,6 +59,7 @@ export interface CreateEventInput {
   adminHeadIds: number[]
   zoneIds: number[]
   budgetHeadIds: number[]
+  subDepartmentIds: number[]
 }
 
 export type CreateEventResult = { ok: true; eventId: number } | { ok: false; error: string }
@@ -86,7 +87,7 @@ function adminGateMessage(reason: 'signed_out' | 'inactive' | 'not_admin'): stri
 /**
  * Admin-gated (doc §1.5's "admin screen"). Inserts the new event row,
  * flips `is_current` off the previous current event and onto this one, and
- * seeds the four membership tables from the ids the caller passes in --
+ * seeds the five membership tables from the ids the caller passes in --
  * all inside one transaction so the partial unique index never sees two
  * `is_current = true` rows at once.
  */
@@ -143,6 +144,14 @@ export async function createEvent(input: CreateEventInput): Promise<CreateEventR
          select $1, unnest($2::bigint[])
          on conflict do nothing`,
         [eventId, input.budgetHeadIds]
+      )
+    }
+    if (input.subDepartmentIds.length > 0) {
+      await client.query(
+        `insert into public.event_sub_department (event_id, sub_department_id)
+         select $1, unnest($2::bigint[])
+         on conflict do nothing`,
+        [eventId, input.subDepartmentIds]
       )
     }
 

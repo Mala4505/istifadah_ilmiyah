@@ -18,7 +18,7 @@
 
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { ZoomIn, ZoomOut, RotateCw, ChevronLeft, ChevronRight, Eye, EyeOff, CheckCircle2 } from 'lucide-react'
+import { ZoomIn, ZoomOut, RotateCw, ChevronLeft, ChevronRight, Eye, EyeOff, CheckCircle2, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { FriendlyError } from '@/components/ui/friendly-error'
@@ -174,6 +174,22 @@ export const PdfViewer = forwardRef<
   // change, which is what re-renders the canvas across drag-resize and pane
   // mode cycling (L1, checklist 3.8).
   const [containerWidth, setContainerWidth] = useState(0)
+  // UX fix: which page number the <canvas> currently has *painted* -- distinct
+  // from `pageNumber` (the target), so a page-to-page transition can be
+  // detected as "pageNumber !== paintedPageNumber" without a separately
+  // tracked boolean that could drift out of sync with the render effect below
+  // (e.g. across a cancelled render during rapid clicking). Only updated once
+  // the render effect's task.promise actually resolves for `pageNumber` --
+  // see that effect. Starts at null so the very first page's initial paint
+  // (already covered by the whole-document `loading` skeleton above) doesn't
+  // spuriously read as a transition before anything has painted yet.
+  const [paintedPageNumber, setPaintedPageNumber] = useState<number | null>(null)
+  // True only while the target page differs from what's actually painted --
+  // i.e. a genuine page-content change is in flight. Deliberately NOT keyed
+  // on zoom/rotation/containerWidth (those re-render the *same* page and are
+  // near-instant re-paints of already-fetched page data), so dragging the
+  // zoom slider or resizing the pane never flips this on.
+  const pageTransitioning = paintedPageNumber !== null && pageNumber !== paintedPageNumber
 
   const docRef = useRef<PdfDocumentProxy | null>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
@@ -276,6 +292,11 @@ export const PdfViewer = forwardRef<
     setLoading(true)
     setError(null)
     setRotation(0)
+    // A new document means nothing painted for it yet -- without this, a
+    // coincidental page-number match with whatever was last painted for the
+    // *previous* document would make pageTransitioning read false even
+    // though the canvas hasn't rendered anything for this document.
+    setPaintedPageNumber(null)
 
     void (async () => {
       const urlResult = await getReviewDocumentUrl(sourceDocumentId)
@@ -399,7 +420,15 @@ export const PdfViewer = forwardRef<
         throw err
       }
       if (renderTaskRef.current === task) renderTaskRef.current = null
-      if (!cancelled) setCanvasSize({ width: viewport.width, height: viewport.height })
+      if (!cancelled) {
+        setCanvasSize({ width: viewport.width, height: viewport.height })
+        // The canvas now genuinely shows `pageNumber`'s content -- clears
+        // pageTransitioning (derived from this vs. pageNumber above) whether
+        // this render was a real page change or just a zoom/rotation/resize
+        // re-paint of the same page (a no-op in the latter case, since
+        // paintedPageNumber already equalled pageNumber).
+        setPaintedPageNumber(pageNumber)
+      }
     })()
 
     return () => {
@@ -714,6 +743,21 @@ export const PdfViewer = forwardRef<
               // zoom level without a separate pixel<->fraction conversion.
               <div className="relative mx-auto" style={{ width: canvasSize.width, height: canvasSize.height }}>
                 <canvas ref={canvasRef} className="shadow-sm" />
+                {/* UX fix: page-to-page transitions (thumbnail click, next/prev,
+                    a sibling-bill switch landing on a new page) are async --
+                    doc.getPage()+page.render() in the effect above can take a
+                    noticeable moment, during which the canvas above still shows
+                    the *previous* page with no feedback otherwise. This dims
+                    that stale image and shows a spinner until the new page has
+                    actually painted (pageTransitioning, derived above from
+                    paintedPageNumber vs. pageNumber). Deliberately excludes
+                    zoom/rotation/resize-only re-renders of the same page --
+                    those stay instant and flicker-free. */}
+                {pageTransitioning ? (
+                  <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-background/50">
+                    <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" aria-hidden="true" />
+                  </div>
+                ) : null}
                 {!collapsed &&
                   currentPageBoxes.map((box, i) => (
                     <div

@@ -89,6 +89,9 @@ export function ReviewStatusLine({
   onZoneChange,
   adminHeadOptions,
   zoneOptions,
+  subDepartmentId,
+  onSubDepartmentChange,
+  subDepartmentOptions,
 }: {
   verifyStatus: StageStatus
   vendorName: string
@@ -118,6 +121,9 @@ export function ReviewStatusLine({
   onZoneChange: (value: string) => void
   adminHeadOptions: { id: number; head_number: number; name: string }[]
   zoneOptions: { id: number; zone_number: number; name: string }[]
+  subDepartmentId: string
+  onSubDepartmentChange: (value: string) => void
+  subDepartmentOptions: { id: number; name: string }[]
 }) {
   return (
     <div className="flex w-full items-center gap-2 overflow-x-auto rounded-md border border-border bg-background px-3 py-2 text-sm">
@@ -230,6 +236,22 @@ export function ReviewStatusLine({
                   value: String(z.id),
                   label: `${z.zone_number}. ${z.name}`,
                   searchValue: `${z.zone_number}. ${z.name}`,
+                })),
+              ]}
+            />
+            <Combobox
+              id="stage3-sub-department-select"
+              value={subDepartmentId}
+              onValueChange={onSubDepartmentChange}
+              placeholder="Sub-department (U)"
+              searchPlaceholder="Search sub-departments…"
+              className="w-36"
+              options={[
+                { value: NONE, label: 'Not set', searchValue: 'not set' },
+                ...subDepartmentOptions.map((s) => ({
+                  value: String(s.id),
+                  label: s.name,
+                  searchValue: s.name,
                 })),
               ]}
             />

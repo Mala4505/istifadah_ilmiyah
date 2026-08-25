@@ -21,6 +21,7 @@ export type ShortcutActionId =
   | 'openVendorAutocomplete'
   | 'focusZone'
   | 'focusAdminHead'
+  | 'focusSubDepartment'
   | 'jumpToLineDigit'
   | 'nextDocument'
   | 'prevDocument'
@@ -113,6 +114,13 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
     label: 'Focus admin head field',
     description: 'Moves focus to the Admin Head classification field.',
     default: { key: 'h', alt: true },
+    configurable: true,
+  },
+  {
+    id: 'focusSubDepartment',
+    label: 'Focus sub-department field',
+    description: 'Moves focus to the Sub-department classification field.',
+    default: { key: 'u', alt: true },
     configurable: true,
   },
   {

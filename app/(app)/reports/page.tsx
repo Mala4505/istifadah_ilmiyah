@@ -71,6 +71,38 @@ type DepartmentBudgetVsActualRow = {
   budget_status_note: string | null
 }
 
+type SubDepartmentBudgetVsActualRow = {
+  sub_department_id: number
+  sub_department_name: string
+  department_id: number
+  department_name: string
+  as_of: string | null
+  budget_amount: number | null
+  actual_amount: number | null
+  entry_count: number
+  pct_of_budget: number | null
+  budget_status_note: string | null
+}
+
+// Display-only shape for the roll-up table below (Reports plan §"Reports
+// page"): a department header row (its own figures straight from
+// v_department_budget_vs_actual) followed by that department's
+// sub-department rows (from v_sub_department_budget_vs_actual), indented
+// underneath. Both source views are already keyed by department_id, so
+// building this list is a client-side groupBy over the sub-department rows.
+type SubDepartmentBudgetTableRow = {
+  kind: 'department' | 'sub-department'
+  rowKey: string
+  label: string
+  department_id: number
+  as_of: string | null
+  budget_amount: number | null
+  actual_amount: number | null
+  entry_count: number
+  pct_of_budget: number | null
+  budget_status_note: string | null
+}
+
 type VendorSpendRow = {
   vendor_id: number
   display_name: string
@@ -193,7 +225,7 @@ async function loadReportsData() {
   const selectedEvent = await getSelectedEvent(supabase)
   const eventId = selectedEvent?.id ?? null
 
-  const [budgetRes, deptBudgetRes, vendorRes, zoneRes, ageingRes, issuesRes] = await Promise.all([
+  const [budgetRes, deptBudgetRes, subDeptBudgetRes, vendorRes, zoneRes, ageingRes, issuesRes] = await Promise.all([
     supabase
       .from('v_budget_vs_actual')
       .select(
@@ -210,6 +242,14 @@ async function loadReportsData() {
       .eq('event_id', eventId)
       .order('actual_amount', { ascending: false, nullsFirst: false })
       .returns<DepartmentBudgetVsActualRow[]>(),
+    supabase
+      .from('v_sub_department_budget_vs_actual')
+      .select(
+        'sub_department_id, sub_department_name, department_id, department_name, as_of, budget_amount, actual_amount, entry_count, pct_of_budget, budget_status_note'
+      )
+      .eq('event_id', eventId)
+      .order('actual_amount', { ascending: false, nullsFirst: false })
+      .returns<SubDepartmentBudgetVsActualRow[]>(),
     supabase
       .from('v_vendor_spend')
       .select(
@@ -259,6 +299,7 @@ async function loadReportsData() {
     eventName: selectedEvent?.name ?? null,
     budgetRows: budgetRes.data ?? [],
     deptBudgetRows: deptBudgetRes.data ?? [],
+    subDeptBudgetRows: subDeptBudgetRes.data ?? [],
     vendorRows,
     zoneRows: zoneRes.data ?? [],
     ageingRows,
@@ -271,6 +312,7 @@ async function loadReportsData() {
     errors: {
       budget: friendlyDataError(budgetRes.error, 'reports:budgetRes'),
       deptBudget: friendlyDataError(deptBudgetRes.error, 'reports:deptBudgetRes'),
+      subDeptBudget: friendlyDataError(subDeptBudgetRes.error, 'reports:subDeptBudgetRes'),
       vendor: friendlyDataError(vendorRes.error, 'reports:vendorRes'),
       zone: friendlyDataError(zoneRes.error, 'reports:zoneRes'),
       ageing: friendlyDataError(ageingRes.error, 'reports:ageingRes'),
@@ -367,6 +409,7 @@ const SECTIONS = [
   { id: 'overview', label: 'Overview' },
   { id: 'budget-vs-actual', label: 'Budget vs Actual' },
   { id: 'department-budget-vs-actual', label: 'Department Budget vs Actual' },
+  { id: 'sub-department-budget-vs-actual', label: 'Sub-department Budget vs Actual' },
   { id: 'vendor-spend', label: 'Vendor Spend' },
   { id: 'zone-spend', label: 'Spend by Zone' },
   { id: 'hub-status-ageing', label: 'Hub-status Ageing' },
@@ -508,6 +551,71 @@ export default async function ReportsPage() {
       colorClass: budgetStatusColorClass(r.budget_amount, r.actual_amount),
     }))
 
+  // Sub-department names are only unique within a department (plan's "Sub-department
+  // feature" doc), so the bar-list label carries both.
+  const subDeptBudgetBarItems: BarListItem[] = data.subDeptBudgetRows
+    .filter((r) => (r.actual_amount ?? 0) > 0)
+    .slice(0, 12)
+    .map((r) => ({
+      key: r.sub_department_id,
+      label: `${r.department_name} — ${r.sub_department_name}`,
+      value: r.actual_amount ?? 0,
+      marker: r.budget_amount && r.budget_amount > 0 ? r.budget_amount : null,
+      markerLabel: r.budget_amount ? `Budget: ${formatINR(r.budget_amount)}` : undefined,
+      note: r.budget_status_note ?? undefined,
+      colorClass: budgetStatusColorClass(r.budget_amount, r.actual_amount),
+    }))
+
+  // Roll-up requirement (plan's "Reports page" section): a department's
+  // actuals should read as the sum of its sub-departments' actuals, so this
+  // groups the sub-department rows by department_id and interleaves a
+  // department header row (sourced from data.deptBudgetRows, the same rows
+  // the section above already renders) ahead of each department's own
+  // sub-department rows, rather than showing sub-departments as a flat list.
+  const deptBudgetByDeptId = new Map(data.deptBudgetRows.map((d) => [d.department_id, d]))
+  const subDeptRowsByDeptId = new Map<number, SubDepartmentBudgetVsActualRow[]>()
+  for (const r of data.subDeptBudgetRows) {
+    const arr = subDeptRowsByDeptId.get(r.department_id)
+    if (arr) arr.push(r)
+    else subDeptRowsByDeptId.set(r.department_id, [r])
+  }
+  const subDeptDepartmentGroups = [...subDeptRowsByDeptId.entries()].sort((a, b) => {
+    const aActual = deptBudgetByDeptId.get(a[0])?.actual_amount ?? 0
+    const bActual = deptBudgetByDeptId.get(b[0])?.actual_amount ?? 0
+    return bActual - aActual
+  })
+  const subDeptBudgetTableRows: SubDepartmentBudgetTableRow[] = subDeptDepartmentGroups.flatMap(
+    ([departmentId, subRows]) => {
+      const deptRow = deptBudgetByDeptId.get(departmentId)
+      const departmentHeader: SubDepartmentBudgetTableRow = {
+        kind: 'department',
+        rowKey: `dept-${departmentId}`,
+        label: deptRow?.department_name ?? subRows[0]!.department_name,
+        department_id: departmentId,
+        as_of: deptRow?.as_of ?? null,
+        budget_amount: deptRow?.budget_amount ?? null,
+        actual_amount: deptRow?.actual_amount ?? null,
+        entry_count: deptRow?.entry_count ?? 0,
+        pct_of_budget: deptRow?.pct_of_budget ?? null,
+        budget_status_note: deptRow?.budget_status_note ?? null,
+      }
+      const subRowsSorted = [...subRows].sort((a, b) => (b.actual_amount ?? 0) - (a.actual_amount ?? 0))
+      const subDeptRows: SubDepartmentBudgetTableRow[] = subRowsSorted.map((r) => ({
+        kind: 'sub-department',
+        rowKey: `sub-${r.sub_department_id}`,
+        label: r.sub_department_name,
+        department_id: r.department_id,
+        as_of: r.as_of,
+        budget_amount: r.budget_amount,
+        actual_amount: r.actual_amount,
+        entry_count: r.entry_count,
+        pct_of_budget: r.pct_of_budget,
+        budget_status_note: r.budget_status_note,
+      }))
+      return [departmentHeader, ...subDeptRows]
+    }
+  )
+
   // Phase 5 §5.2: join spend rows (data.vendorRows, already event-scoped)
   // with concentration rows (analyticsData.vendorRows, now event-scoped too
   // per this same pass) on vendor_id. Keyed off the spend side since that's
@@ -585,6 +693,39 @@ export default async function ReportsPage() {
           {r.department_name}
         </Link>
       ),
+    },
+    { key: 'asOf', header: 'As of', render: (r) => formatDate(r.as_of) },
+    { key: 'budget', header: 'Budget', align: 'right', render: (r) => formatINR(r.budget_amount) },
+    { key: 'actual', header: 'Actual (sum of amounts)', align: 'right', render: (r) => formatINR(r.actual_amount) },
+    {
+      key: 'pct',
+      header: '% of Budget',
+      align: 'right',
+      render: (r) =>
+        r.budget_status_note ? (
+          <span className="text-muted-foreground">{r.budget_status_note}</span>
+        ) : (
+          formatPercent(r.pct_of_budget)
+        ),
+    },
+    { key: 'entries', header: 'Entries', align: 'right', render: (r) => formatNumber(r.entry_count) },
+  ]
+
+  const subDeptBudgetColumns: DataTableColumn<SubDepartmentBudgetTableRow>[] = [
+    {
+      key: 'name',
+      header: 'Department / Sub-department',
+      render: (r) =>
+        r.kind === 'department' ? (
+          <Link
+            href={`/entries?department_id=${r.department_id}`}
+            className="font-semibold text-primary underline-offset-2 hover:underline"
+          >
+            {r.label}
+          </Link>
+        ) : (
+          <span className="pl-4 text-foreground/90">↳ {r.label}</span>
+        ),
     },
     { key: 'asOf', header: 'As of', render: (r) => formatDate(r.as_of) },
     { key: 'budget', header: 'Budget', align: 'right', render: (r) => formatINR(r.budget_amount) },
@@ -976,6 +1117,47 @@ export default async function ReportsPage() {
             <BarList items={deptBudgetBarItems} valueFormatter={formatINRCompact} />
             <BudgetStatusLegend />
             <DataTable columns={deptBudgetColumns} rows={data.deptBudgetRows} getRowKey={(r) => r.department_id} />
+          </>
+        )}
+      </ReportSection>
+
+      <ReportSection
+        id="sub-department-budget-vs-actual"
+        title="Sub-department budget vs actual"
+        description={
+          data.subDeptBudgetRows.some((r) => r.budget_status_note)
+            ? "A department's actuals are the sum of its sub-departments' actuals — each department row above is repeated here as a header, with its sub-departments' own budget/actual indented underneath. Sub-departments with no budget set show \"no budget set\" instead of a misleading −100% figure."
+            : "A department's actuals are the sum of its sub-departments' actuals — each department row above is repeated here as a header, with its sub-departments' own budget/actual indented underneath."
+        }
+        action={
+          <ExportCsvButton
+            filename="sub-department-budget-vs-actual.csv"
+            rowCount={data.subDeptBudgetRows.length}
+            csv={toCsv(data.subDeptBudgetRows, [
+              { header: 'Department', value: (r) => r.department_name },
+              { header: 'Sub-department', value: (r) => r.sub_department_name },
+              { header: 'As Of', value: (r) => r.as_of },
+              { header: 'Budget Amount', value: (r) => r.budget_amount },
+              { header: 'Actual (sum of amounts)', value: (r) => r.actual_amount },
+              { header: '% of Budget', value: (r) => r.pct_of_budget },
+              { header: 'Note', value: (r) => r.budget_status_note },
+              { header: 'Entries', value: (r) => r.entry_count },
+            ])}
+          />
+        }
+      >
+        {data.errors.subDeptBudget ? (
+          <EmptyState title="Couldn't load sub-department budget data" description={data.errors.subDeptBudget} />
+        ) : data.subDeptBudgetRows.length === 0 ? (
+          <EmptyState
+            title="No sub-department budgets yet"
+            description="Sub-department budgets arrive via the Sub-department budget import on /import — no file has been provided yet."
+          />
+        ) : (
+          <>
+            <BarList items={subDeptBudgetBarItems} valueFormatter={formatINRCompact} />
+            <BudgetStatusLegend />
+            <DataTable columns={subDeptBudgetColumns} rows={subDeptBudgetTableRows} getRowKey={(r) => r.rowKey} />
           </>
         )}
       </ReportSection>

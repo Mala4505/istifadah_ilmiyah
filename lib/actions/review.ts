@@ -454,6 +454,7 @@ export async function saveEntryClassification(input: {
   entryId: number
   adminHeadId: number | null
   zoneId: number | null
+  subDepartmentId: number | null
 }): Promise<SimpleActionResult> {
   if (!Number.isInteger(input.entryId)) {
     return { ok: false, error: 'Invalid entry id.' }
@@ -462,7 +463,7 @@ export async function saveEntryClassification(input: {
   const supabase = await createClient()
   const { data, error } = await supabase
     .from('entries')
-    .update({ admin_head_id: input.adminHeadId, zone_id: input.zoneId })
+    .update({ admin_head_id: input.adminHeadId, zone_id: input.zoneId, sub_department_id: input.subDepartmentId })
     .eq('id', input.entryId)
     .select('id')
 
