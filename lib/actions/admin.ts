@@ -7,6 +7,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { requireSuperadmin } from '@/lib/export/auth'
 import { itsNumberSchema, itsNumberToLoginEmail } from '@/lib/auth/its'
 import { logRawError } from '@/lib/friendly-error'
+import { getSelectedEvent, isEventMutable } from '@/lib/events/current'
 
 type ActionResult = { ok: true } | { ok: false; error: string }
 
@@ -214,6 +215,101 @@ export async function unmergeVendor(input: { vendorId: number }): Promise<Action
   if (error) return { ok: false, error: logRawError('admin.unmergeVendor', error.message) }
 
   revalidatePath('/admin')
+  return { ok: true }
+}
+
+const updateSubDepartmentBudgetSchema = z.object({
+  subDepartmentId: z.number().int().positive(),
+  budgetAmount: z.number().nonnegative('Budget amount cannot be negative.').nullable(),
+})
+
+/**
+ * Manually sets a sub-department's budget from the Settings page, independent
+ * of the periodic sub-department-budget import
+ * (lib/import/run-sub-department-budget-import.ts). Superadmin-only by
+ * request -- deliberately narrower than the RLS update policy on
+ * `sub_department_budget_allocation` (`is_reviewer_or_admin()`, i.e.
+ * admin-or-above), same pattern as createStaffUser: an app-level gate
+ * stricter than the database's own floor.
+ *
+ * `sub_department_budget_allocation` is an append-only snapshot table with a
+ * not-null `import_batch_id` FK and NO insert policy for `authenticated` at
+ * all (rows are meant to come from the import pipeline running as
+ * service_role) -- so, like createStaffUser, this writes through the
+ * service-role admin client after the gate above, inserting one lightweight
+ * `import_batch` row (mirroring the real importer's `source_system`) to
+ * satisfy the FK, then one new allocation row dated today. That row becomes
+ * "latest" for this (sub_department, event) pair by the same
+ * (as_of desc, id desc) ordering a real import relies on.
+ *
+ * Restricted to the current event (`isEventMutable`) -- past events are
+ * browsable read-only (docs/event-scoping-and-review-fixes-plan.md §1.6),
+ * and a manual budget edit is exactly the kind of write that must not land
+ * against closed history.
+ */
+export async function updateSubDepartmentBudget(input: {
+  subDepartmentId: number
+  budgetAmount: number | null
+}): Promise<ActionResult> {
+  const gate = await requireSuperadmin()
+  if (!gate.ok) {
+    return { ok: false, error: 'Editing budgets is a superadmin-only action.' }
+  }
+
+  const parsed = updateSubDepartmentBudgetSchema.safeParse(input)
+  if (!parsed.success) {
+    return { ok: false, error: parsed.error.issues[0]!.message }
+  }
+
+  const supabase = await createClient()
+  const selectedEvent = await getSelectedEvent(supabase)
+  if (!selectedEvent) {
+    return { ok: false, error: 'No event is configured yet. Contact an admin.' }
+  }
+  if (!isEventMutable(selectedEvent)) {
+    return {
+      ok: false,
+      error: 'The selected event is closed to editing -- switch to the current event before editing budgets.',
+    }
+  }
+
+  const admin = createAdminClient()
+
+  const { data: batch, error: batchError } = await admin
+    .from('import_batch')
+    .insert({
+      source_system: 'sub_department_budget',
+      source_filename: 'manual edit (settings)',
+      file_hash_sha256: 'manual',
+      mode: 'commit',
+      imported_by: gate.staff.userId,
+      event_id: selectedEvent.id,
+      status: 'completed',
+      row_count: 1,
+      summary_jsonb: { manual_edit: 1 },
+      completed_at: new Date().toISOString(),
+    })
+    .select('id')
+    .single()
+
+  if (batchError || !batch) {
+    return {
+      ok: false,
+      error: logRawError('admin.updateSubDepartmentBudget:batch', batchError?.message ?? 'insert failed'),
+    }
+  }
+
+  const { error } = await admin.from('sub_department_budget_allocation').insert({
+    sub_department_id: parsed.data.subDepartmentId,
+    event_id: selectedEvent.id,
+    import_batch_id: batch.id,
+    as_of: new Date().toISOString().slice(0, 10),
+    budget_amount: parsed.data.budgetAmount,
+  })
+
+  if (error) return { ok: false, error: logRawError('admin.updateSubDepartmentBudget', error.message) }
+
+  revalidatePath('/settings')
   return { ok: true }
 }
 

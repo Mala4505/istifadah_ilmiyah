@@ -117,6 +117,11 @@ export interface MatchCandidate {
   date: string | null
   ubblNumber: string
   mainNumber: string | null
+  /** So the Connect step can show which department a candidate belongs to
+   *  while a reviewer is still picking among several similar-looking
+   *  entries -- null when the entry's department has no name resolvable
+   *  (see the resolution site for why that can happen). */
+  departmentName: string | null
 }
 
 /** One sibling bill from the same multi-bill PDF, for the bill rail (§7).
@@ -154,11 +159,17 @@ export interface ReviewDocumentDetail {
   entryInvoiceNumber: string | null
   entryAmount: number | null
   entryVendorId: number | null
-  entryVendorDisplayName: string | null
   /** Populated only when `entryId !== null` -- the matched entry's
    * department, and stage-3 (Classify) options scoped to that department
    * (same pattern as app/(app)/entries/[id]/page.tsx). */
   entryDepartmentId: number | null
+  /** Resolved alongside entryDepartmentId -- shown in the Connect segment
+   *  once a bill is matched, replacing the vendor name/variance shown
+   *  beforehand (plan: department is the more useful glance-check once a
+   *  match is made). Null when the department has no name resolvable for
+   *  the selected event (same event-scoped rule as MatchCandidate's own
+   *  departmentName). */
+  entryDepartmentName: string | null
   entryAdminHeadId: number | null
   entryZoneId: number | null
   entrySubDepartmentId: number | null

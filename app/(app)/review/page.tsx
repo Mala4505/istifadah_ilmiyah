@@ -418,11 +418,11 @@ async function loadDocumentDetail(
     sub_department_id: number | null
   } | null
 
-  let entryVendorDisplayName: string | null = null
   let entryHubStatusCode: string | null = null
-  if (entry?.vendor_id) {
-    const { data: vendor } = await supabase.from('vendor').select('display_name').eq('id', entry.vendor_id).maybeSingle()
-    entryVendorDisplayName = (vendor?.display_name as string | undefined) ?? null
+  let entryDepartmentName: string | null = null
+  if (entry?.department_id) {
+    const { data: dept } = await supabase.from('department').select('name').eq('id', entry.department_id).maybeSingle()
+    entryDepartmentName = (dept?.name as string | undefined) ?? null
   }
   if (entry?.hub_status_id) {
     const { data: hs } = await supabase.from('hub_status').select('code').eq('id', entry.hub_status_id).maybeSingle()
@@ -525,6 +525,29 @@ async function loadDocumentDetail(
         ubblNumber: e.ubbl_number as string,
         mainNumber: e.main_number as string | null,
       }))
+
+    // Same event-scoped department-name resolution as
+    // getInboxMatchCandidates (lib/actions/documents.ts) -- a candidate's
+    // department name is cosmetic (helps a reviewer tell apart otherwise
+    // similar-looking candidates while picking one), so it's scoped to the
+    // selected event's event_department membership rather than the full
+    // shared department table; a department with no membership row simply
+    // comes back with no name.
+    const candidateDepartmentIds = Array.from(
+      new Set(candidatePool.map((c) => c.departmentId).filter((id): id is number => id !== null))
+    )
+    const { data: eventDepartmentRows } =
+      selectedEventId !== null && candidateDepartmentIds.length > 0
+        ? await supabase.from('event_department').select('department_id').eq('event_id', selectedEventId)
+        : { data: [] as { department_id: number }[] }
+    const activeDepartmentIds = new Set((eventDepartmentRows ?? []).map((r) => r.department_id as number))
+    const departmentIdsToResolve = candidateDepartmentIds.filter((id) => activeDepartmentIds.has(id))
+    const { data: departmentsData } =
+      departmentIdsToResolve.length > 0
+        ? await supabase.from('department').select('id, name').in('id', departmentIdsToResolve)
+        : { data: [] as { id: number; name: string }[] }
+    const departmentNameById = new Map((departmentsData ?? []).map((d) => [d.id as number, d.name as string]))
+
     matchCandidates = rankCandidates(
       {
         vendorName: extraction.vendor_name_ocr as string | null,
@@ -543,6 +566,7 @@ async function loadDocumentDetail(
       date: c.date,
       ubblNumber: c.ubblNumber,
       mainNumber: c.mainNumber,
+      departmentName: c.departmentId !== null ? (departmentNameById.get(c.departmentId) ?? null) : null,
     }))
   }
 
@@ -661,8 +685,8 @@ async function loadDocumentDetail(
     entryInvoiceNumber: entry?.invoice_number ?? null,
     entryAmount: entry?.amount ?? null,
     entryVendorId: entry?.vendor_id ?? null,
-    entryVendorDisplayName,
     entryDepartmentId: entry?.department_id ?? null,
+    entryDepartmentName,
     entryAdminHeadId: entry?.admin_head_id ?? null,
     entryZoneId: entry?.zone_id ?? null,
     entrySubDepartmentId: entry?.sub_department_id ?? null,

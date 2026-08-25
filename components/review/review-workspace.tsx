@@ -1196,9 +1196,8 @@ export function ReviewWorkspace({
         sourceDocumentId={detail.sourceDocumentId}
         entryId={detail.entryId}
         entryUbblNumber={detail.entryUbblNumber}
-        entryVendorDisplayName={detail.entryVendorDisplayName}
+        entryDepartmentName={detail.entryDepartmentName}
         entryAmount={detail.entryAmount}
-        liveTotalAmount={documentTotal}
         matchCandidates={detail.matchCandidates}
         onMatchChanged={() => router.refresh()}
         classifyStatus={classifyStatus}

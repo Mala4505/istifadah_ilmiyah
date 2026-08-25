@@ -50,6 +50,7 @@ interface AttachListItem {
   ubblNumber: string
   vendorRaw: string | null
   amount: number | null
+  departmentName: string | null
 }
 
 export function EntryAttachCombobox({
@@ -119,8 +120,20 @@ export function EntryAttachCombobox({
   // different names (entryId vs id) -- normalise here so the results list
   // and handleSelect below don't need two code paths.
   const listResults: AttachListItem[] = showingSuggestedList
-    ? suggestedCandidates.map((c) => ({ id: c.entryId, ubblNumber: c.ubblNumber, vendorRaw: c.vendorRaw, amount: c.amount }))
-    : results
+    ? suggestedCandidates.map((c) => ({
+        id: c.entryId,
+        ubblNumber: c.ubblNumber,
+        vendorRaw: c.vendorRaw,
+        amount: c.amount,
+        departmentName: c.departmentName,
+      }))
+    : results.map((e) => ({
+        id: e.id,
+        ubblNumber: e.ubblNumber,
+        vendorRaw: e.vendorRaw,
+        amount: e.amount,
+        departmentName: e.departmentName,
+      }))
 
   const triggerValue = attachedLabel
     ? attachedLabel
@@ -182,9 +195,14 @@ export function EntryAttachCombobox({
                 onClick={() => handleSelect(e)}
               >
                 {attaching === e.id ? <Check className="h-4 w-4 flex-shrink-0 animate-pulse" /> : <span className="w-4" />}
-                <span className="flex-1 truncate">
-                  {e.ubblNumber}
-                  {e.vendorRaw ? ` · ${e.vendorRaw}` : ''}
+                <span className="flex min-w-0 flex-1 flex-col">
+                  <span className="truncate">
+                    {e.ubblNumber}
+                    {e.vendorRaw ? ` · ${e.vendorRaw}` : ''}
+                  </span>
+                  {e.departmentName ? (
+                    <span className="truncate text-xs text-muted-foreground">{e.departmentName}</span>
+                  ) : null}
                 </span>
                 {e.amount !== null ? <span className="text-xs text-muted-foreground">{formatMoney(e.amount)}</span> : null}
               </button>

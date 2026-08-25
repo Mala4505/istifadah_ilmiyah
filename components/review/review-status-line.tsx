@@ -75,9 +75,8 @@ export function ReviewStatusLine({
   sourceDocumentId,
   entryId,
   entryUbblNumber,
-  entryVendorDisplayName,
+  entryDepartmentName,
   entryAmount,
-  liveTotalAmount,
   matchCandidates,
   onMatchChanged,
   // Classify segment
@@ -107,9 +106,8 @@ export function ReviewStatusLine({
   sourceDocumentId: number
   entryId: number | null
   entryUbblNumber: string | null
-  entryVendorDisplayName: string | null
+  entryDepartmentName: string | null
   entryAmount: number | null
-  liveTotalAmount: number | null
   matchCandidates: MatchCandidate[]
   onMatchChanged: () => void
 
@@ -126,7 +124,7 @@ export function ReviewStatusLine({
   subDepartmentOptions: { id: number; name: string }[]
 }) {
   return (
-    <div className="flex w-full items-center gap-2 overflow-x-auto rounded-md border border-border bg-background px-3 py-2 text-sm">
+    <div className="flex w-full items-center gap-2 overflow-x-auto rounded-md border border-border bg-background px-6 py-2 text-sm">
       {/* Verify */}
       <div className="flex shrink-0 items-center gap-2">
         <StepCircle index={1} status={verifyStatus} />
@@ -186,9 +184,8 @@ export function ReviewStatusLine({
           sourceDocumentId={sourceDocumentId}
           entryId={entryId}
           entryUbblNumber={entryUbblNumber}
-          entryVendorDisplayName={entryVendorDisplayName}
+          entryDepartmentName={entryDepartmentName}
           entryAmount={entryAmount}
-          liveTotalAmount={liveTotalAmount}
           matchCandidates={matchCandidates}
           onChanged={onMatchChanged}
         />
@@ -200,61 +197,78 @@ export function ReviewStatusLine({
           that, a single line of placeholder text instead of two grayed-out
           selects (plan §4, "nothing renders that the reviewer can't act on
           yet"). */}
-      <div className="flex shrink-0 items-center gap-2">
-        <StepCircle index={3} status={classifyStatus} />
-        <span className="text-xs font-medium text-muted-foreground">Classify</span>
+      <div className="flex shrink-0 items-end gap-2">
+        <div className="flex items-center gap-2 self-center">
+          <StepCircle index={3} status={classifyStatus} />
+          <span className="text-xs font-medium text-muted-foreground">Classify</span>
+        </div>
         {!stage2Done ? (
-          <span className="text-xs text-muted-foreground">unlocks once connected</span>
+          <span className="self-center text-xs text-muted-foreground">unlocks once connected</span>
         ) : (
           <>
-            <Combobox
-              id="stage3-admin-head-select"
-              value={adminHeadId}
-              onValueChange={onAdminHeadChange}
-              placeholder="Admin head (H)"
-              searchPlaceholder="Search admin heads…"
-              className="w-36"
-              options={[
-                { value: NONE, label: 'Not set', searchValue: 'not set' },
-                ...adminHeadOptions.map((h) => ({
-                  value: String(h.id),
-                  label: `${h.head_number}. ${h.name}`,
-                  searchValue: `${h.head_number}. ${h.name}`,
-                })),
-              ]}
-            />
-            <Combobox
-              id="stage3-zone-select"
-              value={zoneId}
-              onValueChange={onZoneChange}
-              placeholder="Zone (Z)"
-              searchPlaceholder="Search zones…"
-              className="w-32"
-              options={[
-                { value: NONE, label: 'Not set', searchValue: 'not set' },
-                ...zoneOptions.map((z) => ({
-                  value: String(z.id),
-                  label: `${z.zone_number}. ${z.name}`,
-                  searchValue: `${z.zone_number}. ${z.name}`,
-                })),
-              ]}
-            />
-            <Combobox
-              id="stage3-sub-department-select"
-              value={subDepartmentId}
-              onValueChange={onSubDepartmentChange}
-              placeholder="Sub-department (U)"
-              searchPlaceholder="Search sub-departments…"
-              className="w-36"
-              options={[
-                { value: NONE, label: 'Not set', searchValue: 'not set' },
-                ...subDepartmentOptions.map((s) => ({
-                  value: String(s.id),
-                  label: s.name,
-                  searchValue: s.name,
-                })),
-              ]}
-            />
+            {/* Redesign (Classify legibility): a caption above each field so
+                a reviewer can tell them apart independent of whatever value
+                (or "No X") happens to be showing in the trigger -- three
+                unlabelled selects in a row were indistinguishable once
+                filled in, since the trigger only ever renders the picked
+                option's own label. */}
+            <div className="flex flex-col gap-1">
+              <span className="text-[11px] font-medium leading-none text-muted-foreground">Sub-department</span>
+              <Combobox
+                id="stage3-sub-department-select"
+                value={subDepartmentId}
+                onValueChange={onSubDepartmentChange}
+                placeholder="Sub-department (U)"
+                searchPlaceholder="Search sub-departments…"
+                className="w-36"
+                options={[
+                  { value: NONE, label: 'No sub-department', searchValue: 'not set' },
+                  ...subDepartmentOptions.map((s) => ({
+                    value: String(s.id),
+                    label: s.name,
+                    searchValue: s.name,
+                  })),
+                ]}
+              />
+            </div>
+            <div className="flex flex-col gap-1">
+              <span className="text-[11px] font-medium leading-none text-muted-foreground">Admin head</span>
+              <Combobox
+                id="stage3-admin-head-select"
+                value={adminHeadId}
+                onValueChange={onAdminHeadChange}
+                placeholder="Admin head (H)"
+                searchPlaceholder="Search admin heads…"
+                className="w-36"
+                options={[
+                  { value: NONE, label: 'No admin head', searchValue: 'not set' },
+                  ...adminHeadOptions.map((h) => ({
+                    value: String(h.id),
+                    label: `${h.head_number}. ${h.name}`,
+                    searchValue: `${h.head_number}. ${h.name}`,
+                  })),
+                ]}
+              />
+            </div>
+            <div className="flex flex-col gap-1">
+              <span className="text-[11px] font-medium leading-none text-muted-foreground">Zone</span>
+              <Combobox
+                id="stage3-zone-select"
+                value={zoneId}
+                onValueChange={onZoneChange}
+                placeholder="Zone (Z)"
+                searchPlaceholder="Search zones…"
+                className="w-32"
+                options={[
+                  { value: NONE, label: 'No zone', searchValue: 'not set' },
+                  ...zoneOptions.map((z) => ({
+                    value: String(z.id),
+                    label: `${z.zone_number}. ${z.name}`,
+                    searchValue: `${z.zone_number}. ${z.name}`,
+                  })),
+                ]}
+              />
+            </div>
           </>
         )}
       </div>

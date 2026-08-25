@@ -14,6 +14,10 @@ import { UsersTable, type StaffRow } from '@/components/admin/users-table'
 import { CreateUserDialog } from '@/components/admin/create-user-dialog'
 import { BudgetHeadTable, type BudgetHeadRow, type HeadOption } from '@/components/admin/budget-head-table'
 import { VendorMergePanel, type VendorRow } from '@/components/admin/vendor-merge-panel'
+import {
+  SubDepartmentBudgetTable,
+  type SubDepartmentBudgetRow,
+} from '@/components/settings/sub-department-budget-table'
 import type { SupabaseClient } from '@supabase/supabase-js'
 
 /**
@@ -76,7 +80,13 @@ function GatedState({ title, body }: { title: string; body: string }) {
 
 type DepartmentOption = { id: number; name: string }
 type ZoneRow = { id: number; departmentId: number; zoneNumber: number; name: string }
-type SubDepartmentRow = { id: number; departmentId: number; name: string; isActive: boolean }
+type SubDepartmentRow = {
+  id: number
+  departmentId: number
+  name: string
+  isActive: boolean
+  budgetAmount: number | null
+}
 type HubStatusRow = {
   id: number
   code: string
@@ -122,6 +132,7 @@ async function loadSuperadminData(
     { data: headMembershipData },
     { data: zoneMembershipData },
     { data: subDepartmentMembershipData },
+    { data: subDepartmentBudgetData },
   ] = await Promise.all([
     supabase.from('department').select('id, name').order('name'),
     supabase
@@ -159,6 +170,12 @@ async function loadSuperadminData(
     selectedEventId === null
       ? Promise.resolve({ data: [] as { sub_department_id: number }[] })
       : supabase.from('event_sub_department').select('sub_department_id').eq('event_id', selectedEventId),
+    selectedEventId === null
+      ? Promise.resolve({ data: [] as { sub_department_id: number; budget_amount: number | null }[] })
+      : supabase
+          .from('v_sub_department_budget_vs_actual')
+          .select('sub_department_id, budget_amount')
+          .eq('event_id', selectedEventId),
   ])
 
   // Falls back to "no filtering" when there's no resolvable event (should
@@ -213,6 +230,11 @@ async function loadSuperadminData(
       name: row.name as string,
     }))
 
+  const subDepartmentBudgetById = new Map<number, number | null>()
+  for (const row of subDepartmentBudgetData ?? []) {
+    subDepartmentBudgetById.set(row.sub_department_id as number, row.budget_amount as number | null)
+  }
+
   const subDepartments: SubDepartmentRow[] = (subDepartmentsData ?? [])
     .filter((row) => selectedEventId === null || subDepartmentMemberIds.has(row.id as number))
     .map((row) => ({
@@ -220,6 +242,7 @@ async function loadSuperadminData(
       departmentId: row.department_id as number,
       name: row.name as string,
       isActive: row.is_active as boolean,
+      budgetAmount: subDepartmentBudgetById.get(row.id as number) ?? null,
     }))
 
   const vendors: VendorRow[] = (vendorsData ?? []).map((row) => ({
@@ -259,6 +282,7 @@ type TabDef = { value: string; superadminOnly?: boolean }
 const TAB_DEFS: TabDef[] = [
   { value: 'users', superadminOnly: true },
   { value: 'budget-heads', superadminOnly: true },
+  { value: 'budgets', superadminOnly: true },
   { value: 'vendors', superadminOnly: true },
   { value: 'master-data', superadminOnly: true },
   { value: 'events' },
@@ -375,6 +399,7 @@ export default async function SettingsPage() {
                   <Badge variant="secondary">{superadminData.unmappedBudgetHeadCount}</Badge>
                 )}
               </TabsTrigger>
+              <TabsTrigger value="budgets">Budgets</TabsTrigger>
               <TabsTrigger value="vendors" className="gap-2">
                 Vendors
                 {superadminData.unconfirmedVendorCount > 0 && (
@@ -515,6 +540,44 @@ export default async function SettingsPage() {
                     <p className="text-sm text-muted-foreground">No budget heads imported yet.</p>
                   ) : (
                     <BudgetHeadTable budgetHeads={superadminData.budgetHeads} heads={superadminData.heads} />
+                  )}
+                </CardContent>
+              </Card>
+            </TabsContent>
+
+            <TabsContent value="budgets">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Sub-department budgets</CardTitle>
+                  <CardDescription>
+                    Sets the budget for the currently selected event directly, without waiting for the next
+                    sub-department-budget import. Saving writes a fresh snapshot dated today — the same
+                    append-only history the import pipeline builds — so nothing already imported is
+                    overwritten, only superseded. Only available on the current event; switch off a past
+                    event first if editing is disabled.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {superadminData.subDepartments.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">No sub-departments in this event yet.</p>
+                  ) : (
+                    <SubDepartmentBudgetTable
+                      rows={[...superadminData.subDepartments]
+                        .map(
+                          (subDepartment): SubDepartmentBudgetRow => ({
+                            id: subDepartment.id,
+                            departmentName:
+                              superadminData.departments.find((d) => d.id === subDepartment.departmentId)?.name ??
+                              '—',
+                            name: subDepartment.name,
+                            budgetAmount: subDepartment.budgetAmount,
+                          })
+                        )
+                        .sort(
+                          (a, b) =>
+                            a.departmentName.localeCompare(b.departmentName) || a.name.localeCompare(b.name)
+                        )}
+                    />
                   )}
                 </CardContent>
               </Card>

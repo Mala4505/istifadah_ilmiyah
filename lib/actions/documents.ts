@@ -367,6 +367,12 @@ export interface EntrySearchResult {
   entryDepartmentId: number | null
   adminHeadId: number | null
   zoneId: number | null
+  /** Resolved alongside entryDepartmentId, same event-scoped lookup
+   *  getInboxMatchCandidates uses -- lets EntryAttachCombobox show which
+   *  department a searched-up entry belongs to, not just the ranked
+   *  suggestions. Null when the department has no name resolvable for the
+   *  selected event (see the resolution site). */
+  departmentName: string | null
 }
 
 /**
@@ -399,6 +405,26 @@ export async function searchEntriesForAttach(
 
   if (error) return { ok: false, error: logRawError('documents.searchEntriesForAttach', error.message) }
 
+  // Same event-scoped department-name resolution as getInboxMatchCandidates
+  // -- cosmetic only (helps tell apart similar-looking search results), so
+  // scoped to the selected event's event_department membership rather than
+  // the full shared department table.
+  const resultDepartmentIds = Array.from(
+    new Set((data ?? []).map((e) => e.department_id as number | null).filter((id): id is number => id !== null))
+  )
+  const selectedEventId = await getSelectedEventId(supabase)
+  const { data: eventDepartmentRows } =
+    selectedEventId !== null && resultDepartmentIds.length > 0
+      ? await supabase.from('event_department').select('department_id').eq('event_id', selectedEventId)
+      : { data: [] as { department_id: number }[] }
+  const activeDepartmentIds = new Set((eventDepartmentRows ?? []).map((r) => r.department_id as number))
+  const departmentIdsToResolve = resultDepartmentIds.filter((id) => activeDepartmentIds.has(id))
+  const { data: departmentsData } =
+    departmentIdsToResolve.length > 0
+      ? await supabase.from('department').select('id, name').in('id', departmentIdsToResolve)
+      : { data: [] as { id: number; name: string }[] }
+  const departmentNameById = new Map((departmentsData ?? []).map((d) => [d.id as number, d.name as string]))
+
   return {
     ok: true,
     results: (data ?? []).map((e) => ({
@@ -411,6 +437,7 @@ export async function searchEntriesForAttach(
       entryDepartmentId: e.department_id,
       adminHeadId: e.admin_head_id,
       zoneId: e.zone_id,
+      departmentName: e.department_id !== null ? (departmentNameById.get(e.department_id) ?? null) : null,
     })),
   }
 }

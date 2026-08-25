@@ -36,9 +36,8 @@ export function MatchStrip({
   sourceDocumentId,
   entryId,
   entryUbblNumber,
-  entryVendorDisplayName,
+  entryDepartmentName,
   entryAmount,
-  liveTotalAmount,
   matchCandidates,
   onChanged,
   bare = false,
@@ -47,12 +46,8 @@ export function MatchStrip({
   sourceDocumentId: number
   entryId: number | null
   entryUbblNumber: string | null
-  entryVendorDisplayName: string | null
+  entryDepartmentName: string | null
   entryAmount: number | null
-  /** The live (currently-typed, unsaved) form total, passed down from
-   * review-workspace's state rather than re-derived here, so the strip
-   * updates as the reviewer types instead of only after a save. */
-  liveTotalAmount: number | null
   matchCandidates: MatchCandidate[]
   onChanged: () => void
   /** Redesign plan §4: when embedded inline in the Connect segment of
@@ -96,17 +91,6 @@ export function MatchStrip({
   )
 
   if (entryId !== null) {
-    const variance = liveTotalAmount !== null && entryAmount !== null ? liveTotalAmount - entryAmount : null
-    const varianceNote =
-      variance === null
-        ? null
-        : Math.abs(variance) < 0.01
-          ? { label: 'Matches', tint: 'text-emerald-700 dark:text-emerald-400' }
-          : {
-              label: `${variance > 0 ? '+' : ''}${formatMoney(variance)}`,
-              tint: 'text-amber-700 dark:text-amber-400',
-            }
-
     return (
       <div className={`flex flex-wrap items-center gap-2 text-sm ${cardClass}`}>
         <EntryAttachCombobox
@@ -115,8 +99,7 @@ export function MatchStrip({
           onAttached={onChanged}
           className="w-56"
         />
-        {entryVendorDisplayName ? <span className="truncate text-xs text-muted-foreground">{entryVendorDisplayName}</span> : null}
-        {varianceNote ? <span className={`shrink-0 text-xs ${varianceNote.tint}`}>{varianceNote.label}</span> : null}
+        {entryDepartmentName ? <span className="truncate text-xs text-muted-foreground">{entryDepartmentName}</span> : null}
       </div>
     )
   }
