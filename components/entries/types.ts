@@ -111,7 +111,15 @@ export const PAGE_SIZE = 50
 // unconditionally) — it's now the *default* rather than the *only* option, per
 // the plan's own wording, and is the only column keyset pagination stays exact
 // for (see query.ts's fetchEntriesPage header for why).
-export type SortColumn = 'id' | 'amount' | 'date' | 'vendor_display_name' | 'status_label'
+export type SortColumn =
+  | 'id'
+  | 'amount'
+  | 'date'
+  | 'vendor_display_name'
+  | 'status_label'
+  | 'ubbl_number'
+  | 'main_number'
+  | 'budget_head_short_label'
 export type SortDirection = 'asc' | 'desc'
 export type EntriesSort = { column: SortColumn; direction: SortDirection }
 export const DEFAULT_SORT: EntriesSort = { column: 'id', direction: 'desc' }

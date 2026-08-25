@@ -222,7 +222,11 @@ export function DocumentTable({
         )}
       </div>
 
-      <div className="rounded-md border border-border">
+      {/* §7.7: the table's six nowrap columns are wider than a phone
+          viewport (430px) — without this, the whole page body was forced
+          wider than the viewport instead of scrolling just the table.
+          Matches components/reports/data-table.tsx's existing convention. */}
+      <div className="overflow-x-auto rounded-md border border-border">
         <Table>
           <TableHeader>
             <TableRow>

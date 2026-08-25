@@ -30,6 +30,9 @@ import type { PageStatus, UncertainField } from '@/lib/review/types'
 
 /** "bank_cheque" -> "Bank cheque", for the skipped-page tooltip/label. */
 function formatSkipReason(reason: string): string {
+  // 'id_document' title-cases to "Id document", which reads wrong -- "ID" is
+  // an acronym, not a capitalized word.
+  if (reason === 'id_document') return 'ID document'
   const words = reason.split('_')
   return words[0]!.charAt(0).toUpperCase() + words[0]!.slice(1) + (words.length > 1 ? ' ' + words.slice(1).join(' ') : '')
 }
@@ -96,6 +99,11 @@ export const PdfViewer = forwardRef<
     // 2.1: this bill's own first page (document_extraction.page_number_start)
     // -- seeds/resets pageNumber below instead of always opening on page 1.
     pageNumberStart?: number | null
+    // review/page.tsx's `&page=N` -- set when this bill was reached by
+    // clicking a sibling bill's page in the thumbnail rail below (see
+    // billPageRanges/onRequestBillSwitch), so this opens on the exact page
+    // clicked rather than this bill's own first page.
+    initialPageOverride?: number | null
     pages?: PageStatus[]
     uncertainFields?: UncertainField[]
     collapsed?: boolean
@@ -103,9 +111,29 @@ export const PdfViewer = forwardRef<
     // without lifting the whole pdf.js render loop up a level -- pageNumber
     // and numPages otherwise live only in this component's own state.
     onPageInfoChange?: (pageNumber: number, numPages: number) => void
+    // review-workspace.tsx: every sibling bill's own page range within this
+    // shared source PDF, so a thumbnail click can be resolved to whichever
+    // bill actually owns that page -- see handleThumbnailClick below.
+    billPageRanges?: { documentExtractionId: number; pageNumberStart: number | null; pageNumberEnd: number | null }[]
+    // Fires instead of a local page change when a clicked thumbnail belongs
+    // to a different bill than the one currently open -- review-workspace.tsx
+    // navigates the whole workspace there (OCR form included) rather than
+    // just scrolling this canvas to a page whose data isn't on screen.
+    onRequestBillSwitch?: (documentExtractionId: number, pageNumber: number) => void
   }
 >(function PdfViewer(
-  { sourceDocumentId, documentExtractionId, pageNumberStart, pages = [], uncertainFields = [], collapsed = false, onPageInfoChange },
+  {
+    sourceDocumentId,
+    documentExtractionId,
+    pageNumberStart,
+    initialPageOverride,
+    pages = [],
+    uncertainFields = [],
+    collapsed = false,
+    onPageInfoChange,
+    billPageRanges = [],
+    onRequestBillSwitch,
+  },
   ref
 ) {
   const router = useRouter()
@@ -129,7 +157,9 @@ export const PdfViewer = forwardRef<
   const [numPages, setNumPages] = useState(0)
   // 2.1: seeded from this bill's own first page rather than hard-coded to 1
   // -- the effect below re-seeds this on every bill change (see its comment).
-  const [pageNumber, setPageNumber] = useState(pageNumberStart ?? 1)
+  // initialPageOverride takes priority when set (a sibling-bill thumbnail
+  // click landed here wanting a specific page, not this bill's default).
+  const [pageNumber, setPageNumber] = useState(initialPageOverride ?? pageNumberStart ?? 1)
   // Manual zoom multiplier on top of the fit-width base scale computed below
   // -- 1 means "exactly fit the pane," not "no zoom applied at a fixed pixel
   // size" like the old fixed-scale render did.
@@ -163,6 +193,27 @@ export const PdfViewer = forwardRef<
     for (const p of pages) map.set(p.pageNumber, p)
     return map
   }, [pages])
+
+  // Which bill (documentExtractionId) a given page belongs to, resolved from
+  // billPageRanges -- used by the thumbnail click handler below to decide
+  // whether clicking a page should switch bills. Falls back to the current
+  // bill when no range covers the page (e.g. billPageRanges empty on a
+  // single-bill document), which keeps the click a plain local page change.
+  function resolveBillForPage(n: number): number {
+    const owner = billPageRanges.find(
+      (r) => r.pageNumberStart !== null && r.pageNumberEnd !== null && n >= r.pageNumberStart && n <= r.pageNumberEnd
+    )
+    return owner?.documentExtractionId ?? documentExtractionId
+  }
+
+  function handleThumbnailClick(n: number) {
+    const owner = resolveBillForPage(n)
+    if (owner !== documentExtractionId && onRequestBillSwitch) {
+      onRequestBillSwitch(owner, n)
+      return
+    }
+    setPageNumber(n)
+  }
 
   // Plan §2: the workspace's nav cluster has no other way to know current
   // position -- pageNumber/numPages were previously internal-only.
@@ -215,7 +266,8 @@ export const PdfViewer = forwardRef<
   // effect). A separate effect from the document-load one below so a fresh
   // pdf.js load isn't required just to move between bills of the same PDF.
   useEffect(() => {
-    setPageNumber(pageNumberStart ?? 1)
+    setPageNumber(initialPageOverride ?? pageNumberStart ?? 1)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [documentExtractionId, pageNumberStart])
 
   // Load the document whenever the target document changes.
@@ -542,7 +594,7 @@ export const PdfViewer = forwardRef<
                 <button
                   key={n}
                   type="button"
-                  onClick={() => setPageNumber(n)}
+                  onClick={() => handleThumbnailClick(n)}
                   title={
                     skipped
                       ? `Skipped${skipLabel ? `: ${skipLabel}` : ''}${manualOverride ? ' (set by a reviewer)' : ''} -- not extracted as a bill`
@@ -600,9 +652,23 @@ export const PdfViewer = forwardRef<
               button, gated behind the confirmation Dialog below, instead of
               the old pair of ~16px overlay icons that fired immediately. */}
           {!collapsed && numPages > 0 ? (
-            <div className="flex items-center gap-2 border-b border-border bg-background px-3 py-1.5">
+            <div
+              className={`flex items-center gap-2 border-b px-3 py-1.5 ${
+                currentSkipped
+                  ? 'border-amber-300 bg-amber-50 dark:border-amber-800 dark:bg-amber-950'
+                  : 'border-border bg-background'
+              }`}
+            >
               <span className="flex-shrink-0 text-xs font-medium text-foreground">Page {pageNumber}</span>
-              <span className="truncate text-xs text-muted-foreground">{currentStatusText}</span>
+              <span
+                className={`truncate text-xs ${
+                  currentSkipped
+                    ? 'font-semibold text-amber-900 dark:text-amber-200'
+                    : 'text-muted-foreground'
+                }`}
+              >
+                {currentStatusText}
+              </span>
               <Button
                 type="button"
                 variant="outline"
@@ -662,6 +728,17 @@ export const PdfViewer = forwardRef<
                       }}
                     />
                   ))}
+                {/* Redesign: the thin status bar above already says "Skipped"
+                    in text, but that's easy to miss while scrolling pages --
+                    this watermark makes it unmistakable directly on the page
+                    image itself, at whatever zoom/rotation it's rendered. */}
+                {!collapsed && currentSkipped ? (
+                  <div className="pointer-events-none absolute inset-0 flex items-center justify-center overflow-hidden">
+                    <span className="-rotate-[30deg] select-none whitespace-nowrap rounded border-4 border-amber-500/70 px-6 py-2 text-3xl font-bold uppercase tracking-widest text-amber-500/70">
+                      Skipped page
+                    </span>
+                  </div>
+                ) : null}
               </div>
             )}
           </div>

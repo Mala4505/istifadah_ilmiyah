@@ -261,7 +261,11 @@ export async function persistExtractionPipelineResult(
   // the own-org GSTIN exclusion below.
   // Every downstream use of `extraction` (document_extraction upsert, line
   // item insert, tally checks) reads the sanitized copy from here on.
-  const { cleaned: extraction, blankedFields: leakedTagFields } = sanitizeExtractionResponse(final.extraction)
+  const {
+    cleaned: extraction,
+    leakedTagFields,
+    metaCommentaryFields,
+  } = sanitizeExtractionResponse(final.extraction)
 
   // ---- document_page: the classification gate's per-page verdict (§8 point 3)
   const pageRows = extraction.pages.map((page) => ({
@@ -496,6 +500,32 @@ export async function persistExtractionPipelineResult(
             'affected field(s) were left blank instead of written with corrupted text. Enter the ' +
             'correct value manually on review.',
           dedup_key: `ocr_leaked_tag_syntax:${documentExtractionId}:${currentRunId}:${billIndex}`,
+        },
+        { onConflict: 'dedup_key' }
+      )
+    }
+
+    // Meta-commentary backstop (finding 10.1): one exception per
+    // document_extraction naming every field on THIS bill that was blanked
+    // because it read like the model's own commentary about the document
+    // (illegibility, rotation, "this appears to be a...") rather than
+    // content transcribed from it -- same list-them-together reasoning as
+    // the leaked-tag-syntax block above. `metaCommentaryFields` is flat
+    // across the whole response (from sanitizeExtractionResponse), prefixed
+    // `bills[i].` per field -- filter down to this bill's own entries.
+    const billMetaCommentaryFields = metaCommentaryFields.filter((field) => field.startsWith(`bills[${billIndex}].`))
+    if (billMetaCommentaryFields.length > 0) {
+      await admin.from('reconciliation_exception').upsert(
+        {
+          document_extraction_id: documentExtractionId,
+          exception_type: 'ocr_meta_commentary',
+          severity: 'low',
+          description:
+            `Extracted text for ${billMetaCommentaryFields.join(', ')} read like the model's own commentary ` +
+            'about the document (e.g. noting it was illegible, rotated, or describing what it appeared to ' +
+            'be) rather than real content extracted from it, so the affected field(s) were left blank ' +
+            'instead of written with that commentary. Enter the correct value manually on review.',
+          dedup_key: `ocr_meta_commentary:${documentExtractionId}:${currentRunId}:${billIndex}`,
         },
         { onConflict: 'dedup_key' }
       )

@@ -36,6 +36,10 @@ export const SKIP_REASONS = [
   'permission_letter',
   'agreement',
   'photo',
+  // Added by migration 20260822000013: PAN cards, Aadhaar cards, and similar
+  // government ID documents are the most common supporting document type and
+  // were previously dumped into the catch-all 'other' bucket.
+  'id_document',
 ] as const
 export const skipReasonSchema = z.enum(SKIP_REASONS)
 export type SkipReason = z.infer<typeof skipReasonSchema>
@@ -819,8 +823,63 @@ export function buildTaxBreakdown(bill: ExtractionBill): TaxBreakdown | null {
 const LEAKED_TAG_PATTERN =
   /<\/?[a-zA-Z][\w:.-]*(?:\s+[\w:.-]+(?:=(?:"[^"<>]*"|'[^'<>]*'|[^\s<>]+))?)*\s*\/?>/
 
-/** Result of scanning one object's string fields for leaked tag syntax. */
-export interface SanitizeLeakedTagSyntaxResult<T> {
+/**
+ * Code-level backstop for meta-commentary landing in OCR text fields (finding
+ * 10.1, docs/pre-deploy-findings-and-plan.md). Real example observed in
+ * production: a bill's `notes` field held "Document is partially rotated and
+ * heavily skewed; significant text is illegible or obscured. Bank of Baroda
+ * receipt/document with reference number 11100100253... This appears to be a
+ * bank receipt." -- prose *about* the document (its condition, what the model
+ * thinks it is) rather than content transcribed *from* it. The same bill's
+ * `vendor_name` was then read as "Bank of Baroda", the bank on a cheque, not
+ * a supplier -- a downstream symptom of the same root cause, not something
+ * this pattern needs to catch directly (it operates on the commentary text,
+ * not on inferring that a vendor name is implausible). Same posture as
+ * `LEAKED_TAG_PATTERN` above: the system prompt (buildSystemPrompt) is Layer
+ * 1, this is Layer 2, because `strict: true` tool calling only constrains
+ * JSON structure, never what text ends up *inside* a string field.
+ *
+ * Two independent signals are OR'd together, each chosen to be a phrase
+ * genuine invoice/bill/receipt text essentially never contains, because real
+ * printed documents don't narrate their own condition or hedge about their
+ * own identity:
+ *
+ * 1. Hedged self-identification -- "appears to be" / "seems to be" / "looks
+ *    like". A model unsure what it's looking at says "this appears to be a
+ *    bank receipt"; no vendor ever prints that sentence on an invoice. This
+ *    alone catches the "This appears to be a bank receipt" clause above.
+ *    Deliberately NOT keyed to a leading "this document/image/scan" -- the
+ *    real example's hedge has no such noun ("This appears to be..."), so
+ *    requiring one would have missed the actual production case.
+ * 2. Document/scan-quality descriptors -- illegible, unreadable, obscured,
+ *    blurry/blurred, smudged, faded, unclear, out of focus, "too dark/faint
+ *    to read", "poorly scanned/photographed", "heavily/partially
+ *    skewed/rotated/cropped/obscured", "hard/difficult to read/discern",
+ *    "cannot be read/determined/verified", "not clearly/fully
+ *    visible/legible". These describe the physical scan/photo, not the
+ *    document's business content -- catches "Document is partially rotated
+ *    and heavily skewed; ... text is illegible or obscured."
+ *
+ * False-positive guard (same standard of care as LEAKED_TAG_PATTERN's
+ * regression story above -- a silent backstop wrongly blanking real data is
+ * worse than an occasional miss): genuine bill/invoice/receipt language that
+ * must survive untouched includes "This invoice includes GST at 18%", "Rate
+ * as per agreement dated 12/04/2026", "Please remit within 30 days", and
+ * "This bill covers services for August". None of these contain a hedged
+ * "appears/seems to be" or "looks like", and none use an optical/legibility
+ * word -- "invoice", "bill", "rate", "agreement", "remit", "covers" are
+ * ordinary transactional vocabulary, not document-condition vocabulary, so
+ * neither branch fires. `rotated`/`skewed`/`cropped`/`obscured` are
+ * deliberately gated behind a `heavily`/`partially` qualifier (rather than
+ * matched bare) since those bare words carry a higher chance of turning up in
+ * unrelated business phrasing (e.g. a print-run or crop-size note) than
+ * `illegible`/`blurry`/`unreadable`, which are strongly scan-condition-only.
+ */
+const META_COMMENTARY_PATTERN =
+  /\b(?:illegible|unreadable|indecipherable|obscured|blurry|blurred|smudged|faded|unclear|out of focus|too (?:faint|dark|light|blurry) to read|poorly (?:scanned|photographed|lit|captured)|(?:heavily|partially) (?:skewed|rotated|cropped|obscured)|hard to (?:read|make out)|difficult to (?:read|discern|make out)|cannot be (?:read|determined|discerned|verified|made out)|not (?:clearly|fully) (?:visible|legible))\b|\b(?:appears|seems) to be\b|\blooks like\b/i
+
+/** Result of scanning one object's string fields against a single pattern. */
+export interface FieldScanResult<T> {
   /** Shallow copy of the input, with every matching field set to null. */
   cleaned: T
   /** Field names (from `fields`) whose value was blanked. Empty when nothing matched. */
@@ -828,7 +887,7 @@ export interface SanitizeLeakedTagSyntaxResult<T> {
 }
 
 /**
- * Scans the given fields of `obj` for tag-shaped content and blanks any that
+ * Scans the given fields of `obj` against `pattern` and blanks any that
  * match, same "blank it, don't write corrupted text" posture as
  * `isOwnOrgGstin` nulling `vendor_gstin_ocr` in lib/jobs/handlers/extract.ts.
  *
@@ -836,12 +895,15 @@ export interface SanitizeLeakedTagSyntaxResult<T> {
  * scanning behaviour is needed for the header extraction object AND for each
  * line item (see HEADER_TEXT_FIELDS_TO_SANITIZE / LINE_ITEM_TEXT_FIELDS_TO_SANITIZE
  * below), and those two shapes share no common field list -- only the
- * mechanics of "check this field, blank it if it matches" are shared.
+ * mechanics of "check this field, blank it if it matches" are shared. Shared
+ * by both `sanitizeLeakedTagSyntax` and `sanitizeMetaCommentary` below, which
+ * differ only in which pattern they scan for.
  */
-export function sanitizeLeakedTagSyntax<T extends Record<string, unknown>>(
+function scanFieldsForPattern<T extends Record<string, unknown>>(
   obj: T,
-  fields: readonly (keyof T)[]
-): SanitizeLeakedTagSyntaxResult<T> {
+  fields: readonly (keyof T)[],
+  pattern: RegExp
+): FieldScanResult<T> {
   // Mutated as a loosely-typed record rather than T directly: T's fields are
   // typed `string | null` (every field this is called with went through
   // absentTextAsNull), but TypeScript cannot see that generically through a
@@ -853,13 +915,29 @@ export function sanitizeLeakedTagSyntax<T extends Record<string, unknown>>(
   for (const field of fields) {
     const key = field as string
     const value = cleaned[key]
-    if (typeof value === 'string' && LEAKED_TAG_PATTERN.test(value)) {
+    if (typeof value === 'string' && pattern.test(value)) {
       cleaned[key] = null
       blankedFields.push(key)
     }
   }
 
   return { cleaned: cleaned as T, blankedFields }
+}
+
+/** Scans for leaked internal tool-call tag syntax (see `LEAKED_TAG_PATTERN` above). */
+export function sanitizeLeakedTagSyntax<T extends Record<string, unknown>>(
+  obj: T,
+  fields: readonly (keyof T)[]
+): FieldScanResult<T> {
+  return scanFieldsForPattern(obj, fields, LEAKED_TAG_PATTERN)
+}
+
+/** Scans for the model's own commentary about the document (see `META_COMMENTARY_PATTERN` above). */
+export function sanitizeMetaCommentary<T extends Record<string, unknown>>(
+  obj: T,
+  fields: readonly (keyof T)[]
+): FieldScanResult<T> {
+  return scanFieldsForPattern(obj, fields, META_COMMENTARY_PATTERN)
 }
 
 /** Header text fields to scan -- every free-text field on the extraction response
@@ -887,46 +965,76 @@ export const LINE_ITEM_TEXT_FIELDS_TO_SANITIZE = [
   'discount',
 ] as const satisfies readonly (keyof ExtractionLineItem)[]
 
-/** Result of sanitizing a whole extraction response, every bill's header and every line item. */
+/**
+ * Result of sanitizing a whole extraction response, every bill's header and
+ * every line item, against BOTH backstop patterns. The two field lists are
+ * kept separate (rather than one flat `blankedFields`) because
+ * lib/jobs/handlers/extract.ts raises a different `reconciliation_exception`
+ * exception_type per category (`ocr_leaked_tag_syntax` vs
+ * `ocr_meta_commentary`) -- a reviewer needs to know which kind of problem
+ * blanked a field, not just that something was blanked.
+ */
 export interface ExtractionSanitizeResult {
   cleaned: ExtractionResponse
-  /** e.g. `['bills[0].vendor_phone', 'bills[2].line_items[1].description']`. Empty when nothing was blanked. */
-  blankedFields: string[]
+  /** Fields blanked by `LEAKED_TAG_PATTERN`, e.g. `['bills[0].vendor_phone']`. Empty when nothing matched. */
+  leakedTagFields: string[]
+  /** Fields blanked by `META_COMMENTARY_PATTERN`, e.g. `['bills[0].notes']`. Empty when nothing matched. */
+  metaCommentaryFields: string[]
 }
 
 /**
- * Runs `sanitizeLeakedTagSyntax` over every bill's header fields and every
- * line item of one extraction response, and rolls the results into a single
- * field list -- lib/jobs/handlers/extract.ts raises ONE `ocr_leaked_tag_syntax`
- * exception per document_extraction (i.e. per bill) naming every blanked
- * field on that bill, not one exception per field (a flood of duplicate
- * exceptions for the same document is less useful to a reviewer than one
- * that lists everything). Field names are prefixed with `bills[i].` so a
- * per-bill exception can filter this flat list down to just its own bill's
- * blanked fields.
+ * Runs both `sanitizeLeakedTagSyntax` and `sanitizeMetaCommentary` over every
+ * bill's header fields and every line item of one extraction response, and
+ * rolls each into its own field list -- lib/jobs/handlers/extract.ts raises
+ * one exception per category per document_extraction (i.e. per bill) naming
+ * every blanked field of that category on that bill, not one exception per
+ * field (a flood of duplicate exceptions for the same document is less
+ * useful to a reviewer than one that lists everything). Field names are
+ * prefixed with `bills[i].` so a per-bill exception can filter either flat
+ * list down to just its own bill's blanked fields.
+ *
+ * The meta-commentary scan runs on the leaked-tag scan's OUTPUT (not the
+ * original field), not the other way around arbitrarily -- doing so means a
+ * field already blanked to null by the leaked-tag pass is skipped by the
+ * meta-commentary pass (it only tests `typeof value === 'string'`), so a
+ * field can only ever land in one of the two lists, never both.
  */
 export function sanitizeExtractionResponse(extraction: ExtractionResponse): ExtractionSanitizeResult {
-  const blankedFields: string[] = []
+  const leakedTagFields: string[] = []
+  const metaCommentaryFields: string[] = []
 
   const bills = extraction.bills.map((bill, billIndex) => {
-    const header = sanitizeLeakedTagSyntax(bill, HEADER_TEXT_FIELDS_TO_SANITIZE)
-    if (header.blankedFields.length > 0) {
-      blankedFields.push(...header.blankedFields.map((field) => `bills[${billIndex}].${field}`))
+    const leakedHeader = sanitizeLeakedTagSyntax(bill, HEADER_TEXT_FIELDS_TO_SANITIZE)
+    if (leakedHeader.blankedFields.length > 0) {
+      leakedTagFields.push(...leakedHeader.blankedFields.map((field) => `bills[${billIndex}].${field}`))
+    }
+    const metaHeader = sanitizeMetaCommentary(leakedHeader.cleaned, HEADER_TEXT_FIELDS_TO_SANITIZE)
+    if (metaHeader.blankedFields.length > 0) {
+      metaCommentaryFields.push(...metaHeader.blankedFields.map((field) => `bills[${billIndex}].${field}`))
     }
 
     const line_items = bill.line_items.map((item, lineIndex) => {
-      const { cleaned, blankedFields: itemFields } = sanitizeLeakedTagSyntax(item, LINE_ITEM_TEXT_FIELDS_TO_SANITIZE)
-      if (itemFields.length > 0) {
-        blankedFields.push(...itemFields.map((field) => `bills[${billIndex}].line_items[${lineIndex}].${field}`))
+      const leakedItem = sanitizeLeakedTagSyntax(item, LINE_ITEM_TEXT_FIELDS_TO_SANITIZE)
+      if (leakedItem.blankedFields.length > 0) {
+        leakedTagFields.push(
+          ...leakedItem.blankedFields.map((field) => `bills[${billIndex}].line_items[${lineIndex}].${field}`)
+        )
       }
-      return cleaned
+      const metaItem = sanitizeMetaCommentary(leakedItem.cleaned, LINE_ITEM_TEXT_FIELDS_TO_SANITIZE)
+      if (metaItem.blankedFields.length > 0) {
+        metaCommentaryFields.push(
+          ...metaItem.blankedFields.map((field) => `bills[${billIndex}].line_items[${lineIndex}].${field}`)
+        )
+      }
+      return metaItem.cleaned
     })
 
-    return { ...header.cleaned, line_items }
+    return { ...metaHeader.cleaned, line_items }
   })
 
   return {
     cleaned: { ...extraction, bills },
-    blankedFields,
+    leakedTagFields,
+    metaCommentaryFields,
   }
 }

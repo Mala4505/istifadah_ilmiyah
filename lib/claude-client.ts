@@ -294,7 +294,13 @@ function buildPdfBlock(data: string): UserContentBlockParam {
  * prompt together; every subsequent extraction call within the 5-minute TTL
  * reads that ~90% cheaper instead of paying full price for it again.
  */
-function buildCachedSystemPrompt(
+// Exported (testability-only, not part of the intended public API) so
+// test/unit/claude-client-cache-prefix.test.ts can reconstruct the exact
+// cached prefix (this text plus buildExtractionTool's JSON.stringify'd
+// schema) and assert it stays safely clear of Haiku's 4,096-token
+// cache-eligibility floor — see the comment above buildSystemPrompt for the
+// ~4,039-token near-miss this guards against regressing to.
+export function buildCachedSystemPrompt(
   communityGstin: string | null,
   communityName: string | null
 ): Anthropic.TextBlockParam[] {

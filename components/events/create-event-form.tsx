@@ -33,19 +33,38 @@ function ChecklistColumn({
   options,
   selected,
   onToggle,
+  onSetAll,
 }: {
   title: string
   options: MasterOption[]
   selected: Set<number>
   onToggle: (id: number) => void
+  onSetAll: (ids: number[]) => void
 }) {
   return (
     <div className="flex min-w-0 flex-1 flex-col gap-2">
       <div className="flex items-center justify-between">
         <h4 className="text-sm font-semibold">{title}</h4>
-        <span className="text-xs text-muted-foreground">
-          {selected.size}/{options.length}
-        </span>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            className="text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+            onClick={() => onSetAll(options.map((option) => option.id))}
+          >
+            All
+          </button>
+          <span className="text-xs text-muted-foreground">·</span>
+          <button
+            type="button"
+            className="text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+            onClick={() => onSetAll([])}
+          >
+            None
+          </button>
+          <span className="text-xs text-muted-foreground">
+            {selected.size}/{options.length}
+          </span>
+        </div>
       </div>
       <div className="flex max-h-72 flex-col gap-1 overflow-y-auto rounded-md border border-border p-2">
         {options.length === 0 && <p className="text-xs text-muted-foreground">None available.</p>}
@@ -157,24 +176,28 @@ export function CreateEventForm({
             options={departments}
             selected={departmentIds}
             onToggle={(id) => toggle(departmentIds, setDepartmentIds, id)}
+            onSetAll={(ids) => setDepartmentIds(new Set(ids))}
           />
           <ChecklistColumn
             title="Admin heads"
             options={adminHeads}
             selected={adminHeadIds}
             onToggle={(id) => toggle(adminHeadIds, setAdminHeadIds, id)}
+            onSetAll={(ids) => setAdminHeadIds(new Set(ids))}
           />
           <ChecklistColumn
             title="Zones"
             options={zones}
             selected={zoneIds}
             onToggle={(id) => toggle(zoneIds, setZoneIds, id)}
+            onSetAll={(ids) => setZoneIds(new Set(ids))}
           />
           <ChecklistColumn
             title="Budget heads"
             options={budgetHeads}
             selected={budgetHeadIds}
             onToggle={(id) => toggle(budgetHeadIds, setBudgetHeadIds, id)}
+            onSetAll={(ids) => setBudgetHeadIds(new Set(ids))}
           />
         </div>
       </div>

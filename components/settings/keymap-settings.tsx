@@ -22,8 +22,7 @@ const FIXED_DEFINITIONS = SHORTCUT_DEFINITIONS.filter((def) => !def.configurable
 // those so capture waits for the actual key the modifier is held with.
 const MODIFIER_ONLY_KEYS = new Set(['Alt', 'Control', 'Shift', 'Meta', 'OS'])
 
-const NO_MODIFIER_MESSAGE =
-  'Shortcuts need at least one modifier key (Alt, Ctrl, or Shift) to avoid firing while typing.'
+const NO_MODIFIER_MESSAGE = 'Shortcuts must include the Alt key (e.g. Alt+E) so they never fire while typing.'
 
 function bindingsEqual(a: ShortcutBinding, b: ShortcutBinding): boolean {
   return (
@@ -48,8 +47,8 @@ function overridesEqual(
   })
 }
 
-function hasAnyModifier(binding: ShortcutBinding): boolean {
-  return !!binding.alt || !!binding.shift || !!binding.ctrl || !!binding.meta
+function hasRequiredModifier(binding: ShortcutBinding): boolean {
+  return !!binding.alt
 }
 
 export function KeymapSettings({
@@ -100,7 +99,7 @@ export function KeymapSettings({
       ctrl: event.ctrlKey,
       meta: event.metaKey,
     }
-    if (!hasAnyModifier(binding)) {
+    if (!hasRequiredModifier(binding)) {
       setCaptureError(NO_MODIFIER_MESSAGE)
       return
     }
@@ -125,27 +124,20 @@ export function KeymapSettings({
 
   // jumpToLineDigit is exempt from raw key capture -- its digit isn't
   // configurable at all (lib/shortcuts/config.ts: `default: { key: '', alt:
-  // true }`), so the only thing to record is which modifier is held down
-  // with 1-9. Three checkboxes are a simpler, more reliable UI for that than
-  // listening for a raw keydown that would never see a literal digit key.
-  function handleLineDigitModifierChange(
-    def: ShortcutDefinition,
-    field: 'alt' | 'shift' | 'ctrl',
-    checked: boolean
-  ) {
+  // true }`), so the only thing to record is which EXTRA modifier is held
+  // down alongside the mandatory Alt with 1-9. Alt itself isn't one of these
+  // checkboxes -- it's always on, not user-toggleable, since it's the one
+  // modifier every shortcut in the app now requires.
+  function handleLineDigitModifierChange(def: ShortcutDefinition, field: 'shift' | 'ctrl', checked: boolean) {
     const current = currentBinding(def)
     const next: ShortcutBinding = {
       key: '',
-      alt: current.alt,
+      alt: true,
       shift: current.shift,
       ctrl: current.ctrl,
       meta: current.meta,
     }
     next[field] = checked
-    if (!hasAnyModifier(next)) {
-      setCaptureError(NO_MODIFIER_MESSAGE)
-      return
-    }
     setCaptureError(null)
     setOverrides((prev) => ({ ...prev, [def.id]: next }))
   }
@@ -197,15 +189,12 @@ export function KeymapSettings({
 
                   {def.id === 'jumpToLineDigit' ? (
                     <div className="flex shrink-0 items-center gap-3">
-                      <label className="flex items-center gap-1.5 text-xs">
-                        <Checkbox
-                          checked={!!binding.alt}
-                          onCheckedChange={(checked) =>
-                            handleLineDigitModifierChange(def, 'alt', checked === true)
-                          }
-                        />
+                      <kbd
+                        className="rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-xs text-muted-foreground"
+                        title="Alt is required on every shortcut so it never fires while typing -- not optional here."
+                      >
                         Alt
-                      </label>
+                      </kbd>
                       <label className="flex items-center gap-1.5 text-xs">
                         <Checkbox
                           checked={!!binding.ctrl}

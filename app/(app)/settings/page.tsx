@@ -95,6 +95,7 @@ interface SuperadminData {
   hubStatuses: HubStatusRow[]
   inactiveStaffCount: number
   unmappedBudgetHeadCount: number
+  unconfirmedVendorCount: number
 }
 
 /** Users & Roles / Budget Heads / Vendors / Master Data all read from the
@@ -231,17 +232,18 @@ async function loadSuperadminData(
     hubStatuses,
     inactiveStaffCount: staff.filter((row) => !row.isActive).length,
     unmappedBudgetHeadCount: budgetHeads.filter((row) => row.headId === null).length,
+    unconfirmedVendorCount: vendors.filter((row) => !row.isConfirmed).length,
   }
 }
 
 type TabDef = { value: string; superadminOnly?: boolean }
 const TAB_DEFS: TabDef[] = [
-  { value: 'events' },
-  { value: 'upload-limits' },
   { value: 'users', superadminOnly: true },
   { value: 'budget-heads', superadminOnly: true },
   { value: 'vendors', superadminOnly: true },
   { value: 'master-data', superadminOnly: true },
+  { value: 'events' },
+  { value: 'upload-limits' },
 ]
 
 export default async function SettingsPage() {
@@ -303,7 +305,7 @@ export default async function SettingsPage() {
   }))
   const eventBudgetHeadOptions: MasterOption[] = (budgetHeadRes.data ?? []).map((row) => ({
     id: row.id,
-    label: row.short_label ? `${row.raw_label} (${row.short_label})` : row.raw_label,
+    label: row.short_label ?? row.raw_label,
   }))
 
   let selectedMembership = { departmentIds: [] as number[], adminHeadIds: [] as number[], zoneIds: [] as number[], budgetHeadIds: [] as number[] }
@@ -327,8 +329,6 @@ export default async function SettingsPage() {
       <PageHeader />
       <Tabs defaultValue={tabs[0]!.value}>
         <TabsList>
-          <TabsTrigger value="events">Events</TabsTrigger>
-          <TabsTrigger value="upload-limits">Upload limits</TabsTrigger>
           {superadminData && (
             <>
               <TabsTrigger value="users" className="gap-2">
@@ -343,10 +343,17 @@ export default async function SettingsPage() {
                   <Badge variant="secondary">{superadminData.unmappedBudgetHeadCount}</Badge>
                 )}
               </TabsTrigger>
-              <TabsTrigger value="vendors">Vendors</TabsTrigger>
+              <TabsTrigger value="vendors" className="gap-2">
+                Vendors
+                {superadminData.unconfirmedVendorCount > 0 && (
+                  <Badge variant="secondary">{superadminData.unconfirmedVendorCount}</Badge>
+                )}
+              </TabsTrigger>
               <TabsTrigger value="master-data">Master Data</TabsTrigger>
             </>
           )}
+          <TabsTrigger value="events">Events</TabsTrigger>
+          <TabsTrigger value="upload-limits">Upload limits</TabsTrigger>
         </TabsList>
 
         <TabsContent value="events" className="flex flex-col gap-4">

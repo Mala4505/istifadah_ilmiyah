@@ -130,6 +130,14 @@ export interface SiblingBill {
   billIndex: number
   matched: boolean
   verifiedAt: string | null
+  /** This bill's own page range within the shared source PDF -- lets the PDF
+   *  viewer's thumbnail rail (which shows every page of the source document,
+   *  not just this bill's own pages) work out which sibling bill owns a page
+   *  a reviewer clicks, so selecting it can switch the whole workspace to
+   *  that bill instead of just scrolling the canvas to a page whose OCR data
+   *  isn't the one on screen. */
+  pageNumberStart: number | null
+  pageNumberEnd: number | null
 }
 
 export interface ReviewDocumentDetail {

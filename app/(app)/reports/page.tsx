@@ -19,6 +19,12 @@ import {
   humanizeCode,
 } from '@/lib/reports/format'
 import { RATE_BENCHMARK_MIN_OBSERVATIONS, RATE_BENCHMARK_MIN_VENDORS } from '@/lib/analytics/thresholds'
+import { loadHeroMetrics } from '@/lib/reports/hero-metrics'
+import { KpiTile } from '@/components/reports/charts/kpi-tile'
+import { TrendChart } from '@/components/reports/charts/trend-chart'
+import { DonutChart, type DonutSegment } from '@/components/reports/charts/donut-chart'
+import { FunnelChart } from '@/components/reports/charts/funnel-chart'
+import { ORDINAL_RAMP } from '@/components/reports/charts/ordinal-ramp'
 
 // Screen 10 — Reports (MASTER-PLAN §5, day 6). Every section reads from a
 // §10.2 reporting view and carries its own CSV export. Charts are plain
@@ -358,6 +364,7 @@ async function loadAnalyticsData() {
 }
 
 const SECTIONS = [
+  { id: 'overview', label: 'Overview' },
   { id: 'budget-vs-actual', label: 'Budget vs Actual' },
   { id: 'department-budget-vs-actual', label: 'Department Budget vs Actual' },
   { id: 'vendor-spend', label: 'Vendor Spend' },
@@ -370,7 +377,89 @@ const SECTIONS = [
 ] as const
 
 export default async function ReportsPage() {
-  const [data, analyticsData] = await Promise.all([loadReportsData(), loadAnalyticsData()])
+  // One extra getSelectedEvent() round trip here, deliberately -- matches
+  // this file's existing convention of each loader owning its own Supabase
+  // client and resolving the active event itself (loadReportsData,
+  // loadAnalyticsData) rather than threading a shared client/eventId through
+  // props. loadHeroMetrics follows the same pattern, so it needs eventId
+  // resolved at the call site.
+  const eventSupabase = await createClient()
+  const selectedEventForHero = await getSelectedEvent(eventSupabase)
+  const [data, analyticsData, hero] = await Promise.all([
+    loadReportsData(),
+    loadAnalyticsData(),
+    loadHeroMetrics(selectedEventForHero?.id ?? null),
+  ])
+
+  // ---- Overview band (hero KPIs, spend pace, hub-status mix, pipeline) ----
+
+  function seriesDelta(series: number[]): number | null {
+    if (series.length < 2) return null
+    return series[series.length - 1]! - series[series.length - 2]!
+  }
+  function formatDeltaINR(delta: number | null): string | undefined {
+    if (delta == null) return undefined
+    const sign = delta > 0 ? '+' : delta < 0 ? '−' : '±'
+    return `${sign}${formatINRCompact(Math.abs(delta))} this week`
+  }
+  function formatDeltaCount(delta: number | null, noun: string): string | undefined {
+    if (delta == null) return undefined
+    const sign = delta > 0 ? '+' : delta < 0 ? '−' : '±'
+    return `${sign}${formatNumber(Math.abs(delta))} ${noun} this week`
+  }
+
+  const spendDelta = seriesDelta(hero.kpi.weeklySpendSeries)
+  const entryDelta = seriesDelta(hero.kpi.weeklyEntrySeries)
+  const riskDelta = seriesDelta(hero.kpi.weeklyAtRiskSeries)
+  // No delta badge for "avg days to review": an empty week reduces to 0 in
+  // this series (see hero-metrics.ts's own flagged judgment call), which
+  // would misreport as "reviewed same-day" rather than "nothing reviewed
+  // that week" -- showing a value+sparkline without a week-over-week claim
+  // is the honest version until that ambiguity is resolved at the source.
+
+  const hubStatusSegments: DonutSegment[] = hero.hubStatus.map((s, i) => ({
+    key: s.key,
+    label: s.label,
+    value: s.value,
+    colorClass: ORDINAL_RAMP[i % ORDINAL_RAMP.length]!.strokeClass,
+  }))
+
+  const spendTrendPoints = hero.spendTrend.map((p) => ({ label: p.weekLabel, actual: p.actual, target: p.target }))
+
+  // Budget-vs-actual bar color: reserved status color, not the ordinal ramp
+  // -- this encodes "over/near/within budget," a genuinely per-row status,
+  // not a rank or a sequence position. No approved budget at all keeps the
+  // default accent blue (there's no over/under signal to show).
+  function budgetStatusColorClass(approved: number | null, actual: number | null): string | undefined {
+    if (!approved || approved <= 0) return undefined
+    const pct = ((actual ?? 0) / approved) * 100
+    if (pct <= 95) return 'bg-emerald-600 dark:bg-emerald-500'
+    if (pct <= 110) return 'bg-amber-500 dark:bg-amber-400'
+    return 'bg-red-600 dark:bg-red-500'
+  }
+
+  const SEVERITY_DONUT_COLOR: Record<string, string> = {
+    high: 'stroke-red-600 dark:stroke-red-400',
+    medium: 'stroke-amber-500 dark:stroke-amber-400',
+    low: 'stroke-muted-foreground',
+  }
+  function severitySegments(rows: { severity: string | null }[]): DonutSegment[] {
+    const counts: Record<'high' | 'medium' | 'low', number> = { high: 0, medium: 0, low: 0 }
+    for (const r of rows) {
+      const k = r.severity === 'high' || r.severity === 'medium' ? r.severity : 'low'
+      counts[k] += 1
+    }
+    return (['high', 'medium', 'low'] as const)
+      .filter((k) => counts[k] > 0)
+      .map((k) => ({
+        key: k,
+        label: k === 'high' ? 'High severity' : k === 'medium' ? 'Medium severity' : 'Low severity',
+        value: counts[k],
+        colorClass: SEVERITY_DONUT_COLOR[k]!,
+      }))
+  }
+  const issueSeveritySegments = severitySegments(data.issueRows)
+  const complianceSeveritySegments = severitySegments(analyticsData.complianceRows)
 
   const budgetBarItems: BarListItem[] = data.budgetRows
     .filter((r) => (r.actual_amount ?? 0) > 0)
@@ -382,6 +471,7 @@ export default async function ReportsPage() {
       marker: r.approved_amount && r.approved_amount > 0 ? r.approved_amount : null,
       markerLabel: r.approved_amount ? `Approved: ${formatINR(r.approved_amount)}` : undefined,
       note: r.budget_status_note ?? undefined,
+      colorClass: budgetStatusColorClass(r.approved_amount, r.actual_amount),
     }))
 
   // Phase 5 §5.1 (docs/pre-deploy-findings-and-plan.md): budget heads carry a
@@ -415,6 +505,7 @@ export default async function ReportsPage() {
       marker: r.budget_amount && r.budget_amount > 0 ? r.budget_amount : null,
       markerLabel: r.budget_amount ? `Budget: ${formatINR(r.budget_amount)}` : undefined,
       note: r.budget_status_note ?? undefined,
+      colorClass: budgetStatusColorClass(r.budget_amount, r.actual_amount),
     }))
 
   // Phase 5 §5.2: join spend rows (data.vendorRows, already event-scoped)
@@ -728,9 +819,10 @@ export default async function ReportsPage() {
         )}
       </div>
       <p className="max-w-2xl text-sm text-muted-foreground">
-        Budget vs actual, vendor spend, zone spend, Hub-status ageing, open issues, compliance &
-        leakage flags, item-family spend, and rate benchmarking, all for the selected event
-        (flags-run sweeps the corpus every 15 minutes). CSV export on every section.
+        An overview of this event (spend pace, Hub status mix, document pipeline), then budget vs
+        actual, vendor spend, zone spend, Hub-status ageing, open issues, compliance & leakage
+        flags, item-family spend, and rate benchmarking (flags-run sweeps the corpus every 15
+        minutes). CSV export on every section.
       </p>
 
       <nav className="flex flex-wrap gap-x-4 gap-y-1 border-b border-border pb-3 text-xs">
@@ -740,6 +832,74 @@ export default async function ReportsPage() {
           </a>
         ))}
       </nav>
+
+      <section id="overview" className="flex scroll-mt-20 flex-col gap-4">
+        <h2 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">This event, so far</h2>
+
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <KpiTile
+            label="Total spend to date"
+            value={formatINRCompact(hero.kpi.totalSpend)}
+            delta={formatDeltaINR(spendDelta)}
+            deltaTone="neutral"
+            series={hero.kpi.weeklySpendSeries}
+          />
+          <KpiTile
+            label="Entries this event"
+            value={formatNumber(hero.kpi.totalEntries)}
+            delta={formatDeltaCount(entryDelta, 'this week')}
+            deltaTone="neutral"
+            series={hero.kpi.weeklyEntrySeries}
+          />
+          <KpiTile
+            label="Open ₹ at risk"
+            value={formatINRCompact(hero.kpi.openAmountAtRisk)}
+            delta={formatDeltaINR(riskDelta)}
+            deltaTone={riskDelta == null ? 'neutral' : riskDelta > 0 ? 'bad' : 'good'}
+            series={hero.kpi.weeklyAtRiskSeries}
+          />
+          <KpiTile
+            label="Avg. days to review"
+            value={hero.kpi.avgDaysToReview != null ? hero.kpi.avgDaysToReview.toFixed(1) : '—'}
+            series={hero.kpi.weeklyAvgDaysSeries}
+          />
+        </div>
+        {hero.errors.kpi && <p className="text-xs text-destructive">{hero.errors.kpi}</p>}
+
+        <div className="grid gap-4 lg:grid-cols-[1.4fr_1fr]">
+          <ReportSection id="spend-pace" title="Spend pace" description="Cumulative spend for this event against an even-pace target line.">
+            {hero.errors.spendTrend ? (
+              <EmptyState title="Couldn't load spend pace" description={hero.errors.spendTrend} />
+            ) : spendTrendPoints.length === 0 ? (
+              <EmptyState title="Not enough data yet" description="Needs at least one entry, or an event with start/end dates set." />
+            ) : (
+              <TrendChart points={spendTrendPoints} valueFormatter={formatINRCompact} />
+            )}
+          </ReportSection>
+
+          <div className="flex flex-col gap-4">
+            <ReportSection id="hub-status-mix" title="Hub status mix" description="Where every entry sits in the review workflow right now.">
+              {hero.errors.hubStatus ? (
+                <EmptyState title="Couldn't load Hub status" description={hero.errors.hubStatus} />
+              ) : hubStatusSegments.every((s) => s.value === 0) || hubStatusSegments.length === 0 ? (
+                <EmptyState title="No entries yet" />
+              ) : (
+                <DonutChart segments={hubStatusSegments} centerLabel={`${formatNumber(hero.hubStatus.reduce((s, r) => s + r.value, 0))} entries`} />
+              )}
+            </ReportSection>
+
+            <ReportSection id="document-pipeline" title="Document pipeline" description="Uploaded bills, and how many make it through each stage.">
+              {hero.errors.pipeline ? (
+                <EmptyState title="Couldn't load the pipeline" description={hero.errors.pipeline} />
+              ) : hero.pipeline.every((p) => p.count === 0) ? (
+                <EmptyState title="No documents uploaded yet" />
+              ) : (
+                <FunnelChart stages={hero.pipeline} />
+              )}
+            </ReportSection>
+          </div>
+        </div>
+      </section>
 
       <ReportSection
         id="budget-vs-actual"
@@ -774,6 +934,7 @@ export default async function ReportsPage() {
         ) : (
           <>
             <BarList items={budgetBarItems} valueFormatter={formatINRCompact} />
+            <BudgetStatusLegend />
             <DataTable columns={budgetColumns} rows={budgetRowsGrouped} getRowKey={(r) => r.budget_head_id} />
           </>
         )}
@@ -813,11 +974,13 @@ export default async function ReportsPage() {
         ) : (
           <>
             <BarList items={deptBudgetBarItems} valueFormatter={formatINRCompact} />
+            <BudgetStatusLegend />
             <DataTable columns={deptBudgetColumns} rows={data.deptBudgetRows} getRowKey={(r) => r.department_id} />
           </>
         )}
       </ReportSection>
 
+      <div className="grid gap-4 md:grid-cols-2">
       <ReportSection
         id="vendor-spend"
         title="Vendor spend"
@@ -951,13 +1114,16 @@ export default async function ReportsPage() {
         {data.errors.issues ? (
           <EmptyState title="Couldn't load open issues" description={data.errors.issues} />
         ) : (
-          <DataTable
+          <>
+            {issueSeveritySegments.length > 0 && <DonutChart segments={issueSeveritySegments} centerLabel={`${data.issueRows.length} issues`} />}
+            <DataTable
             columns={issueColumns}
             rows={data.issueRows}
             getRowKey={(r) => `${r.source_table}-${r.id}`}
             emptyTitle="No open issues"
             emptyDescription="Nothing in reconciliation_exception or flags is currently open."
-          />
+            />
+          </>
         )}
       </ReportSection>
 
@@ -1008,6 +1174,7 @@ export default async function ReportsPage() {
                 </div>
               ))}
             </div>
+            {complianceSeveritySegments.length > 0 && <DonutChart segments={complianceSeveritySegments} centerLabel={`${analyticsData.complianceRows.length} flags`} />}
             <DataTable columns={complianceColumns} rows={analyticsData.complianceRows} getRowKey={(r) => r.id} />
           </>
         )}
@@ -1090,6 +1257,30 @@ export default async function ReportsPage() {
           </>
         )}
       </ReportSection>
+      </div>
+    </div>
+  )
+}
+
+function BudgetStatusLegend() {
+  return (
+    <div className="flex flex-wrap items-center gap-4 text-xs text-muted-foreground">
+      <span className="flex items-center gap-1.5">
+        <span className="h-2 w-2 rounded-full bg-emerald-600 dark:bg-emerald-500" />
+        Within budget
+      </span>
+      <span className="flex items-center gap-1.5">
+        <span className="h-2 w-2 rounded-full bg-amber-500 dark:bg-amber-400" />
+        Near limit
+      </span>
+      <span className="flex items-center gap-1.5">
+        <span className="h-2 w-2 rounded-full bg-red-600 dark:bg-red-500" />
+        Over budget
+      </span>
+      <span className="flex items-center gap-1.5">
+        <span className="h-0.5 w-3 bg-foreground/70" />
+        Approved amount
+      </span>
     </div>
   )
 }

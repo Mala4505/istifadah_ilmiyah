@@ -39,7 +39,7 @@ const QUEUE_ROW_CAP = 500
 export default async function ReviewPage({
   searchParams,
 }: {
-  searchParams: Promise<{ id?: string }>
+  searchParams: Promise<{ id?: string; page?: string }>
 }) {
   const staff = await getStaffContext()
   if (!staff) return <GatedState title="Sign in required" body="You need to sign in to use the review queue." />
@@ -61,7 +61,14 @@ export default async function ReviewPage({
   }
 
   const supabase = await createClient()
-  const { id: idParam } = await searchParams
+  const { id: idParam, page: pageParam } = await searchParams
+  // review-workspace.tsx's PDF thumbnail rail spans every page of the source
+  // PDF, including sibling bills' pages -- clicking one that belongs to a
+  // different bill navigates here with `&page=N` so the newly-loaded bill's
+  // PdfViewer opens on the exact page the reviewer clicked instead of that
+  // bill's own first page (its usual default, `pageNumberStart` below).
+  const requestedPage = pageParam ? Number(pageParam) : null
+  const initialPageOverride = requestedPage !== null && Number.isFinite(requestedPage) ? requestedPage : null
 
   // Plan §2.1: per-user keymap + master enable/disable, resolved server-side
   // so ReviewWorkspace's shortcut handler never has to guess at defaults.
@@ -193,6 +200,7 @@ export default async function ReviewPage({
           nextId={null}
           keymap={keymap}
           shortcutsEnabled={shortcutsEnabled}
+          initialPageOverride={initialPageOverride}
         />
       </div>
     )
@@ -228,6 +236,7 @@ export default async function ReviewPage({
         nextId={nextId}
         keymap={keymap}
         shortcutsEnabled={shortcutsEnabled}
+        initialPageOverride={initialPageOverride}
       />
     </div>
   )
@@ -521,6 +530,8 @@ async function loadDocumentDetail(
       billIndex: b.bill_index as number,
       matched: (b.entry_id as number | null) !== null,
       verifiedAt: b.verified_at as string | null,
+      pageNumberStart: b.page_number_start as number | null,
+      pageNumberEnd: b.page_number_end as number | null,
     }))
     .sort((a, b) => a.billIndex - b.billIndex)
 

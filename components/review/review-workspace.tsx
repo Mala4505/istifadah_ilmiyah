@@ -212,6 +212,7 @@ export function ReviewWorkspace({
   nextId,
   keymap,
   shortcutsEnabled,
+  initialPageOverride,
 }: {
   detail: ReviewDocumentDetail
   // Widened for the Document nav (redesign point 4): QueueEntry
@@ -224,6 +225,11 @@ export function ReviewWorkspace({
   nextId: number | null
   keymap: Keymap
   shortcutsEnabled: boolean
+  // review/page.tsx's `&page=N` override -- set when this document was
+  // reached by clicking a sibling bill's page in the PDF thumbnail rail
+  // (handleRequestBillSwitch below), so PdfViewer opens on that exact page
+  // instead of this bill's own first page.
+  initialPageOverride: number | null
 }) {
   const router = useRouter()
   const formContainerRef = useRef<HTMLDivElement>(null)
@@ -374,7 +380,7 @@ export function ReviewWorkspace({
   // edits (re-extract, or navigating away). Reused for both so there is one
   // dialog and one place that decides "does this need confirming."
   const [confirmAction, setConfirmAction] = useState<
-    { kind: 're-extract' } | { kind: 'navigate'; targetId: number } | null
+    { kind: 're-extract' } | { kind: 'navigate'; targetId: number; targetPage: number | null } | null
   >(null)
 
   // event-scoping-and-review-fixes-plan.md §2.4: "stop the vendor overwrite."
@@ -548,39 +554,48 @@ export function ReviewWorkspace({
     return unverified.reduce((min, b) => (b.billIndex < min.billIndex ? b : min)).documentExtractionId
   }, [detail.siblingBills, detail.documentExtractionId])
 
-  function goToDocument(id: number | null) {
+  function goToDocument(id: number | null, page?: number | null) {
     if (id === null) {
       toast.info('No more documents in that direction.')
       return
     }
-    router.push(`/review?id=${id}`)
+    router.push(`/review?id=${id}${page ? `&page=${page}` : ''}`)
   }
 
   // Guarded entry point for Prev/Next/PgUp/PgDn (checklist 1.8): today
   // `goToDocument` discards unsaved edits the instant the target component
   // remounts. Route every navigation call site through this instead so a
-  // dirty form always confirms first.
-  function requestGoToDocument(id: number | null) {
+  // dirty form always confirms first. `page` carries a specific target page
+  // through the confirm dialog too -- used by handleRequestBillSwitch below
+  // when a reviewer clicks a sibling bill's page in the thumbnail rail.
+  function requestGoToDocument(id: number | null, page?: number | null) {
     if (id === null) {
       toast.info('No more documents in that direction.')
       return
     }
     if (dirty) {
-      setConfirmAction({ kind: 'navigate', targetId: id })
+      setConfirmAction({ kind: 'navigate', targetId: id, targetPage: page ?? null })
       return
     }
-    goToDocument(id)
+    goToDocument(id, page)
   }
 
-  // Guarded entry point for re-extract (checklist 1.6): confirms first when
-  // there are unsaved edits that the new extraction run would silently wipe
-  // out on remount.
+  // PdfViewer's thumbnail rail shows every page of the shared source PDF,
+  // including sibling bills' own pages -- clicking one that isn't in this
+  // bill's own page range should switch the whole workspace (OCR form
+  // included) to whichever bill actually owns that page, landing on it
+  // directly, rather than just scrolling the canvas to a page whose data
+  // isn't the one on screen.
+  function handleRequestBillSwitch(targetDocumentExtractionId: number, pageNumber: number) {
+    requestGoToDocument(targetDocumentExtractionId, pageNumber)
+  }
+
+  // Guarded entry point for re-extract (checklist 1.6): always confirms
+  // first, not just when there are unsaved edits to lose -- forcing a new
+  // Sonnet run costs real money on every call regardless of dirty state, so
+  // it should never fire straight from a keypress or a menu click.
   function requestReExtract() {
-    if (dirty) {
-      setConfirmAction({ kind: 're-extract' })
-      return
-    }
-    void handleReExtract()
+    setConfirmAction({ kind: 're-extract' })
   }
 
   function confirmPendingAction() {
@@ -588,7 +603,7 @@ export function ReviewWorkspace({
     if (confirmAction.kind === 're-extract') {
       void handleReExtract()
     } else {
-      goToDocument(confirmAction.targetId)
+      goToDocument(confirmAction.targetId, confirmAction.targetPage)
     }
     setConfirmAction(null)
   }
@@ -925,8 +940,10 @@ export function ReviewWorkspace({
       // forces a new Sonnet run and, via review/page.tsx's run-id key,
       // remounts the whole workspace from the database -- previously a
       // single unmodified `r` silently discarded every unsaved correction.
-      // Shift+R (default) plus a confirm-when-dirty gate makes that a
-      // deliberate choice instead of a typo.
+      // Alt+R (default) always confirms before running (requestReExtract
+      // below) -- forcing a new Sonnet run costs real money and, via
+      // review/page.tsx's run-id key, remounts the whole workspace from the
+      // database, discarding any unsaved corrections.
       if (matchesBinding(e, keymap.reExtract)) {
         e.preventDefault()
         requestReExtract()
@@ -1058,7 +1075,7 @@ export function ReviewWorkspace({
                   Documents inbox's "Extract now (Haiku)" — and Sonnet costs
                   materially more per document, so the choice should be
                   deliberate. */}
-              {reExtracting ? 'Re-extracting…' : 'Re-extract with Sonnet (Shift+R)'}
+              {reExtracting ? 'Re-extracting…' : 'Re-extract with Sonnet (Alt+R)'}
             </DropdownMenuItem>
             <DropdownMenuItem onClick={openHubStatus} disabled={!detail.canSetHubStatus || formDisabled}>
               Hub status (S)
@@ -1224,10 +1241,17 @@ export function ReviewWorkspace({
             sourceDocumentId={detail.sourceDocumentId}
             documentExtractionId={detail.documentExtractionId}
             pageNumberStart={detail.pageNumberStart}
+            initialPageOverride={initialPageOverride}
             pages={detail.pages}
             uncertainFields={detail.uncertainFields}
             collapsed={paneMode === 'collapsed'}
             onPageInfoChange={handlePdfPageInfoChange}
+            billPageRanges={detail.siblingBills.map((b) => ({
+              documentExtractionId: b.documentExtractionId,
+              pageNumberStart: b.pageNumberStart,
+              pageNumberEnd: b.pageNumberEnd,
+            }))}
+            onRequestBillSwitch={handleRequestBillSwitch}
           />
         </div>
 
@@ -1299,11 +1323,17 @@ export function ReviewWorkspace({
         <DialogContent>
           <DialogHeader>
             <DialogTitle>
-              {confirmAction?.kind === 're-extract' ? 'Discard unsaved corrections?' : 'Leave without saving?'}
+              {confirmAction?.kind === 're-extract'
+                ? dirty
+                  ? 'Discard unsaved corrections and re-extract?'
+                  : 'Re-extract this document with Sonnet?'
+                : 'Leave without saving?'}
             </DialogTitle>
             <DialogDescription>
               {confirmAction?.kind === 're-extract'
-                ? 'Re-extracting with Sonnet rebuilds this form from a new OCR run. Your unsaved corrections on this document will be lost.'
+                ? dirty
+                  ? 'Re-extracting with Sonnet rebuilds this form from a new OCR run. Your unsaved corrections on this document will be lost.'
+                  : 'This runs a new Sonnet extraction on the whole document, which costs more than the original Haiku pass. Only do this if the current extraction is genuinely wrong.'
                 : 'This document has unsaved corrections. Moving to another document discards them.'}
             </DialogDescription>
           </DialogHeader>
@@ -1312,7 +1342,7 @@ export function ReviewWorkspace({
               Cancel
             </Button>
             <Button type="button" variant="destructive" onClick={confirmPendingAction}>
-              {confirmAction?.kind === 're-extract' ? 'Re-extract anyway' : 'Discard and continue'}
+              {confirmAction?.kind === 're-extract' ? 'Re-extract' : 'Discard and continue'}
             </Button>
           </DialogFooter>
         </DialogContent>

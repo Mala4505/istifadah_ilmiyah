@@ -39,8 +39,8 @@
  * Types with no destination specified by the plan (department_vs_audit_
  * variance, allocation_sum_mismatch, unknown_status_code, missing_
  * documentation, other, audit_ambiguous_match, ocr_leaked_tag_syntax,
- * vendor_gstin_invalid_checksum) get a sensible one-liner and no button,
- * rather than a guessed link.
+ * ocr_meta_commentary, vendor_gstin_invalid_checksum) get a sensible
+ * one-liner and no button, rather than a guessed link.
  */
 
 export interface ExceptionActionRow {
@@ -76,6 +76,8 @@ const STATIC_WHAT_TO_DO: Record<string, string> = {
   other: 'Read the description for details on what to check.',
   audit_ambiguous_match: 'Multiple Audit-portal rows could match this entry — confirm the right one manually.',
   ocr_leaked_tag_syntax: 'A field was blanked because it contained stray formatting artefacts — re-check it manually.',
+  ocr_meta_commentary:
+    'A field was blanked because it looked like the model’s own commentary about the document rather than real content — re-check it manually.',
   vendor_gstin_invalid_checksum: 'The vendor GSTIN failed its checksum — it was likely misread; correct it.',
 }
 

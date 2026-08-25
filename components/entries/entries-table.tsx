@@ -15,7 +15,15 @@ import { formatDate, formatMoney, hubStatusBadgeVariant, statusBadgeVariant } fr
 // at minimum". Each key here is also a valid SortColumn (see types.ts) — the
 // values are identical strings on purpose, so no translation table is needed
 // between "which column was clicked" and "what to sort by".
-const SORTABLE_COLUMNS = new Set<ColumnKey>(['date', 'amount', 'vendor_display_name', 'status_label'])
+const SORTABLE_COLUMNS = new Set<ColumnKey>([
+  'date',
+  'amount',
+  'vendor_display_name',
+  'status_label',
+  'ubbl_number',
+  'main_number',
+  'budget_head_short_label',
+])
 
 export function EntriesTable({
   rows,
@@ -42,7 +50,14 @@ export function EntriesTable({
   const someOnPageSelected = rows.some((r) => selected.has(r.id))
 
   return (
-    <div className="rounded-lg border border-border">
+    // Phase 5 §7.7 (docs/pre-deploy-findings-and-plan.md): at 430px viewport
+    // width this table's columns (up to 16, several fixed-width money/date
+    // cells) pushed the page body wider than the viewport instead of
+    // scrolling internally — same `overflow-x-auto` convention as
+    // components/reports/data-table.tsx and
+    // components/review/extraction-form.tsx's line-items table. No columns
+    // removed; this is containment, not content reduction.
+    <div className="overflow-x-auto rounded-lg border border-border">
       <Table>
         <TableHeader>
           <TableRow>

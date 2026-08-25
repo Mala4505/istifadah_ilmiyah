@@ -15,7 +15,7 @@ One-glance answer to "what's implemented, what's left." Full detail: §15 (Defin
 | **0 — Prerequisites** | — | ✅ Done (2026-08-11) | Nothing. |
 | **1A — The portal** | ✅ Complete (all 7 days merged) | ✅ Data + Security bullets **live-verified against production** (2026-08-13, via direct DB checks + 3 parallel verification passes). ⚠️ Workflow bullets (dry-run/commit, enrichment editing, export batch, exception resolution) are code-complete but not yet click-through-tested live. ⚠️ CSP is code-verified only — no production domain on file to check live headers/console. | **Yours:** confirm Sentry is receiving errors (one step, §17.18); restore a backup into `dev` (§17.19); enable leaked-password-protection in the Supabase dashboard (one click, not push-able from here safely). **Either:** click through the Workflow bullets live once, and check CSP against the real domain in a browser. |
 | **1B — Verification & review** | ✅ Complete (all 5 days merged) | ⚠️ Not yet run against real data — blocked on the 21 real invoices being labeled | **Yours:** write blind pre-notes for ~10 of the 21 invoices into `test/gold-blind-notes.json`, then upload + correct all 21 through the site (§18). **Mine, once that's done:** run `npm run gold:build` then `npm run score` and confirm every §9.1 bar is met; confirm cheque/passbook non-financial classification and Gujarati auto-escalation; measure real OCR cost/doc and reviewer speed. |
-| **2 — Analytics engine** | Not started, by design (§14) | — | Gated on ~200 verified documents existing (a byproduct of running Phase 1B, not separate work). Nothing to do until then. |
+| **2 — Analytics engine** | **Built** (correction added 2026-08-25 — see below) | Code-verified | The status this row originally carried ("not started, by design") is stale and was wrong: `lib/jobs/handlers/flags-run.ts`, `lib/analytics/rules/compliance.ts`, `lib/analytics/rules/vendor-patterns.ts`, and four analytics views (`v_compliance_summary`, `v_vendor_concentration`, `v_spend_by_family`, `v_rate_benchmark`) are all built and wired into the job queue — via a rule-based sweep job, not the LLM-driven "nightly Claude flagging pass" this section originally envisioned. Vendor fuzzy clustering (GSTIN/phone/address matching to auto-group vendor variants) is the one piece of the original §14 scope genuinely not built. |
 | **3 — Two-way integration** | Bookmarklet reader, Audit-side import and Departmental scrape all built 2026-08-12 and unit-tested; **not yet run against a live portal**. Audit↔Hub linkage itself is verified 8/8 against real fixtures (§17.23, `test/unit/portal-linkage.test.ts`) — what's outstanding is exercising the bookmarklet against the actual live pages. **API push-back DESCOPED 2026-08-13 (your call) — will not be built.** Both directions stay manual Excel: Departmental/Audit export to `.xlsx`, imported via `/import`; Hub status changes export to `.xlsx` via the existing `/export` screen, applied by hand on the other side. No API endpoint, ever, for this. | — | **Yours:** confirmed daily order is Departmental .xlsx export first, then the Audit portal (§17.23) — the Audit portal only exposes its own entry number, which lands in `main_number`, so an entry must exist before the Audit row can link to it. Install the bookmarklet from `/import/bookmarklet`, run it once against each portal **in that order**, and send me what the overlay reports. **Mine:** fix whatever that surfaces. Two-way integration is then complete — nothing further planned for §14 Phase 3. |
 | **4 — Windows Server cutover** | Not started | — | **Parked at your request** — nothing to do until you un-park it. |
 | **5 — Event operations** | Runbook only (§16) | — | Nothing to build; becomes active once the event starts. |
@@ -1891,15 +1891,16 @@ As of 2026-08-13 (originally 2026-08-11; see §0.1 for the current one-glance su
 - [ ] Write your own read (vendor, invoice number, total, line items) into `test/gold-blind-notes.json` for **~10 of the 21 invoices, before uploading them** — this is what makes those 10 a genuine blind check rather than another correction (§17.22). Copy `test/gold-blind-notes.example.json` to start; see `test/gold.README.md`.
 - [ ] Upload and correct all 21 through the site as normal, then run `npm run gold:build` — no `gold.json` editing needed
 
-### Phase 2 — Analytics engine (not started, by design — §14)
+### Phase 2 — Analytics engine (correction added 2026-08-25: mostly built, not "not started")
 
-**Mine** (once gated on ~200 verified documents)
-- [ ] Item catalog + `item_key` normalization — LLM-assisted clustering with human confirmation
-- [ ] Rate comparison across vendors
-- [ ] Rate drift over time, same vendor/item
-- [ ] Vendor clustering detection (GSTIN-prefix, phone, address) — proposes only, never auto-merges
-- [ ] `flags-run` — duplicate payment, discount inconsistency, missing documentation
-- [ ] Morning digest email; Playwright coverage of the review-save path
+This section's original "not started, by design" framing is stale — a rule-based version of this shipped without this document being updated. Current status per item:
+
+- [x] `flags-run` — recurring sweep job (`lib/jobs/handlers/flags-run.ts`), compliance + vendor-pattern detectors, four analytics views. Built via rule-based detection, not the LLM-assisted approach originally sketched below.
+- [ ] Item catalog + `item_key` normalization — LLM-assisted clustering with human confirmation — **not built**
+- [ ] Rate comparison across vendors — **not built** (see §5.5's "Rate benchmark" empty state, no data yet either way)
+- [ ] Rate drift over time, same vendor/item — **not built**
+- [ ] Vendor clustering detection (GSTIN-prefix, phone, address) — proposes only, never auto-merges — **not built**; `vendor.cluster_group_id` column exists but nothing populates it
+- [ ] Morning digest email; Playwright coverage of the review-save path — **not built**
 
 **Yours** — none yet. The prerequisite (~200 verified documents) is a byproduct of running Phase 1B, not a separate task.
 

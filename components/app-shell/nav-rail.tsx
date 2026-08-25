@@ -59,8 +59,8 @@ const NAV_ITEMS = [
   { label: 'Exceptions', href: '/exceptions', icon: TriangleAlert },
   { label: 'Reports', href: '/reports', icon: FileBarChart },
   { label: 'Shortcuts', href: '/shortcuts', icon: Keyboard },
-  { label: 'Settings', href: '/settings', icon: Settings, adminOnly: true },
   { label: 'Export', href: '/export', icon: Download, adminOnly: true },
+  { label: 'Settings', href: '/settings', icon: Settings, adminOnly: true },
 ] as const
 
 function initialsFor(name: string): string {
@@ -256,7 +256,7 @@ export function NavRail({
               <div className="flex items-center justify-between gap-2 px-1.5 py-1">
                 <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
                   <kbd className="rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[10px]">
-                    Ctrl K
+                    Alt K
                   </kbd>
                   <span>jump to entry</span>
                 </div>

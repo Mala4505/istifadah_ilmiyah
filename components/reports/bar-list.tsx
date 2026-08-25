@@ -12,6 +12,14 @@ export type BarListItem = {
   marker?: number | null
   markerLabel?: string
   note?: string
+  /**
+   * Optional per-item override for the bar's fill — a literal Tailwind
+   * `bg-[...]` class (with a `dark:bg-[...]` pair), e.g. one of
+   * severity-badge.tsx's status colors, for callers that need to color-code
+   * individual bars by status rather than rank. Omit to keep today's single
+   * fixed accent hue.
+   */
+  colorClass?: string
 }
 
 /**
@@ -56,7 +64,13 @@ export function BarList({
               {/* Width/position come from a build-time Tailwind class, never an
                   inline style attribute — see lib/reports/bar-scale.ts for why:
                   production CSP's style-src has no 'unsafe-inline'. */}
-              <div className={cn('h-full rounded-full bg-[#2a78d6] dark:bg-[#3987e5]', barWidthClass(pct))} />
+              <div
+                className={cn(
+                  'h-full rounded-full',
+                  item.colorClass ?? 'bg-[#2a78d6] dark:bg-[#3987e5]',
+                  barWidthClass(pct)
+                )}
+              />
               {markerPct != null && (
                 <div
                   className={cn('absolute top-0 h-1.5 w-0.5 bg-foreground/70', barLeftClass(markerPct))}

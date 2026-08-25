@@ -21,11 +21,16 @@ function formatMoney(value: number | null): string {
 const MIN_QUERY_LENGTH = 2
 const SEARCH_DEBOUNCE_MS = 200
 
-// Cmd/Ctrl-K command palette (MASTER-PLAN §5 "Navigation" — jump to entry by
-// UBBL, Main number, or invoice number). Reuses searchEntriesForAttach
-// (lib/actions/documents.ts) rather than a second copy of the same
-// UBBL/main/vendor/invoice OR-search -- it's already RLS-scoped and read-only
-// for any active staff member, which is exactly this palette's access shape.
+// Alt-K command palette (MASTER-PLAN §5 "Navigation" — jump to entry by
+// UBBL, Main number, or invoice number). Alt rather than Ctrl/Cmd
+// (lib/shortcuts/config.ts's doc comment explains the app-wide policy):
+// Ctrl+K collides with a common browser/OS shortcut and, more importantly,
+// fires while a user is simply editing text with the Ctrl key held for
+// something else -- Alt+letter is a combination normal typing and editing
+// never produces. Reuses searchEntriesForAttach (lib/actions/documents.ts)
+// rather than a second copy of the same UBBL/main/vendor/invoice OR-search --
+// it's already RLS-scoped and read-only for any active staff member, which is
+// exactly this palette's access shape.
 export function CommandPalette() {
   const router = useRouter()
   const [open, setOpen] = useState(false)
@@ -37,7 +42,7 @@ export function CommandPalette() {
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === 'k' && (event.metaKey || event.ctrlKey)) {
+      if (event.key.toLowerCase() === 'k' && event.altKey) {
         event.preventDefault()
         setOpen((current) => !current)
       }

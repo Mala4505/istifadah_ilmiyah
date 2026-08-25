@@ -32,17 +32,20 @@ const CONFIGURABLE_ACTION_IDS = new Set<ShortcutActionId>(
 )
 
 /**
- * Anti-regression rule (plan §2.1): the whole reason this screen exists is a
- * previous bug where bare letter keys fired review-screen shortcuts while a
- * reviewer was simply typing. A user must not be able to reintroduce that by
- * rebinding a shortcut back onto a bare key, so every override needs at
- * least one modifier -- including `jumpToLineDigit`, whose `key` is always
- * `''` (the digit itself isn't configurable, see lib/shortcuts/config.ts)
- * but which still needs a modifier, since a bare 1-9 press is exactly the
- * failure mode being guarded against.
+ * Anti-regression rule (plan §2.1, tightened): the whole reason this screen
+ * exists is a previous bug where bare letter keys fired review-screen
+ * shortcuts while a reviewer was simply typing. Requiring "any modifier"
+ * wasn't enough on its own -- Shift+letter is just typing a capital letter,
+ * and Ctrl+letter collides with common text-editing shortcuts (select-all,
+ * copy, undo) -- both still fired accidentally. Alt+letter is a combination
+ * normal typing and editing never produces, so it's the one modifier every
+ * override must include, on top of whatever else the user layers on. This
+ * covers `jumpToLineDigit` too, whose `key` is always `''` (the digit itself
+ * isn't configurable, see lib/shortcuts/config.ts) -- a bare or Ctrl/Shift-only
+ * 1-9 press is exactly the failure mode being guarded against.
  */
-function hasAnyModifier(binding: ShortcutBinding): boolean {
-  return !!binding.alt || !!binding.shift || !!binding.ctrl || !!binding.meta
+function hasRequiredModifier(binding: ShortcutBinding): boolean {
+  return !!binding.alt
 }
 
 export async function saveKeymapPreferences(input: SaveKeymapPreferencesInput): Promise<SimpleActionResult> {
@@ -59,10 +62,10 @@ export async function saveKeymapPreferences(input: SaveKeymapPreferencesInput): 
     if (!CONFIGURABLE_ACTION_IDS.has(actionId)) {
       return { ok: false, error: `"${rawActionId}" cannot be rebound.` }
     }
-    if (!hasAnyModifier(binding)) {
+    if (!hasRequiredModifier(binding)) {
       return {
         ok: false,
-        error: 'Shortcuts need at least one modifier key (Alt, Ctrl, or Shift) to avoid firing while typing.',
+        error: 'Shortcuts must include the Alt key (e.g. Alt+E) so they never fire while typing.',
       }
     }
     overrides[actionId] = {

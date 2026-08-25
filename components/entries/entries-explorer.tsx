@@ -20,17 +20,6 @@ import type { ColumnKey, EntriesFilters, EntriesSort, EntryEnriched, FilterOptio
 import { NewEntryDialog } from './new-entry-dialog'
 import { isAdminOrAbove, type StaffRole } from '@/lib/auth/roles'
 
-const EMPTY_OPTIONS: FilterOptions = {
-  departments: [],
-  budgetHeads: [],
-  adminHeads: [],
-  zones: [],
-  costCenters: [],
-  statuses: [],
-  auditStatuses: [],
-  hubStatuses: [],
-}
-
 function filtersToSearchParams(filters: EntriesFilters): URLSearchParams {
   const sp = new URLSearchParams()
   if (filters.department) sp.set('dept', filters.department)
@@ -73,44 +62,22 @@ function searchParamsToFilters(sp: URLSearchParams): EntriesFilters {
 // §1/§2): "a sorted view stays copy-pasteable." Only written to the URL when it
 // differs from the default, so the common case (id desc, unsorted) doesn't clutter
 // every entries-list link with `?sort=id&dir=desc`.
-const SORT_COLUMNS: SortColumn[] = ['id', 'amount', 'date', 'vendor_display_name', 'status_label']
+const SORT_COLUMNS: SortColumn[] = [
+  'id',
+  'amount',
+  'date',
+  'vendor_display_name',
+  'status_label',
+  'ubbl_number',
+  'main_number',
+  'budget_head_short_label',
+]
 
 function sortToSearchParams(sort: EntriesSort): URLSearchParams {
   const sp = new URLSearchParams()
   if (sort.column !== DEFAULT_SORT.column) sp.set('sort', sort.column)
   if (sort.direction !== DEFAULT_SORT.direction) sp.set('dir', sort.direction)
   return sp
-}
-
-// Phase 6 Step 2 (docs/event-scoping-and-review-fixes-plan.md §1): the
-// department/admin_head/zone dropdowns below are filtered through the
-// per-event membership tables so a switch to a new event presents its own
-// "clean slate" (§1.1) rather than every master row that has ever existed.
-//
-// This is a Client Component (filter state lives in the URL via
-// useSearchParams), so it can't call next/headers' cookies() the way
-// lib/events/current.ts's getSelectedEventId does — that helper is
-// server-only. `active_event_id` (lib/events/current.ts's
-// ACTIVE_EVENT_COOKIE) is written without `httpOnly` (lib/actions/events.ts's
-// setActiveEvent), so it's readable here; this mirrors getSelectedEventId's
-// exact fallback logic (cookie, verified against a live event row, else the
-// current event) against the browser client instead.
-function readActiveEventIdCookie(): number | null {
-  if (typeof document === 'undefined') return null
-  const match = document.cookie.match(/(?:^|;\s*)active_event_id=([^;]*)/)
-  if (!match) return null
-  const parsed = Number(decodeURIComponent(match[1] ?? ''))
-  return Number.isFinite(parsed) ? parsed : null
-}
-
-async function resolveSelectedEventId(supabase: ReturnType<typeof createClient>): Promise<number | null> {
-  const cookieId = readActiveEventIdCookie()
-  if (cookieId !== null) {
-    const { data } = await supabase.from('event').select('id').eq('id', cookieId).maybeSingle()
-    if (data) return data.id as number
-  }
-  const { data: current } = await supabase.from('event').select('id').eq('is_current', true).maybeSingle()
-  return (current?.id as number | undefined) ?? null
 }
 
 function searchParamsToSort(sp: URLSearchParams): EntriesSort {
@@ -122,7 +89,29 @@ function searchParamsToSort(sp: URLSearchParams): EntriesSort {
   }
 }
 
-export function EntriesExplorer() {
+// Phase 5 §8.1 (docs/pre-deploy-findings-and-plan.md): the filter-dropdown
+// lookups (departments, budget heads, admin heads, zones, cost centers,
+// statuses, hub statuses) and the viewer's own role/department-ids used to
+// be fetched here in a client-side useEffect chain that fired after mount --
+// several sequential/parallel round trips gating first paint, and the
+// biggest single contributor to Entries being the slowest screen in the app
+// (3.7s to settle at 14 entries). app/(app)/entries/page.tsx now resolves
+// all of it server-side (same event-membership-scoped logic, moved
+// verbatim) and passes it down as props, so first paint carries this data
+// instead of waiting on it. Seeded into state once via useState's
+// lazy-initializer form is intentional, not a bug: page.tsx is the sole
+// caller (verified via grep — no other importer), it always fully remounts
+// this component on navigation to /entries, and in-page filter/sort changes
+// never change these props, so there is nothing to resync against.
+export function EntriesExplorer({
+  initialOptions,
+  initialRole,
+  initialOwnDepartmentIds,
+}: {
+  initialOptions: FilterOptions
+  initialRole: StaffRole | null
+  initialOwnDepartmentIds: number[]
+}) {
   const supabase = useMemo(() => createClient(), [])
   const router = useRouter()
   const pathname = usePathname()
@@ -130,11 +119,11 @@ export function EntriesExplorer() {
 
   const [filters, setFilters] = useState<EntriesFilters>(() => searchParamsToFilters(searchParams))
   const [sort, setSort] = useState<EntriesSort>(() => searchParamsToSort(searchParams))
-  const [options, setOptions] = useState<FilterOptions>(EMPTY_OPTIONS)
-  const [optionsLoaded, setOptionsLoaded] = useState(false)
-  const [role, setRole] = useState<StaffRole | null>(null)
-  // Empty once loaded = an all-departments account; the New-entry form then has to ask which department.
-  const [ownDepartmentIds, setOwnDepartmentIds] = useState<number[]>([])
+  const [options] = useState<FilterOptions>(initialOptions)
+  const optionsLoaded = true
+  const [role] = useState<StaffRole | null>(initialRole)
+  // Empty = an all-departments account; the New-entry form then has to ask which department.
+  const [ownDepartmentIds] = useState<number[]>(initialOwnDepartmentIds)
 
   const [pages, setPages] = useState<EntryEnriched[][]>([])
   const [hasMoreFlags, setHasMoreFlags] = useState<boolean[]>([])
@@ -153,105 +142,6 @@ export function EntriesExplorer() {
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const requestIdRef = useRef(0)
-
-  // ---- filter options + own role (once) --------------------------------
-  useEffect(() => {
-    let cancelled = false
-    async function loadOptions() {
-      const selectedEventId = await resolveSelectedEventId(supabase)
-
-      // Membership ids fetched first (department_id/admin_head_id/zone_id
-      // arrays), then used to filter the master-row queries below — cheap at
-      // this app's volumes, and keeps every dropdown source-of-truth query
-      // parallel with the rest instead of nesting round trips.
-      const [deptMembership, headMembership, zoneMembership] =
-        selectedEventId === null
-          ? [{ data: [] as { department_id: number }[] }, { data: [] as { admin_head_id: number }[] }, { data: [] as { zone_id: number }[] }]
-          : await Promise.all([
-              supabase.from('event_department').select('department_id').eq('event_id', selectedEventId),
-              supabase.from('event_admin_head').select('admin_head_id').eq('event_id', selectedEventId),
-              supabase.from('event_zone').select('zone_id').eq('event_id', selectedEventId),
-            ])
-      const departmentMemberIds = (deptMembership.data ?? []).map((r) => r.department_id)
-      const adminHeadMemberIds = (headMembership.data ?? []).map((r) => r.admin_head_id)
-      const zoneMemberIds = (zoneMembership.data ?? []).map((r) => r.zone_id)
-
-      const [dept, bh, adminHead, zone, costCenter, status, hub, userRes] = await Promise.all([
-        selectedEventId === null
-          ? supabase.from('department').select('id,name').eq('is_active', true).order('name')
-          : supabase.from('department').select('id,name').eq('is_active', true).in('id', departmentMemberIds).order('name'),
-        supabase.from('budget_head').select('id,raw_label,short_label,department_id').order('raw_label'),
-        selectedEventId === null
-          ? supabase.from('admin_head').select('id,name,head_number,department_id').eq('is_active', true).order('head_number')
-          : supabase
-              .from('admin_head')
-              .select('id,name,head_number,department_id')
-              .eq('is_active', true)
-              .in('id', adminHeadMemberIds)
-              .order('head_number'),
-        selectedEventId === null
-          ? supabase.from('zone').select('id,name,zone_number,department_id').eq('is_active', true).order('zone_number')
-          : supabase
-              .from('zone')
-              .select('id,name,zone_number,department_id')
-              .eq('is_active', true)
-              .in('id', zoneMemberIds)
-              .order('zone_number'),
-        supabase.from('cost_center').select('id,name').order('name'),
-        supabase.from('entry_status').select('id,code,label,source_system').order('sort_order'),
-        supabase.from('hub_status').select('id,code,label').order('sort_order'),
-        supabase.auth.getUser(),
-      ])
-      if (cancelled) return
-
-      const nextOptions: FilterOptions = {
-        departments: (dept.data ?? []).map((d) => ({ id: d.id, label: d.name })),
-        budgetHeads: (bh.data ?? []).map((b) => ({
-          id: b.id,
-          label: b.short_label ?? b.raw_label,
-          department_id: b.department_id,
-        })),
-        adminHeads: (adminHead.data ?? []).map((h) => ({ id: h.id, label: `${h.head_number}. ${h.name}`, department_id: h.department_id })),
-        zones: (zone.data ?? []).map((z) => ({ id: z.id, label: `${z.zone_number}. ${z.name}`, department_id: z.department_id })),
-        costCenters: (costCenter.data ?? []).map((c) => ({ id: c.id, label: c.name })),
-        statuses: (status.data ?? [])
-          .filter((s) => s.source_system === 'departmental')
-          .map((s) => ({ id: s.id, label: s.label, code: s.code })),
-        auditStatuses: (status.data ?? [])
-          .filter((s) => s.source_system === 'audit')
-          .map((s) => ({ id: s.id, label: s.label, code: s.code })),
-        hubStatuses: (hub.data ?? []).map((h) => ({ id: h.id, label: h.label, code: h.code })),
-      }
-      setOptions(nextOptions)
-      setOptionsLoaded(true)
-
-      const user = userRes.data.user
-      if (user) {
-        const { data: profile } = await supabase
-          .from('staff_profile')
-          .select('role')
-          .eq('id', user.id)
-          .maybeSingle()
-        // department_id no longer lives on staff_profile (20260819000003) — a
-        // dept account may now hold several departments via staff_department.
-        const { data: deptRows } =
-          profile?.role === 'dept'
-            ? await supabase.from('staff_department').select('department_id').eq('staff_id', user.id)
-            : { data: [] as { department_id: number }[] }
-        if (!cancelled) {
-          setRole((profile?.role as typeof role) ?? null)
-          setOwnDepartmentIds((deptRows ?? []).map((d) => d.department_id as number))
-        }
-      }
-    }
-    loadOptions().catch((err) => {
-      console.error('[entries] failed to load filter options', err)
-    })
-    return () => {
-      cancelled = true
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
 
   // ---- fetch page 1 whenever filters or sort change, debounced + URL-synced ----
   useEffect(() => {
@@ -394,10 +284,10 @@ export function EntriesExplorer() {
   const isLastPage = pageIndex === pages.length - 1 && !hasMoreFlags[pageIndex]
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex min-w-0 flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-xl font-semibold tracking-tight">Entries</h1>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {/* Typing an entry is a dept/admin/superadmin action (entries_insert,
               20260819000002/20260819000003 — is_staff() gated, department-scoped
               via can_see_department) — dept keeps entry creation under the new
@@ -434,7 +324,7 @@ export function EntriesExplorer() {
           <FilterBar filters={filters} options={options} onChange={handleFilterChange} />
 
           {selected.size > 0 && (
-            <div className="flex items-center gap-3 rounded-lg border border-border bg-accent/40 px-3 py-2 text-sm">
+            <div className="flex flex-wrap items-center gap-3 rounded-lg border border-border bg-accent/40 px-3 py-2 text-sm">
               <span>
                 {selected.size} selected
               </span>

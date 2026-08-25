@@ -2,13 +2,13 @@
 
 For staff running the Istifadah Ilmiyah reconciliation Hub day-to-day. No technical background assumed — this covers the screens that exist today only.
 
-**Your role decides what you can do.** Every account is one of three roles, set by an admin when your account was created:
+**Your role decides what you can do.** Every account is one of three roles, set by a superadmin when your account was created (confirmed 2026-08-19, `20260819000003_role_rbac_v2.sql` — this replaces an earlier Viewer/Reviewer/Admin model that never shipped this way):
 
-- **Viewer** — can look at everything for their department, can change nothing.
-- **Reviewer** — everything a Viewer can do, plus: edit an entry's department fields, change its Hub status, and resolve exceptions — for their own department.
-- **Admin** — everything a Reviewer can do, across every department, plus: run imports, generate export batches, create/manage staff accounts, map budget heads, and merge vendors.
+- **Dept** — assigned to one or more specific departments. Can view Entries, Documents and Reports for those departments, and create manual entries there. **Cannot** open the Review screen at all (it's gated to admin-or-above — you'll see an "Admins only" message), cannot edit an entry's enrichment fields or Hub status, and cannot resolve exceptions. This is a deliberate restriction, not a bug: verifying and resolving is admin-or-above work.
+- **Admin** — everything a Dept account can do, across every department, plus: verify document extractions in Review, edit entry enrichment fields and Hub status, resolve exceptions, run imports, generate export batches, and map budget heads/merge vendors.
+- **Superadmin** — everything Admin can do, plus create/manage staff accounts and assign departments.
 
-If a button doesn't work or a save doesn't stick, the first thing to check is whether your role allows it (see section 6).
+If a button doesn't work or a save doesn't stick, the first thing to check is whether your role allows it (see section 6) — for a Dept account, most write actions outside "create a manual entry" are expected to be unavailable.
 
 ---
 
@@ -18,7 +18,7 @@ Work through this list at the start of the day:
 
 1. **Import today's export.** If an admin, open **Import** and load the latest Departmental file (see section 2). If you're not an admin, ask one to run it.
 2. **Scrape the Audit portal, after the import above — never before.** If an admin, use the bookmarklet to read today's Audit portal entry list into the Hub (see section 2a). This must happen *after* step 1: the Audit portal only links to a Hub entry through a number that today's Departmental import just wrote onto it, so scraping first means every row comes back unmatched. If you're not an admin, ask one to run it.
-3. **Document inbox and Review queue are not built yet** — these are coming in a later phase. Skip them; there is nothing to do here today.
+3. **If you're an admin: work the Review queue.** Open **Documents** to see everything uploaded and where it stands (queued/extracting/extracted, and how many of its bills are reviewed). Open **Review** to verify bills one at a time — see section 3. Dept accounts don't have this step; the Documents inbox is still visible to browse, but Review itself is admin-only.
 4. **Check Exceptions.** Open **Exceptions**, sort by severity (already the default), and resolve or dismiss anything above roughly **₹50,000 at risk** first. Everything else can wait, but don't leave the queue unread.
 5. **Generate an export batch if any Hub status changed today.** If you (or a reviewer) set an entry's status to Awaiting Verification or Awaiting Validation today, an admin should generate and send a status export batch before the day ends (section 5).
 
@@ -83,13 +83,19 @@ Only admins can do this.
 
 ## 3. Reviewing
 
-**The dedicated review queue (with keyboard shortcuts) is not built yet — coming soon.** Until it ships, day-to-day review happens through **Entries**:
+**Admin/superadmin only** — a Dept account cannot open this screen (see section 0).
 
-1. Open **Entries**, find the entry (search or filter by department/vendor/status).
-2. Open it to see the **Enrichment** tab — fill in admin head, zone, cost center, and any remark. This is the only place these fields are edited; importing never overwrites them.
-3. For an invoice that settles an earlier advance payment, use the advance-settlement picker on the entry to link the two.
-4. Use the **Hub status** panel on the entry to move it to Awaiting Verification or Awaiting Validation once you're satisfied with it. **A note explaining why is required every time** — the system will not let you save a status change without one.
-5. The **Change history** tab shows every edit made to the entry, who made it, and when — check this if something looks off.
+1. Open **Review**. It queues unverified bills ordered by severity → confidence → amount, so the riskiest bill is next — not necessarily the next bill in the same PDF.
+2. Each bill shows the source PDF page on the left (jumped to that bill's own page) and the extracted fields on the right. Confirm or correct vendor, invoice number, date, amount and line items; uncertain fields are highlighted.
+3. Search for or attach the matching Hub entry (the match strip suggests candidates). Saving a verified bill advances to the next unverified bill in the *same* document if one remains, otherwise back to the queue.
+4. Keyboard shortcuts exist for the whole flow — see **Shortcuts** in the nav, or the shortcuts overlay on the Review screen itself.
+5. Once a bill is attached and verified, edit the linked entry's own fields from **Entries**:
+   - Open the entry to see the **Enrichment** tab — fill in admin head, zone, cost center, and any remark. This is the only place these fields are edited; importing never overwrites them.
+   - For an invoice that settles an earlier advance payment, use the advance-settlement picker on the entry to link the two.
+   - Use the **Hub status** panel on the entry to move it to Awaiting Verification or Awaiting Validation once you're satisfied with it. **A note explaining why is required every time** — the system will not let you save a status change without one.
+   - The **Change history** tab shows every edit made to the entry, who made it, and when — check this if something looks off.
+
+A Dept account can open **Entries** and **Documents** to browse and can create a manual entry, but cannot edit an existing entry's enrichment fields or Hub status — that's admin/superadmin work, same as Review.
 
 ---
 
@@ -97,14 +103,15 @@ Only admins can do this.
 
 Open **Exceptions**. Each row is a discrepancy the system found automatically, with a severity (High / Medium / Low) and, where relevant, a Rupee amount at risk.
 
-**What you'll actually see today** (raised automatically during import):
+**Raised automatically during import:**
 - **Unknown status code** (Low) — the file used a status word the system hasn't seen before. It still imported fine; this is just a heads-up.
 - **Allocation sum mismatch** (High) — a budget head's reported total doesn't match the sum of its individual entries. Worth a close look before trusting that head's numbers.
 - **ID namespace collision** (High) — the same reference number is being used as both a UBBL Number and a Main Entry Number on different entries. Needs a human to sort out which one is right.
+- **Audit row unmatched** — an Audit-portal row scraped before its matching Departmental entry existed (see section 2a's warning).
 
-**Types you'll start seeing once document review ships** (not active yet — nothing to do about these today): line-item tally mismatch, OCR total vs. amount, department vs. Audit variance, duplicate document, missing documentation.
+**Raised automatically during document review** (Review/Documents have shipped, so these are live now, not future work): line-item tally mismatch, OCR total vs. entry amount, duplicate document hash, page extraction failed, page count mismatch, GST recipient compliance, and a few others — the full list and what to do about each type is in `components/exceptions/labels.ts` / `what-to-do.ts` if you need it.
 
-**Who resolves which:** any Reviewer or Admin can resolve or dismiss an exception in their own department; Admins can act on any department. There's no further split by exception type — whoever is working that department's queue handles whatever is in it.
+**Who resolves which:** resolving or dismissing an exception is admin/superadmin work — same boundary as Review and entry editing (see section 0). A Dept account can see the exceptions in their own department on the Exceptions screen but cannot resolve or dismiss them.
 
 **How:** open the exception, choose Resolve or Dismiss, and **write a note explaining why** — this is required, the same as a status change. "Resolved" with no explanation is not acceptable; someone else needs to be able to understand the decision later.
 

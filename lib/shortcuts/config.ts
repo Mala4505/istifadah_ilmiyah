@@ -48,10 +48,15 @@ export interface ShortcutDefinition {
 }
 
 /**
- * Defaults move off bare letters onto Alt-combinations (plan §2.1) so that
- * stray focus landing outside a form field can no longer fire a command by
- * accident. `jumpToLineDigit` covers the 1-9 row as one entry: only the
- * modifier is configurable, the digit itself always maps to its line index.
+ * Every configurable binding requires Alt (enforced in matchesBinding/
+ * matchLineDigit below, and again server-side in
+ * lib/actions/settings.ts's saveKeymapPreferences) so that neither bare
+ * typing, nor a Ctrl/Shift text-editing combo (select-all, copy, a
+ * capitalized letter), can ever fire a command by accident -- Alt+letter is
+ * not a sequence normal typing or editing ever produces. `jumpToLineDigit`
+ * covers the 1-9 row as one entry: only extra modifiers on top of the
+ * required Alt are configurable, the digit itself always maps to its line
+ * index.
  */
 export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
   {
@@ -79,7 +84,7 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
     id: 'reExtract',
     label: 'Re-extract with Sonnet',
     description: 'Re-runs extraction on the whole document.',
-    default: { key: 'r', shift: true },
+    default: { key: 'r', alt: true },
     configurable: true,
   },
   {
@@ -162,15 +167,19 @@ const DEFAULT_KEYMAP: Keymap = SHORTCUT_DEFINITIONS.reduce((acc, def) => {
 }, {} as Keymap)
 
 /** Merges a user's stored overrides on top of the defaults. Unknown action
- *  ids in `overrides` (e.g. from a removed action) are silently dropped. */
+ *  ids in `overrides` (e.g. from a removed action) are silently dropped. An
+ *  override missing Alt is dropped too, falling back to the (also
+ *  Alt-gated) default -- belt-and-braces alongside saveKeymapPreferences'
+ *  own Alt check, in case a row saved under an older, looser rule ever made
+ *  it into the database. */
 export function resolveKeymap(overrides: Partial<Record<string, ShortcutBinding>>): Keymap {
   const resolved = { ...DEFAULT_KEYMAP }
   for (const def of SHORTCUT_DEFINITIONS) {
     const override = overrides[def.id]
-    if (def.configurable && override && typeof override.key === 'string') {
+    if (def.configurable && override && typeof override.key === 'string' && override.alt) {
       resolved[def.id] = {
         key: override.key,
-        alt: !!override.alt,
+        alt: true,
         shift: !!override.shift,
         ctrl: !!override.ctrl,
         meta: !!override.meta,

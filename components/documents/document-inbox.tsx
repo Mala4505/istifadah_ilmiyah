@@ -6,6 +6,7 @@ import { toast } from 'sonner'
 import { AlertTriangle } from 'lucide-react'
 import { toastError } from '@/components/ui/error-toast'
 import { Button } from '@/components/ui/button'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { bulkAttachDocuments, deleteDocuments, getInboxMatchCandidates } from '@/lib/actions/documents'
 import { BulkEnrichmentDialog } from '@/components/entries/bulk-enrichment-dialog'
 import type { LookupOption } from '@/components/entries/types'
@@ -66,6 +67,7 @@ export function DocumentInbox({
   const [selected, setSelected] = useState<Set<number>>(new Set())
   const [bulkPending, setBulkPending] = useState(false)
   const [deletePending, setDeletePending] = useState(false)
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
   // Follow-up step after a successful bulk attach (checklist 5.12): reuses
   // BulkEnrichmentDialog unmodified, scoped to only the entries that were
   // actually attached (a partial bulk-attach failure must not offer to
@@ -337,27 +339,24 @@ export function DocumentInbox({
    * from storage and every row derived from it, and drops any extraction
    * still queued for it (lib/actions/documents.ts's deleteDocuments).
    *
-   * Confirmed with a native confirm() rather than a dialog component:
-   * this is the one irreversible action on the screen and should not be one
-   * stray click away.
+   * Confirmed with the app's own Dialog component, not a native
+   * window.confirm() -- every confirmation in the app goes through the same
+   * custom modal (matches review-workspace.tsx's confirm dialog and
+   * pdf-viewer.tsx's skip dialog) rather than the browser's own styling,
+   * which a reviewer can dismiss without reading and which some browsers
+   * suppress outright when several fire in a row.
    */
   function handleBulkDelete() {
-    const ids = [...selected]
-    if (ids.length === 0) {
+    if (selected.size === 0) {
       toast.error('Select at least one document to delete.')
       return
     }
-    const noun = ids.length === 1 ? 'document' : 'documents'
-    if (
-      !window.confirm(
-        `Permanently delete ${ids.length} ${noun}?\n\n` +
-          `This removes the uploaded PDF and everything extracted from it, and stops any extraction still queued for it. ` +
-          `It cannot be undone.`
-      )
-    ) {
-      return
-    }
+    setDeleteConfirmOpen(true)
+  }
 
+  function confirmBulkDelete() {
+    const ids = [...selected]
+    setDeleteConfirmOpen(false)
     setDeletePending(true)
     void (async () => {
       const result = await deleteDocuments(ids)
@@ -391,7 +390,10 @@ export function DocumentInbox({
         </div>
       )}
 
-      <UploadDropzone onUploaded={() => router.refresh()} />
+      {/* Compact once the inbox already has documents to show (§7.8f) — the
+          full-size, inviting panel is reserved for a first-time/empty inbox
+          so it doesn't push the list below the fold as it grows. */}
+      <UploadDropzone onUploaded={() => router.refresh()} compact={documents.length > 0} />
 
       {canAct && selectedCount > 0 && (
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border bg-muted/30 px-4 py-2.5">
@@ -443,6 +445,28 @@ export function DocumentInbox({
         costCenterOptions={costCenterOptions}
         onDone={() => router.refresh()}
       />
+
+      <Dialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              Permanently delete {selected.size} {selected.size === 1 ? 'document' : 'documents'}?
+            </DialogTitle>
+            <DialogDescription>
+              This removes the uploaded PDF and everything extracted from it, and stops any extraction still queued
+              for it. It cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setDeleteConfirmOpen(false)}>
+              Cancel
+            </Button>
+            <Button type="button" variant="destructive" onClick={confirmBulkDelete}>
+              Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

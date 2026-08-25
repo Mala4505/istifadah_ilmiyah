@@ -1,6 +1,6 @@
 # Import & Review UX — Plan
 
-**Status:** Nothing in this document is built yet — this is the plan, not a change log. Findings verified against the **working tree** on 2026-08-21 (dirty: the uncertain-fields pass is in progress and uncommitted, see §0a). Companion artifact (stakeholder-facing walkthrough of the same ground): ["Why the review screen feels stuck"](https://claude.ai/code/artifact/a5344ffa-3ca9-41b4-8599-ceee96dc3c76).
+**Status (correction added 2026-08-25):** this line originally read "Nothing in this document is built yet" — that is now false. Every item in the §0 status table (D1-D8, C1, Z1-Z2, L1-L3, V1) has since been built and code-verified against the current `components/review/*` and `app/(app)/review/*` implementation. This document is now a historical record of the design reasoning behind those fixes, not an open plan — see its companion [`import-review-ux-checklist.md`](./import-review-ux-checklist.md) for the (also complete) task-by-task list. Findings were originally verified against the **working tree** on 2026-08-21. Companion artifact (stakeholder-facing walkthrough of the same ground): ["Why the review screen feels stuck"](https://claude.ai/code/artifact/a5344ffa-3ca9-41b4-8599-ceee96dc3c76).
 
 Distinct from [`review-inbox-redesign-plan.md`](./review-inbox-redesign-plan.md), which is the **completed** record of the 2026-08-14 seven-item pass. This document covers ground that pass did not.
 
@@ -18,23 +18,25 @@ The rest is genuine interface work: a hard-coded 50/50 split that starves the fo
 
 ## 0. Status snapshot
 
+_"Status" column corrected 2026-08-25 from "To build" to "Built" for every row — see the top-of-document correction note. Each row maps to a corresponding entry in [`import-review-ux-checklist.md`](./import-review-ux-checklist.md), which the 2026-08-22 pre-deploy audit confirmed complete end to end._
+
 | # | Item | Kind | Status | Size |
 |---|---|---|---|---|
-| D1 | Bill→entry attach writes to a column nothing reads | **Bug** | To build | Small |
-| D2 | Uncertainty highlighting covers line items only; no stepper | Gap | To build | Small |
-| D3 | Bare `R` re-extracts and discards all unsaved edits | **Bug** | To build | Small |
-| D4 | Multi-bill PDF collapses to one arbitrary bill in the inbox | **Bug** | To build | Small–Medium |
-| D5 | Upload blocks on unrelated backlog; timeout reported as failure | **Bug** | To build | Medium |
-| D6 | Inbox re-runs its heaviest query every 4s with no loading state | Perf/UX | To build | Medium |
-| D7 | Import commit has no progress and no `maxDuration` | Gap | To build | Small |
-| D8 | No visible signal when the job queue stops draining | Gap | To build | Small |
-| C1 | Always-present three-state entry match strip | Redesign | To build | Medium |
-| Z1 | Zone + admin head as stage 3 of a visible review flow | Feature | To build | Medium |
-| Z2 | Zone + admin head at the moment of attach in the inbox | Feature | To build | Small |
-| L1 | Retractable PDF pane — three modes, draggable, persisted | Redesign | To build | Medium |
-| L2 | Collapse secondary line-item columns | UX | To build | Small |
-| L3 | Confidence tint applied uniformly to every field | UX | To build | Small |
-| V1 | Validation, dirty state, save-conflict detection | Gap | To build | Medium |
+| D1 | Bill→entry attach writes to a column nothing reads | **Bug** | Built | Small |
+| D2 | Uncertainty highlighting covers line items only; no stepper | Gap | Built | Small |
+| D3 | Bare `R` re-extracts and discards all unsaved edits | **Bug** | Built | Small |
+| D4 | Multi-bill PDF collapses to one arbitrary bill in the inbox | **Bug** | Built | Small–Medium |
+| D5 | Upload blocks on unrelated backlog; timeout reported as failure | **Bug** | Built | Medium |
+| D6 | Inbox re-runs its heaviest query every 4s with no loading state | Perf/UX | Built | Medium |
+| D7 | Import commit has no progress and no `maxDuration` | Gap | Built | Small |
+| D8 | No visible signal when the job queue stops draining | Gap | Built | Small |
+| C1 | Always-present three-state entry match strip | Redesign | Built | Medium |
+| Z1 | Zone + admin head as stage 3 of a visible review flow | Feature | Built | Medium |
+| Z2 | Zone + admin head at the moment of attach in the inbox | Feature | Built | Small |
+| L1 | Retractable PDF pane — three modes, draggable, persisted | Redesign | Built | Medium |
+| L2 | Collapse secondary line-item columns | UX | Built | Small |
+| L3 | Confidence tint applied uniformly to every field | UX | Built | Small |
+| V1 | Validation, dirty state, save-conflict detection | Gap | Built | Medium |
 
 ---
 

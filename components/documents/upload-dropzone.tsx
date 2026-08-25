@@ -192,7 +192,20 @@ function StageTracker({
   )
 }
 
-export function UploadDropzone({ onUploaded }: { onUploaded: () => void }) {
+export function UploadDropzone({
+  onUploaded,
+  compact = false,
+}: {
+  onUploaded: () => void
+  /** Renders a slim, single-row drop target instead of the full ~230px
+   *  invitation panel (MASTER-PLAN §7.8f). Passed by document-inbox.tsx once
+   *  the inbox already holds documents — at that point the panel's job is
+   *  "let me add one more file", not "convince a first-time user to try
+   *  this", so it shouldn't push the list below the fold. Drag-and-drop and
+   *  click-to-browse both keep working identically; only the layout/size of
+   *  the target itself changes. */
+  compact?: boolean
+}) {
   const inputRef = useRef<HTMLInputElement>(null)
   const [items, setItems] = useState<UploadItem[]>([])
   const [isDragging, setIsDragging] = useState(false)
@@ -390,16 +403,30 @@ export function UploadDropzone({ onUploaded }: { onUploaded: () => void }) {
         onDragLeave={() => setIsDragging(false)}
         onDrop={handleDrop}
         className={cn(
-          'flex cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed px-4 py-8 text-center transition-colors sm:py-10',
+          'flex cursor-pointer rounded-lg border-2 border-dashed text-center transition-colors',
+          compact
+            ? 'flex-row items-center justify-center gap-2 px-3 py-2.5'
+            : 'flex-col items-center justify-center gap-2 px-4 py-8 sm:py-10',
           isDragging ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/50 hover:bg-muted/40'
         )}
       >
-        <UploadCloud className="h-8 w-8 text-muted-foreground" aria-hidden="true" />
-        <p className="text-sm font-medium">Drop PDFs here, or tap to browse</p>
-        <p className="max-w-xs text-xs text-muted-foreground">
-          One PDF per document. Nothing uploads or starts extracting until you confirm it below.
-        </p>
-        <Button type="button" variant="outline" size="sm" className="mt-1" onClick={(e) => e.stopPropagation()}>
+        <UploadCloud
+          className={cn('flex-shrink-0 text-muted-foreground', compact ? 'h-4 w-4' : 'h-8 w-8')}
+          aria-hidden="true"
+        />
+        <p className={cn('font-medium', compact ? 'text-xs' : 'text-sm')}>Drop PDFs here, or tap to browse</p>
+        {!compact && (
+          <p className="max-w-xs text-xs text-muted-foreground">
+            One PDF per document. Nothing uploads or starts extracting until you confirm it below.
+          </p>
+        )}
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className={compact ? 'flex-shrink-0' : 'mt-1'}
+          onClick={(e) => e.stopPropagation()}
+        >
           Choose files
         </Button>
         <input

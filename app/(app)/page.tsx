@@ -316,7 +316,19 @@ export default async function DashboardPage() {
               Import ledger data
             </div>
             {data.isAdmin ? (
-              <ImportWorkspace isAdmin={data.isAdmin} />
+              // §7.7 (docs/pre-deploy-findings-and-plan.md): the dry-run/commit
+              // result inside ImportWorkspace renders RowLogTable, an
+              // 8-column table with several fixed/whitespace-nowrap cells
+              // (components/import/row-log-table.tsx) that easily exceeds a
+              // 430px phone viewport. That table doesn't make sense to
+              // stack, so this contains its overflow to a local horizontal
+              // scrollbar instead of pushing the whole page wider —
+              // overflow-y-visible keeps this from also becoming an
+              // accidental vertical scroll container per the CSS spec's
+              // "auto" side-effect when only overflow-x is set.
+              <div className="overflow-x-auto overflow-y-visible">
+                <ImportWorkspace isAdmin={data.isAdmin} />
+              </div>
             ) : (
               <Card className="h-full">
                 <CardHeader>

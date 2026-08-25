@@ -26,6 +26,8 @@ export const EXCEPTION_TYPE_LABELS: Record<string, string> = {
   page_extraction_failed: 'Page extraction failed',
   // GST recipient-compliance check
   gst_recipient_compliance_missing: 'GST recipient details missing',
+  // meta-commentary landing in an OCR text field (finding 10.1)
+  ocr_meta_commentary: 'OCR meta-commentary',
 }
 
 /** In CHECK-constraint order (MASTER-PLAN §3.10 migration). */

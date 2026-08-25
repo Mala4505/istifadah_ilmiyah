@@ -4,6 +4,8 @@
 **Scope:** the whole extraction workflow — ingest → Claude call → schema → pipeline → persist → job queue → review UI.
 **Merges:** this review's findings with the existing multi-bill plan (`~/.claude/plans/resilient-rolling-clover.md`), which is folded in wholesale as Phase 2.
 
+**Status (correction added 2026-08-25):** every P0/P1/P2 issue below in Phase 1 and Phase 2 has since been fixed and code-verified — this document is a historical record of what was wrong, not a live issue list. The individual issue rows below are left unedited (as originally written, describing the bug as it was) rather than retrofitted with strikethroughs. Phase 3 ("deferred") has also since mostly shipped: I16 (Batch API), I4 (SDK upgrade), I15 (queue sweeper), I1 (page-count fallback exception), I17 (duplicate migration timestamp) are all built. Only the request-timeout/page-ceiling question ("Re-evaluate Sonnet necessity", chunked/resumable extraction) remains genuinely open — see `docs/ocr-execution-decision.md` and Phase 11 of `docs/pre-deploy-findings-and-plan.md`.
+
 **Operator decision driving Phase 1:** run **Haiku only** for now. Sonnet is consuming too many tokens. Once Haiku output has been reviewed on real documents, we decide whether Sonnet earns its cost.
 
 ---

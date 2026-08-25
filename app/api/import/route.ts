@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto'
 import * as XLSX from 'xlsx'
 import { createClient } from '@/lib/supabase/server'
 import { EventNotMutableError, runImport } from '@/lib/import/run-import'
+import { getSelectedEventId } from '@/lib/events/current'
 import { withApiLogging } from '@/lib/api-log'
 import { isAdminOrAbove } from '@/lib/auth/roles'
 
@@ -148,12 +149,29 @@ async function handleGET(request: NextRequest) {
     return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 })
   }
 
+  // Phase 6 event scoping: import_batch carries a NOT-NULL, indexed
+  // event_id (20260822000005_event_scoping.sql) and every batch is written
+  // with it (lib/import/run-import.ts), but this route never filtered by
+  // it. Invisible today since only one event exists; the day a second
+  // event is created, this would silently mix every year's batches
+  // together in the /import history list. Scoped to the selected event the
+  // same way the dashboard's import_batch tile already is
+  // (app/(app)/page.tsx's loadDashboardData). selectedEventId is null only
+  // if no event row exists at all (should never happen once the Phase 6
+  // backfill has run) -- short-circuit to an empty result rather than pass
+  // null into .eq(), matching app/(app)/documents/page.tsx and
+  // app/(app)/entries/[id]/page.tsx's convention for that edge case.
+  const selectedEventId = await getSelectedEventId(supabase)
+
   const batchIdParam = request.nextUrl.searchParams.get('batchId')
 
   if (batchIdParam) {
     const batchId = Number(batchIdParam)
     if (!Number.isFinite(batchId)) {
       return NextResponse.json({ error: 'Invalid batchId.' }, { status: 400 })
+    }
+    if (selectedEventId === null) {
+      return NextResponse.json({ error: 'Batch not found.' }, { status: 404 })
     }
 
     const [{ data: batch, error: batchError }, { data: rows, error: rowsError }] = await Promise.all([
@@ -168,11 +186,20 @@ async function handleGET(request: NextRequest) {
     if (batchError || rowsError) {
       return NextResponse.json({ error: 'Could not load batch detail.' }, { status: 500 })
     }
-    if (!batch) {
+    // A batch belonging to a different event than the one currently
+    // selected is treated the same as a nonexistent batch -- past events
+    // stay browsable on their own pages, not leakable by guessing a
+    // batchId across the boundary (see the event-scoping doc's read-only
+    // past-event rule referenced throughout this codebase's other routes).
+    if (!batch || batch.event_id !== selectedEventId) {
       return NextResponse.json({ error: 'Batch not found.' }, { status: 404 })
     }
 
     return NextResponse.json({ batch, rows: rows ?? [] })
+  }
+
+  if (selectedEventId === null) {
+    return NextResponse.json({ batches: [] })
   }
 
   // Dry runs never keep their per-row detail (see lib/import/run-import.ts's
@@ -182,6 +209,7 @@ async function handleGET(request: NextRequest) {
     .from('import_batch')
     .select('*')
     .eq('mode', 'commit')
+    .eq('event_id', selectedEventId)
     .order('started_at', { ascending: false })
     .limit(50)
 

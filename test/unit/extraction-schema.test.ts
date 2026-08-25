@@ -269,14 +269,14 @@ describe('sanitizeExtractionResponse â€” leaked tool-call tag syntax backstop (Â
 
   it('passes a clean extraction through untouched', () => {
     const extraction = extractionWithLineItems()
-    const { cleaned, blankedFields } = sanitizeExtractionResponse(extraction)
+    const { cleaned, leakedTagFields: blankedFields } = sanitizeExtractionResponse(extraction)
     expect(blankedFields).toEqual([])
     expect(cleaned).toEqual(extraction)
   })
 
   it('blanks a header field containing leaked tool-call tag syntax', () => {
     const extraction = extractionWithLineItems({ vendor_gstin: LEAKED_TAG_EXAMPLE })
-    const { cleaned, blankedFields } = sanitizeExtractionResponse(extraction)
+    const { cleaned, leakedTagFields: blankedFields } = sanitizeExtractionResponse(extraction)
     expect(cleaned.bills[0]?.vendor_gstin).toBeNull()
     expect(blankedFields).toEqual(['bills[0].vendor_gstin'])
     // Everything else on the header is untouched, not just vendor_gstin.
@@ -286,7 +286,7 @@ describe('sanitizeExtractionResponse â€” leaked tool-call tag syntax backstop (Â
 
   it('blanks a line-item field containing leaked tag syntax, tagged by bill and line index', () => {
     const extraction = extractionWithLineItems({}, { description: 'Chairs <parameter name="foo">' })
-    const { cleaned, blankedFields } = sanitizeExtractionResponse(extraction)
+    const { cleaned, leakedTagFields: blankedFields } = sanitizeExtractionResponse(extraction)
     expect(cleaned.bills[0]?.line_items[0]?.description).toBeNull()
     expect(blankedFields).toEqual(['bills[0].line_items[0].description'])
     // The rest of the line item survives untouched.
@@ -296,7 +296,7 @@ describe('sanitizeExtractionResponse â€” leaked tool-call tag syntax backstop (Â
 
   it('reports every blanked field across header and line items in one call', () => {
     const extraction = extractionWithLineItems({ vendor_phone: '<foo>' }, { discount: '</bar>' })
-    const { blankedFields } = sanitizeExtractionResponse(extraction)
+    const { leakedTagFields: blankedFields } = sanitizeExtractionResponse(extraction)
     expect(blankedFields).toEqual(['bills[0].vendor_phone', 'bills[0].line_items[0].discount'])
   })
 
@@ -304,7 +304,7 @@ describe('sanitizeExtractionResponse â€” leaked tool-call tag syntax backstop (Â
     // "<" not immediately followed by a word/namespace token is real invoice
     // text (e.g. a quantity threshold), not leaked formatting.
     const extraction = extractionWithLineItems({ notes: 'Item < 5kg, price > 100' })
-    const { cleaned, blankedFields } = sanitizeExtractionResponse(extraction)
+    const { cleaned, leakedTagFields: blankedFields } = sanitizeExtractionResponse(extraction)
     expect(blankedFields).toEqual([])
     expect(cleaned.bills[0]?.notes).toBe('Item < 5kg, price > 100')
   })
@@ -320,7 +320,7 @@ describe('sanitizeExtractionResponse â€” leaked tool-call tag syntax backstop (Â
       // the "tag name" and let arbitrary text span to the next `>`, so real
       // line-item text using `<`/`>` as comparators was wrongly blanked.
       const extraction = extractionWithLineItems({}, { discount: text })
-      const { cleaned, blankedFields } = sanitizeExtractionResponse(extraction)
+      const { cleaned, leakedTagFields: blankedFields } = sanitizeExtractionResponse(extraction)
       expect(blankedFields).toEqual([])
       expect(cleaned.bills[0]?.line_items[0]?.discount).toBe(text)
     }
@@ -385,10 +385,114 @@ describe('sanitizeExtractionResponse â€” leaked tool-call tag syntax backstop (Â
         ],
       })
     )
-    const { cleaned, blankedFields } = sanitizeExtractionResponse(parsed)
+    const { cleaned, leakedTagFields: blankedFields } = sanitizeExtractionResponse(parsed)
     expect(blankedFields).toEqual(['bills[1].vendor_gstin'])
     expect(cleaned.bills[0]?.vendor_gstin).toBe(parsed.bills[0]?.vendor_gstin)
     expect(cleaned.bills[1]?.vendor_gstin).toBeNull()
+  })
+})
+
+describe('sanitizeExtractionResponse â€” meta-commentary backstop (finding 10.1)', () => {
+  /**
+   * Real example from docs/pre-deploy-findings-and-plan.md finding 10.1: a
+   * bill's `notes` field held prose about the document itself, not content
+   * transcribed from it, and its `vendor_name` was misread as the bank on a
+   * cheque as a downstream symptom.
+   */
+  const META_COMMENTARY_EXAMPLE =
+    'Document is partially rotated and heavily skewed; significant text is illegible or obscured. ' +
+    'Bank of Baroda receipt/document with reference number 11100100253. This appears to be a bank receipt.'
+
+  function extractionWithLineItems(
+    headerOverrides: Record<string, unknown> = {},
+    lineItemOverrides: Record<string, unknown> = {}
+  ): ExtractionResponse {
+    return extractionResponseSchema.parse(
+      baseInput(
+        {},
+        {
+          ...headerOverrides,
+          line_items: [
+            {
+              page_number: 1,
+              line_order: 0,
+              description: 'Chairs x4',
+              hsn_sac_code: '9401',
+              quantity: 4,
+              quantity_raw_text: '4 nos',
+              unit: 'NOS',
+              rate: 500,
+              discount: '',
+              amount: 2000,
+              ...lineItemOverrides,
+            },
+          ],
+        }
+      )
+    )
+  }
+
+  it('blanks a header field containing the real production meta-commentary example', () => {
+    const extraction = extractionWithLineItems({ notes: META_COMMENTARY_EXAMPLE })
+    const { cleaned, metaCommentaryFields } = sanitizeExtractionResponse(extraction)
+    expect(cleaned.bills[0]?.notes).toBeNull()
+    expect(metaCommentaryFields).toEqual(['bills[0].notes'])
+  })
+
+  it.each([
+    ['This appears to be a bank receipt.'],
+    ['Significant text is illegible or obscured.'],
+    ['The image is blurry and hard to read in the top section.'],
+    ['This document is a scanned copy that is difficult to discern in places.'],
+    ['Text cannot be verified from the image.'],
+  ])('blanks a field containing meta-commentary: %s', (text) => {
+    const extraction = extractionWithLineItems({ notes: text })
+    const { cleaned, metaCommentaryFields } = sanitizeExtractionResponse(extraction)
+    expect(cleaned.bills[0]?.notes).toBeNull()
+    expect(metaCommentaryFields).toEqual(['bills[0].notes'])
+  })
+
+  it.each([
+    ['This invoice includes GST at 18%'],
+    ['Rate as per agreement dated 12/04/2026'],
+    ['Please remit within 30 days'],
+    ['This bill covers services for August'],
+  ])('does not flag genuine bill/invoice text: %s', (text) => {
+    // False-positive guard, same standard of care as LEAKED_TAG_PATTERN's
+    // own regression story: none of these hedge about the document's
+    // identity ("appears/seems to be", "looks like") or describe its
+    // physical condition (illegible, blurry, skewed, ...), so the pattern
+    // must leave them untouched.
+    const extraction = extractionWithLineItems({ notes: text })
+    const { cleaned, metaCommentaryFields } = sanitizeExtractionResponse(extraction)
+    expect(metaCommentaryFields).toEqual([])
+    expect(cleaned.bills[0]?.notes).toBe(text)
+  })
+
+  it('blanks a line-item field containing meta-commentary, tagged by bill and line index', () => {
+    const extraction = extractionWithLineItems(
+      {},
+      { description: 'This appears to be a torn packing slip, mostly illegible.' }
+    )
+    const { cleaned, metaCommentaryFields } = sanitizeExtractionResponse(extraction)
+    expect(cleaned.bills[0]?.line_items[0]?.description).toBeNull()
+    expect(metaCommentaryFields).toEqual(['bills[0].line_items[0].description'])
+    // The rest of the line item survives untouched.
+    expect(cleaned.bills[0]?.line_items[0]?.hsn_sac_code).toBe('9401')
+    expect(cleaned.bills[0]?.line_items[0]?.amount).toBe(2000)
+  })
+
+  it('categorizes a leaked-tag field and a meta-commentary field independently in one call', () => {
+    const LEAKED_TAG_EXAMPLE = '</antml.parameter><parameter name="vendor_phone">+91 9925755'
+    const extraction = extractionWithLineItems({
+      vendor_phone: LEAKED_TAG_EXAMPLE,
+      notes: META_COMMENTARY_EXAMPLE,
+    })
+    const { cleaned, leakedTagFields, metaCommentaryFields } = sanitizeExtractionResponse(extraction)
+    expect(leakedTagFields).toEqual(['bills[0].vendor_phone'])
+    expect(metaCommentaryFields).toEqual(['bills[0].notes'])
+    expect(cleaned.bills[0]?.vendor_phone).toBeNull()
+    expect(cleaned.bills[0]?.notes).toBeNull()
   })
 })
 
