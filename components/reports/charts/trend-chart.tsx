@@ -2,7 +2,7 @@
 
 import { useState, type PointerEvent, type KeyboardEvent } from 'react'
 import { cn } from '@/lib/utils'
-import { formatNumber } from '@/lib/reports/format'
+import { formatNumber, formatINRCompact } from '@/lib/reports/format'
 import { barLeftClass } from '@/lib/reports/bar-scale'
 import { DataTable, type DataTableColumn } from '@/components/reports/data-table'
 import { Button } from '@/components/ui/button'
@@ -57,13 +57,23 @@ function niceTicks(min: number, max: number, tickCount = 4): number[] {
  * lookup-table helper bar-list.tsx already uses, snapped to 5% steps
  * instead of an inline style.
  */
+// `valueFormatter` used to be a function prop, but this component is a
+// Client Component ('use client' above) rendered from the Server Component
+// page.tsx -- a function reference can't cross that boundary (React errors
+// "Functions cannot be passed directly to Client Components" at render
+// time, digest 429141552, seen live on /reports). A format *name* is plain
+// data and serializes fine; the actual function is resolved locally here,
+// on the client, from this module's own imports.
+const FORMATTERS = { number: formatNumber, 'inr-compact': formatINRCompact } as const
+
 export function TrendChart({
   points,
-  valueFormatter = formatNumber,
+  valueFormat = 'number',
 }: {
   points: TrendPoint[]
-  valueFormatter?: (v: number) => string
+  valueFormat?: keyof typeof FORMATTERS
 }) {
+  const valueFormatter = FORMATTERS[valueFormat]
   const [hoverIndex, setHoverIndex] = useState<number | null>(null)
   const [showTable, setShowTable] = useState(false)
 

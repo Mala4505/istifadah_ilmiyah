@@ -873,7 +873,7 @@ export default async function ReportsPage() {
             ) : spendTrendPoints.length === 0 ? (
               <EmptyState title="Not enough data yet" description="Needs at least one entry, or an event with start/end dates set." />
             ) : (
-              <TrendChart points={spendTrendPoints} valueFormatter={formatINRCompact} />
+              <TrendChart points={spendTrendPoints} valueFormat="inr-compact" />
             )}
           </ReportSection>
 
