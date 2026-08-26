@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Checkbox } from '@/components/ui/checkbox'
+import { DepartmentPicker } from '@/components/admin/department-picker'
 import {
   Dialog,
   DialogContent,
@@ -43,12 +43,6 @@ export function CreateUserDialog({ departments }: { departments: { id: number; n
     setRole('dept')
     setDepartmentIds([])
     setPassword('')
-  }
-
-  function toggleDepartment(departmentId: number, checked: boolean) {
-    setDepartmentIds((current) =>
-      checked ? [...current, departmentId] : current.filter((id) => id !== departmentId)
-    )
   }
 
   function handleSubmit() {
@@ -125,17 +119,12 @@ export function CreateUserDialog({ departments }: { departments: { id: number; n
             {role === 'dept' && (
               <div className="flex flex-col gap-2">
                 <Label>Departments</Label>
-                <div className="flex flex-col gap-2 rounded-md border p-3">
-                  {departments.map((department) => (
-                    <label key={department.id} className="flex items-center gap-2 text-sm">
-                      <Checkbox
-                        checked={departmentIds.includes(department.id)}
-                        onCheckedChange={(value) => toggleDepartment(department.id, value === true)}
-                      />
-                      {department.name}
-                    </label>
-                  ))}
-                </div>
+                <DepartmentPicker
+                  options={departments}
+                  selectedIds={departmentIds}
+                  onChange={setDepartmentIds}
+                  className="w-full"
+                />
               </div>
             )}
           </div>

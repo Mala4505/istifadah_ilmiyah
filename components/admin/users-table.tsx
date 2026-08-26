@@ -9,6 +9,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { updateStaffProfile } from '@/lib/actions/admin'
+import { DepartmentPicker } from '@/components/admin/department-picker'
 
 export type StaffRow = {
   id: string
@@ -26,7 +27,7 @@ const ROLE_LABELS: Record<StaffRow['role'], string> = {
   dept: 'Dept',
 }
 
-/** Order-independent comparison — the checkbox list can toggle ids in any order. */
+/** Order-independent comparison — the department picker can toggle ids in any order. */
 function sameDepartmentIds(a: number[], b: number[]): boolean {
   if (a.length !== b.length) return false
   const sortedA = [...a].sort((x, y) => x - y)
@@ -98,12 +99,6 @@ function UserRow({
   const isDirty =
     role !== row.role || !sameDepartmentIds(departmentIds, row.departmentIds) || isActive !== row.isActive
 
-  function toggleDepartment(departmentId: number, checked: boolean) {
-    setDepartmentIds((current) =>
-      checked ? [...current, departmentId] : current.filter((id) => id !== departmentId)
-    )
-  }
-
   function handleSave() {
     startTransition(async () => {
       const result = await updateStaffProfile({
@@ -132,7 +127,9 @@ function UserRow({
         </TableCell>
         <TableCell className="font-mono text-sm">{row.itsNumber ?? '—'}</TableCell>
         <TableCell>{row.contactEmail ?? '—'}</TableCell>
-        <TableCell>{departmentNames(row.departmentIds, departments)}</TableCell>
+        <TableCell className="max-w-[220px] truncate" title={departmentNames(row.departmentIds, departments)}>
+          {departmentNames(row.departmentIds, departments)}
+        </TableCell>
         <TableCell>{ROLE_LABELS[row.role]}</TableCell>
         <TableCell>{row.isActive ? 'Yes' : 'No'}</TableCell>
         <TableCell className="text-right" />
@@ -153,17 +150,11 @@ function UserRow({
       <TableCell>{row.contactEmail ?? '—'}</TableCell>
       <TableCell>
         {role === 'dept' ? (
-          <div className="flex w-[220px] flex-col gap-1 rounded-md border p-2">
-            {departments.map((department) => (
-              <label key={department.id} className="flex items-center gap-2 text-sm">
-                <Checkbox
-                  checked={departmentIds.includes(department.id)}
-                  onCheckedChange={(value) => toggleDepartment(department.id, value === true)}
-                />
-                {department.name}
-              </label>
-            ))}
-          </div>
+          <DepartmentPicker
+            options={departments}
+            selectedIds={departmentIds}
+            onChange={setDepartmentIds}
+          />
         ) : (
           <span className="text-sm text-muted-foreground">—</span>
         )}
