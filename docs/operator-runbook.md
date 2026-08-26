@@ -56,7 +56,7 @@ Only admins can do this.
 4. **Drag** the blue button that appears — do not click it — to your browser's bookmarks bar. Clicking it here does nothing useful; it only works on the Audit portal's own page.
 5. Keep this in mind about the token:
    - It is shown **once and never again** — if you miss it, revoke it and create a new one.
-   - It **expires in 12 hours**.
+   - It **expires in 30 days**.
    - It **never contains your Audit portal password or login** — it only ever lets the bookmarklet submit rows to the Hub.
    - **Never share it or paste it anywhere** (chat, email, a doc). If you think it's leaked, revoke it from the same **Import → Portal reader** page and create a fresh one.
 
@@ -76,7 +76,7 @@ Only admins can do this.
 - **"No table found on this page."** You're not on the entry list. Navigate there first, then click the bookmark again.
 - **"Could not reach the Hub" and a file downloads instead.** The Audit portal blocked the upload (this is normal for some portals' security settings). The downloaded `.json` file is safe and contains exactly what was read — send it to an admin, or upload it yourself on the **Import** screen.
 - **A warning that the page shows only some of the rows.** The table is paginated and the reader couldn't switch it to show all. Set the page size to show all rows yourself, then click the bookmark again.
-- **"Invalid or expired scrape token."** Your token has expired (12 hours) or was revoked. Go back to **Import → Portal reader**, create a new token, and drag the new bookmark to replace the old one.
+- **"Invalid or expired scrape token."** Your token has expired (30 days) or was revoked. Go back to **Import → Portal reader**, create a new token, and drag the new bookmark to replace the old one.
 - **Everything comes back unmatched.** You scraped the Audit portal before importing today's Departmental export. Import the export first, then click the bookmark again — see the warning at the top of this section.
 
 ---

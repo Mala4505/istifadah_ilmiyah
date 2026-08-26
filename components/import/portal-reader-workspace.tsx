@@ -237,7 +237,7 @@ export function PortalReaderWorkspace({ isAdmin, source, hubUrl }: Props) {
         <div className="flex flex-col gap-3 border-t border-border pt-4">
           <p className="text-sm font-medium">Create a reader link</p>
           <p className="text-xs text-muted-foreground">
-            Shown once and never again. Expires in 12 hours and can be revoked at any time.
+            Shown once and never again. Expires in 30 days and can be revoked at any time.
           </p>
           <div className="flex flex-wrap items-end gap-3">
             <div className="flex flex-col gap-1.5">

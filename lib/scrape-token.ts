@@ -42,14 +42,15 @@ import type { SourceSystem } from '@/lib/import/portal-mapping'
 const TOKEN_BYTES = 32
 
 /**
- * Default lifetime. Long enough to cover a working day of imports, short
- * enough that a token left in a browser bookmark on a shared machine stops
- * being useful overnight.
+ * Default lifetime. Portal imports for a given source system run in bursts
+ * spread across weeks, so the token needs to outlive the whole campaign
+ * rather than a single working day — a month covers that without the
+ * operator having to re-mint and re-paste the bookmarklet mid-import.
  */
-export const DEFAULT_TOKEN_TTL_HOURS = 12
+export const DEFAULT_TOKEN_TTL_HOURS = 24 * 30
 
 /** Upper bound the API refuses to exceed, whatever the caller asks for. */
-export const MAX_TOKEN_TTL_HOURS = 24 * 7
+export const MAX_TOKEN_TTL_HOURS = 24 * 30
 
 export interface MintedScrapeToken {
   /** Plaintext. Returned exactly once, at creation, and never stored. */
