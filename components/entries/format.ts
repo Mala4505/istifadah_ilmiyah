@@ -40,11 +40,20 @@ export function hubStatusBadgeVariant(code: string | null): BadgeProps['variant'
 
 /** Status/audit status are import-observed and open-ended (§3.3) — badge
  * color is a best-effort read on the label text rather than a hard-coded
- * code list, since new codes can appear on any import. */
+ * code list, since new codes can appear on any import.
+ *
+ * 'paid' is checked alongside 'approve' as the same terminal-positive
+ * bucket — before this they diverged ('Approved' success/emerald, 'Paid'
+ * falling through to the 'secondary' default, which renders in the app's
+ * gold/amber secondary color and reads as needing attention despite being
+ * just as terminal as 'Approved'). 'pending' is still checked first so
+ * 'Tax Invoice Upload Pending (Paid)' — non-terminal despite containing
+ * "paid" — lands in the in-progress bucket, not this one. */
 export function statusBadgeVariant(label: string | null): BadgeProps['variant'] {
   const l = (label ?? '').toLowerCase()
-  if (l.includes('approve')) return 'success'
+  if (l === 'not set') return 'outline'
   if (l.includes('pending')) return 'outline'
   if (l.includes('sent')) return 'warning'
+  if (l.includes('approve') || l.includes('paid')) return 'success'
   return 'secondary'
 }

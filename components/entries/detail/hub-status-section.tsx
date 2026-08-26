@@ -18,15 +18,10 @@ import {
 import { Separator } from '@/components/ui/separator'
 import { Textarea } from '@/components/ui/textarea'
 import { setHubStatus } from '@/lib/actions/hub-status'
+import { hubStatusBadgeVariant } from '@/components/entries/format'
 import { formatIsoDate } from './format'
 import { HubStatusTimeline } from './hub-status-timeline'
 import type { ChangeLogRow, HubStatusOption } from './types'
-
-const STATUS_BADGE_VARIANT: Record<string, 'muted' | 'warning' | 'default'> = {
-  not_set: 'muted',
-  awaiting_verification: 'warning',
-  awaiting_validation: 'default',
-}
 
 export function HubStatusSection({
   entryId,
@@ -87,7 +82,7 @@ export function HubStatusSection({
       </CardHeader>
       <CardContent className="flex flex-col gap-5">
         <div className="flex flex-wrap items-center gap-3">
-          <Badge variant={STATUS_BADGE_VARIANT[hubStatusCode] ?? 'default'} className="text-sm">
+          <Badge variant={hubStatusBadgeVariant(hubStatusCode)} className="text-sm">
             {hubStatusLabel}
           </Badge>
           <span className="text-sm text-muted-foreground">

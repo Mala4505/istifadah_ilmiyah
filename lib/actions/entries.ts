@@ -3,8 +3,10 @@
 import { revalidatePath } from 'next/cache'
 import { z } from 'zod'
 import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/admin'
 import { logRawError } from '@/lib/friendly-error'
 import { getSelectedEvent, isEventMutable } from '@/lib/events/current'
+import { normalizeVendorName } from '@/lib/normalize'
 
 // Phase 6 Step 2 (docs/event-scoping-and-review-fixes-plan.md §1.6): past
 // events are browsable read-only. Every mutation in this file is gated on
@@ -58,6 +60,91 @@ export type CreateManualEntryInput = z.input<typeof createManualEntrySchema>
  * couple of retries walks past it rather than failing the whole save.
  */
 const NUMBER_COLLISION_RETRIES = 3
+
+/**
+ * Resolves a manually-typed vendor/payee name to a `vendor_id`, creating a
+ * new (unconfirmed) vendor if nothing matches yet — the same normalize ->
+ * exact match on normalized_name or vendor_alias -> else create rule
+ * `vendor_and_alias.sql`'s own comment documents and `lib/import/run-import.ts`'s
+ * `resolveVendor` already applies to the Departmental import. A typed entry
+ * is the one other place a vendor name enters the system as free text, so it
+ * gets the same treatment rather than sitting outside the vendor table
+ * forever with only `vendor_raw` set.
+ *
+ * Runs on the admin (service-role) client, same as
+ * `lib/actions/review.ts`'s `learnVendorAliasesFromAttach`/`confirmVendorAlias`
+ * and for the same reason: `vendor`/`vendor_alias` deny inserts to
+ * `authenticated` entirely (20260808000026_rls_policies.sql) — vendor
+ * identity is staff-wide, not department-scoped, so there is no per-caller
+ * RLS check to preserve here the way there is for `entries` itself. The
+ * entries insert below stays on the session-bound client exactly as before
+ * (see this file's header comment) — only this vendor lookup/create step is
+ * elevated.
+ *
+ * Best-effort: any failure here is logged and swallowed, returning null so
+ * the caller falls back to the pre-existing behaviour (`vendor_raw` set,
+ * `vendor_id` left null) rather than blocking the entry itself over a
+ * vendor-lookup problem.
+ */
+async function resolveOrCreateVendor(rawName: string): Promise<number | null> {
+  const trimmed = rawName.trim()
+  const normalized = normalizeVendorName(trimmed)
+  if (!normalized) return null
+
+  try {
+    const admin = createAdminClient()
+
+    const { data: byNormalized, error: byNormalizedError } = await admin
+      .from('vendor')
+      .select('id')
+      .eq('normalized_name', normalized)
+      .maybeSingle()
+    if (byNormalizedError) throw byNormalizedError
+    if (byNormalized) return byNormalized.id as number
+
+    const { data: byAlias, error: byAliasError } = await admin
+      .from('vendor_alias')
+      .select('vendor_id')
+      .eq('raw_name', normalized)
+      .maybeSingle()
+    if (byAliasError) throw byAliasError
+    if (byAlias) return byAlias.vendor_id as number
+
+    const { data: created, error: createError } = await admin
+      .from('vendor')
+      .insert({ display_name: trimmed, normalized_name: normalized, is_confirmed: false })
+      .select('id')
+      .single()
+
+    if (createError) {
+      // Unique-violation on normalized_name means a concurrent request just
+      // created the same vendor — read back what it created rather than
+      // failing this one.
+      if (createError.code === '23505') {
+        const { data: retry } = await admin
+          .from('vendor')
+          .select('id')
+          .eq('normalized_name', normalized)
+          .maybeSingle()
+        if (retry) return retry.id as number
+      }
+      throw createError
+    }
+
+    const vendorId = created.id as number
+    const { error: aliasError } = await admin
+      .from('vendor_alias')
+      .insert({ vendor_id: vendorId, raw_name: normalized, source: 'manual' })
+    // A duplicate alias row (another request winning the same race) is fine —
+    // the vendor itself already resolved correctly either way.
+    if (aliasError && aliasError.code !== '23505') throw aliasError
+
+    return vendorId
+  } catch (err) {
+    logRawError('entries.resolveOrCreateVendor', err instanceof Error ? err.message : String(err))
+    return null
+  }
+}
 
 export async function createManualEntry(input: CreateManualEntryInput): Promise<CreateResult> {
   const parsed = createManualEntrySchema.safeParse(input)
@@ -121,6 +208,8 @@ export async function createManualEntry(input: CreateManualEntryInput): Promise<
     return { ok: false, error: 'Choose which department this entry belongs to.' }
   }
 
+  const vendorId = await resolveOrCreateVendor(fields.vendorName)
+
   for (let attempt = 0; attempt < NUMBER_COLLISION_RETRIES; attempt += 1) {
     const { data: generatedNumber, error: numberError } = await supabase.rpc('next_manual_ubbl_number')
     if (numberError || typeof generatedNumber !== 'string') {
@@ -140,6 +229,7 @@ export async function createManualEntry(input: CreateManualEntryInput): Promise<
         source: 'manual',
         department_id: departmentId,
         type: fields.type,
+        vendor_id: vendorId,
         vendor_raw: fields.vendorName,
         invoice_number: fields.invoiceNumber || null,
         date: fields.date || null,
