@@ -59,8 +59,8 @@ export function UsersTable({
           <TableHead>Name</TableHead>
           <TableHead>ITS Number</TableHead>
           <TableHead>Contact email</TableHead>
-          <TableHead>Department</TableHead>
           <TableHead>Role</TableHead>
+          <TableHead>Department</TableHead>
           <TableHead>Active</TableHead>
           <TableHead className="text-right">Save</TableHead>
         </TableRow>
@@ -127,10 +127,10 @@ function UserRow({
         </TableCell>
         <TableCell className="font-mono text-sm">{row.itsNumber ?? '—'}</TableCell>
         <TableCell>{row.contactEmail ?? '—'}</TableCell>
+        <TableCell>{ROLE_LABELS[row.role]}</TableCell>
         <TableCell className="max-w-[220px] truncate" title={departmentNames(row.departmentIds, departments)}>
           {departmentNames(row.departmentIds, departments)}
         </TableCell>
-        <TableCell>{ROLE_LABELS[row.role]}</TableCell>
         <TableCell>{row.isActive ? 'Yes' : 'No'}</TableCell>
         <TableCell className="text-right" />
       </TableRow>
@@ -149,17 +149,6 @@ function UserRow({
       <TableCell className="font-mono text-sm">{row.itsNumber ?? '—'}</TableCell>
       <TableCell>{row.contactEmail ?? '—'}</TableCell>
       <TableCell>
-        {role === 'dept' ? (
-          <DepartmentPicker
-            options={departments}
-            selectedIds={departmentIds}
-            onChange={setDepartmentIds}
-          />
-        ) : (
-          <span className="text-sm text-muted-foreground">—</span>
-        )}
-      </TableCell>
-      <TableCell>
         <Select value={role} onValueChange={(value) => setRole(value as StaffRow['role'])}>
           <SelectTrigger className="w-[140px]">
             <SelectValue />
@@ -170,6 +159,17 @@ function UserRow({
             <SelectItem value="dept">Dept</SelectItem>
           </SelectContent>
         </Select>
+      </TableCell>
+      <TableCell>
+        {role === 'dept' ? (
+          <DepartmentPicker
+            options={departments}
+            selectedIds={departmentIds}
+            onChange={setDepartmentIds}
+          />
+        ) : (
+          <span className="text-sm text-muted-foreground">—</span>
+        )}
       </TableCell>
       <TableCell>
         <Checkbox checked={isActive} onCheckedChange={(value) => setIsActive(value === true)} />
