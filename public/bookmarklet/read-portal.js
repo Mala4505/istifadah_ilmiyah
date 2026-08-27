@@ -82,7 +82,57 @@
   }
 
   function fail(message) {
+    stopBusy()
     ui('<div style="color:#b91c1c">' + esc(message) + '</div>')
+  }
+
+  // -------------------------------------------------------------------------
+  // Busy state
+  //
+  // Every wait in this script used to render as static text ("Committing…")
+  // with nothing else changing until the network call resolved. For a slow
+  // portal or a large batch that reads as frozen, not busy — there is no
+  // browser chrome around a bookmarklet's own overlay to reassure the
+  // operator the tab is still working. A spinner plus a running clock does
+  // that job instead, and the 10s reassurance line heads off the "did it
+  // hang?" reflex before it turns into a second, concurrent submit attempt.
+  // -------------------------------------------------------------------------
+
+  var busyTimer = null
+
+  function stopBusy() {
+    if (busyTimer) {
+      clearInterval(busyTimer)
+      busyTimer = null
+    }
+  }
+
+  var SPINNER_CSS =
+    '<style>@keyframes ih-spin{to{transform:rotate(360deg)}}' +
+    '.ih-spinner{display:inline-block;width:14px;height:14px;border:2px solid #d4d4d8;' +
+    'border-top-color:#111;border-radius:50%;animation:ih-spin .7s linear infinite;' +
+    'vertical-align:-2px;margin-right:8px}</style>'
+
+  function busy(label) {
+    stopBusy()
+    var start = Date.now()
+    ui(
+      SPINNER_CSS +
+        '<div><span class="ih-spinner"></span>' +
+        esc(label) +
+        ' <span id="ih-elapsed" style="color:#71717a">(0s)</span></div>' +
+        '<div id="ih-reassure" style="color:#71717a;margin-top:6px"></div>'
+    )
+    busyTimer = setInterval(function () {
+      var secs = Math.round((Date.now() - start) / 1000)
+      var elapsedEl = document.getElementById('ih-elapsed')
+      if (elapsedEl) elapsedEl.textContent = '(' + secs + 's)'
+      var reassureEl = document.getElementById('ih-reassure')
+      if (reassureEl && secs >= 10) {
+        reassureEl.textContent =
+          'Still working — large imports can take a minute or two. Keep this tab open.'
+      }
+    }, 1000)
   }
 
   // -------------------------------------------------------------------------
@@ -371,9 +421,10 @@
   // Go
   // -------------------------------------------------------------------------
 
-  ui('<div>Reading the table…</div>')
+  busy('Reading the table…')
 
   readTable(function (headers, rows) {
+    stopBusy()
     if (!headers.length) {
       return fail('Found a table but could not read its column headings. Send a screenshot to whoever set this up.')
     }
@@ -428,28 +479,35 @@
           if (!previewBtn || !commitBtn) return
 
           function onPostFailure(error) {
+            stopBusy()
             // The likely cause is the portal's own `connect-src` CSP blocking
             // the upload, which no amount of retrying fixes — hand the
-            // operator the file instead so the scrape is not wasted.
+            // operator the file instead so the scrape is not wasted. The raw
+            // fetch error (typically the browser's generic "Failed to fetch")
+            // reads as a connectivity problem to a non-technical operator, so
+            // it goes behind a collapsed detail rather than being the
+            // headline — same convention the Hub itself uses for extraction
+            // failures (components/documents/document-card.tsx).
             var saved = download(payload)
             ui(
-              '<div style="color:#b91c1c;margin-bottom:8px">Could not reach the Hub: ' +
+              '<div style="color:#b91c1c;margin-bottom:4px">This portal is blocking the direct connection to the Hub.</div>' +
+                '<details style="margin-bottom:8px"><summary style="cursor:pointer;color:#71717a">Technical detail</summary>' +
+                '<div style="color:#71717a;margin-top:4px">' +
                 esc(error.message) +
-                '</div>' +
+                '</div></details>' +
                 (saved
-                  ? '<div>The rows were downloaded as a .json file instead. Upload it on the Hub&rsquo;s import screen.</div>'
-                  : '<div>Saving a file also failed. Copy the rows manually, or ask for the paste-box workaround.</div>')
+                  ? '<div>The rows were downloaded as a .json file instead — drop it on the Hub&rsquo;s Import page, in the same box you drop .xlsx files into. It runs the same preview-then-commit flow.</div>'
+                  : '<div>Saving a file also failed. Copy the rows manually and paste them into the Hub instead.</div>')
             )
           }
 
           previewBtn.onclick = function () {
-            previewBtn.disabled = true
-            commitBtn.disabled = true
-            previewBtn.textContent = 'Previewing…'
+            busy('Previewing…')
             post(
               payload,
               'dry_run',
               function (result) {
+                stopBusy()
                 ui(
                   partialNote +
                     summarise(result) +
@@ -460,12 +518,12 @@
                       var btn = document.getElementById('ih-commit')
                       if (!btn) return
                       btn.onclick = function () {
-                        btn.disabled = true
-                        btn.textContent = 'Committing…'
+                        busy('Committing…')
                         post(
                           payload,
                           'commit',
                           function (committed) {
+                            stopBusy()
                             ui(partialNote + summarise(committed) + savedMessage())
                           },
                           function (error) {
@@ -482,13 +540,12 @@
           }
 
           commitBtn.onclick = function () {
-            previewBtn.disabled = true
-            commitBtn.disabled = true
-            commitBtn.textContent = 'Committing…'
+            busy('Committing…')
             post(
               payload,
               'commit',
               function (committed) {
+                stopBusy()
                 ui(partialNote + summarise(committed) + savedMessage())
               },
               onPostFailure

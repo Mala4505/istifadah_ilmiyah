@@ -14,17 +14,68 @@ import { SummaryBadges } from '@/components/import/summary-badges'
 import { FriendlyError } from '@/components/ui/friendly-error'
 import type { ImportResult } from '@/lib/import/run-import'
 
-function isSpreadsheet(file: File): boolean {
-  return /\.xlsx?$/i.test(file.name)
+type AnyImportResult = ImportResult & { warnings?: string[] }
+type ImportResponseBody = Partial<AnyImportResult> & { error?: string }
+
+type FileKind = 'xlsx' | 'portal_json'
+
+interface PickedFile {
+  file: File
+  kind: FileKind
 }
 
-async function postImport(file: File, mode: 'dry_run' | 'commit'): Promise<{ ok: boolean; body: ImportResult & { error?: string } }> {
-  const formData = new FormData()
-  formData.append('file', file)
-  formData.append('mode', mode)
-  formData.append('source_system', 'departmental')
+function detectFileKind(file: File): FileKind | null {
+  if (/\.xlsx?$/i.test(file.name)) return 'xlsx'
+  if (/\.json$/i.test(file.name)) return 'portal_json'
+  return null
+}
 
-  const res = await fetch('/api/import', { method: 'POST', body: formData })
+/**
+ * `.json` here is the fallback file public/bookmarklet/read-portal.js downloads
+ * when a portal's own `connect-src` CSP blocks its fetch straight to the Hub
+ * (see that file's `download()`/`onPostFailure`). Posting it through this same
+ * dropzone, signed in as an admin, hits the same importer the bookmarklet
+ * itself does — app/api/import/portal/route.ts accepts either a bearer scrape
+ * token or a plain Hub session, exactly so this path exists.
+ */
+async function postImport(
+  picked: PickedFile,
+  mode: 'dry_run' | 'commit'
+): Promise<{ ok: boolean; body: ImportResponseBody }> {
+  if (picked.kind === 'xlsx') {
+    const formData = new FormData()
+    formData.append('file', picked.file)
+    formData.append('mode', mode)
+    formData.append('source_system', 'departmental')
+
+    const res = await fetch('/api/import', { method: 'POST', body: formData })
+    const body = await res.json()
+    return { ok: res.ok, body }
+  }
+
+  let payload: unknown
+  try {
+    payload = JSON.parse(await picked.file.text())
+  } catch {
+    return { ok: false, body: { error: 'That file is not valid JSON.' } }
+  }
+  if (
+    typeof payload !== 'object' ||
+    payload === null ||
+    !Array.isArray((payload as { headers?: unknown }).headers) ||
+    !Array.isArray((payload as { rows?: unknown }).rows)
+  ) {
+    return {
+      ok: false,
+      body: { error: "That JSON file doesn't look like a Portal Reader scrape (missing headers/rows)." },
+    }
+  }
+
+  const res = await fetch('/api/import/portal', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ...(payload as Record<string, unknown>), mode }),
+  })
   const body = await res.json()
   return { ok: res.ok, body }
 }
@@ -43,15 +94,15 @@ export function ImportWorkspace({
   /** Called after a successful commit, so a host page can refresh its own batch history list. */
   onCommitted?: () => void
 }) {
-  const [file, setFile] = useState<File | null>(null)
+  const [file, setFile] = useState<PickedFile | null>(null)
   const [running, setRunning] = useState<'idle' | 'dry_run' | 'commit'>('idle')
-  const [preview, setPreview] = useState<ImportResult | null>(null)
-  const [committed, setCommitted] = useState<ImportResult | null>(null)
+  const [preview, setPreview] = useState<AnyImportResult | null>(null)
+  const [committed, setCommitted] = useState<AnyImportResult | null>(null)
   const [formError, setFormError] = useState<string | null>(null)
   const [isDragging, setIsDragging] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  const chooseFile = useCallback((next: File | null) => {
+  const chooseFile = useCallback((next: PickedFile | null) => {
     setFile(next)
     setPreview(null)
     setCommitted(null)
@@ -62,11 +113,12 @@ export function ImportWorkspace({
     (fileList: FileList | File[]) => {
       const picked = Array.from(fileList)[0]
       if (!picked) return
-      if (!isSpreadsheet(picked)) {
-        toast.error('Only .xlsx or .xls files are supported.')
+      const kind = detectFileKind(picked)
+      if (!kind) {
+        toast.error('Only .xlsx, .xls, or a Portal Reader .json fallback file are supported.')
         return
       }
-      chooseFile(picked)
+      chooseFile({ file: picked, kind })
     },
     [chooseFile]
   )
@@ -88,7 +140,7 @@ export function ImportWorkspace({
         setPreview(null)
         return
       }
-      setPreview(body)
+      setPreview(body as AnyImportResult)
       if (body.status === 'failed') {
         toastError(body.errorMessage, { title: 'Dry run failed', context: 'import-workspace' })
       } else {
@@ -111,7 +163,7 @@ export function ImportWorkspace({
         setFormError(body.error ?? 'Commit failed.')
         return
       }
-      setCommitted(body)
+      setCommitted(body as AnyImportResult)
       if (body.status === 'failed') {
         toastError(body.errorMessage, { title: 'Import failed', context: 'import-workspace' })
       } else {
@@ -161,7 +213,9 @@ export function ImportWorkspace({
         <CardTitle>New import</CardTitle>
         <CardDescription>
           Drop the Departmental export (.xlsx) or choose it below, review the dry-run diff, then
-          commit. The preview is the screen — nothing is written until you commit.
+          commit. The preview is the screen — nothing is written until you commit. If the Portal
+          Reader bookmarklet couldn&apos;t reach the Hub directly, drop the .json file it downloaded
+          here instead — it goes through the same preview-then-commit flow.
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
@@ -191,7 +245,8 @@ export function ImportWorkspace({
             <UploadCloud className="h-8 w-8 text-muted-foreground" aria-hidden="true" />
             <p className="text-sm font-medium">Drop the .xlsx export here, or tap to browse</p>
             <p className="max-w-xs text-xs text-muted-foreground">
-              Choose the latest Departmental export to begin.
+              Choose the latest Departmental export, or a Portal Reader fallback .json file, to
+              begin.
             </p>
             <Button type="button" variant="outline" size="sm" className="mt-1" onClick={(e) => e.stopPropagation()}>
               Choose file
@@ -199,7 +254,7 @@ export function ImportWorkspace({
             <input
               ref={fileInputRef}
               type="file"
-              accept=".xlsx,.xls"
+              accept=".xlsx,.xls,.json"
               className="sr-only"
               onChange={(e) => {
                 if (e.target.files && e.target.files.length > 0) handleFiles(e.target.files)
@@ -209,7 +264,7 @@ export function ImportWorkspace({
           </div>
         ) : (
           <div className="flex flex-wrap items-center gap-3">
-            <span className="truncate text-sm font-medium">{file.name}</span>
+            <span className="truncate text-sm font-medium">{file.file.name}</span>
             <Button onClick={handleDryRun} disabled={running !== 'idle'}>
               {running === 'dry_run' ? 'Running dry run…' : 'Run dry-run preview'}
             </Button>
@@ -256,6 +311,16 @@ export function ImportWorkspace({
             </div>
 
             <SummaryBadges summary={activeResult.summary} />
+
+            {activeResult.warnings && activeResult.warnings.length > 0 && (
+              <div className="rounded-md border border-amber-300/50 bg-amber-50 p-3 text-sm dark:border-amber-900 dark:bg-amber-950/40">
+                <ul className="list-inside list-disc space-y-0.5 text-amber-800 dark:text-amber-300">
+                  {activeResult.warnings.map((warning, i) => (
+                    <li key={i}>{warning}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
 
             {activeResult.exceptions.length > 0 && (
               <div className="rounded-md border border-amber-300/50 bg-amber-50 p-3 text-sm dark:border-amber-900 dark:bg-amber-950/40">
