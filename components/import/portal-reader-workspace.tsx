@@ -17,15 +17,22 @@ import {
   TableRow,
 } from '@/components/ui/table'
 
-/**
- * Only the Audit portal is read this way today — the Departmental side comes
- * in through the .xlsx export (New import, alongside this card). The type
- * stays a union with 'departmental' because app/api/scrape-token and
- * app/api/import/portal already support it; this workspace just never offers
- * it as a choice.
- */
 type SourceSystem = 'departmental' | 'audit'
-const PORTAL_READER_SOURCE: SourceSystem = 'audit'
+
+/**
+ * One reader link per portal, each carrying its own `SOURCE_SYSTEM` baked in
+ * at mint time. Deliberately NOT one bookmarklet that detects which portal
+ * it's on: the two portals render an "Entry Number" column that means a
+ * different thing on each side (UBBL on Departmental, Main/Audit number on
+ * Audit — see lib/import/portal-mapping.ts), and a misdetection there writes
+ * a confidently wrong value instead of failing loudly. A separate,
+ * clearly-labelled link per portal removes the guess entirely: the operator
+ * already knows which portal they're looking at.
+ */
+const PORTAL_READER_SOURCES: readonly { sourceSystem: SourceSystem; portalName: string }[] = [
+  { sourceSystem: 'departmental', portalName: 'Departmental portal' },
+  { sourceSystem: 'audit', portalName: 'Audit portal' },
+]
 
 interface MintedToken {
   token: string
@@ -94,16 +101,147 @@ function tokenState(row: TokenRow): string {
   return 'Live'
 }
 
+function portalName(sourceSystem: SourceSystem): string {
+  return PORTAL_READER_SOURCES.find((s) => s.sourceSystem === sourceSystem)?.portalName ?? sourceSystem
+}
+
+interface MintCardProps {
+  sourceSystem: SourceSystem
+  portalName: string
+  source: string
+  hubUrl: string
+  /** Live (non-revoked) tokens, so a just-revoked link disappears here too. */
+  liveTokenIds: ReadonlySet<number>
+  onMinted: () => void
+}
+
 /**
- * "Portal Reader" (previously "bookmarklet" in this UI — same feature, a
- * plainer name). Mints a short-lived token and hands the operator a
- * drag-to-install link that reads the Audit portal's on-screen table straight
- * into the Hub, without ever storing a portal password.
+ * One portal's create-link flow: label input, mint button, and the
+ * drag-to-install link once minted. Each instance carries its own state so
+ * minting a Departmental link never disturbs an already-minted Audit link
+ * sitting above/below it.
  */
-export function PortalReaderWorkspace({ isAdmin, source, hubUrl }: Props) {
+function PortalReaderMintCard({
+  sourceSystem,
+  portalName,
+  source,
+  hubUrl,
+  liveTokenIds,
+  onMinted,
+}: MintCardProps) {
   const [label, setLabel] = useState('')
   const [minting, setMinting] = useState(false)
   const [minted, setMinted] = useState<MintedToken | null>(null)
+
+  const mint = useCallback(async () => {
+    setMinting(true)
+    try {
+      const res = await fetch('/api/scrape-token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sourceSystem, label: label.trim() || null }),
+      })
+      const body = await res.json()
+      if (!res.ok) {
+        toastError(body.error, { title: 'Could not create a reader link.', context: 'portal-reader-workspace' })
+        return
+      }
+      setMinted(body as MintedToken)
+      toast.success('Reader link created — drag it to your bookmarks bar now.')
+      onMinted()
+    } catch {
+      toast.error('Could not reach the server.')
+    } finally {
+      setMinting(false)
+    }
+  }, [label, onMinted, sourceSystem])
+
+  // A token revoked from the list below (including the one just minted)
+  // must not go on showing its "drag this now" box as if still live.
+  const stillLive = minted !== null && liveTokenIds.has(minted.id)
+
+  const readerHref = useMemo(() => {
+    if (!minted || !stillLive) return null
+    return packReaderLink({ source, hubUrl, token: minted.token, sourceSystem: minted.sourceSystem })
+  }, [minted, stillLive, source, hubUrl])
+
+  // React 19 refuses to set `href` to a `javascript:` string via a normal
+  // JSX prop -- it throws "React has blocked a javascript: URL as a
+  // security precaution" instead, which silently breaks the drag-to-install
+  // link entirely (no real href ever reaches the DOM, so the dragged
+  // bookmark is empty). Setting it with the native DOM API through a ref
+  // bypasses that guard -- it only intercepts React's own prop-driven
+  // attribute writes, not an imperative `setAttribute` call. This is not an
+  // XSS hole: the string comes from packReaderLink() above, built from our
+  // own known-good source file plus a token WE minted, never from anything
+  // a user typed in.
+  const dragLinkRef = useRef<HTMLAnchorElement>(null)
+  useEffect(() => {
+    const el = dragLinkRef.current
+    if (!el) return
+    if (readerHref) {
+      el.setAttribute('href', readerHref)
+    } else {
+      el.removeAttribute('href')
+    }
+  }, [readerHref])
+
+  return (
+    <div className="flex flex-col gap-3 border-t border-border pt-4">
+      <p className="text-sm font-medium">{portalName}</p>
+      <p className="text-xs text-muted-foreground">
+        Shown once and never again. Expires in 30 days and can be revoked at any time.
+      </p>
+      <div className="flex flex-wrap items-end gap-3">
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor={`token-label-${sourceSystem}`}>Label (optional)</Label>
+          <Input
+            id={`token-label-${sourceSystem}`}
+            value={label}
+            placeholder="e.g. my laptop"
+            onChange={(e) => setLabel(e.target.value)}
+            className="w-48"
+          />
+        </div>
+        <Button onClick={() => void mint()} disabled={minting}>
+          {minting ? 'Creating…' : `Create ${portalName} link`}
+        </Button>
+      </div>
+
+      {minted && stillLive && readerHref && (
+        <div className="rounded-md border border-dashed p-4">
+          <p className="text-sm font-medium">
+            Drag this to your bookmarks bar now — it will not be shown again.
+          </p>
+          <p className="mt-1 text-sm text-muted-foreground">Expires {formatDateTime(minted.expiresAt)}</p>
+          <a
+            ref={dragLinkRef}
+            onClick={(e) => {
+              // Clicking it here would run it against the Hub's own page,
+              // which has no portal table on it — a confusing no-op. It is
+              // meant to be dragged.
+              e.preventDefault()
+              toast.info('Drag this link to your bookmarks bar — clicking it here does nothing.')
+            }}
+            className="mt-3 inline-flex cursor-grab items-center gap-1.5 rounded-md bg-primary px-2.5 py-1.5 text-xs font-medium text-primary-foreground"
+          >
+            <GripVertical className="h-3.5 w-3.5" aria-hidden="true" />
+            Read {portalName}
+          </a>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/**
+ * "Portal Reader" (previously "bookmarklet" in this UI — same feature, a
+ * plainer name). Mints a short-lived, portal-scoped token per source system
+ * and hands the operator a drag-to-install link that reads that portal's
+ * on-screen table straight into the Hub, without ever storing a portal
+ * password.
+ */
+export function PortalReaderWorkspace({ isAdmin, source, hubUrl }: Props) {
   const [tokens, setTokens] = useState<TokenRow[]>([])
   const [loadingTokens, setLoadingTokens] = useState(false)
 
@@ -130,28 +268,7 @@ export function PortalReaderWorkspace({ isAdmin, source, hubUrl }: Props) {
     void loadTokens()
   }, [loadTokens])
 
-  const mint = useCallback(async () => {
-    setMinting(true)
-    try {
-      const res = await fetch('/api/scrape-token', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sourceSystem: PORTAL_READER_SOURCE, label: label.trim() || null }),
-      })
-      const body = await res.json()
-      if (!res.ok) {
-        toastError(body.error, { title: 'Could not create a reader link.', context: 'portal-reader-workspace' })
-        return
-      }
-      setMinted(body as MintedToken)
-      toast.success('Reader link created — drag it to your bookmarks bar now.')
-      void loadTokens()
-    } catch {
-      toast.error('Could not reach the server.')
-    } finally {
-      setMinting(false)
-    }
-  }, [label, loadTokens])
+  const liveTokenIds = useMemo(() => new Set(tokens.map((t) => t.id)), [tokens])
 
   const revoke = useCallback(
     async (id: number) => {
@@ -163,45 +280,13 @@ export function PortalReaderWorkspace({ isAdmin, source, hubUrl }: Props) {
           return
         }
         toast.success('Reader link revoked.')
-        if (minted?.id === id) setMinted(null)
         void loadTokens()
       } catch {
         toast.error('Could not reach the server.')
       }
     },
-    [loadTokens, minted]
+    [loadTokens]
   )
-
-  const readerHref = useMemo(() => {
-    if (!minted) return null
-    return packReaderLink({
-      source,
-      hubUrl,
-      token: minted.token,
-      sourceSystem: minted.sourceSystem,
-    })
-  }, [minted, source, hubUrl])
-
-  // React 19 refuses to set `href` to a `javascript:` string via a normal
-  // JSX prop -- it throws "React has blocked a javascript: URL as a
-  // security precaution" instead, which silently breaks the drag-to-install
-  // link entirely (no real href ever reaches the DOM, so the dragged
-  // bookmark is empty). Setting it with the native DOM API through a ref
-  // bypasses that guard -- it only intercepts React's own prop-driven
-  // attribute writes, not an imperative `setAttribute` call. This is not an
-  // XSS hole: the string comes from packReaderLink() above, built from our
-  // own known-good source file plus a token WE minted, never from anything
-  // a user typed in.
-  const dragLinkRef = useRef<HTMLAnchorElement>(null)
-  useEffect(() => {
-    const el = dragLinkRef.current
-    if (!el) return
-    if (readerHref) {
-      el.setAttribute('href', readerHref)
-    } else {
-      el.removeAttribute('href')
-    }
-  }, [readerHref])
 
   if (!isAdmin) {
     return (
@@ -222,64 +307,29 @@ export function PortalReaderWorkspace({ isAdmin, source, hubUrl }: Props) {
       <CardHeader>
         <CardTitle>Portal Reader</CardTitle>
         <CardDescription>
-          Reads the Audit portal&rsquo;s table straight into the Hub. You stay logged into the
-          portal yourself — nothing here ever stores a portal password.
+          Reads the Departmental or Audit portal&rsquo;s table straight into the Hub. You stay
+          logged into the portal yourself — nothing here ever stores a portal password.
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-5">
         <ol className="ml-4 list-decimal space-y-1.5 text-sm text-muted-foreground">
-          <li>Create a link below and drag it to your browser&rsquo;s bookmarks bar.</li>
-          <li>Open the Audit portal, log in as normal, and go to the entry list.</li>
-          <li>Set the table to show all rows if it is paginated, then click the bookmark.</li>
+          <li>Create a link for the portal you need below and drag it to your bookmarks bar.</li>
+          <li>Open that portal, log in as normal, and go to the entry list.</li>
+          <li>Set the table to show all rows if it is paginated, then click the matching bookmark.</li>
           <li>Preview what it read, or commit straight away if you trust it.</li>
         </ol>
 
-        <div className="flex flex-col gap-3 border-t border-border pt-4">
-          <p className="text-sm font-medium">Create a reader link</p>
-          <p className="text-xs text-muted-foreground">
-            Shown once and never again. Expires in 30 days and can be revoked at any time.
-          </p>
-          <div className="flex flex-wrap items-end gap-3">
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="token-label">Label (optional)</Label>
-              <Input
-                id="token-label"
-                value={label}
-                placeholder="e.g. my laptop"
-                onChange={(e) => setLabel(e.target.value)}
-                className="w-48"
-              />
-            </div>
-            <Button onClick={() => void mint()} disabled={minting}>
-              {minting ? 'Creating…' : 'Create link'}
-            </Button>
-          </div>
-
-          {minted && readerHref && (
-            <div className="rounded-md border border-dashed p-4">
-              <p className="text-sm font-medium">
-                Drag this to your bookmarks bar now — it will not be shown again.
-              </p>
-              <p className="mt-1 text-sm text-muted-foreground">
-                Expires {formatDateTime(minted.expiresAt)}
-              </p>
-              <a
-                ref={dragLinkRef}
-                onClick={(e) => {
-                  // Clicking it here would run it against the Hub's own page,
-                  // which has no portal table on it — a confusing no-op. It is
-                  // meant to be dragged.
-                  e.preventDefault()
-                  toast.info('Drag this link to your bookmarks bar — clicking it here does nothing.')
-                }}
-                className="mt-3 inline-flex cursor-grab items-center gap-1.5 rounded-md bg-primary px-2.5 py-1.5 text-xs font-medium text-primary-foreground"
-              >
-                <GripVertical className="h-3.5 w-3.5" aria-hidden="true" />
-                Read Audit portal
-              </a>
-            </div>
-          )}
-        </div>
+        {PORTAL_READER_SOURCES.map(({ sourceSystem, portalName: name }) => (
+          <PortalReaderMintCard
+            key={sourceSystem}
+            sourceSystem={sourceSystem}
+            portalName={name}
+            source={source}
+            hubUrl={hubUrl}
+            liveTokenIds={liveTokenIds}
+            onMinted={loadTokens}
+          />
+        ))}
 
         <div className="flex flex-col gap-2 border-t border-border pt-4">
           <p className="text-sm font-medium">Reader links</p>
@@ -297,6 +347,7 @@ export function PortalReaderWorkspace({ isAdmin, source, hubUrl }: Props) {
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead>Portal</TableHead>
                   <TableHead>Label</TableHead>
                   <TableHead>State</TableHead>
                   <TableHead>Expires</TableHead>
@@ -308,6 +359,7 @@ export function PortalReaderWorkspace({ isAdmin, source, hubUrl }: Props) {
               <TableBody>
                 {tokens.map((row) => (
                   <TableRow key={row.id}>
+                    <TableCell>{portalName(row.source_system)}</TableCell>
                     <TableCell>{row.label ?? row.token_prefix + '…'}</TableCell>
                     <TableCell>{tokenState(row)}</TableCell>
                     <TableCell>{formatDateTime(row.expires_at)}</TableCell>
