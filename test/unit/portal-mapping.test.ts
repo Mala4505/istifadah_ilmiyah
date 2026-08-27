@@ -12,6 +12,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   deriveEntryType,
+  detectDepartmentalTableKind,
   mapPortalHeaders,
   normalizeHeader,
   parsePortalAmount,
@@ -267,12 +268,68 @@ describe('toPortalStringOrNull', () => {
 describe('deriveEntryType', () => {
   it('applies the same prefix rule as the .xlsx path', () => {
     expect(deriveEntryType('ADP_202608042')).toBe('advance_payment')
-    expect(deriveEntryType('RB202608042')).toBe('reimbursement')
+    expect(deriveEntryType('RG-202608042')).toBe('reimbursement')
     expect(deriveEntryType('2026080532')).toBe('invoice')
   })
 
-  it('checks ADP_ before RB so neither falls through to the other', () => {
-    expect(deriveEntryType('ADP_RB123')).toBe('advance_payment')
+  it('checks ADP_ before RG- so neither falls through to the other', () => {
+    expect(deriveEntryType('ADP_RG-123')).toBe('advance_payment')
+  })
+})
+
+// --- detectDepartmentalTableKind --------------------------------------------
+
+describe('detectDepartmentalTableKind', () => {
+  it('classifies the Invoice tab (today\'s shape) by absence of any marker column', () => {
+    const headers = [
+      'UBBL Number',
+      'Vendor Name',
+      'Invoice Number',
+      'Amount',
+      'Status',
+      'Date',
+    ]
+    expect(detectDepartmentalTableKind(headers)).toBe('invoice')
+  })
+
+  it('classifies the Reimbursement tab by Reimbursement Type', () => {
+    const headers = ['UBBL Number', 'Vendor Name', 'Amount', 'Reimbursement Type']
+    expect(detectDepartmentalTableKind(headers)).toBe('reimbursement')
+  })
+
+  it('classifies the Reimbursement tab by Reimburse To', () => {
+    const headers = ['UBBL Number', 'Vendor Name', 'Amount', 'Reimburse To']
+    expect(detectDepartmentalTableKind(headers)).toBe('reimbursement')
+  })
+
+  it('classifies the Reimbursement tab by SR NO', () => {
+    const headers = ['SR NO', 'UBBL Number', 'Vendor Name', 'Amount']
+    expect(detectDepartmentalTableKind(headers)).toBe('reimbursement')
+  })
+
+  it('classifies the Advance Payment tab only when Uplaq/Advance Amount AND Invoice Amount both appear', () => {
+    const headers = ['UBBL Number', 'Vendor Name', 'Uplaq Amount', 'Invoice Amount']
+    expect(detectDepartmentalTableKind(headers)).toBe('advance_payment')
+  })
+
+  it('does not classify as Advance Payment on Invoice Amount alone (already the generic amount synonym)', () => {
+    const headers = ['UBBL Number', 'Vendor Name', 'Invoice Amount', 'Status']
+    expect(detectDepartmentalTableKind(headers)).toBe('invoice')
+  })
+
+  it('does not classify as Advance Payment on Uplaq Amount alone', () => {
+    const headers = ['UBBL Number', 'Vendor Name', 'Uplaq Amount', 'Status']
+    expect(detectDepartmentalTableKind(headers)).toBe('invoice')
+  })
+
+  it('is header-order and case/whitespace insensitive, same as normalizeHeader elsewhere', () => {
+    const headers = ['vendor name', ' REIMBURSE   TO ', 'ubbl number']
+    expect(detectDepartmentalTableKind(headers)).toBe('reimbursement')
+  })
+
+  it('prefers reimbursement over advance_payment when a row somehow has both marker sets', () => {
+    const headers = ['Reimbursement Type', 'Uplaq Amount', 'Invoice Amount']
+    expect(detectDepartmentalTableKind(headers)).toBe('reimbursement')
   })
 })
 

@@ -300,6 +300,10 @@ async function readEntry(id: number) {
 }
 
 const ids = (rows: Array<{ id: number }> | null) => (rows ?? []).map((r) => r.id).sort()
+/** Same shape as `ids`, for the two entries type-detail tables (20260827000001) whose
+ *  primary key is `entry_id`, not `id`. */
+const entryIds = (rows: Array<{ entry_id: number }> | null) =>
+  (rows ?? []).map((r) => r.entry_id).sort()
 
 // ===========================================================================
 describe('RLS as three users (superadmin / admin / dept)', () => {
@@ -1105,6 +1109,111 @@ describe('RLS as three users (superadmin / admin / dept)', () => {
       expect(anonEntries.data ?? []).toEqual([])
       const anonView = await anon.from('v_entry_enriched').select('id').limit(1)
       expect(anonView.data ?? []).toEqual([])
+    })
+  })
+
+  // -------------------------------------------------------------------------
+  // 7. reimbursement_detail / advance_payment_detail — 1:1 class-table-inheritance
+  //    extension tables (20260827000001_entries_type_detail_tables.sql). Each policy
+  //    is a join back to `entries` and `private.can_see_department(e.department_id)`,
+  //    the exact same shape as entries_select, so the assertions mirror section 1
+  //    above almost exactly. Neither table's `entry_id` FK is ON DELETE CASCADE, so
+  //    rows inserted here are deleted in this test's own `finally`, before
+  //    withFixture's outer cleanup deletes fx.entryA/fx.entryB.
+  // -------------------------------------------------------------------------
+  it('scopes reimbursement_detail SELECT to the caller department; admin/superadmin see across departments', async () => {
+    await withFixture({}, async (fx) => {
+      const { error: insAErr } = await svc.from('reimbursement_detail').insert({
+        entry_id: fx.entryA,
+        sr_no: `${TAG}-${fx.suffix}-a`,
+        reimbursement_type: 'staff',
+      })
+      if (insAErr) throw new Error(`fixture reimbursement_detail A: ${insAErr.message}`)
+      const { error: insBErr } = await svc.from('reimbursement_detail').insert({
+        entry_id: fx.entryB,
+        sr_no: `${TAG}-${fx.suffix}-b`,
+        reimbursement_type: 'staff',
+      })
+      if (insBErr) throw new Error(`fixture reimbursement_detail B: ${insBErr.message}`)
+
+      try {
+        const scope = (c: SupabaseClient) =>
+          c.from('reimbursement_detail').select('entry_id').in('entry_id', [fx.entryA, fx.entryB])
+
+        const dept = await scope(fx.deptUser.client)
+        expect(dept.error).toBeNull()
+        expect(entryIds(dept.data)).toEqual([fx.entryA])
+
+        const admin = await scope(fx.adminUser.client)
+        expect(admin.error).toBeNull()
+        expect(entryIds(admin.data)).toEqual([fx.entryA, fx.entryB].sort())
+
+        const superadmin = await scope(fx.superadminUser.client)
+        expect(superadmin.error).toBeNull()
+        expect(entryIds(superadmin.data)).toEqual([fx.entryA, fx.entryB].sort())
+
+        // Direct lookup on department B's row must also return nothing, not an
+        // error — a filtered-out row is indistinguishable from a non-existent one.
+        const direct = await fx.deptUser.client
+          .from('reimbursement_detail')
+          .select('entry_id')
+          .eq('entry_id', fx.entryB)
+        expect(direct.error).toBeNull()
+        expect(direct.data).toEqual([])
+      } finally {
+        const { error } = await svc
+          .from('reimbursement_detail')
+          .delete()
+          .in('entry_id', [fx.entryA, fx.entryB])
+        if (error) throw new Error(`cleanup reimbursement_detail: ${error.message}`)
+      }
+    })
+  })
+
+  it('scopes advance_payment_detail SELECT to the caller department; admin/superadmin see across departments', async () => {
+    await withFixture({}, async (fx) => {
+      const { error: insAErr } = await svc.from('advance_payment_detail').insert({
+        entry_id: fx.entryA,
+        invoice_amount: '111.11',
+      })
+      if (insAErr) throw new Error(`fixture advance_payment_detail A: ${insAErr.message}`)
+      const { error: insBErr } = await svc.from('advance_payment_detail').insert({
+        entry_id: fx.entryB,
+        invoice_amount: '222.22',
+      })
+      if (insBErr) throw new Error(`fixture advance_payment_detail B: ${insBErr.message}`)
+
+      try {
+        const scope = (c: SupabaseClient) =>
+          c.from('advance_payment_detail').select('entry_id').in('entry_id', [fx.entryA, fx.entryB])
+
+        const dept = await scope(fx.deptUser.client)
+        expect(dept.error).toBeNull()
+        expect(entryIds(dept.data)).toEqual([fx.entryA])
+
+        const admin = await scope(fx.adminUser.client)
+        expect(admin.error).toBeNull()
+        expect(entryIds(admin.data)).toEqual([fx.entryA, fx.entryB].sort())
+
+        const superadmin = await scope(fx.superadminUser.client)
+        expect(superadmin.error).toBeNull()
+        expect(entryIds(superadmin.data)).toEqual([fx.entryA, fx.entryB].sort())
+
+        // Direct lookup on department B's row must also return nothing, not an
+        // error — same "filtered-out row, not a missing one" shape as above.
+        const direct = await fx.deptUser.client
+          .from('advance_payment_detail')
+          .select('entry_id')
+          .eq('entry_id', fx.entryB)
+        expect(direct.error).toBeNull()
+        expect(direct.data).toEqual([])
+      } finally {
+        const { error } = await svc
+          .from('advance_payment_detail')
+          .delete()
+          .in('entry_id', [fx.entryA, fx.entryB])
+        if (error) throw new Error(`cleanup advance_payment_detail: ${error.message}`)
+      }
     })
   })
 })

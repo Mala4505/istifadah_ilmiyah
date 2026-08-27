@@ -3,6 +3,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { FriendlyError } from '@/components/ui/friendly-error'
 import { ProvisionalNumberBanner } from '@/components/entries/detail/provisional-number-banner'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { AdvancePaymentDetailSection } from '@/components/entries/detail/advance-payment-detail-section'
 import { AdvanceSettlementPicker } from '@/components/entries/detail/advance-settlement-picker'
 import { ChangeHistoryList } from '@/components/entries/detail/change-history-list'
 import { EnrichmentForm } from '@/components/entries/detail/enrichment-form'
@@ -10,6 +11,7 @@ import { EntryNotFound } from '@/components/entries/detail/entry-not-found'
 import { HubStatusSection } from '@/components/entries/detail/hub-status-section'
 import { ImportFieldsPanel } from '@/components/entries/detail/import-fields-panel'
 import { LinkedDocuments, type LinkedDocumentView } from '@/components/entries/detail/linked-documents'
+import { ReimbursementDetailSection } from '@/components/entries/detail/reimbursement-detail-section'
 import {
   EntryIssues,
   type EntryExceptionIssueRow,
@@ -412,6 +414,8 @@ export default async function EntryDetailPage({
               initialLinked={linkedAdvance}
             />
           )}
+          {entry.type === 'reimbursement' && <ReimbursementDetailSection entry={entry} />}
+          {entry.type === 'advance_payment' && <AdvancePaymentDetailSection entry={entry} />}
         </TabsContent>
 
         <TabsContent value="history">

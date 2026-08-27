@@ -59,6 +59,7 @@ import {
 } from '@/lib/import/run-import'
 import {
   deriveEntryType,
+  detectDepartmentalTableKind,
   findPortalRowByIdentifier,
   parseAuditRowUnmatchedIdentifier,
   parsePortalTable,
@@ -266,6 +267,12 @@ export async function runPortalImport(
     sourceSystem,
   })
 
+  // Which Dept-module tab this batch was scraped from — meaningful only for
+  // the departmental source (see detectDepartmentalTableKind's header). The
+  // audit path never reads this.
+  const tableKind =
+    sourceSystem === 'departmental' ? detectDepartmentalTableKind(payload.headers) : null
+
   const client = await getPool().connect()
 
   // Same early-exit-before-any-write shape as run-import.ts's runImport --
@@ -324,7 +331,18 @@ export async function runPortalImport(
         if (sourceSystem === 'audit') {
           await importAuditRow(client, caches, batchId, row, rowLog, exceptions)
         } else {
-          await importDepartmentalRow(client, caches, batchId, eventId, row, rowLog, exceptions)
+          // tableKind is non-null whenever sourceSystem === 'departmental' —
+          // see its computation above.
+          await importDepartmentalRow(
+            client,
+            caches,
+            batchId,
+            eventId,
+            row,
+            rowLog,
+            exceptions,
+            tableKind!
+          )
         }
       } catch (rowError) {
         const message = rowError instanceof Error ? rowError.message : String(rowError)
@@ -766,6 +784,14 @@ export async function retryUnmatchedAuditRows(
  * Deliberately does not touch budget_head_id, department_id, budget_allocation
  * or any Hub-owned enrichment column (zone_id, admin_head_id, cost_center_id,
  * remark, hub_status_*) — see this file's header.
+ *
+ * `tableKind` is the Dept-module tab this row's batch was scraped from
+ * (detectDepartmentalTableKind, computed once per batch in
+ * runPortalImport) — now the authoritative source for `entries.type` and
+ * for whether `entries.amount` should read the tab's Uplaq/Advance Amount
+ * column instead of its plain Amount column. The UBBL-prefix rule
+ * (deriveEntryType) becomes a secondary cross-check only, see
+ * `entry_type_kind_mismatch` below.
  */
 async function importDepartmentalRow(
   client: PoolClient,
@@ -774,7 +800,8 @@ async function importDepartmentalRow(
   eventId: number,
   row: ParsedPortalRow,
   rowLog: ImportRowLogEntry[],
-  exceptions: ImportExceptionSummary[]
+  exceptions: ImportExceptionSummary[],
+  tableKind: 'invoice' | 'reimbursement' | 'advance_payment'
 ): Promise<void> {
   if (!row.ubblNumber) {
     // parsePortalTable only reaches here with an identifier, and on the
@@ -820,6 +847,13 @@ async function importDepartmentalRow(
   )
   const existing = before.rows[0] ?? null
 
+  // On the Advance Payment tab, entries.amount holds the tab's Uplaq Amount
+  // figure (per the user's decision, see the migration's comment on
+  // advance_payment_detail.invoice_amount) — the tab's own Invoice Amount
+  // column lands separately, in advance_payment_detail below, from the RAW
+  // row.amount rather than this effective value.
+  const effectiveAmount = tableKind === 'advance_payment' ? row.uplaqAmount : row.amount
+
   const upserted = await client.query<{ id: number }>(
     `insert into public.entries (
        type, ubbl_number, main_number, invoice_number, vendor_id, vendor_raw,
@@ -841,14 +875,14 @@ async function importDepartmentalRow(
        updated_at       = now()
      returning id`,
     [
-      deriveEntryType(row.ubblNumber),
+      tableKind,
       row.ubblNumber,
       row.mainNumber,
       row.invoiceNumber,
       vendorId,
       row.vendorRaw,
       row.date,
-      row.amount,
+      effectiveAmount,
       statusId,
       auditStatusId,
       row.status?.raw ?? null,
@@ -858,6 +892,25 @@ async function importDepartmentalRow(
     ]
   )
   const entryId = upserted.rows[0]!.id
+
+  // Defense-in-depth cross-check: the UBBL-prefix rule and the scraped tab
+  // kind should always agree. Flag-only, matching this file's existing
+  // unknown_status_code/allocation_sum_mismatch pattern — never blocks the
+  // row, which is still processed as `tableKind` (the tab it was actually
+  // scraped from, the more trustworthy signal since it reflects which grid
+  // the operator was looking at, not a string-prefix heuristic).
+  const prefixType = deriveEntryType(row.ubblNumber)
+  if (prefixType !== tableKind) {
+    await raiseException(client, batchId, exceptions, {
+      type: 'entry_type_kind_mismatch',
+      severity: 'low',
+      entryId,
+      description:
+        `Entry ${row.ubblNumber} was scraped from the ${tableKind} tab, but its UBBL prefix matches ` +
+        `the ${prefixType} pattern. It was still processed as ${tableKind}, the tab it came from.`,
+      dedupKey: `entry_type_kind_mismatch:${row.ubblNumber}`,
+    })
+  }
 
   // COALESCE on every updated column, unlike the .xlsx path's straight
   // assignment: a scrape reads only what the portal happens to render on that
@@ -892,7 +945,7 @@ async function importDepartmentalRow(
       vendor_id: vendorId ?? existing.vendor_id,
       vendor_raw: row.vendorRaw ?? existing.vendor_raw,
       date: row.date ?? existing.date,
-      amount: row.amount ?? (existing.amount === null ? null : Number(existing.amount)),
+      amount: effectiveAmount ?? (existing.amount === null ? null : Number(existing.amount)),
       status_id: statusId ?? existing.status_id,
       status_raw: row.status?.raw ?? existing.status_raw,
     }
@@ -917,6 +970,14 @@ async function importDepartmentalRow(
     else action = fieldsChanged ? 'updated' : 'unchanged'
   }
 
+  // Reimbursement/advance_payment rows carry a few columns invoice-shaped
+  // `entries` has no room for — write them to the matching 1:1 extension
+  // table. Invoice rows have no extension table (every column their tab has
+  // already exists on `entries`), so there is nothing to do for them.
+  if (tableKind !== 'invoice') {
+    await upsertDetailTable(client, caches, batchId, entryId, tableKind, row)
+  }
+
   await logRow(client, batchId, rowLog, {
     rowNumber: row.rowNumber,
     rawRow: row.rawRow,
@@ -924,4 +985,63 @@ async function importDepartmentalRow(
     entryId,
     fieldsChanged,
   })
+}
+
+/**
+ * Upserts the type-specific extension row for a reimbursement or
+ * advance_payment entry (`public.reimbursement_detail` /
+ * `public.advance_payment_detail`, entry_id PK, 1:1 with `entries`).
+ *
+ * Same COALESCE-on-conflict discipline as the `entries` upsert above: a
+ * scrape only shows what is on screen for that tab right now, so a column
+ * the grid doesn't render for this row arrives null and must not blank a
+ * value a previous scrape already established. import_batch_id and
+ * updated_at are the exception — those always take the latest scrape's
+ * values, same as the `entries` upsert's own import_batch_id/updated_at.
+ */
+async function upsertDetailTable(
+  client: PoolClient,
+  caches: ResolverCaches,
+  batchId: number,
+  entryId: number,
+  tableKind: 'reimbursement' | 'advance_payment',
+  row: ParsedPortalRow
+): Promise<void> {
+  if (tableKind === 'reimbursement') {
+    let reimburseToVendorId: number | null = null
+    if (row.reimburseTo) {
+      const resolved = await resolveVendor(client, caches, row.reimburseTo)
+      reimburseToVendorId = resolved.id
+    }
+
+    await client.query(
+      `insert into public.reimbursement_detail
+         (entry_id, sr_no, reimbursement_type, reimburse_to_raw, reimburse_to_vendor_id, import_batch_id, updated_at)
+       values ($1, $2, $3, $4, $5, $6, now())
+       on conflict (entry_id) do update set
+         sr_no                  = coalesce(excluded.sr_no, reimbursement_detail.sr_no),
+         reimbursement_type     = coalesce(excluded.reimbursement_type, reimbursement_detail.reimbursement_type),
+         reimburse_to_raw       = coalesce(excluded.reimburse_to_raw, reimbursement_detail.reimburse_to_raw),
+         reimburse_to_vendor_id = coalesce(excluded.reimburse_to_vendor_id, reimbursement_detail.reimburse_to_vendor_id),
+         import_batch_id        = excluded.import_batch_id,
+         updated_at              = now()`,
+      [entryId, row.srNo, row.reimbursementType, row.reimburseTo, reimburseToVendorId, batchId]
+    )
+    return
+  }
+
+  // advance_payment: invoice_amount is the tab's own RAW Invoice Amount
+  // column (row.amount), deliberately NOT effectiveAmount — entries.amount
+  // already holds the Uplaq Amount for this tab (see the caller's comment on
+  // effectiveAmount), and confusing the two here would put the same figure
+  // in both places.
+  await client.query(
+    `insert into public.advance_payment_detail (entry_id, invoice_amount, import_batch_id, updated_at)
+     values ($1, $2, $3, now())
+     on conflict (entry_id) do update set
+       invoice_amount  = coalesce(excluded.invoice_amount, advance_payment_detail.invoice_amount),
+       import_batch_id = excluded.import_batch_id,
+       updated_at      = now()`,
+    [entryId, row.amount, batchId]
+  )
 }

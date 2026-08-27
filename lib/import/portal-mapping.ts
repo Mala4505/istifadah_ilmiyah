@@ -68,6 +68,10 @@ export type PortalField =
   | 'date'
   | 'userName'
   | 'remark'
+  | 'srNo'
+  | 'reimbursementType'
+  | 'reimburseTo'
+  | 'uplaqAmount'
 
 /**
  * Header text -> field. Keys are compared after `normalizeHeader`, so case,
@@ -80,7 +84,7 @@ export type PortalField =
  * `unmappedHeaders` so a clean import does not report noise.
  */
 const HEADER_SYNONYMS: Record<PortalField, readonly string[]> = {
-  entryNumber: ['entry number', 'entry no', 'entryno', 'entry', 'srno', 'sr no', 'number'],
+  entryNumber: ['entry number', 'entry no', 'entryno', 'entry', 'number'],
   ubblNumber: [
     'ubbl number',
     'ubbl no',
@@ -114,6 +118,15 @@ const HEADER_SYNONYMS: Record<PortalField, readonly string[]> = {
   date: ['date', 'invoice date', 'entry date', 'bill date', 'transaction date'],
   userName: ['user name', 'username', 'user', 'created by', 'submitted by'],
   remark: ['remark', 'remarks', 'note', 'notes', 'comment', 'comments', 'reason'],
+  // Reimbursement-tab-only marker columns. "SR NO" here is a distinct
+  // row-serial field on that tab (not the entry identifier — see the removal
+  // of 'srno'/'sr no' from entryNumber's synonyms above).
+  srNo: ['sr no', 'srno'],
+  reimbursementType: ['reimbursement type'],
+  reimburseTo: ['reimburse to', 'reimbursed to'],
+  // Advance-payment-tab-only marker column, alongside the tab's own Invoice
+  // Amount (already covered by the generic `amount` field above).
+  uplaqAmount: ['uplaq amount', 'uplaq', 'advance amount', 'advance payment amount'],
 }
 
 /**
@@ -379,6 +392,15 @@ export interface ParsedPortalRow {
   auditStatus: ParsedPortalStatus | null
   verificationStatus: ParsedPortalStatus | null
 
+  /** Reimbursement-tab row-serial number. Null on every other tab. */
+  srNo: string | null
+  /** Reimbursement-tab type text. Null on every other tab. */
+  reimbursementType: string | null
+  /** Reimbursement-tab "Reimburse To" party, raw. Null on every other tab. */
+  reimburseTo: string | null
+  /** Advance-payment-tab Uplaq/Advance Amount. Null on every other tab. */
+  uplaqAmount: number | null
+
   /** Populated when the row cannot be used; `runImport` logs and skips it. */
   skipReason: 'no_identifier' | 'total_row' | null
 }
@@ -465,6 +487,10 @@ export function parsePortalTable(params: ParsePortalTableParams): ParsePortalTab
       status: parsePortalStatus(cell(cells, 'status')),
       auditStatus: parsePortalStatus(cell(cells, 'auditStatus')),
       verificationStatus: parsePortalStatus(cell(cells, 'verificationStatus')),
+      srNo: cell(cells, 'srNo'),
+      reimbursementType: cell(cells, 'reimbursementType'),
+      reimburseTo: cell(cells, 'reimburseTo'),
+      uplaqAmount: parsePortalAmount(cell(cells, 'uplaqAmount')),
     }
 
     if (isTotalRow(cells)) {
@@ -582,15 +608,61 @@ function safeNormalizeId(value: string | null): string | null {
 }
 
 /**
+ * Classifies which Dept-module tab a scraped table came from — Invoice,
+ * Reimbursement, or Advance Payment — from its header row alone.
+ *
+ * The bookmarklet (public/bookmarklet/read-portal.js) is the SAME script on
+ * all three tabs; it just reads whatever grid happens to be on screen. So
+ * there is no client-side signal for which tab produced a given scrape —
+ * classification has to happen here, server-side, from the headers it
+ * happened to scrape. Called once per batch (`runPortalImport`), not per
+ * row: a single scrape is always one tab's table, so the kind is a batch-level
+ * fact, not a row-level one.
+ *
+ * Marker columns, in priority order:
+ *   - Reimbursement tab: uniquely has SR NO / Reimbursement Type / Reimburse
+ *     To. Any one of these appearing is diagnostic on its own — no other tab
+ *     renders them.
+ *   - Advance Payment tab: uniquely has BOTH an Uplaq/Advance Amount column
+ *     AND an Invoice Amount column together. Invoice Amount ALONE is not
+ *     diagnostic: HEADER_SYNONYMS already treats "invoice amount" as just
+ *     another spelling of the plain `amount` column on the Invoice tab (see
+ *     the `amount` synonym list above), so an Invoice-tab table also "has"
+ *     an amount column that reads "Invoice Amount". Only the presence of the
+ *     Uplaq/Advance Amount column alongside it distinguishes the two.
+ *   - Otherwise: Invoice tab, the default.
+ */
+export function detectDepartmentalTableKind(
+  headers: readonly unknown[]
+): 'invoice' | 'reimbursement' | 'advance_payment' {
+  const normalized = new Set(headers.map((h) => normalizeHeader(h)))
+  const has = (...keys: string[]) => keys.some((k) => normalized.has(k))
+  if (has('reimbursement type') || has('reimburse to') || has('sr no') || has('srno')) {
+    return 'reimbursement'
+  }
+  if (
+    has('uplaq amount', 'uplaq', 'advance amount', 'advance payment amount') &&
+    has('invoice amount')
+  ) {
+    return 'advance_payment'
+  }
+  return 'invoice'
+}
+
+/**
  * Derives `entries.type` from an entry number, per the rule confirmed
  * 2026-08-12 (MASTER-PLAN §18 Phase 3) and already implemented for the .xlsx
  * path in lib/module-mapping.ts. Expressed here in portal vocabulary so the
  * scrape path applies the identical rule.
+ *
+ * The real UBBL prefix for reimbursement is `RG-`, confirmed against real
+ * screenshots (earlier `RB` was wrong). Checked in this exact order so
+ * `ADP_` never falls into the reimbursement branch.
  */
 export function deriveEntryType(
   entryNumber: string
 ): 'advance_payment' | 'reimbursement' | 'invoice' {
   if (entryNumber.startsWith('ADP_')) return 'advance_payment'
-  if (entryNumber.startsWith('RB')) return 'reimbursement'
+  if (entryNumber.startsWith('RG-')) return 'reimbursement'
   return 'invoice'
 }

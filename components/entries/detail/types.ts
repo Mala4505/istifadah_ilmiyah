@@ -56,6 +56,12 @@ export interface EntryEnriched {
   created_at: string
   updated_at: string
   document_count: number
+  // Added by supabase/migrations/20260827000001_entries_type_detail_tables.sql
+  // — reimbursement_detail / advance_payment_detail 1:1 extension tables.
+  reimbursement_sr_no: string | null
+  reimbursement_type: string | null
+  reimburse_to_raw: string | null
+  advance_invoice_amount: number | null
 }
 
 export interface AdminHeadOption {
