@@ -477,6 +477,130 @@ export async function getDocumentPreviewUrl(
   }
 }
 
+export interface DocumentViewLineItem {
+  id: number
+  lineOrder: number
+  description: string | null
+  quantity: number | null
+  unit: string | null
+  rate: number | null
+  discount: string | null
+  amount: number | null
+}
+
+export interface DocumentViewDetail {
+  sourceDocumentId: number
+  documentExtractionId: number
+  originalFilename: string
+  pageCount: number | null
+  billIndex: number
+  billCount: number
+  verifiedAt: string | null
+  vendorName: string | null
+  vendorGstin: string | null
+  vendorPhone: string | null
+  vendorEmail: string | null
+  vendorAddress: string | null
+  invoiceNumber: string | null
+  invoiceDate: string | null
+  subtotal: number | null
+  taxAmount: number | null
+  totalAmount: number | null
+  notes: string | null
+  lineItems: DocumentViewLineItem[]
+}
+
+/**
+ * Read-only bill detail (header + line items) for lookup contexts outside
+ * `/review` — the "View details" modal on `LinkedDocuments`
+ * (components/entries/detail/linked-documents.tsx). Same visibility gate as
+ * getDocumentPreviewUrl above (session-bound client, source_document_select
+ * RLS checked first), but returns the structured OCR data instead of a PDF
+ * URL so a reviewer doesn't have to re-enter the `/review` queue just to
+ * see a bill's line items again.
+ *
+ * `entryId`, when passed, picks the specific bill matched to that entry out
+ * of a multi-bill PDF (document_extraction.entry_id, same per-bill source of
+ * truth used throughout review.ts); omitted or unmatched falls back to the
+ * first bill by bill_index, mirroring the same convention already used to
+ * build LinkedDocumentView on the entry detail page.
+ */
+export async function getDocumentViewDetail(
+  documentId: number,
+  entryId?: number
+): Promise<{ ok: true; detail: DocumentViewDetail } | { ok: false; error: string }> {
+  if (!Number.isInteger(documentId) || documentId <= 0) {
+    return { ok: false, error: 'Invalid document id.' }
+  }
+
+  const supabase = await createClient()
+
+  const [sourceDocRes, extractionsRes] = await Promise.all([
+    supabase.from('source_document').select('id, original_filename, page_count').eq('id', documentId).maybeSingle(),
+    supabase
+      .from('document_extraction')
+      .select(
+        'id, bill_index, entry_id, verified_at, vendor_name_ocr, vendor_name_verified, vendor_gstin_ocr, vendor_gstin_verified, vendor_phone_ocr, vendor_phone_verified, vendor_email_ocr, vendor_email_verified, vendor_address_ocr, vendor_address_verified, invoice_number_ocr, invoice_number_verified, invoice_date_ocr, invoice_date_verified, subtotal_ocr, subtotal_verified, tax_amount_ocr, tax_amount_verified, total_amount_ocr, total_amount_verified, notes_ocr, notes_verified'
+      )
+      .eq('source_document_id', documentId)
+      .order('bill_index'),
+  ])
+
+  const sourceDoc = sourceDocRes.data
+  const extractions = extractionsRes.data ?? []
+  if (!sourceDoc || extractions.length === 0) {
+    return { ok: false, error: 'This document has not been extracted yet, or is not visible to you.' }
+  }
+
+  const extraction = (entryId !== undefined ? extractions.find((e) => e.entry_id === entryId) : undefined) ?? extractions[0]!
+
+  const { data: lineItemsData, error: lineItemsError } = await supabase
+    .from('document_extraction_line_item')
+    .select(
+      'id, line_order, description_ocr, description_verified, quantity_ocr, quantity_verified, unit_ocr, unit_verified, unit_normalized, rate_ocr, rate_verified, discount_ocr, discount_verified, amount_ocr, amount_verified'
+    )
+    .eq('document_extraction_id', extraction.id)
+    .order('line_order')
+
+  if (lineItemsError) {
+    return { ok: false, error: logRawError('documents.getDocumentViewDetail', lineItemsError.message) }
+  }
+
+  return {
+    ok: true,
+    detail: {
+      sourceDocumentId: sourceDoc.id as number,
+      documentExtractionId: extraction.id as number,
+      originalFilename: sourceDoc.original_filename as string,
+      pageCount: sourceDoc.page_count as number | null,
+      billIndex: extraction.bill_index as number,
+      billCount: extractions.length,
+      verifiedAt: extraction.verified_at as string | null,
+      vendorName: (extraction.vendor_name_verified ?? extraction.vendor_name_ocr) as string | null,
+      vendorGstin: (extraction.vendor_gstin_verified ?? extraction.vendor_gstin_ocr) as string | null,
+      vendorPhone: (extraction.vendor_phone_verified ?? extraction.vendor_phone_ocr) as string | null,
+      vendorEmail: (extraction.vendor_email_verified ?? extraction.vendor_email_ocr) as string | null,
+      vendorAddress: (extraction.vendor_address_verified ?? extraction.vendor_address_ocr) as string | null,
+      invoiceNumber: (extraction.invoice_number_verified ?? extraction.invoice_number_ocr) as string | null,
+      invoiceDate: (extraction.invoice_date_verified ?? extraction.invoice_date_ocr) as string | null,
+      subtotal: (extraction.subtotal_verified ?? extraction.subtotal_ocr) as number | null,
+      taxAmount: (extraction.tax_amount_verified ?? extraction.tax_amount_ocr) as number | null,
+      totalAmount: (extraction.total_amount_verified ?? extraction.total_amount_ocr) as number | null,
+      notes: (extraction.notes_verified ?? extraction.notes_ocr) as string | null,
+      lineItems: (lineItemsData ?? []).map((li) => ({
+        id: li.id as number,
+        lineOrder: li.line_order as number,
+        description: (li.description_verified ?? li.description_ocr) as string | null,
+        quantity: (li.quantity_verified ?? li.quantity_ocr) as number | null,
+        unit: ((li.unit_normalized as string | null) || (li.unit_verified ?? li.unit_ocr)) as string | null,
+        rate: (li.rate_verified ?? li.rate_ocr) as number | null,
+        discount: (li.discount_verified ?? li.discount_ocr) as string | null,
+        amount: (li.amount_verified ?? li.amount_ocr) as number | null,
+      })),
+    },
+  }
+}
+
 /**
  * Checklist 2.9 (plan §5, D6): the inbox used to score `rankCandidates`
  * against every unmatched/suggested bill on every server-rendered load of

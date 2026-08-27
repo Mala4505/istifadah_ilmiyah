@@ -7,6 +7,7 @@ import { FileText, ExternalLink } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { detachDocumentFromEntry, getDocumentPreviewUrl } from '@/lib/actions/documents'
+import { BillViewModal } from '@/components/entries/detail/bill-view-modal'
 import { formatINR, formatDate } from '@/lib/reports/format'
 import { cn } from '@/lib/utils'
 
@@ -110,8 +111,9 @@ export function LinkedDocuments({
                 </div>
               </div>
               <div className="flex flex-shrink-0 items-center gap-2 self-end sm:self-auto">
+                <BillViewModal documentId={doc.id} entryId={entryId} />
                 <Button variant="outline" size="sm" onClick={() => handlePreview(doc.id)}>
-                  View
+                  PDF
                   <ExternalLink className="ml-1.5 h-3.5 w-3.5" aria-hidden="true" />
                 </Button>
                 <Button
