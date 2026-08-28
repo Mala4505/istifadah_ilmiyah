@@ -1,0 +1,60 @@
+{
+  "sourceSystem": "departmental",
+  "headers": [
+    "",
+    "UBBL NUMBER",
+    "MAIN NUMBER",
+    "SR NO.",
+    "REIMBURSEMENT TYPE",
+    "REIMBURSE TO",
+    "AMOUNT",
+    "STATUS",
+    "DATE",
+    "DEPARTMENT",
+    "ACTION BUTTON"
+  ],
+  "rows": [
+    [
+      "",
+      "RG-260808001 Submitted",
+      "RG-260814003",
+      "1",
+      "General",
+      "Jagruti trust",
+      "4,00,000.00",
+      "Good for submission",
+      "08/08/2026",
+      "Venue Setup",
+      "View"
+    ],
+    [
+      "",
+      "RG-260819001 Submitted",
+      "RG-260821006",
+      "2",
+      "General",
+      "Sach Energy Solutions LLP",
+      "25,000.00",
+      "Paid",
+      "19/08/2026",
+      "Venue Setup",
+      "View"
+    ],
+    [
+      "",
+      "RG-260826001 Submitted",
+      "RG-260827010",
+      "3",
+      "General",
+      "Dawat Properties Trust",
+      "1,28,14,465.00",
+      "Received",
+      "26/08/2026",
+      "Venue Setup",
+      "View"
+    ]
+  ],
+  "sourceUrl": "https://billing.dhaccounts.org/istifada-ilmiyah/reimbursement/list",
+  "scraperVersion": "2026-08-27",
+  "scrapedAt": "2026-08-27T12:15:28.953Z"
+}

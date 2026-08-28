@@ -223,13 +223,50 @@ export function mapPortalHeaders(headers: readonly unknown[]): HeaderMapping {
 // Cell value parsers
 // ---------------------------------------------------------------------------
 
-/** Trim; treat blank, a dash, 'NA' and 'N/A' as absent. */
+/**
+ * Strips a trailing workflow-status badge from an entry-number cell.
+ *
+ * Confirmed 2026-08-27 against a real Departmental scrape (all three tabs):
+ * the portal renders the UBBL/Entry Number cell as "<number> <status>" —
+ * e.g. "202608276 Pending", "2026082628 Submitted", "202608125 Not
+ * Verified", "RG-260808001 Submitted" — the same workflow state that also
+ * appears, correctly alone, in the row's own Status column. Left unstripped,
+ * that suffix becomes part of `ubblNumber`/`mainNumber`, so it never matches
+ * the clean id the .xlsx import already wrote to `entries.ubbl_number` —
+ * every scraped row then looks "new" and the upsert on conflict(ubbl_number)
+ * inserts a duplicate entry instead of updating the real one (or, on the
+ * Audit side, main_number lookup misses and a real match is reported as
+ * audit_row_unmatched).
+ *
+ * Every real UBBL/Main/Entry number observed so far is one contiguous token
+ * — digits, or an "ADP_"/"RG-" prefix plus digits — with no internal
+ * whitespace, so the id is always the FIRST whitespace-delimited token and
+ * anything after it is badge text to discard, never part of the identifier.
+ * The Main Number column is unaffected in practice (its cell is just the
+ * clean id, or "-----" before the value is assigned), so this only needs to
+ * run on the columns that route to ubblNumber/mainNumber/entryNumber.
+ */
+function stripIdentifierBadge(value: string | null): string | null {
+  if (value === null) return null
+  return value.split(/\s+/)[0] || null
+}
+
+/**
+ * Trim; treat blank, a run of one or more dashes, 'NA' and 'N/A' as absent.
+ *
+ * The Departmental portal's own "not assigned yet" placeholder for MAIN
+ * NUMBER is "-----" (five dashes, confirmed 2026-08-27), not a single "-".
+ * Left unmatched, that literal string would flow through as a real
+ * `mainNumber` value — and since `entries.main_number` is unique, every row
+ * after the first one still awaiting a main number would fail to import
+ * with a unique-constraint error instead of leaving main_number null.
+ */
 export function toPortalStringOrNull(value: unknown): string | null {
   if (value === null || value === undefined) return null
   // Grids routinely render an empty cell as a non-breaking space, which
   // .trim() alone does not remove.
   const str = String(value).replace(/[   ]/g, ' ').trim()
-  if (str === '' || str === '-' || str === '—') return null
+  if (str === '' || /^-+$/.test(str) || str === '—') return null
   const upper = str.toUpperCase()
   if (upper === 'NA' || upper === 'N/A' || upper === 'NULL') return null
   return str
@@ -499,9 +536,11 @@ export function parsePortalTable(params: ParsePortalTableParams): ParsePortalTab
 
     // Explicit columns win; the ambiguous generic "Entry Number" is resolved
     // against the portal it came from (see this module's header comment).
-    const explicitUbbl = cell(cells, 'ubblNumber')
-    const explicitMain = cell(cells, 'mainNumber')
-    const generic = cell(cells, 'entryNumber')
+    // Each is stripped of a possible trailing status badge (see
+    // stripIdentifierBadge) before it becomes the identifier.
+    const explicitUbbl = stripIdentifierBadge(cell(cells, 'ubblNumber'))
+    const explicitMain = stripIdentifierBadge(cell(cells, 'mainNumber'))
+    const generic = stripIdentifierBadge(cell(cells, 'entryNumber'))
 
     const ubblNumber = safeNormalizeId(explicitUbbl ?? (sourceSystem === 'departmental' ? generic : null))
     const mainNumber = safeNormalizeId(explicitMain ?? (sourceSystem === 'audit' ? generic : null))

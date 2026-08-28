@@ -252,6 +252,11 @@ describe('toPortalStringOrNull', () => {
     expect(toPortalStringOrNull('   ')).toBeNull()
   })
 
+  it('nulls a run of dashes, the real Departmental "not assigned yet" placeholder', () => {
+    expect(toPortalStringOrNull('-----')).toBeNull()
+    expect(toPortalStringOrNull('--')).toBeNull()
+  })
+
   it('strips the non-breaking space a grid renders for an empty cell', () => {
     expect(toPortalStringOrNull(' ')).toBeNull()
     expect(toPortalStringOrNull('Al Nafees Tech')).toBe('Al Nafees Tech')
@@ -445,5 +450,150 @@ describe('parsePortalTable (Audit portal fixture)', () => {
     expect(short.rows[0]!.mainNumber).toBe('2026080532')
     expect(short.rows[0]!.amount).toBeNull()
     expect(short.rows[0]!.rawRow['Vendor']).toBe('')
+  })
+})
+
+// --- identifier status badge (real 2026-08-27 Departmental scrape) --------
+//
+// Every UBBL NUMBER cell on the real portal reads "<number> <status>" — the
+// workflow badge is rendered inside the same cell as the id, not just in the
+// row's own Status column. See stripIdentifierBadge in portal-mapping.ts.
+
+describe('parsePortalTable (identifier cell carries a trailing status badge)', () => {
+  const DEPARTMENTAL_HEADERS = [
+    'UBBL NUMBER',
+    'MAIN NUMBER',
+    'INVOICE NUMBER',
+    'BUDGET HEAD',
+    'VENDOR',
+    'AMOUNT',
+    'STATUS',
+    'DATE',
+    'DEPARTMENT',
+    'ACTION BUTTON',
+  ]
+
+  it('strips a single-word badge ("Submitted") from the UBBL column', () => {
+    const result = parsePortalTable({
+      headers: DEPARTMENTAL_HEADERS,
+      rows: [
+        [
+          '2026082628 Submitted',
+          '2026082730',
+          '2026-2027/02',
+          'Venue setup (Labour)',
+          'Khan Galiya Shahjaha Mohammed Ahmed',
+          '18,000.00',
+          'Good for submission',
+          '26/08/2026',
+          'Venue Setup',
+          'View',
+        ],
+      ],
+      sourceSystem: 'departmental',
+    })
+    expect(result.rows[0]!.ubblNumber).toBe('2026082628')
+    expect(result.rows[0]!.mainNumber).toBe('2026082730')
+  })
+
+  it('strips a multi-word badge ("Not Verified"), keeping only the id token', () => {
+    const result = parsePortalTable({
+      headers: DEPARTMENTAL_HEADERS,
+      rows: [
+        [
+          '202608125 Not Verified',
+          '2026081241',
+          'na',
+          'Venue setup (Power)',
+          'Torrent power',
+          '15,000.00',
+          'Not Verified',
+          '12/08/2026',
+          'Venue Setup',
+          'View',
+        ],
+      ],
+      sourceSystem: 'departmental',
+    })
+    expect(result.rows[0]!.ubblNumber).toBe('202608125')
+  })
+
+  it('strips the badge from an ADP_-prefixed advance-payment id', () => {
+    const result = parsePortalTable({
+      headers: [...DEPARTMENTAL_HEADERS.slice(0, 5), 'UPLAQ AMOUNT', ...DEPARTMENTAL_HEADERS.slice(5)],
+      rows: [
+        [
+          'ADP_202608261 Submitted',
+          'ADP_202608271',
+          '12930840',
+          'Venue setup (Power)',
+          'Dakshin Gujarat Vij Company Limited',
+          '2,49,64,592.00',
+          '2,49,64,592.00',
+          'Paid',
+          '26/08/2026',
+          'Venue Setup',
+          'View',
+        ],
+      ],
+      sourceSystem: 'departmental',
+    })
+    expect(result.rows[0]!.ubblNumber).toBe('ADP_202608261')
+    expect(result.rows[0]!.mainNumber).toBe('ADP_202608271')
+  })
+
+  it('strips the badge from an RG--prefixed reimbursement id', () => {
+    const result = parsePortalTable({
+      headers: ['UBBL NUMBER', 'MAIN NUMBER', 'SR NO.', 'REIMBURSEMENT TYPE', 'REIMBURSE TO', 'AMOUNT', 'STATUS', 'DATE', 'DEPARTMENT', 'ACTION BUTTON'],
+      rows: [
+        [
+          'RG-260808001 Submitted',
+          'RG-260814003',
+          '1',
+          'General',
+          'Jagruti trust',
+          '4,00,000.00',
+          'Good for submission',
+          '08/08/2026',
+          'Venue Setup',
+          'View',
+        ],
+      ],
+      sourceSystem: 'departmental',
+    })
+    expect(result.rows[0]!.ubblNumber).toBe('RG-260808001')
+    expect(result.rows[0]!.mainNumber).toBe('RG-260814003')
+  })
+
+  it('leaves an unbadged Main Number column (or the "-----" placeholder) untouched', () => {
+    const result = parsePortalTable({
+      headers: DEPARTMENTAL_HEADERS,
+      rows: [
+        [
+          '202608276 Pending',
+          '-----',
+          'GT/28',
+          'Venue setup (Office setup)',
+          'JAY JALARAM STEEL FURNITURE',
+          '1,26,614.00',
+          'Subject to Approval',
+          '27/08/2026',
+          'Venue Setup',
+          'View',
+        ],
+      ],
+      sourceSystem: 'departmental',
+    })
+    expect(result.rows[0]!.ubblNumber).toBe('202608276')
+    expect(result.rows[0]!.mainNumber).toBeNull() // "-----" is a placeholder, not a value
+  })
+
+  it('strips the badge from the ambiguous generic "Entry Number" column too', () => {
+    const result = parsePortalTable({
+      headers: ['Entry Number', 'Amount'],
+      rows: [['2026080532 Submitted', '100.00']],
+      sourceSystem: 'audit',
+    })
+    expect(result.rows[0]!.mainNumber).toBe('2026080532')
   })
 })
