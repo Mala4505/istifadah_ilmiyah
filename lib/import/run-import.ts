@@ -316,7 +316,7 @@ async function registerEventDepartment(
   )
 }
 
-async function resolveDepartment(
+export async function resolveDepartment(
   client: PoolClient,
   caches: ResolverCaches,
   name: string,
@@ -385,7 +385,7 @@ async function registerEventBudgetHead(
   )
 }
 
-async function resolveBudgetHead(
+export async function resolveBudgetHead(
   client: PoolClient,
   caches: ResolverCaches,
   rawLabel: string,
@@ -413,6 +413,52 @@ async function resolveBudgetHead(
   }
 
   const shortLabel = parseBudgetHeadShortLabel(rawLabel)
+
+  /**
+   * Second lookup, on (department_id, short_label) case-insensitively,
+   * before giving up and creating a row.
+   *
+   * `raw_label` is the whole rendered string, and the SAME budget head is
+   * not spelled identically everywhere it appears. Confirmed 2026-08-28
+   * against live data: every stored row reads "Venue setup (X)" with a
+   * lowercase s, while the Departmental portal renders BOTH "Venue setup
+   * (Power)" and "Venue Setup (Electricals)" -- the department half's
+   * casing varies row to row within one scrape. Matching on raw_label
+   * alone therefore forks a second budget_head row for what is, to a
+   * human, the head they already have, and entries then split across two
+   * ids that no report re-joins.
+   *
+   * The identity that actually matters is the pair the schema already
+   * stores as its own columns: which department, and which short label
+   * (the bracketed half). That is what this matches on, so a casing or
+   * spacing difference in the department prefix can no longer create a
+   * duplicate. Verified safe before shipping: the live table has zero
+   * (department_id, lower(short_label)) collisions, so this can only
+   * collapse would-be duplicates, never merge two heads a human meant to
+   * keep apart.
+   *
+   * Deliberately a code-level lookup rather than a unique constraint on
+   * the pair. A constraint would turn a future genuine collision into a
+   * hard import failure mid-batch; this degrades to the existing
+   * create-a-row behaviour instead, which is the same posture the rest of
+   * this file takes toward unseen master data.
+   */
+  if (departmentId !== null && shortLabel !== null) {
+    const byParts = await client.query<{ id: number; department_id: number | null }>(
+      `select id, department_id from public.budget_head
+        where department_id = $1 and lower(short_label) = lower($2)
+        order by id limit 1`,
+      [departmentId, shortLabel]
+    )
+    if (byParts.rows[0]) {
+      caches.budgetHeadByRawLabel.set(rawLabel, {
+        id: byParts.rows[0].id,
+        departmentId: byParts.rows[0].department_id,
+      })
+      await registerEventBudgetHead(client, eventId, byParts.rows[0].id)
+      return { id: byParts.rows[0].id, created: false }
+    }
+  }
   const created = await client.query<{ id: number }>(
     `insert into public.budget_head (department_id, raw_label, short_label, first_seen_batch_id)
      values ($1, $2, $3, $4)
@@ -483,35 +529,41 @@ export async function resolveStatus(
   batchId: number,
   exceptionsOut: ImportExceptionSummary[]
 ): Promise<number> {
-  // Cache key carries the source system for the same reason the query does.
-  const cacheKey = `${sourceSystem}:${rawText}`
-  const cached = caches.statusByCode.get(cacheKey)
+  // ONE vocabulary, keyed on code alone (20260828000001).
+  //
+  // This used to look up (code, source_system), which meant "Paid" from the
+  // Audit portal and "Paid" from the Departmental one resolved to two
+  // different entry_status rows — and entries then carried two independent
+  // status pointers that no screen reconciled. The status a row is in is one
+  // fact about that row, so there is now one vocabulary and one pointer.
+  //
+  // `sourceSystem` is still taken, but only to say WHICH import first met an
+  // unseen code in the exception text below. It no longer partitions the
+  // lookup, so the same code resolves to the same row whichever side reports
+  // it — which is the whole point.
+  const cached = caches.statusByCode.get(rawText)
   if (cached !== undefined) return cached
 
-  // Keyed on (code, source_system), not code alone: the two sides share status
-  // LABELS (both portals render "Paid"), and 20260814000005 replaced the global
-  // unique constraint on code with a composite one for exactly that reason.
-  // Looking up on code alone would resolve an Audit status to the Departmental
-  // row that happened to be inserted first.
   const existing = await client.query<{ id: number }>(
-    'select id from public.entry_status where code = $1 and source_system = $2',
-    [rawText, sourceSystem]
+    'select id from public.entry_status where code = $1',
+    [rawText]
   )
   if (existing.rows[0]) {
-    caches.statusByCode.set(cacheKey, existing.rows[0].id)
+    caches.statusByCode.set(rawText, existing.rows[0].id)
     return existing.rows[0].id
   }
 
   const created = await client.query<{ id: number }>(
-    `insert into public.entry_status (code, label, source_system, sort_order, is_terminal)
-     values ($1, $1, $2, 999, false)
+    `insert into public.entry_status (code, label, sort_order, is_terminal)
+     values ($1, $1, 999, false)
+     on conflict (code) do update set code = excluded.code
      returning id`,
-    [rawText, sourceSystem]
+    [rawText]
   )
   const id = created.rows[0]!.id
-  caches.statusByCode.set(cacheKey, id)
+  caches.statusByCode.set(rawText, id)
 
-  const description = `Unseen status code "${rawText}" (${sourceSystem}) auto-inserted with sort_order = 999.`
+  const description = `Unseen status code "${rawText}" (first seen from ${sourceSystem}) auto-inserted with sort_order = 999.`
   // dedup_key deliberately excludes batchId: the same unseen code hit by a
   // later import is the same finding, not a new one. ON CONFLICT refreshes
   // the pointer to the latest batch that saw it while it's still open, but
@@ -527,7 +579,9 @@ export async function resolveStatus(
        set import_batch_id = excluded.import_batch_id,
            description = excluded.description
        where public.reconciliation_exception.status = 'open'`,
-    [batchId, description, `unknown_status_code:${rawText}:${sourceSystem}`]
+    // Keyed on the code alone, matching the unified vocabulary: the same
+    // unseen code met from both portals is one finding to act on, not two.
+    [batchId, description, `unknown_status_code:${rawText}`]
   )
   exceptionsOut.push({ exceptionType: 'unknown_status_code', severity: 'low', description })
 
@@ -681,9 +735,12 @@ export async function runImport(params: RunImportParams): Promise<ImportResult> 
               exceptions
             )
           }
-          let auditStatusId: number | null = null
+          // The export's "Main Status" column is the audit-side state. It is
+          // no longer a SECOND status: with one unified vocabulary and one
+          // status column (20260828000001), whichever side reports last wins,
+          // and the audit side is downstream so its word is the later one.
           if (entry.auditStatusRaw) {
-            auditStatusId = await resolveStatus(
+            statusId = await resolveStatus(
               client,
               caches,
               entry.auditStatusRaw,
@@ -692,13 +749,13 @@ export async function runImport(params: RunImportParams): Promise<ImportResult> 
               exceptions
             )
           }
+          const effectiveStatusRaw = entry.auditStatusRaw ?? entry.statusRaw
 
           const invoiceDate = parseDdMmYyyy(entry.invoiceDate)
 
           const before = await client.query<Record<string, unknown>>(
             `select main_number, department_id, budget_head_id, invoice_number, vendor_id, vendor_raw,
-                    date, amount, variance_reason, status_id, audit_status_id,
-                    status_raw, audit_status_raw, budget_head_raw, type
+                    date, amount, status_id, status_raw, type
              from public.entries where ubbl_number = $1`,
             [entry.ubblNumber]
           )
@@ -707,11 +764,11 @@ export async function runImport(params: RunImportParams): Promise<ImportResult> 
           const upserted = await client.query<{ id: number }>(
             `insert into public.entries (
                type, ubbl_number, main_number, department_id, budget_head_id, invoice_number,
-               vendor_id, vendor_raw, date, amount, variance_reason,
-               status_id, audit_status_id, status_raw, audit_status_raw,
-               budget_head_raw, source, import_batch_id, event_id, updated_at
+               vendor_id, vendor_raw, date, amount,
+               status_id, status_raw,
+               source, import_batch_id, event_id, updated_at
              ) values (
-               $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, 'import', $17, $18, now()
+               $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'import', $13, $14, now()
              )
              on conflict (ubbl_number) do update set
                main_number       = coalesce(excluded.main_number, entries.main_number),
@@ -722,12 +779,8 @@ export async function runImport(params: RunImportParams): Promise<ImportResult> 
                vendor_raw        = excluded.vendor_raw,
                date              = excluded.date,
                amount            = excluded.amount,
-               variance_reason   = coalesce(excluded.variance_reason, entries.variance_reason),
                status_id         = excluded.status_id,
-               audit_status_id   = coalesce(excluded.audit_status_id, entries.audit_status_id),
                status_raw        = excluded.status_raw,
-               audit_status_raw  = coalesce(excluded.audit_status_raw, entries.audit_status_raw),
-               budget_head_raw   = excluded.budget_head_raw,
                import_batch_id   = excluded.import_batch_id,
                updated_at        = now()
              returning id`,
@@ -742,12 +795,8 @@ export async function runImport(params: RunImportParams): Promise<ImportResult> 
               entry.vendorRaw,
               invoiceDate,
               entry.invoiceAmount,
-              null, // variance_reason: not present in the Departmental export
               statusId,
-              auditStatusId,
-              entry.statusRaw,
-              entry.auditStatusRaw,
-              row.budgetHead,
+              effectiveStatusRaw,
               batchId,
               eventId,
             ]
@@ -767,10 +816,7 @@ export async function runImport(params: RunImportParams): Promise<ImportResult> 
               date: invoiceDate,
               amount: entry.invoiceAmount,
               status_id: statusId,
-              audit_status_id: auditStatusId ?? existing.audit_status_id,
-              status_raw: entry.statusRaw,
-              audit_status_raw: entry.auditStatusRaw ?? existing.audit_status_raw,
-              budget_head_raw: row.budgetHead,
+              status_raw: effectiveStatusRaw,
               type: entry.type,
             }
             const diff = diffFields(existing, after)
@@ -999,6 +1045,53 @@ export async function runImport(params: RunImportParams): Promise<ImportResult> 
     }
   } finally {
     client.release()
+  }
+}
+
+/**
+ * Multi-row form of writeRowLog: one INSERT for the whole batch instead of
+ * one per row.
+ *
+ * The row log is pure append -- no ON CONFLICT, no read-back, and nothing
+ * later in the import reads what it wrote -- so the individual writes were
+ * never ordering-sensitive, only numerous. On a 64-row scrape that was 64
+ * sequential round trips of the ~320 the import spent (measured 2026-08-28:
+ * 6.1ms per round trip against the ap-south-1 pooler, which is most of a
+ * multi-second import). Collapsing them costs nothing in behaviour: the
+ * rows land inside the same transaction, in the same order, and a dry run
+ * still rolls every one of them back.
+ *
+ * Chunked because Postgres caps a statement at 65535 bound parameters; at 6
+ * columns per row that is ~10900 rows, and MAX_ROWS on the scrape endpoint
+ * is 20000. Callers pass whatever they have and this stays correct.
+ */
+export async function writeRowLogBatch(
+  client: PoolClient,
+  batchId: number,
+  entries: readonly ImportRowLogEntry[]
+): Promise<void> {
+  const CHUNK = 500
+  for (let start = 0; start < entries.length; start += CHUNK) {
+    const chunk = entries.slice(start, start + CHUNK)
+    const values: unknown[] = []
+    const tuples = chunk.map((entry, i) => {
+      const b = i * 6
+      values.push(
+        batchId,
+        entry.entryId,
+        entry.rowNumber,
+        JSON.stringify(entry.rawRow),
+        entry.action,
+        entry.fieldsChanged ? JSON.stringify(entry.fieldsChanged) : null
+      )
+      return `($${b + 1}, $${b + 2}, $${b + 3}, $${b + 4}, $${b + 5}, $${b + 6})`
+    })
+    await client.query(
+      `insert into public.import_row_log
+         (import_batch_id, entry_id, row_number, raw_row_jsonb, action, fields_changed)
+       values ${tuples.join(', ')}`,
+      values
+    )
   }
 }
 

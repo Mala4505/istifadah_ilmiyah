@@ -186,12 +186,6 @@ function renderCell(row: EntryEnriched, key: ColumnKey) {
       ) : (
         '—'
       )
-    case 'audit_status_label':
-      return row.audit_status_label ? (
-        <Badge variant={statusBadgeVariant(row.audit_status_label)}>{row.audit_status_label}</Badge>
-      ) : (
-        '—'
-      )
     case 'hub_status_label':
       return <Badge variant={hubStatusBadgeVariant(row.hub_status_code)}>{row.hub_status_label}</Badge>
     case 'export_pending':

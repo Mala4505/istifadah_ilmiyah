@@ -1,6 +1,6 @@
 import { friendlyDataError } from '@/lib/friendly-error'
 import Link from 'next/link'
-import { ScanLine, TriangleAlert, Wallet, UploadCloud, FileScan, ArrowRight, ListChecks, ShieldCheck, Tag } from 'lucide-react'
+import { ScanLine, TriangleAlert, Wallet, UploadCloud, FileScan, ArrowRight, ListChecks, Tag } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
 import { getSelectedEventId } from '@/lib/events/current'
 import { StatTile } from '@/components/dashboard/stat-tile'
@@ -25,7 +25,7 @@ type BudgetVsActualRow = {
 }
 type ImportBatchRow = { id: number; row_count: number | null; mode: string; status: string }
 type EntryStatusCountRow = {
-  dimension: 'status' | 'audit_status' | 'hub_status'
+  dimension: 'status' | 'hub_status'
   status_id: number | null
   status_code: string
   status_label: string
@@ -145,7 +145,6 @@ async function loadDashboardData() {
     unmatchedDocsError: friendlyDataError(unmatchedDocsRes.error, 'dashboard:unmatchedDocsRes'),
 
     statusCounts: toStatusCounts('status'),
-    auditStatusCounts: toStatusCounts('audit_status'),
     hubStatusCounts: toStatusCounts('hub_status'),
     statusCountsError: friendlyDataError(statusCountsRes.error, 'dashboard:statusCountsRes'),
 
@@ -277,14 +276,6 @@ export default async function DashboardPage() {
               paramKey="st"
               variantFor={dashboardStatusBadgeVariant}
               emptyHint="No entries imported yet."
-            />
-            <StatusCountCard
-              title="Audit status"
-              icon={ShieldCheck}
-              rows={data.auditStatusCounts}
-              paramKey="ast"
-              variantFor={dashboardStatusBadgeVariant}
-              emptyHint="No Audit-portal data linked yet."
             />
             <StatusCountCard
               title="Hub status"

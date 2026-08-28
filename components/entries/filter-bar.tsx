@@ -119,17 +119,6 @@ export function FilterBar({
           </SelectNative>
         </Field>
 
-        <Field label="Audit status">
-          <SelectNative value={filters.auditStatus} onChange={(e) => onChange({ auditStatus: e.target.value })}>
-            <option value="">Any audit status</option>
-            {options.auditStatuses.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.label}
-              </option>
-            ))}
-          </SelectNative>
-        </Field>
-
         <Field label="Hub status">
           <SelectNative value={filters.hubStatus} onChange={(e) => onChange({ hubStatus: e.target.value })}>
             <option value="">Any Hub status</option>
@@ -282,7 +271,6 @@ function buildFilterSummary(filters: EntriesFilters, options: FilterOptions): st
   }
 
   pushSelect(filters.status, options.statuses, 'Status')
-  pushSelect(filters.auditStatus, options.auditStatuses, 'Audit status')
   pushSelect(filters.hubStatus, options.hubStatuses, 'Hub status')
   pushSelect(filters.department, options.departments, 'Department')
   pushSelect(filters.budgetHead, options.budgetHeads, 'Budget head')

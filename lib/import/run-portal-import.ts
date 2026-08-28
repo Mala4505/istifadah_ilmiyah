@@ -23,7 +23,7 @@
  * WHAT EACH SOURCE SYSTEM WRITES
  *
  *   audit        Annotates entries the Departmental import already created.
- *                Writes audit_status_id / audit_status_raw / audit_synced_at
+ *                Writes the shared status_id / status_raw plus audit_synced_at
  *                and nothing else. Never inserts an entry: an Audit row with
  *                no Hub counterpart is a reconciliation finding, not a licence
  *                to invent a half-populated entry with no budget head, no
@@ -31,14 +31,15 @@
  *
  *   departmental Upserts entries on ubbl_number, keeping identity, money,
  *                dates, vendor and departmental status current between .xlsx
- *                imports. It does NOT write budget_head_id, department_id or
- *                budget_allocation — see the budget-head note in
- *                lib/import/portal-mapping.ts for why the portal's "Budget
- *                Head" column cannot be trusted to mean the same thing as the
- *                export's, and §3.5 for why allocations only ever arrive as a
- *                snapshot from the export. The .xlsx import remains the source
- *                of truth for classification and allocation; the scrape keeps
- *                the rest fresh daily.
+ *                imports. It ALSO resolves department_id and budget_head_id
+ *                from the tab's own DEPARTMENT and BUDGET HEAD columns, via
+ *                the same resolvers the .xlsx path uses — see the
+ *                classification block in importDepartmentalRow for why this
+ *                portal (unlike the Audit one) renders a budget head that
+ *                can be trusted. It still does NOT write budget_allocation:
+ *                per §3.5 allocations only ever arrive as a snapshot from
+ *                the export, so the .xlsx import remains the source of truth
+ *                there and the scrape keeps the rest fresh daily.
  * ---------------------------------------------------------------------------
  */
 
@@ -47,10 +48,12 @@ import type { PoolClient } from 'pg'
 import {
   getPool,
   newCaches,
+  resolveBudgetHead,
+  resolveDepartment,
   resolveMutableEventId,
   resolveStatus,
   resolveVendor,
-  writeRowLog,
+  writeRowLogBatch,
   type ImportExceptionSummary,
   type ImportResult,
   type ImportRowAction,
@@ -129,8 +132,6 @@ interface MatchedEntry {
   ubbl_number: string
   main_number: string | null
   amount: string | null
-  audit_status_id: number | null
-  audit_status_raw: string | null
   status_id: number | null
   status_raw: string | null
   invoice_number: string | null
@@ -140,7 +141,7 @@ interface MatchedEntry {
   type: string
 }
 
-const ENTRY_COLUMNS = `id, ubbl_number, main_number, amount, audit_status_id, audit_status_raw,
+const ENTRY_COLUMNS = `id, ubbl_number, main_number, amount,
                        status_id, status_raw, invoice_number, vendor_id, vendor_raw, date, type`
 
 /**
@@ -193,46 +194,94 @@ async function findEntry(
   return { entry: null, ambiguous: false }
 }
 
-async function raiseException(
-  client: PoolClient,
-  batchId: number,
+interface PendingException {
+  type: string
+  severity: 'low' | 'medium' | 'high'
+  description: string
+  dedupKey: string
+  entryId?: number | null
+  amountAtRisk?: number | null
+}
+
+/**
+ * Records a finding. Buffered, not written — `flushExceptions` below does the
+ * single INSERT once the row loop is done.
+ *
+ * Every caller already treats raising an exception as fire-and-forget: none
+ * reads back the inserted row, and none branches on whether the insert
+ * conflicted. So the only thing the per-call `await` bought was a round trip
+ * per finding — 67 of them on the 64-row scrape measured 2026-08-28. Kept
+ * synchronous (no promise) so a forgotten `await` can't silently drop a
+ * finding.
+ */
+function raiseException(
+  pending: PendingException[],
   exceptionsOut: ImportExceptionSummary[],
-  input: {
-    type: string
-    severity: 'low' | 'medium' | 'high'
-    description: string
-    dedupKey: string
-    entryId?: number | null
-    amountAtRisk?: number | null
-  }
-): Promise<void> {
-  // Same dedup discipline as run-import.ts's exceptions (2026-08-13 fix):
-  // batchId is deliberately NOT part of the key, so re-importing the same
-  // unresolved finding refreshes the existing open row instead of spawning a
-  // duplicate on every scrape — and never reopens one a human has resolved.
-  await client.query(
-    `insert into public.reconciliation_exception
-       (import_batch_id, entry_id, exception_type, severity, amount_at_risk, description, dedup_key)
-     values ($1, $2, $3, $4, $5, $6, $7)
-     on conflict (dedup_key) do update
-       set import_batch_id = excluded.import_batch_id,
-           description = excluded.description
-       where public.reconciliation_exception.status = 'open'`,
-    [
-      batchId,
-      input.entryId ?? null,
-      input.type,
-      input.severity,
-      input.amountAtRisk ?? null,
-      input.description,
-      input.dedupKey,
-    ]
-  )
+  input: PendingException
+): void {
+  pending.push(input)
   exceptionsOut.push({
     exceptionType: input.type,
     severity: input.severity,
     description: input.description,
   })
+}
+
+/**
+ * Writes every buffered finding in one statement.
+ *
+ * Deduped by `dedupKey` FIRST, keeping the last occurrence: Postgres refuses
+ * an `ON CONFLICT DO UPDATE` that would touch the same row twice in one
+ * statement ("cannot affect row a second time"), and a single scrape can
+ * genuinely raise the same key twice — e.g. two rows sharing a vendor that
+ * trips the same finding. The per-call version never hit this because each
+ * insert was its own statement; batching makes it reachable, so it is handled
+ * here rather than left as a latent crash.
+ *
+ * Dedup discipline is otherwise unchanged from the original (2026-08-13 fix):
+ * batchId is deliberately NOT part of the key, so re-importing the same
+ * unresolved finding refreshes the existing open row instead of spawning a
+ * duplicate on every scrape — and never reopens one a human has resolved.
+ */
+async function flushExceptions(
+  client: PoolClient,
+  batchId: number,
+  pending: readonly PendingException[]
+): Promise<void> {
+  if (pending.length === 0) return
+
+  const byKey = new Map<string, PendingException>()
+  for (const e of pending) byKey.set(e.dedupKey, e)
+  const unique = [...byKey.values()]
+
+  const CHUNK = 500
+  for (let start = 0; start < unique.length; start += CHUNK) {
+    const chunk = unique.slice(start, start + CHUNK)
+    const values: unknown[] = []
+    const tuples = chunk.map((e, i) => {
+      const b = i * 7
+      values.push(
+        batchId,
+        e.entryId ?? null,
+        e.type,
+        e.severity,
+        e.amountAtRisk ?? null,
+        e.description,
+        e.dedupKey
+      )
+      return `($${b + 1}, $${b + 2}, $${b + 3}, $${b + 4}, $${b + 5}, $${b + 6}, $${b + 7})`
+    })
+    await client.query(
+      `insert into public.reconciliation_exception
+         (import_batch_id, entry_id, exception_type, severity, amount_at_risk, description, dedup_key)
+       values ${tuples.join(', ')}
+       on conflict (dedup_key) do update
+         set import_batch_id = excluded.import_batch_id,
+             description = excluded.description
+         where public.reconciliation_exception.status = 'open'`,
+      values
+    )
+  }
 }
 
 /** Resolves a parsed status chip to an entry_status id, or null if absent. */
@@ -288,6 +337,9 @@ export async function runPortalImport(
   const caches = newCaches()
   const rowLog: ImportRowLogEntry[] = []
   const exceptions: ImportExceptionSummary[] = []
+  // Findings and row-log entries are buffered here and written once, after the
+  // row loop, instead of a round trip each — see raiseException/logRow.
+  const pendingExceptions: PendingException[] = []
   const warnings = [...parsed.warnings]
 
   const batchColumns = `(source_system, source_filename, file_hash_sha256, mode, imported_by,
@@ -313,12 +365,42 @@ export async function runPortalImport(
     )
     const batchId = batchInsert.rows[0]!.id
 
+    /**
+     * Every entry this batch could touch, fetched in ONE query instead of a
+     * SELECT per row.
+     *
+     * The row loop needs each entry's prior state to compute the
+     * inserted/updated/unchanged diff. Asking for them one at a time was a
+     * round trip per row — 64 of them on the invoice tab, against a pooler
+     * measured at 6.1ms, so ~0.4s of an import spent re-asking questions one
+     * key at a time.
+     *
+     * A row is REMOVED from this map once processed, so a scrape that somehow
+     * lists the same UBBL twice falls back to a live read for the second
+     * occurrence rather than diffing against a snapshot the first pass has
+     * already invalidated. That keeps the batched path exactly as correct as
+     * the per-row one, including in the pathological case.
+     */
+    const prefetchedEntries = new Map<string, MatchedEntry>()
+    if (sourceSystem === 'departmental') {
+      const ubblNumbers = parsed.rows
+        .filter((r) => !r.skipReason && r.ubblNumber)
+        .map((r) => r.ubblNumber as string)
+      if (ubblNumbers.length > 0) {
+        const existingRows = await client.query<MatchedEntry>(
+          `select ${ENTRY_COLUMNS} from public.entries where ubbl_number = any($1::text[])`,
+          [ubblNumbers]
+        )
+        for (const found of existingRows.rows) prefetchedEntries.set(found.ubbl_number, found)
+      }
+    }
+
     for (const row of parsed.rows) {
       try {
         if (row.skipReason) {
           const action: ImportRowAction =
             row.skipReason === 'total_row' ? 'skipped_total' : 'skipped_no_identifier'
-          await logRow(client, batchId, rowLog, {
+          logRow(rowLog, {
             rowNumber: row.rowNumber,
             rawRow: row.rawRow,
             action,
@@ -329,7 +411,7 @@ export async function runPortalImport(
         }
 
         if (sourceSystem === 'audit') {
-          await importAuditRow(client, caches, batchId, row, rowLog, exceptions)
+          await importAuditRow(client, caches, batchId, row, rowLog, exceptions, pendingExceptions)
         } else {
           // tableKind is non-null whenever sourceSystem === 'departmental' —
           // see its computation above.
@@ -341,12 +423,14 @@ export async function runPortalImport(
             row,
             rowLog,
             exceptions,
-            tableKind!
+            pendingExceptions,
+            tableKind!,
+            prefetchedEntries
           )
         }
       } catch (rowError) {
         const message = rowError instanceof Error ? rowError.message : String(rowError)
-        await logRow(client, batchId, rowLog, {
+        logRow(rowLog, {
           rowNumber: row.rowNumber,
           rawRow: row.rawRow,
           action: 'error',
@@ -356,6 +440,12 @@ export async function runPortalImport(
         })
       }
     }
+
+    // One INSERT each for the row log and the findings, rather than one per
+    // row. Inside the same transaction as the row writes, so a dry run still
+    // rolls both back and a commit still lands them atomically.
+    await writeRowLogBatch(client, batchId, rowLog)
+    await flushExceptions(client, batchId, pendingExceptions)
 
     const summary: Record<string, number> = {}
     for (const entry of rowLog) {
@@ -466,14 +556,14 @@ export async function runPortalImport(
 // Per-row handlers
 // ---------------------------------------------------------------------------
 
-async function logRow(
-  client: PoolClient,
-  batchId: number,
-  rowLog: ImportRowLogEntry[],
-  entry: ImportRowLogEntry
-): Promise<void> {
+/**
+ * Records one row's outcome. Buffered, not written — `writeRowLogBatch`
+ * flushes the whole log in one INSERT once the loop is done. Synchronous for
+ * the same reason as `raiseException`: nothing downstream reads the log back,
+ * so an `await` here only ever bought a round trip per row.
+ */
+function logRow(rowLog: ImportRowLogEntry[], entry: ImportRowLogEntry): void {
   rowLog.push(entry)
-  await writeRowLog(client, batchId, entry)
 }
 
 /** Outcome of attemptAuditRowMatch — see that function for what each case means. */
@@ -515,19 +605,25 @@ async function attemptAuditRowMatch(
   caches: ResolverCaches,
   batchId: number,
   row: ParsedPortalRow,
-  exceptions: ImportExceptionSummary[]
+  exceptions: ImportExceptionSummary[],
+  pendingExceptions: PendingException[]
 ): Promise<AuditRowMatchOutcome> {
   const { entry, ambiguous } = await findEntry(client, row)
   if (ambiguous) return { kind: 'ambiguous' }
   if (!entry) return { kind: 'unmatched' }
 
-  // The Audit portal's status is the AUDIT status, whichever column it came
-  // from: on that portal the plain "Status" column IS the audit-side state.
-  // A dedicated "Audit Status" column, if one ever appears, still wins.
+  // The Audit portal's status chip, whichever column it came from: on that
+  // portal the plain "Status" column IS the state. A dedicated "Audit Status"
+  // column, if one ever appears, still wins.
+  //
+  // This now writes THE status (20260828000001), not a second one parallel to
+  // the Departmental one. The Audit portal is downstream of the Departmental
+  // one, so when it reports on a row the Hub already has, its word is the
+  // later one and simply replaces what is there.
   const auditChip = row.auditStatus ?? row.status
   const verificationChip = row.verificationStatus
 
-  const auditStatusId = await resolvePortalStatus(
+  const statusId = await resolvePortalStatus(
     client,
     caches,
     auditChip,
@@ -549,15 +645,15 @@ async function attemptAuditRowMatch(
 
   const before = {
     main_number: entry.main_number,
-    audit_status_id: entry.audit_status_id,
-    audit_status_raw: entry.audit_status_raw,
+    status_id: entry.status_id,
+    status_raw: entry.status_raw,
   }
   const after = {
     // Fill main_number in if the Hub has never seen it; never overwrite a
     // value the Departmental export already established.
     main_number: entry.main_number ?? row.mainNumber,
-    audit_status_id: auditStatusId ?? entry.audit_status_id,
-    audit_status_raw: auditChip?.raw ?? entry.audit_status_raw,
+    status_id: statusId ?? entry.status_id,
+    status_raw: auditChip?.raw ?? entry.status_raw,
   }
 
   const fieldsChanged: Record<string, { from: unknown; to: unknown }> = {}
@@ -565,18 +661,21 @@ async function attemptAuditRowMatch(
     if (before[key] !== after[key]) fieldsChanged[key] = { from: before[key], to: after[key] }
   }
 
+  // audit_synced_at / audit_sync_batch_id survive the status merge: they
+  // answer "when did the Audit side last confirm this row, and in which
+  // batch", which stays meaningful even though the status itself is now
+  // shared. status_changed_at is only bumped on an actual change, same
+  // conditional the audit-specific column used to carry.
   await client.query(
     `update public.entries
         set main_number      = $1,
-            audit_status_id  = $2,
-            audit_status_raw = $3,
+            status_id        = coalesce($2, status_id),
+            status_raw       = coalesce($3, status_raw),
             audit_synced_at  = now(),
             audit_sync_batch_id = $4,
-            audit_status_changed_at = case when $2::bigint is distinct from audit_status_id
-                                           then now() else audit_status_changed_at end,
             updated_at       = now()
       where id = $5`,
-    [after.main_number, after.audit_status_id, after.audit_status_raw, batchId, entry.id]
+    [after.main_number, after.status_id, after.status_raw, batchId, entry.id]
   )
 
   // Amount disagreement between the two sides is exactly what
@@ -586,7 +685,7 @@ async function attemptAuditRowMatch(
   // would destroy the evidence that they ever disagreed.
   const hubAmount = entry.amount === null ? null : Number(entry.amount)
   if (moneyDiffers(hubAmount, row.amount)) {
-    await raiseException(client, batchId, exceptions, {
+    raiseException(pendingExceptions, exceptions, {
       type: 'tenant_vs_main_variance',
       severity: 'high',
       entryId: entry.id,
@@ -612,20 +711,21 @@ async function importAuditRow(
   batchId: number,
   row: ParsedPortalRow,
   rowLog: ImportRowLogEntry[],
-  exceptions: ImportExceptionSummary[]
+  exceptions: ImportExceptionSummary[],
+  pendingExceptions: PendingException[]
 ): Promise<void> {
-  const outcome = await attemptAuditRowMatch(client, caches, batchId, row, exceptions)
+  const outcome = await attemptAuditRowMatch(client, caches, batchId, row, exceptions, pendingExceptions)
 
   if (outcome.kind === 'ambiguous') {
     const identifier = row.mainNumber ?? row.ubblNumber ?? '(none)'
-    await raiseException(client, batchId, exceptions, {
+    raiseException(pendingExceptions, exceptions, {
       type: 'audit_ambiguous_match',
       severity: 'high',
       description: `Audit row "${identifier}" matched more than one Hub entry; no audit status was written. Resolve the duplicate entries first.`,
       dedupKey: `audit_ambiguous_match:${identifier}`,
       amountAtRisk: row.amount,
     })
-    await logRow(client, batchId, rowLog, {
+    logRow(rowLog, {
       rowNumber: row.rowNumber,
       rawRow: row.rawRow,
       action: 'audit_ambiguous',
@@ -637,7 +737,7 @@ async function importAuditRow(
 
   if (outcome.kind === 'unmatched') {
     const identifier = row.mainNumber ?? row.ubblNumber ?? '(none)'
-    await raiseException(client, batchId, exceptions, {
+    raiseException(pendingExceptions, exceptions, {
       type: 'audit_row_unmatched',
       severity: 'medium',
       description:
@@ -649,7 +749,7 @@ async function importAuditRow(
       dedupKey: `audit_row_unmatched:${identifier}`,
       amountAtRisk: row.amount,
     })
-    await logRow(client, batchId, rowLog, {
+    logRow(rowLog, {
       rowNumber: row.rowNumber,
       rawRow: row.rawRow,
       action: 'audit_unmatched',
@@ -659,7 +759,7 @@ async function importAuditRow(
     return
   }
 
-  await logRow(client, batchId, rowLog, {
+  logRow(rowLog, {
     rowNumber: row.rowNumber,
     rawRow: row.rawRow,
     action: outcome.fieldsChanged ? 'audit_status_updated' : 'audit_status_unchanged',
@@ -708,6 +808,12 @@ export async function retryUnmatchedAuditRows(
   batchId: number,
   exceptions: ImportExceptionSummary[]
 ): Promise<{ resolvedCount: number }> {
+  // Owns its own findings buffer and flushes before returning, so the
+  // .xlsx caller's signature is unchanged by the batching work. The only
+  // findings reachable from here are the tenant_vs_main_variance ones
+  // attemptAuditRowMatch may raise on a now-matched row.
+  const pendingExceptions: PendingException[] = []
+
   const openExceptions = await client.query<{
     id: number
     dedup_key: string
@@ -740,7 +846,7 @@ export async function retryUnmatchedAuditRows(
     )
     if (!row) continue
 
-    const outcome = await attemptAuditRowMatch(client, caches, batchId, row, exceptions)
+    const outcome = await attemptAuditRowMatch(client, caches, batchId, row, exceptions, pendingExceptions)
     // Still ambiguous or still unmatched: per the task's point 5, leave the
     // exception exactly as it is rather than refreshing/re-raising it. The
     // ON CONFLICT ... WHERE status = 'open' pattern in raiseException already
@@ -774,6 +880,7 @@ export async function retryUnmatchedAuditRows(
     resolvedCount++
   }
 
+  await flushExceptions(client, batchId, pendingExceptions)
   return { resolvedCount }
 }
 
@@ -801,12 +908,15 @@ async function importDepartmentalRow(
   row: ParsedPortalRow,
   rowLog: ImportRowLogEntry[],
   exceptions: ImportExceptionSummary[],
-  tableKind: 'invoice' | 'reimbursement' | 'advance_payment'
+  pendingExceptions: PendingException[],
+  tableKind: 'invoice' | 'reimbursement' | 'advance_payment',
+  /** Batch-wide snapshot of pre-existing entries; see runPortalImport. */
+  prefetchedEntries: Map<string, MatchedEntry>
 ): Promise<void> {
   if (!row.ubblNumber) {
     // parsePortalTable only reaches here with an identifier, and on the
     // departmental side that identifier is the UBBL number by construction.
-    await logRow(client, batchId, rowLog, {
+    logRow(rowLog, {
       rowNumber: row.rowNumber,
       rawRow: row.rawRow,
       action: 'skipped_no_identifier',
@@ -824,28 +934,93 @@ async function importDepartmentalRow(
     vendorCreated = resolved.created
   }
 
+  /**
+   * THE status for this row — one column, one value (20260828000001).
+   *
+   * The Departmental portal's own STATUS column already carries the
+   * audit-side state: confirmed 2026-08-28 against a real scrape of all
+   * three tabs, whose STATUS values include "Paid", "Received" and "Tax
+   * Invoice Upload Pending (Paid)" — audit workflow states, rendered on the
+   * Departmental screen. The Dept module is fed the Audit module's status
+   * directly, so a Departmental scrape alone keeps the status current and
+   * scraping the Audit portal is a cross-check rather than a prerequisite.
+   *
+   * A dedicated Audit Status column still wins if a portal ever renders one
+   * alongside the plain Status column — it would be the more specific
+   * signal — but neither is written to a second column any more.
+   */
+  const statusChip = row.auditStatus ?? row.status
   const statusId = await resolvePortalStatus(
     client,
     caches,
-    row.status,
+    statusChip,
     'departmental',
     batchId,
     exceptions
   )
-  const auditStatusId = await resolvePortalStatus(
-    client,
-    caches,
-    row.auditStatus,
-    'audit',
-    batchId,
-    exceptions
-  )
 
-  const before = await client.query<MatchedEntry>(
-    `select ${ENTRY_COLUMNS} from public.entries where ubbl_number = $1`,
-    [row.ubblNumber]
-  )
-  const existing = before.rows[0] ?? null
+  /**
+   * Classification, resolved from the two columns the Departmental portal
+   * actually renders.
+   *
+   * This file's header used to say the scrape never writes department_id or
+   * budget_head_id. That was right for the AUDIT portal and wrong for this
+   * one, and the blanket rule cost every scraped row its classification:
+   * each new entry landed with no budget head and a `new_budget_head`
+   * finding attached (25 of them on the advance-payment tab alone,
+   * 2026-08-28) that a human then had to read and ignore.
+   *
+   * The two portals genuinely differ, which is what the original note
+   * conflated:
+   *   - Audit portal:        "Budget Head" reads "Venue Setup" — just the
+   *                          department name again, nothing to extract.
+   *   - Departmental portal: "Budget Head" reads "Venue setup (Power)" —
+   *                          the exact "<department> (<short label>)" shape
+   *                          the .xlsx export uses and that
+   *                          parseBudgetHeadShortLabel already parses, and
+   *                          the row carries its own DEPARTMENT column
+   *                          ("Venue Setup") alongside it.
+   *
+   * So on THIS side the data needed is present and in a known shape, and it
+   * goes through the very same resolveDepartment/resolveBudgetHead the
+   * .xlsx path uses — one definition of "resolve a budget head", matching
+   * on (department_id, short_label) so the portal's inconsistent department
+   * casing can't fork a duplicate (see resolveBudgetHead).
+   *
+   * Department comes from the DEPARTMENT column, never from splitting the
+   * budget-head string: that mirrors the .xlsx path, where department is
+   * likewise its own column. budget_allocation is still untouched — that
+   * only ever arrives as a snapshot from the export (§3.5).
+   */
+  let departmentId: number | null = null
+  let budgetHeadId: number | null = null
+  if (row.departmentRaw) {
+    departmentId = await resolveDepartment(client, caches, row.departmentRaw, eventId)
+  }
+  if (row.budgetHeadRaw) {
+    const resolvedHead = await resolveBudgetHead(
+      client,
+      caches,
+      row.budgetHeadRaw,
+      departmentId,
+      batchId,
+      eventId
+    )
+    budgetHeadId = resolvedHead.id
+  }
+
+  // Consume the batch snapshot; a repeated UBBL inside one scrape misses it
+  // (deleted below) and falls back to a live read, so the diff is never taken
+  // against state this same batch has already changed.
+  let existing = prefetchedEntries.get(row.ubblNumber) ?? null
+  if (!existing && !prefetchedEntries.has(row.ubblNumber)) {
+    const before = await client.query<MatchedEntry>(
+      `select ${ENTRY_COLUMNS} from public.entries where ubbl_number = $1`,
+      [row.ubblNumber]
+    )
+    existing = before.rows[0] ?? null
+  }
+  prefetchedEntries.delete(row.ubblNumber)
 
   // On the Advance Payment tab, entries.amount holds the tab's Uplaq Amount
   // figure (per the user's decision, see the migration's comment on
@@ -857,7 +1032,8 @@ async function importDepartmentalRow(
   const upserted = await client.query<{ id: number }>(
     `insert into public.entries (
        type, ubbl_number, main_number, invoice_number, vendor_id, vendor_raw,
-       date, amount, status_id, audit_status_id, status_raw, audit_status_raw,
+       date, amount, status_id, status_raw,
+       department_id, budget_head_id,
        source, import_batch_id, event_id, updated_at
      ) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'import', $13, $14, now())
      on conflict (ubbl_number) do update set
@@ -868,9 +1044,9 @@ async function importDepartmentalRow(
        date             = coalesce(excluded.date, entries.date),
        amount           = coalesce(excluded.amount, entries.amount),
        status_id        = coalesce(excluded.status_id, entries.status_id),
-       audit_status_id  = coalesce(excluded.audit_status_id, entries.audit_status_id),
        status_raw       = coalesce(excluded.status_raw, entries.status_raw),
-       audit_status_raw = coalesce(excluded.audit_status_raw, entries.audit_status_raw),
+       department_id    = coalesce(excluded.department_id, entries.department_id),
+       budget_head_id   = coalesce(excluded.budget_head_id, entries.budget_head_id),
        import_batch_id  = excluded.import_batch_id,
        updated_at       = now()
      returning id`,
@@ -884,9 +1060,9 @@ async function importDepartmentalRow(
       row.date,
       effectiveAmount,
       statusId,
-      auditStatusId,
-      row.status?.raw ?? null,
-      row.auditStatus?.raw ?? null,
+      statusChip?.raw ?? null,
+      departmentId,
+      budgetHeadId,
       batchId,
       eventId,
     ]
@@ -901,7 +1077,7 @@ async function importDepartmentalRow(
   // the operator was looking at, not a string-prefix heuristic).
   const prefixType = deriveEntryType(row.ubblNumber)
   if (prefixType !== tableKind) {
-    await raiseException(client, batchId, exceptions, {
+    raiseException(pendingExceptions, exceptions, {
       type: 'entry_type_kind_mismatch',
       severity: 'low',
       entryId,
@@ -923,21 +1099,28 @@ async function importDepartmentalRow(
 
   if (!existing) {
     action = vendorCreated ? 'new_vendor' : 'inserted'
-    // A scraped entry arrives with no budget head, because the portal's own
-    // Budget Head column cannot be mapped to `budget_head` with confidence
-    // (see portal-mapping.ts). Flagged so it is visibly incomplete until the
-    // next .xlsx import classifies it, rather than quietly sitting outside
-    // every budget report.
-    await raiseException(client, batchId, exceptions, {
-      type: 'new_budget_head',
-      severity: 'low',
-      entryId,
-      description:
-        `Entry ${row.ubblNumber} was created from a portal scrape and has no budget head. ` +
-        `The portal shows "${row.budgetHeadRaw ?? 'nothing'}", which does not map to a budget_head row on its own. ` +
-        `The next Departmental .xlsx import will classify it.`,
-      dedupKey: `new_budget_head:scrape:${row.ubblNumber}`,
-    })
+    // Only worth a finding when the row genuinely ended up unclassified.
+    // This used to fire on EVERY newly-scraped entry, because the scrape
+    // never resolved a budget head at all — 25 identical low-severity rows
+    // on one advance-payment tab, none of them actionable, which is exactly
+    // the noise that trains an operator to skim past findings that matter.
+    // Now that classification is resolved above, an entry reaching here
+    // without one means the portal really did render no Budget Head cell
+    // (the reimbursement tab has no such column) or no Department to scope
+    // it to — a real gap, and rare.
+    if (budgetHeadId === null) {
+      raiseException(pendingExceptions, exceptions, {
+        type: 'new_budget_head',
+        severity: 'low',
+        entryId,
+        description:
+          `Entry ${row.ubblNumber} was created from a portal scrape with no budget head. ` +
+          `The portal showed "${row.budgetHeadRaw ?? 'nothing'}" as its Budget Head and ` +
+          `"${row.departmentRaw ?? 'nothing'}" as its Department. ` +
+          `The next Departmental .xlsx import will classify it.`,
+        dedupKey: `new_budget_head:scrape:${row.ubblNumber}`,
+      })
+    }
   } else {
     const after = {
       main_number: row.mainNumber ?? existing.main_number,
@@ -947,7 +1130,7 @@ async function importDepartmentalRow(
       date: row.date ?? existing.date,
       amount: effectiveAmount ?? (existing.amount === null ? null : Number(existing.amount)),
       status_id: statusId ?? existing.status_id,
-      status_raw: row.status?.raw ?? existing.status_raw,
+      status_raw: statusChip?.raw ?? existing.status_raw,
     }
     const existingComparable = {
       main_number: existing.main_number,
@@ -978,7 +1161,7 @@ async function importDepartmentalRow(
     await upsertDetailTable(client, caches, batchId, entryId, tableKind, row)
   }
 
-  await logRow(client, batchId, rowLog, {
+  logRow(rowLog, {
     rowNumber: row.rowNumber,
     rawRow: row.rawRow,
     action,

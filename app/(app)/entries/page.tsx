@@ -88,12 +88,7 @@ async function loadEntriesPageData(): Promise<{
     adminHeads: (adminHead.data ?? []).map((h) => ({ id: h.id, label: `${h.head_number}. ${h.name}`, department_id: h.department_id })),
     zones: (zone.data ?? []).map((z) => ({ id: z.id, label: `${z.zone_number}. ${z.name}`, department_id: z.department_id })),
     costCenters: (costCenter.data ?? []).map((c) => ({ id: c.id, label: c.name })),
-    statuses: (status.data ?? [])
-      .filter((s) => s.source_system === 'departmental')
-      .map((s) => ({ id: s.id, label: s.label, code: s.code })),
-    auditStatuses: (status.data ?? [])
-      .filter((s) => s.source_system === 'audit')
-      .map((s) => ({ id: s.id, label: s.label, code: s.code })),
+    statuses: (status.data ?? []).map((s) => ({ id: s.id, label: s.label, code: s.code })),
     hubStatuses: (hub.data ?? []).map((h) => ({ id: h.id, label: h.label, code: h.code })),
   }
 

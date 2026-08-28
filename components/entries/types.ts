@@ -17,15 +17,10 @@ export type EntryEnriched = {
   vendor_raw: string | null
   date: string | null
   amount: number | null
-  variance_reason: string | null
   status_id: number | null
   status_code: string | null
   status_label: string | null
-  audit_status_id: number | null
-  audit_status_code: string | null
-  audit_status_label: string | null
   status_raw: string | null
-  audit_status_raw: string | null
   admin_head_id: number | null
   admin_head_name: string | null
   zone_id: number | null
@@ -41,8 +36,6 @@ export type EntryEnriched = {
   hub_status_changed_by: string | null
   hub_status_note: string | null
   hub_status_exported_at: string | null
-  audit_status_changed_at: string | null
-  audit_status_changed_by: string | null
   settles_entry_id: number | null
   is_void: boolean
   source: 'import' | 'manual' | 'api'
@@ -61,7 +54,6 @@ export type FilterOptions = {
   zones: LookupOption[]
   costCenters: LookupOption[]
   statuses: LookupOption[]
-  auditStatuses: LookupOption[]
   hubStatuses: LookupOption[]
 }
 
@@ -74,7 +66,6 @@ export type EntriesFilters = {
   zone: string
   costCenter: string
   status: string
-  auditStatus: string
   hubStatus: string
   exportPending: boolean
   dateFrom: string
@@ -91,7 +82,6 @@ export const DEFAULT_FILTERS: EntriesFilters = {
   zone: '',
   costCenter: '',
   status: '',
-  auditStatus: '',
   hubStatus: '',
   exportPending: false,
   dateFrom: '',
@@ -137,7 +127,6 @@ export type ColumnKey =
   | 'date'
   | 'amount'
   | 'status_label'
-  | 'audit_status_label'
   | 'hub_status_label'
   | 'export_pending'
   | 'document_count'
@@ -162,7 +151,6 @@ export const ALL_COLUMNS: ColumnDef[] = [
   { key: 'invoice_number', label: 'Invoice #', defaultVisible: false },
   { key: 'amount', label: 'Amount', defaultVisible: true, align: 'right' },
   { key: 'status_label', label: 'Status', defaultVisible: true },
-  { key: 'audit_status_label', label: 'Audit status', defaultVisible: false },
   { key: 'hub_status_label', label: 'Hub status', defaultVisible: true },
   { key: 'export_pending', label: 'Export', defaultVisible: false },
   { key: 'document_count', label: 'Docs', defaultVisible: true, align: 'right' },

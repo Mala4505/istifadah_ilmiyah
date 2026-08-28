@@ -27,11 +27,7 @@ export interface EntryEnriched {
   status_id: number | null
   status_code: string | null
   status_label: string | null
-  audit_status_id: number | null
-  audit_status_code: string | null
-  audit_status_label: string | null
   status_raw: string | null
-  audit_status_raw: string | null
   admin_head_id: number | null
   admin_head_name: string | null
   zone_id: number | null
@@ -47,8 +43,6 @@ export interface EntryEnriched {
   hub_status_changed_by: string | null
   hub_status_note: string | null
   hub_status_exported_at: string | null
-  audit_status_changed_at: string | null
-  audit_status_changed_by: string | null
   settles_entry_id: number | null
   is_void: boolean
   source: EntrySource

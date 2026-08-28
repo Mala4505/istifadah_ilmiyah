@@ -70,14 +70,6 @@ export function ImportFieldsPanel({
             </span>
           )}
         </Field>
-        <Field label="Audit status">
-          {entry.audit_status_label ?? '—'}
-          {entry.audit_status_raw && (
-            <span className="ml-1.5 text-xs text-muted-foreground">
-              (raw: {entry.audit_status_raw})
-            </span>
-          )}
-        </Field>
       </CardContent>
     </Card>
   )

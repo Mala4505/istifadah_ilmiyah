@@ -28,7 +28,6 @@ function filtersToSearchParams(filters: EntriesFilters): URLSearchParams {
   if (filters.zone) sp.set('zone', filters.zone)
   if (filters.costCenter) sp.set('cc', filters.costCenter)
   if (filters.status) sp.set('st', filters.status)
-  if (filters.auditStatus) sp.set('ast', filters.auditStatus)
   if (filters.hubStatus) sp.set('hs', filters.hubStatus)
   if (filters.exportPending) sp.set('exp', '1')
   if (filters.dateFrom) sp.set('from', filters.dateFrom)
@@ -47,7 +46,6 @@ function searchParamsToFilters(sp: URLSearchParams): EntriesFilters {
     zone: sp.get('zone') ?? '',
     costCenter: sp.get('cc') ?? '',
     status: sp.get('st') ?? '',
-    auditStatus: sp.get('ast') ?? '',
     hubStatus: sp.get('hs') ?? '',
     exportPending: sp.get('exp') === '1',
     dateFrom: sp.get('from') ?? '',
