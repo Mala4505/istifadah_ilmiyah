@@ -30,6 +30,7 @@ import {
   claimReviewDocument,
   confirmVendorAlias,
   reExtractField,
+  releaseReviewDocument,
   saveEntryClassification,
   saveVerification,
   type ReExtractableHeaderField,
@@ -489,14 +490,34 @@ export function ReviewWorkspace({
     e.currentTarget.releasePointerCapture(e.pointerId)
   }
 
+  // Hub cert 1.8 ("Never released"): tracks whether THIS component instance
+  // actually holds the claim server-side -- set true by the mount effect
+  // below on a genuine claim success, and by handleTakeOver on a successful
+  // takeover. A ref (not state) because it's read from the mount effect's
+  // own cleanup, which must see the latest value without re-running the
+  // effect itself.
+  const claimedByMeRef = useRef(false)
+
   // Claim/lock (§7): attempt to claim on mount; surface a takeover prompt
-  // instead of silently overwriting someone else's active claim.
+  // instead of silently overwriting someone else's active claim. Cleanup
+  // (hub cert 1.8, "Never released") fires a best-effort release when this
+  // document is left behind -- either this component unmounts, or the
+  // effect re-runs for a different sourceDocumentId (Prev/Next/queue
+  // navigation, which all remount via a key change or update this same
+  // prop). Not awaited: there is no unmount-safe "keep this request alive
+  // after the component is gone" primitive for a server action the way
+  // navigator.sendBeacon gives a plain fetch, so a lost release just means
+  // the claim sits until its own 15-minute staleness window lapses --
+  // today's existing fallback, not a regression.
   useEffect(() => {
     let cancelled = false
+    const sourceDocumentId = detail.sourceDocumentId
+    claimedByMeRef.current = false
     setClaimState('checking')
-    void claimReviewDocument(detail.sourceDocumentId).then((result) => {
+    void claimReviewDocument(sourceDocumentId).then((result) => {
       if (cancelled) return
       if (result.ok) {
+        claimedByMeRef.current = true
         setClaimState('mine')
         return
       }
@@ -506,14 +527,51 @@ export function ReviewWorkspace({
         return
       }
       // Transient error (network, etc.) -- fail open rather than locking the
-      // reviewer out of a document they can otherwise see.
+      // reviewer out of a document they can otherwise see. No claim was
+      // actually written server-side on this path, so claimedByMeRef stays
+      // false and the cleanup below correctly skips releasing.
       toastError(result.error, { context: 'review-workspace' })
       setClaimState('mine')
     })
     return () => {
       cancelled = true
+      if (claimedByMeRef.current) {
+        void releaseReviewDocument(sourceDocumentId)
+      }
     }
   }, [detail.sourceDocumentId])
+
+  // Hub cert 1.8 ("Never refreshed"): while this reviewer actively holds the
+  // claim, periodically re-issue the same atomic claim update (own-claim
+  // branch: claimed_by already equals us, so it always succeeds) to refresh
+  // claimed_at. Without this, stepping between several bills of one
+  // multi-page PDF -- or just reading/thinking without saving -- for more
+  // than 15 minutes lets the claim go stale out from under an active
+  // reviewer, and a colleague's claim attempt silently wins with no prompt
+  // on either side. 5 minutes keeps claimed_at comfortably inside the
+  // 15-minute staleness window (CLAIM_STALE_AFTER_MS, lib/actions/review.ts)
+  // even if one tick is delayed. Cleared whenever the claim isn't (or is no
+  // longer) held, and re-created for a new document via the sourceDocumentId
+  // dependency.
+  useEffect(() => {
+    if (claimState !== 'mine') return
+    const sourceDocumentId = detail.sourceDocumentId
+    const interval = setInterval(() => {
+      void claimReviewDocument(sourceDocumentId).then((result) => {
+        if (result.ok) return
+        // Heartbeat lost the claim (e.g. an admin forced a takeover while
+        // this reviewer was idle) -- surface it the same way any other
+        // claim loss would be, rather than leaving the form editable while
+        // the server no longer honors it.
+        if ('needsTakeover' in result && result.needsTakeover) {
+          claimedByMeRef.current = false
+          setClaimState('blocked')
+          setClaimInfo({ displayName: result.claimedByDisplayName, claimedAt: result.claimedAt })
+        }
+      })
+    }, 5 * 60 * 1000)
+    return () => clearInterval(interval)
+  }, [claimState, detail.sourceDocumentId])
 
   // Redesign point 4: "Document N of M" nav, distinct from "Bill N of M" --
   // jumps straight to the next/previous UPLOADED PDF (sourceDocumentId)
@@ -617,6 +675,9 @@ export function ReviewWorkspace({
     void claimReviewDocument(detail.sourceDocumentId, { takeover: true }).then((result) => {
       setTakingOver(false)
       if (result.ok) {
+        // So the mount effect's cleanup (hub cert 1.8) releases this claim
+        // on navigate-away/unmount too, not just a claim won on first load.
+        claimedByMeRef.current = true
         setClaimState('mine')
         toast.success('Claim taken over.')
       } else if ('error' in result) {

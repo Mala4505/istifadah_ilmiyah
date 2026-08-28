@@ -7,9 +7,9 @@ import { friendlyDataError } from '@/lib/friendly-error'
 import { createClient } from '@/lib/supabase/server'
 import { getStaffContext } from '@/lib/export/auth'
 import { getSelectedEventId } from '@/lib/events/current'
-import { severityRank } from '@/components/exceptions/labels'
 import { ExceptionsFilters } from '@/components/exceptions/exceptions-filters'
 import { ExceptionsTable, type ExceptionRow } from '@/components/exceptions/exceptions-table'
+import { SeverityLegend } from '@/components/exceptions/severity-legend'
 import { isAdminOrAbove } from '@/lib/auth/roles'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ReportSection } from '@/components/reports/report-section'
@@ -96,6 +96,13 @@ async function resolveEventIds(
   return resolved
 }
 
+// Item 1.2 (hub-screen-certification.md §3): page size for the exceptions
+// queue, and the per-severity fetch cap the server-side ordering below is
+// built from.
+const QUEUE_PAGE_SIZE = 100
+const QUEUE_SEVERITY_BUCKET_CAP = 1000
+const SEVERITY_PRIORITY = ['high', 'medium', 'low'] as const
+
 /**
  * Queue tab (MASTER-PLAN §3.10, §5 row 8, §11.1 Day 5). Sorted by
  * severity then ₹ at risk descending, filterable by exception_type and by
@@ -113,26 +120,57 @@ async function resolveEventIds(
  * uses. Rows with no resolvable event stay visible regardless of the active
  * event, matching the view and matching Dashboard/Reports (§0.2 — all three
  * surfaces must agree on the same open-exception count).
+ *
+ * Item 1.2: the severity/amount sort used to happen client-side, after an
+ * unordered, uncapped fetch — so whatever PostgREST's default row cap
+ * dropped was arbitrary with respect to severity. The sort is now done
+ * server-side instead. `severity` is plain text (CHECK-constrained to
+ * low/medium/high, not an enum), so a single `.order('severity')` would sort
+ * alphabetically ("high", "low", "medium") rather than by rank — so each
+ * severity is fetched as its own `.order()`ed, `.range()`-capped bucket, and
+ * the buckets are concatenated in priority order. That guarantees the
+ * highest-severity rows always land first; if a single bucket ever exceeded
+ * QUEUE_SEVERITY_BUCKET_CAP rows, the truncation would be confined to the
+ * lowest-priority bucket instead of being arbitrary. `amount_at_risk` (nulls
+ * last), then `created_at`, then `id` break ties within a bucket, the same
+ * tiebreaker discipline 1.1 added to the review queue. Because event-scoping
+ * can only be resolved after the rows are fetched (see resolveEventIds
+ * above), the "true total" for the header is the post-event-scoping row
+ * count rather than a DB-side `count`.
  */
 async function loadQueueData(params: { status: string; type: string }) {
   const supabase = await createClient()
-  let query = supabase
-    .from('reconciliation_exception')
-    .select(
-      'id, entry_id, document_extraction_id, import_batch_id, source_document_id, exception_type, severity, amount_at_risk, description, status, resolution_note, resolved_at, created_at'
+
+  function baseQuery() {
+    let q = supabase
+      .from('reconciliation_exception')
+      .select(
+        'id, entry_id, document_extraction_id, import_batch_id, source_document_id, exception_type, severity, amount_at_risk, description, status, resolution_note, resolved_at, created_at'
+      )
+    if (params.status !== 'all') {
+      q = q.eq('status', params.status)
+    }
+    if (params.type !== 'all') {
+      q = q.eq('exception_type', params.type)
+    }
+    return q
+  }
+
+  const bucketResults = await Promise.all(
+    SEVERITY_PRIORITY.map((severity) =>
+      baseQuery()
+        .eq('severity', severity)
+        .order('amount_at_risk', { ascending: false, nullsFirst: false })
+        .order('created_at', { ascending: false })
+        .order('id', { ascending: false })
+        .range(0, QUEUE_SEVERITY_BUCKET_CAP - 1)
     )
+  )
 
-  if (params.status !== 'all') {
-    query = query.eq('status', params.status)
-  }
-  if (params.type !== 'all') {
-    query = query.eq('exception_type', params.type)
-  }
-
-  const { data, error } = await query
+  const bucketError = bucketResults.find((r) => r.error)?.error ?? null
+  const rawExceptions = bucketResults.flatMap((r) => r.data ?? []) as RawExceptionRow[]
 
   const selectedEventId = await getSelectedEventId(supabase)
-  const rawExceptions = (data ?? []) as RawExceptionRow[]
 
   let exceptions: RawExceptionRow[] = rawExceptions
   if (selectedEventId !== null && rawExceptions.length > 0) {
@@ -143,7 +181,11 @@ async function loadQueueData(params: { status: string; type: string }) {
     })
   }
 
-  return { exceptions, error }
+  return {
+    exceptions: exceptions.slice(0, QUEUE_PAGE_SIZE),
+    totalCount: exceptions.length,
+    error: bucketError,
+  }
 }
 
 // Reconciliation-report tab. Reads from v_department_audit_variance (§10.2,
@@ -214,8 +256,13 @@ async function loadReconciliationReportData() {
     await Promise.all([
       supabase
         .from('v_department_audit_variance')
+        // Item 1.2 §5: `{ count: 'exact' }` rides along on the same request
+        // (no extra round trip) so the report can say when the .limit(1000)
+        // below has actually truncated the result, mirroring 1.5's fix for
+        // the review queue's capped query.
         .select(
-          'entry_id, ubbl_number, main_number, department_id, budget_head_id, vendor_id, date, amount, variance_reason, variance_type'
+          'entry_id, ubbl_number, main_number, department_id, budget_head_id, vendor_id, date, amount, variance_reason, variance_type',
+          { count: 'exact' }
         )
         .order('date', { ascending: false, nullsFirst: false })
         .limit(1000)
@@ -286,6 +333,12 @@ async function loadReconciliationReportData() {
 
   return {
     unmatched,
+    // True row count for `v_department_audit_variance` (RLS-scoped, no
+    // additional filters on this query) -- lets the UI say when the
+    // `.limit(1000)` above has actually truncated the result. Not
+    // event-scoped, since that filter only exists in application code above;
+    // used only to flag cap truncation, not to reconcile against `unmatched`.
+    varianceTotalCount: varianceRes.count ?? null,
     deptMap: new Map(deptRows.map((d) => [d.id, d.name])),
     vendorMap: new Map((vendorRes.data ?? []).map((v) => [v.id, v.display_name])),
     budgetHeadMap: new Map((budgetHeadRes.data ?? []).map((b) => [b.id, b.short_label ?? b.raw_label])),
@@ -337,20 +390,10 @@ export default async function ExceptionsPage({
 
   const canResolve = isAdminOrAbove(staff.role)
 
-  const [{ exceptions: queueData, error: queueError }, reportData] = await Promise.all([
+  const [{ exceptions, totalCount: queueTotalCount, error: queueError }, reportData] = await Promise.all([
     loadQueueData({ status, type }),
     loadReconciliationReportData(),
   ])
-
-  const exceptions = queueData
-    .slice()
-    .sort((a, b) => {
-      const rankDiff = severityRank(b.severity) - severityRank(a.severity)
-      if (rankDiff !== 0) return rankDiff
-      const aAmount = a.amount_at_risk ?? -Infinity
-      const bAmount = b.amount_at_risk ?? -Infinity
-      return bAmount - aAmount
-    })
 
   const unmatchedColumns: DataTableColumn<VarianceRow>[] = [
     {
@@ -423,14 +466,25 @@ export default async function ExceptionsPage({
           ) : exceptions.length === 0 ? (
             <QueueEmptyState isDefaultView={status === 'open' && type === 'all'} />
           ) : (
-            <ExceptionsTable exceptions={exceptions} canResolve={canResolve} />
+            <div className="flex flex-col gap-2">
+              <p className="text-xs text-muted-foreground">
+                Showing {exceptions.length.toLocaleString()} of {queueTotalCount.toLocaleString()} exception
+                {queueTotalCount === 1 ? '' : 's'}
+              </p>
+              <SeverityLegend />
+              <ExceptionsTable exceptions={exceptions} canResolve={canResolve} />
+            </div>
           )}
         </TabsContent>
 
         <TabsContent value="report" className="flex flex-col gap-4">
           <ReportSection
             title="Missing a Main/Audit-side match"
-            description="Entries with no Main Entry Number recorded yet — nothing to compare against on the Audit side."
+            description={
+              reportData.varianceTotalCount !== null && reportData.varianceTotalCount > 1000
+                ? `Entries with no Main Entry Number recorded yet — nothing to compare against on the Audit side. Showing the latest 1,000 of ${reportData.varianceTotalCount.toLocaleString()}.`
+                : 'Entries with no Main Entry Number recorded yet — nothing to compare against on the Audit side.'
+            }
             action={
               <ExportCsvButton
                 filename="reconciliation-unmatched.csv"

@@ -33,8 +33,16 @@ export function applyEntriesFilters<T extends EntriesQueryBuilder>(query: T, fil
   if (filters.dateFrom) q = q.gte('date', filters.dateFrom)
   if (filters.dateTo) q = q.lte('date', filters.dateTo)
   if (filters.vendor.trim()) {
-    const term = filters.vendor.trim().replace(/[%,]/g, '')
-    q = q.or(`vendor_display_name.ilike.%${term}%,vendor_raw.ilike.%${term}%`)
+    // PostgREST reserves `,` `.` `(` `)` as or()/filter-grammar delimiters, so a
+    // vendor name containing any of them (e.g. "Acme (India)") breaks the
+    // filter string. Double-quoting the ilike pattern's value makes those
+    // characters literal (PostgREST's documented quoted-value syntax for
+    // filter values) -- within the quotes, only `\` and `"` themselves still
+    // need escaping. `%` is the ilike wildcard, not a PostgREST delimiter, so
+    // it's left as-is and still works inside the quotes.
+    const term = filters.vendor.trim()
+    const escaped = term.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
+    q = q.or(`vendor_display_name.ilike."%${escaped}%",vendor_raw.ilike."%${escaped}%"`)
   }
   // export-pending: "hub_status_exported_at is null and hub_status_code <> 'not_set'"
   if (filters.exportPending) {

@@ -159,7 +159,12 @@ export function EntriesTable({
 function renderCell(row: EntryEnriched, key: ColumnKey) {
   switch (key) {
     case 'ubbl_number':
-      return <span className="font-mono text-xs">{row.ubbl_number}</span>
+      return (
+        <span className="inline-flex items-center gap-1.5">
+          <span className="font-mono text-xs">{row.ubbl_number}</span>
+          {row.is_void && <Badge variant="destructive">Void</Badge>}
+        </span>
+      )
     case 'main_number':
       return <span className="font-mono text-xs">{row.main_number ?? '—'}</span>
     case 'department_name':

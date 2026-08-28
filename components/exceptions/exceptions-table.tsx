@@ -91,7 +91,12 @@ export function ExceptionsTable({ exceptions, canResolve }: { exceptions: Except
               {group.rows.map((exception) => (
                 <TableRow key={exception.id}>
                   <TableCell>
-                    <Badge variant={severityBadgeVariant(exception.severity)}>{exception.severity}</Badge>
+                    <Badge
+                      variant={severityBadgeVariant(exception.severity)}
+                      aria-label={`${severityGroupLabel(exception.severity)}: ${exceptionTypeLabel(exception.exception_type)}`}
+                    >
+                      {exception.severity}
+                    </Badge>
                   </TableCell>
                   <TableCell className="text-sm">{exceptionTypeLabel(exception.exception_type)}</TableCell>
                   <TableCell>

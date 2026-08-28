@@ -97,14 +97,29 @@ export default async function ReviewPage({
     .select(
       'document_extraction_id, source_document_id, original_filename, extraction_confidence, max_open_severity_rank, open_issue_count, queue_amount, bill_index, page_number_start, page_number_end, bill_count'
     )
+  // Item 1.5: the capped query below can silently truncate the queue, so a
+  // second, uncapped count-only query runs alongside it on the same
+  // view/filters to surface the true pending total in the header.
+  let queueCountQuery = supabase
+    .from(scope === 'all' ? 'v_review_queue_all' : 'v_review_queue')
+    .select('*', { count: 'exact', head: true })
   if (selectedEventId !== null) {
     queueQuery = queueQuery.eq('event_id', selectedEventId)
+    queueCountQuery = queueCountQuery.eq('event_id', selectedEventId)
   }
-  const { data: queueRows, error: queueError } = await queueQuery
-    .order('max_open_severity_rank', { ascending: false })
-    .order('extraction_confidence', { ascending: true, nullsFirst: true })
-    .order('queue_amount', { ascending: false, nullsFirst: false })
-    .limit(QUEUE_ROW_CAP)
+  const [{ data: queueRows, error: queueError }, { count: truePendingTotal }] = await Promise.all([
+    queueQuery
+      .order('max_open_severity_rank', { ascending: false })
+      .order('extraction_confidence', { ascending: true, nullsFirst: true })
+      .order('queue_amount', { ascending: false, nullsFirst: false })
+      // Item 1.1: without a final tiebreaker, the common case (rank 0, null
+      // confidence, null amount) puts every such bill into one tie group
+      // Postgres may return in any order -- "Bill N of M" then drifts between
+      // navigations and a different 500 rows can come back on each request.
+      .order('document_extraction_id', { ascending: true })
+      .limit(QUEUE_ROW_CAP),
+    queueCountQuery,
+  ])
 
   if (queueError) {
     return (
@@ -226,7 +241,12 @@ export default async function ReviewPage({
 
   return (
     <div className="flex h-[calc(100vh-3rem)] flex-col gap-3">
-      <PageHeader position={currentIndex + 1} total={queue.length} scope={scope} />
+      <PageHeader
+        position={currentIndex + 1}
+        total={queue.length}
+        scope={scope}
+        truePendingTotal={truePendingTotal ?? undefined}
+      />
       <ReviewWorkspace
         key={`${detail.documentExtractionId}:${detail.currentExtractionRunId ?? 'none'}`}
         detail={detail}
@@ -246,10 +266,16 @@ function PageHeader({
   position,
   total,
   scope,
+  truePendingTotal,
 }: {
   position?: number
   total?: number
   scope?: 'pending' | 'all'
+  // Item 1.5: the true row count across the whole (uncapped) queue, only
+  // passed by the normal render branch. Rendered only when it exceeds
+  // `total` -- i.e. only when QUEUE_ROW_CAP actually truncated the queue --
+  // so the header never states a number smaller than what's on screen.
+  truePendingTotal?: number
 }) {
   return (
     <div className="flex flex-wrap items-center gap-3">
@@ -257,6 +283,7 @@ function PageHeader({
       {position !== undefined && total !== undefined ? (
         <span className="text-sm text-muted-foreground">
           Bill {position} of {total}
+          {truePendingTotal !== undefined && truePendingTotal > total ? ` (${truePendingTotal} pending)` : ''}
         </span>
       ) : null}
       {scope !== undefined ? <QueueScopeToggle current={scope} /> : null}

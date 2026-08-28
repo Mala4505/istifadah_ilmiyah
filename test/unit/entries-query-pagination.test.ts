@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { buildPaginationPlan, computeNextCursor, type PageCursor } from '@/components/entries/query'
-import { DEFAULT_SORT, type EntriesSort, type EntryEnriched } from '@/components/entries/types'
+import { applyEntriesFilters, buildPaginationPlan, computeNextCursor, type PageCursor } from '@/components/entries/query'
+import { DEFAULT_FILTERS, DEFAULT_SORT, type EntriesSort, type EntryEnriched } from '@/components/entries/types'
 
 // Minimal fixture -- only `id` is read by the pure cursor logic under test here.
 function row(id: number): EntryEnriched {
@@ -83,6 +83,80 @@ describe('computeNextCursor', () => {
   it('returns null if hasMore is somehow true but no rows came back, rather than an unusable keyset cursor', () => {
     const next = computeNextCursor({ sort: DEFAULT_SORT, cursor: null, pageRows: [], hasMore: true })
     expect(next).toBeNull()
+  })
+})
+
+// A minimal chainable stand-in for the real Supabase/PostgREST query builder.
+// `applyEntriesFilters` only ever calls filter methods that return `this`, so
+// a Proxy that records every call and hands back itself is enough to inspect
+// the exact `.or()` string it constructs -- without needing a live client.
+function createMockQuery() {
+  const calls: Record<string, unknown[][]> = {}
+  const builder = new Proxy(
+    {},
+    {
+      get(_target, prop: string) {
+        return (...args: unknown[]) => {
+          calls[prop] = calls[prop] ?? []
+          calls[prop].push(args)
+          return builder
+        }
+      },
+    }
+  ) as unknown as Parameters<typeof applyEntriesFilters>[0]
+  return { builder, calls }
+}
+
+// Pulls out the single string argument passed to `.or()`, asserting it was
+// actually called -- avoids repeating a non-null-assertion chain (and the
+// `noUncheckedIndexedAccess` errors that come with it) at every call site.
+function orFilterArg(calls: Record<string, unknown[][]>): string {
+  const orCalls = calls.or
+  if (!orCalls || !orCalls[0]) throw new Error('expected .or() to have been called')
+  return orCalls[0][0] as string
+}
+
+describe('applyEntriesFilters -- vendor search with parentheses (hub-screen-certification.md 1.4)', () => {
+  it('quotes the ilike value so a vendor name containing parentheses does not break or() group syntax', () => {
+    const { builder, calls } = createMockQuery()
+    applyEntriesFilters(builder, { ...DEFAULT_FILTERS, vendor: 'Acme (India)' })
+
+    const filterString = orFilterArg(calls)
+
+    // The exact known-good shape: both ilike values double-quoted, parens left
+    // untouched inside the quotes, `%` wildcards intact.
+    expect(filterString).toBe(
+      'vendor_display_name.ilike."%Acme (India)%",vendor_raw.ilike."%Acme (India)%"'
+    )
+
+    // Structural check independent of the exact string: strip out the quoted
+    // value segments and confirm no stray '(' or ')' remains to be misread as
+    // an or()-group delimiter by PostgREST's parser.
+    const withoutQuotedValues = filterString.replace(/"[^"]*"/g, '""')
+    expect(withoutQuotedValues).not.toMatch(/[()]/)
+
+    // The comma that separates the two ilike conditions must be the one
+    // between the two quoted segments, not one PostgREST could misparse as
+    // ending the or() list early inside a value.
+    expect(filterString.split('.ilike.')).toHaveLength(3)
+  })
+
+  it('escapes an embedded double quote so it cannot terminate the quoted value early', () => {
+    const { builder, calls } = createMockQuery()
+    applyEntriesFilters(builder, { ...DEFAULT_FILTERS, vendor: 'Say "Hi" Traders' })
+
+    const filterString = orFilterArg(calls)
+    expect(filterString).toBe(
+      'vendor_display_name.ilike."%Say \\"Hi\\" Traders%",vendor_raw.ilike."%Say \\"Hi\\" Traders%"'
+    )
+  })
+
+  it('leaves a plain vendor term (no reserved characters) matching the original literal search text', () => {
+    const { builder, calls } = createMockQuery()
+    applyEntriesFilters(builder, { ...DEFAULT_FILTERS, vendor: 'Acme Traders' })
+
+    const filterString = orFilterArg(calls)
+    expect(filterString).toBe('vendor_display_name.ilike."%Acme Traders%",vendor_raw.ilike."%Acme Traders%"')
   })
 })
 

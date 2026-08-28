@@ -24,12 +24,8 @@ import { toastError } from '@/components/ui/error-toast'
 import { Button } from '@/components/ui/button'
 import { markNoEntryExpected } from '@/lib/actions/documents'
 import type { MatchCandidate } from '@/lib/review/types'
+import { formatINR } from '@/lib/reports/format'
 import { EntryAttachCombobox } from './entry-attach-combobox'
-
-function formatMoney(n: number | null): string {
-  if (n === null) return '—'
-  return n.toLocaleString('en-IN', { maximumFractionDigits: 2 })
-}
 
 export function MatchStrip({
   documentExtractionId,
@@ -95,7 +91,7 @@ export function MatchStrip({
       <div className={`flex flex-wrap items-center gap-2 text-sm ${cardClass}`}>
         <EntryAttachCombobox
           documentExtractionId={documentExtractionId}
-          attachedLabel={`${entryUbblNumber ?? ''}${entryAmount !== null ? ` · RM ${formatMoney(entryAmount)}` : ''}`}
+          attachedLabel={`${entryUbblNumber ?? ''}${entryAmount !== null ? ` · ${formatINR(entryAmount)}` : ''}`}
           onAttached={onChanged}
           className="w-56"
         />

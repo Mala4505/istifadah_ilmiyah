@@ -23,6 +23,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
+import { formatBinding, type Keymap } from '@/lib/shortcuts/config'
 import type { UncertainField } from '@/lib/review/types'
 import type { VendorSearchResult } from '@/lib/actions/review'
 import { VendorAutocomplete } from './vendor-autocomplete'
@@ -198,6 +199,7 @@ export const ExtractionForm = forwardRef(function ExtractionForm(
     pageNumberEnd = null,
     currentPdfPage,
     gstCharged,
+    keymap,
   }: {
     header: HeaderFormState
     onHeaderChange: (field: keyof HeaderFormState, value: string) => void
@@ -254,6 +256,9 @@ export const ExtractionForm = forwardRef(function ExtractionForm(
      *  fields below. When false, that whole block is genuinely absent from
      *  the DOM, not just hidden, per the plan's explicit requirement. */
     gstCharged: boolean
+    /** Item 2.1: the resolved, user-remappable keymap -- shortcut hints in
+     *  this form are rendered from it via formatBinding, never hard-coded. */
+    keymap: Keymap
   },
   ref: Ref<HTMLDivElement>
 ) {
@@ -521,7 +526,7 @@ export const ExtractionForm = forwardRef(function ExtractionForm(
 
       <section className="flex flex-col gap-2">
         <h3 className="text-sm font-medium text-muted-foreground">
-          Line items <span className="text-xs">(press 1-9 to jump to a row)</span>
+          Line items <span className="text-xs">(press {formatBinding(keymap.jumpToLineDigit)} to jump to a row)</span>
         </h3>
         {isMultiPage ? (
           // Plan §6: no per-row/per-cell page data exists beyond individually

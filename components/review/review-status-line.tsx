@@ -26,6 +26,7 @@
 import { Check, ChevronsUpDown, Search } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Combobox } from '@/components/ui/combobox'
+import { formatBinding, type Keymap } from '@/lib/shortcuts/config'
 import type { MatchCandidate, UncertainField } from '@/lib/review/types'
 import { MatchStrip } from './match-strip'
 
@@ -65,6 +66,7 @@ export function ReviewStatusLine({
   vendorName,
   vendorId,
   onOpenVendorPicker,
+  keymap,
   uncertainFields,
   uncertainStepIndex,
   onStepUncertainField,
@@ -96,6 +98,7 @@ export function ReviewStatusLine({
   vendorName: string
   vendorId: number | null
   onOpenVendorPicker: () => void
+  keymap: Keymap
   uncertainFields: UncertainField[]
   uncertainStepIndex: number | null
   onStepUncertainField: (direction: 1 | -1) => void
@@ -134,7 +137,7 @@ export function ReviewStatusLine({
           variant="outline"
           onClick={onOpenVendorPicker}
           disabled={formDisabled}
-          title="Change vendor (/)"
+          title={`Change vendor (${formatBinding(keymap.openVendorAutocomplete)})`}
           className="h-8 w-44 justify-between gap-1.5 px-2 text-xs font-normal"
         >
           <span className="flex min-w-0 items-center gap-1.5">
@@ -218,7 +221,7 @@ export function ReviewStatusLine({
                 id="stage3-sub-department-select"
                 value={subDepartmentId}
                 onValueChange={onSubDepartmentChange}
-                placeholder="Sub-department (U)"
+                placeholder={`Sub-department (${formatBinding(keymap.focusSubDepartment)})`}
                 searchPlaceholder="Search sub-departments…"
                 className="w-36"
                 options={[
@@ -237,7 +240,7 @@ export function ReviewStatusLine({
                 id="stage3-admin-head-select"
                 value={adminHeadId}
                 onValueChange={onAdminHeadChange}
-                placeholder="Admin head (H)"
+                placeholder={`Admin head (${formatBinding(keymap.focusAdminHead)})`}
                 searchPlaceholder="Search admin heads…"
                 className="w-36"
                 options={[
@@ -256,7 +259,7 @@ export function ReviewStatusLine({
                 id="stage3-zone-select"
                 value={zoneId}
                 onValueChange={onZoneChange}
-                placeholder="Zone (Z)"
+                placeholder={`Zone (${formatBinding(keymap.focusZone)})`}
                 searchPlaceholder="Search zones…"
                 className="w-32"
                 options={[

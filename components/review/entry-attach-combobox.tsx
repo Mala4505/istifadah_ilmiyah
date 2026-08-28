@@ -35,6 +35,7 @@ import { cn } from '@/lib/utils'
 import { searchEntriesForAttach, type EntrySearchResult } from '@/lib/actions/documents'
 import { attachExtractionToEntry } from '@/lib/actions/review'
 import type { MatchCandidate } from '@/lib/review/types'
+import { formatINR } from '@/lib/reports/format'
 
 function formatMoney(n: number | null): string {
   if (n === null) return '—'
@@ -138,7 +139,7 @@ export function EntryAttachCombobox({
   const triggerValue = attachedLabel
     ? attachedLabel
     : top
-      ? `${top.ubblNumber}${top.amount !== null ? ` · RM ${formatMoney(top.amount)}` : ''}`
+      ? `${top.ubblNumber}${top.amount !== null ? ` · ${formatINR(top.amount)}` : ''}`
       : null
 
   return (

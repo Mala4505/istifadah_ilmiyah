@@ -116,7 +116,10 @@ async function handlePOST(request: NextRequest) {
   }
   if (file.size > MAX_UPLOAD_BYTES) {
     return NextResponse.json(
-      { error: `File is ${file.size} bytes; the limit is ${MAX_UPLOAD_BYTES}.` },
+      {
+        error:
+          `File is ${file.size} bytes, which exceeds the file size limit of ${MAX_UPLOAD_BYTES} bytes.`,
+      },
       { status: 413 }
     )
   }

@@ -179,6 +179,53 @@ export async function claimReviewDocument(
     return { ok: false, error: 'You must be signed in.' }
   }
 
+  const staleThresholdIso = new Date(Date.now() - CLAIM_STALE_AFTER_MS).toISOString()
+
+  // Hub cert 1.8 ("Race"): a single conditional UPDATE, not a read-then-write
+  // -- the old version read claimed_by/claimed_at, decided in JS whether the
+  // claim was free, and only then issued an UNCONDITIONAL update, so two
+  // reviewers who both read a null/stale claim in the same instant both
+  // passed the check and both wrote, each told they'd won. PostgREST ANDs
+  // every chained filter and `.or()` groups its own comma-separated
+  // conditions, so this compiles to one statement:
+  //   UPDATE source_document SET claimed_by = $me, claimed_at = now()
+  //   WHERE id = $id AND (claimed_by IS NULL OR claimed_by = $me OR claimed_at < $stale)
+  // which is atomic at Postgres's row-lock level: whichever request's UPDATE
+  // actually commits first is guaranteed to be the only one that can still
+  // see the row as claimable, because the second commits only after the
+  // first's row lock releases and re-evaluates the WHERE clause against the
+  // first request's own just-written claimed_by. `takeover: true` widens the
+  // WHERE to accept ANY current claimant -- the caller only sends that after
+  // the reviewer has explicitly confirmed the takeover prompt.
+  let query = supabase
+    .from('source_document')
+    .update({ claimed_by: user.id, claimed_at: new Date().toISOString() })
+    .eq('id', sourceDocumentId)
+
+  if (!options.takeover) {
+    query = query.or(`claimed_by.is.null,claimed_by.eq.${user.id},claimed_at.lt.${staleThresholdIso}`)
+  }
+
+  const { data: claimedRows, error: updateError } = await query.select('id')
+
+  if (updateError) {
+    return { ok: false, error: logRawError('review.claimReviewDocument', updateError.message) }
+  }
+
+  if (claimedRows && claimedRows.length > 0) {
+    return { ok: true, claimedByMe: true }
+  }
+
+  // Zero rows updated: either the document doesn't exist/isn't visible to
+  // this reviewer, or -- the race window this replaces the old
+  // read-then-write with -- someone else's claim won the moment the WHERE
+  // clause above was evaluated. Re-read (unconditionally, so it isn't
+  // filtered out by the same WHERE that just failed) to tell those apart and
+  // to get the current claimant's display name for the takeover prompt. The
+  // claimant's display name has to come from the admin client:
+  // `staff_profile_select` RLS (20260808000026_rls_policies.sql) only lets a
+  // user read their OWN row or an admin read any row -- a plain reviewer
+  // cannot select a colleague's profile through the session-bound client.
   const { data: doc, error: readError } = await supabase
     .from('source_document')
     .select('id, claimed_by, claimed_at')
@@ -194,35 +241,53 @@ export async function claimReviewDocument(
 
   const claimedBy = doc.claimed_by as string | null
   const claimedAt = doc.claimed_at as string | null
-  const isStale = claimedAt !== null && Date.now() - new Date(claimedAt).getTime() > CLAIM_STALE_AFTER_MS
-  const claimedBySomeoneElse = claimedBy !== null && claimedBy !== user.id
 
-  if (claimedBySomeoneElse && !isStale && !options.takeover) {
-    const admin = createAdminClient()
-    const { data: claimant } = await admin
-      .from('staff_profile')
-      .select('display_name')
-      .eq('id', claimedBy as string)
-      .maybeSingle()
+  const admin = createAdminClient()
+  const { data: claimant } = claimedBy
+    ? await admin.from('staff_profile').select('display_name').eq('id', claimedBy).maybeSingle()
+    : { data: null }
 
-    return {
-      ok: false,
-      needsTakeover: true,
-      claimedByDisplayName: (claimant?.display_name as string | undefined) ?? 'another reviewer',
-      claimedAt: claimedAt as string,
-    }
+  return {
+    ok: false,
+    needsTakeover: true,
+    claimedByDisplayName: (claimant?.display_name as string | undefined) ?? 'another reviewer',
+    claimedAt: claimedAt ?? new Date().toISOString(),
+  }
+}
+
+/**
+ * Release (hub-screen-certification.md §3 item 1.8, "Never released"): the
+ * counterpart to claimReviewDocument's write, called from
+ * review-workspace.tsx's unmount/document-change cleanup so a reviewer who
+ * navigates away stops blocking colleagues behind a 15-minute takeover
+ * prompt for no reason. Guarded server-side to only clear a claim still held
+ * by the CALLING user (`.eq('claimed_by', user.id)`) -- if a takeover already
+ * moved the claim to someone else before this fires (a slow unmount racing a
+ * colleague's takeover), this must not clear THEIR claim. Best-effort by
+ * design: the caller fires this without awaiting it from an effect cleanup,
+ * so a failure here only means the claim sits until its own 15-minute
+ * staleness window lapses -- exactly today's existing fallback, not a
+ * regression.
+ */
+export async function releaseReviewDocument(sourceDocumentId: number): Promise<SimpleActionResult> {
+  const supabase = await createClient()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+  if (!user) {
+    return { ok: false, error: 'You must be signed in.' }
   }
 
-  const { error: updateError } = await supabase
+  const { error } = await supabase
     .from('source_document')
-    .update({ claimed_by: user.id, claimed_at: new Date().toISOString() })
+    .update({ claimed_by: null, claimed_at: null })
     .eq('id', sourceDocumentId)
+    .eq('claimed_by', user.id)
 
-  if (updateError) {
-    return { ok: false, error: logRawError('review.claimReviewDocument', updateError.message) }
+  if (error) {
+    return { ok: false, error: logRawError('review.releaseReviewDocument', error.message) }
   }
-
-  return { ok: true, claimedByMe: true }
+  return { ok: true }
 }
 
 /**

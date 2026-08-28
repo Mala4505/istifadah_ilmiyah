@@ -13,6 +13,18 @@ import { getSelectedEventId } from '@/lib/events/current'
 const STALLED_QUEUE_THRESHOLD_MS = 10 * 60 * 1000
 
 /**
+ * Hard cap on the inbox query (hub certification §3, Wave 1 item 1.3): the
+ * `source_document` fetch below had no `.limit()`/`.range()`, so a busy
+ * event's full unmatched/suggested backlog — and the two queries that fan
+ * out over its id list (document_extraction, ocr_extraction_run) — grew
+ * without bound. This is currently masked by the match_status filter, but
+ * nothing puts a floor under that number. Capped to the 200 most-recently
+ * uploaded; the dependent queries below derive their id lists from this
+ * same capped `docs` array, so they stay bounded by construction.
+ */
+const DOCUMENT_QUERY_CAP = 200
+
+/**
  * /documents — the document inbox (MASTER-PLAN §5 row 6, §11.2 Day 3):
  * "Unmatched documents with suggested entry matches; attach, mark 'no entry
  * expected', or bulk-attach. Highest-volume flow — ~18 of 21 sample
@@ -74,7 +86,11 @@ export default async function DocumentsPage() {
   if (selectedEventId !== null) {
     docsQuery = docsQuery.eq('event_id', selectedEventId)
   }
-  const { data: docsData, error: docsError } = await docsQuery.order('uploaded_at', { ascending: false })
+  // Fetch one row past the cap so truncation can be detected and surfaced
+  // without a separate `{ count: 'exact' }` round trip.
+  const { data: docsData, error: docsError } = await docsQuery
+    .order('uploaded_at', { ascending: false })
+    .range(0, DOCUMENT_QUERY_CAP)
 
   if (docsError) {
     return (
@@ -89,7 +105,9 @@ export default async function DocumentsPage() {
     )
   }
 
-  const docs = docsData ?? []
+  const docsFetched = docsData ?? []
+  const docsTruncated = docsFetched.length > DOCUMENT_QUERY_CAP
+  const docs = docsTruncated ? docsFetched.slice(0, DOCUMENT_QUERY_CAP) : docsFetched
   const docIds = docs.map((d) => d.id)
 
   // document_extraction is fetched separately (rather than embedded in the
@@ -268,7 +286,7 @@ export default async function DocumentsPage() {
   )
 
   return (
-    <PageShell count={inboxDocuments.length}>
+    <PageShell count={inboxDocuments.length} truncated={docsTruncated}>
       <DocumentInbox
         initialDocuments={inboxDocuments}
         canAct={canAct}
@@ -281,7 +299,15 @@ export default async function DocumentsPage() {
   )
 }
 
-function PageShell({ children, count }: { children: React.ReactNode; count?: number }) {
+function PageShell({
+  children,
+  count,
+  truncated,
+}: {
+  children: React.ReactNode
+  count?: number
+  truncated?: boolean
+}) {
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-center gap-3">
@@ -289,6 +315,7 @@ function PageShell({ children, count }: { children: React.ReactNode; count?: num
         {count !== undefined && (
           <span className="text-sm text-muted-foreground">
             {count} unmatched {count === 1 ? 'document' : 'documents'}
+            {truncated && ` — showing the latest ${DOCUMENT_QUERY_CAP}`}
           </span>
         )}
       </div>

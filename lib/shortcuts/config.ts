@@ -208,7 +208,12 @@ export function matchesBinding(event: KeyboardEvent, binding: ShortcutBinding): 
   const bindingKey = binding.key.length === 1 ? binding.key.toLowerCase() : binding.key
   if (key !== bindingKey) return false
   if (!!binding.alt !== event.altKey) return false
-  if (!!binding.shift !== event.shiftKey) return false
+  // Punctuation keys ('?', '\\', '/') need Shift on some layouts and not
+  // others; the key identity already disambiguates them, so Shift is not a
+  // meaningful discriminator. Without this, { key: '?', alt: true } can never
+  // match -- typing '?' forces event.shiftKey true while binding.shift is false.
+  const keyIsPunctuation = binding.key.length === 1 && !/[a-z0-9]/i.test(binding.key)
+  if (!keyIsPunctuation && !!binding.shift !== event.shiftKey) return false
   const primaryModifierPressed = event.ctrlKey || event.metaKey
   const primaryModifierExpected = !!binding.ctrl || !!binding.meta
   return primaryModifierExpected === primaryModifierPressed

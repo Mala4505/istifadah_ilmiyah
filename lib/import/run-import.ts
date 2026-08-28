@@ -527,7 +527,22 @@ export async function resolveStatus(
   rawText: string,
   sourceSystem: 'departmental' | 'audit',
   batchId: number,
-  exceptionsOut: ImportExceptionSummary[]
+  exceptionsOut: ImportExceptionSummary[],
+  /**
+   * Human-readable label for a status this import is meeting for the first
+   * time. Defaults to `rawText`, which is correct for the .xlsx path where
+   * `rawText` IS the rendered text ("Good for submission").
+   *
+   * The portal path passes a SLUG as `rawText` (parsePortalStatus's `code`,
+   * e.g. "good_for_submission") and hands the rendered text here separately.
+   * Without this, an auto-added status got the slug as its label and looked
+   * like a bug in the UI — "subject_to_approval" sitting next to a curated
+   * "Paid" — even though the portal had sent "Subject to Approval" all along
+   * and it was already being stored on entries.status_raw. Statuses are meant
+   * to arrive complete from the import; a human should not have to go and
+   * retype a label the source already provided.
+   */
+  displayLabel?: string
 ): Promise<number> {
   // ONE vocabulary, keyed on code alone (20260828000001).
   //
@@ -555,15 +570,18 @@ export async function resolveStatus(
 
   const created = await client.query<{ id: number }>(
     `insert into public.entry_status (code, label, sort_order, is_terminal)
-     values ($1, $1, 999, false)
+     values ($1, $2, 999, false)
      on conflict (code) do update set code = excluded.code
      returning id`,
-    [rawText]
+    [rawText, displayLabel ?? rawText]
   )
   const id = created.rows[0]!.id
   caches.statusByCode.set(rawText, id)
 
-  const description = `Unseen status code "${rawText}" (first seen from ${sourceSystem}) auto-inserted with sort_order = 999.`
+  const description =
+    `Unseen status "${displayLabel ?? rawText}" (first seen from ${sourceSystem}) was added automatically ` +
+    `and sorts last until someone gives it a position. Nothing is blocked; this is just so a new ` +
+    `vocabulary word is visible rather than silent.`
   // dedup_key deliberately excludes batchId: the same unseen code hit by a
   // later import is the same finding, not a new one. ON CONFLICT refreshes
   // the pointer to the latest batch that saw it while it's still open, but

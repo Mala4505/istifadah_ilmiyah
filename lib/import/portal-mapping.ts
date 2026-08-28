@@ -72,6 +72,7 @@ export type PortalField =
   | 'reimbursementType'
   | 'reimburseTo'
   | 'uplaqAmount'
+  | 'balancePayable'
 
 /**
  * Header text -> field. Keys are compared after `normalizeHeader`, so case,
@@ -127,6 +128,10 @@ const HEADER_SYNONYMS: Record<PortalField, readonly string[]> = {
   // Advance-payment-tab-only marker column, alongside the tab's own Invoice
   // Amount (already covered by the generic `amount` field above).
   uplaqAmount: ['uplaq amount', 'uplaq', 'advance amount', 'advance payment amount'],
+  // Invoice-Against-Uplaq-tab-only marker column: what is still owed after
+  // the advance already paid and TDS. Diagnostic on its own -- no other tab
+  // renders it.
+  balancePayable: ['balance payable', 'balance', 'payable', 'balance amount'],
 }
 
 /**
@@ -437,6 +442,8 @@ export interface ParsedPortalRow {
   reimburseTo: string | null
   /** Advance-payment-tab Uplaq/Advance Amount. Null on every other tab. */
   uplaqAmount: number | null
+  /** Invoice-Against-Uplaq-tab Balance Payable. Null on every other tab. */
+  balancePayable: number | null
 
   /** Populated when the row cannot be used; `runImport` logs and skips it. */
   skipReason: 'no_identifier' | 'total_row' | null
@@ -528,6 +535,7 @@ export function parsePortalTable(params: ParsePortalTableParams): ParsePortalTab
       reimbursementType: cell(cells, 'reimbursementType'),
       reimburseTo: cell(cells, 'reimburseTo'),
       uplaqAmount: parsePortalAmount(cell(cells, 'uplaqAmount')),
+      balancePayable: parsePortalAmount(cell(cells, 'balancePayable')),
     }
 
     if (isTotalRow(cells)) {
@@ -673,11 +681,19 @@ function safeNormalizeId(value: string | null): string | null {
  */
 export function detectDepartmentalTableKind(
   headers: readonly unknown[]
-): 'invoice' | 'reimbursement' | 'advance_payment' {
+): 'invoice' | 'reimbursement' | 'advance_payment' | 'invoice_against_uplaq' {
   const normalized = new Set(headers.map((h) => normalizeHeader(h)))
   const has = (...keys: string[]) => keys.some((k) => normalized.has(k))
   if (has('reimbursement type') || has('reimburse to') || has('sr no') || has('srno')) {
     return 'reimbursement'
+  }
+  // Invoice Against Uplaq: uniquely renders BALANCE PAYABLE. Checked before
+  // advance_payment because that tab is identified by Uplaq+Invoice Amount
+  // together, and IAU carries an Invoice Amount too -- but never an Uplaq
+  // Amount, so the two cannot both match. Explicit ordering anyway, same
+  // defensive posture as the ADP_/RG- prefix ordering in deriveEntryType.
+  if (has('balance payable', 'balance', 'payable', 'balance amount')) {
+    return 'invoice_against_uplaq'
   }
   if (
     has('uplaq amount', 'uplaq', 'advance amount', 'advance payment amount') &&
@@ -700,7 +716,9 @@ export function detectDepartmentalTableKind(
  */
 export function deriveEntryType(
   entryNumber: string
-): 'advance_payment' | 'reimbursement' | 'invoice' {
+): 'advance_payment' | 'reimbursement' | 'invoice' | 'invoice_against_uplaq' {
+  // IAU_ before ADP_ before RG-, so no prefix can fall into another's branch.
+  if (entryNumber.startsWith('IAU_')) return 'invoice_against_uplaq'
   if (entryNumber.startsWith('ADP_')) return 'advance_payment'
   if (entryNumber.startsWith('RG-')) return 'reimbursement'
   return 'invoice'

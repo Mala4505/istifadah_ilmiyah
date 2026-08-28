@@ -294,10 +294,19 @@ async function resolvePortalStatus(
   exceptionsOut: ImportExceptionSummary[]
 ): Promise<number | null> {
   if (!status) return null
-  // The SLUG is the code, and the verbatim label is kept separately on
-  // entries.*_status_raw. Keying on the slug means "Paid", "paid" and " Paid "
-  // are one status rather than three rows in entry_status with sort_order 999.
-  return resolveStatus(client, caches, status.code, sourceSystem, batchId, exceptionsOut)
+  // The SLUG is the code, so "Paid", "paid" and " Paid " are one status
+  // rather than three rows. The portal's own rendered text rides along as the
+  // display label, so a status added by an import arrives already readable and
+  // needs no follow-up edit by hand (see resolveStatus's displayLabel).
+  return resolveStatus(
+    client,
+    caches,
+    status.code,
+    sourceSystem,
+    batchId,
+    exceptionsOut,
+    status.raw
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -909,7 +918,7 @@ async function importDepartmentalRow(
   rowLog: ImportRowLogEntry[],
   exceptions: ImportExceptionSummary[],
   pendingExceptions: PendingException[],
-  tableKind: 'invoice' | 'reimbursement' | 'advance_payment',
+  tableKind: 'invoice' | 'reimbursement' | 'advance_payment' | 'invoice_against_uplaq',
   /** Batch-wide snapshot of pre-existing entries; see runPortalImport. */
   prefetchedEntries: Map<string, MatchedEntry>
 ): Promise<void> {
@@ -1027,6 +1036,11 @@ async function importDepartmentalRow(
   // advance_payment_detail.invoice_amount) — the tab's own Invoice Amount
   // column lands separately, in advance_payment_detail below, from the RAW
   // row.amount rather than this effective value.
+  // advance_payment is the one tab whose entries.amount is NOT its Invoice
+  // Amount column (it holds Uplaq Amount, per the user's decision -- see
+  // advance_payment_detail.invoice_amount). Every other tab, IAU included,
+  // stores its own Invoice Amount here; IAU's extra BALANCE PAYABLE figure
+  // lands in invoice_against_uplaq_detail below.
   const effectiveAmount = tableKind === 'advance_payment' ? row.uplaqAmount : row.amount
 
   const upserted = await client.query<{ id: number }>(
@@ -1187,7 +1201,7 @@ async function upsertDetailTable(
   caches: ResolverCaches,
   batchId: number,
   entryId: number,
-  tableKind: 'reimbursement' | 'advance_payment',
+  tableKind: 'reimbursement' | 'advance_payment' | 'invoice_against_uplaq',
   row: ParsedPortalRow
 ): Promise<void> {
   if (tableKind === 'reimbursement') {
@@ -1209,6 +1223,20 @@ async function upsertDetailTable(
          import_batch_id        = excluded.import_batch_id,
          updated_at              = now()`,
       [entryId, row.srNo, row.reimbursementType, row.reimburseTo, reimburseToVendorId, batchId]
+    )
+    return
+  }
+
+  if (tableKind === 'invoice_against_uplaq') {
+    await client.query(
+      `insert into public.invoice_against_uplaq_detail
+         (entry_id, balance_payable, import_batch_id, updated_at)
+       values ($1, $2, $3, now())
+       on conflict (entry_id) do update set
+         balance_payable = coalesce(excluded.balance_payable, invoice_against_uplaq_detail.balance_payable),
+         import_batch_id = excluded.import_batch_id,
+         updated_at      = now()`,
+      [entryId, row.balancePayable, batchId]
     )
     return
   }

@@ -280,6 +280,10 @@ describe('deriveEntryType', () => {
   it('checks ADP_ before RG- so neither falls through to the other', () => {
     expect(deriveEntryType('ADP_RG-123')).toBe('advance_payment')
   })
+
+  it('recognises the Invoice-Against-Uplaq prefix', () => {
+    expect(deriveEntryType('IAU_202608272')).toBe('invoice_against_uplaq')
+  })
 })
 
 // --- detectDepartmentalTableKind --------------------------------------------
@@ -335,6 +339,120 @@ describe('detectDepartmentalTableKind', () => {
   it('prefers reimbursement over advance_payment when a row somehow has both marker sets', () => {
     const headers = ['Reimbursement Type', 'Uplaq Amount', 'Invoice Amount']
     expect(detectDepartmentalTableKind(headers)).toBe('reimbursement')
+  })
+
+  // The real Invoice Against Uplaq header row, transcribed from the live tab
+  // (2026-08-28). It shares INVOICE AMOUNT with the Advance Payment tab and
+  // is told apart by BALANCE PAYABLE, which no other tab renders.
+  const IAU_HEADERS = [
+    'UBBL NUMBER',
+    'MAIN NUMBER',
+    'BUDGET HEAD',
+    'VENDOR',
+    'BALANCE PAYABLE',
+    'INVOICE AMOUNT',
+    'STATUS',
+    'DATE',
+    'DEPARTMENT',
+    'ACTION BUTTON',
+  ]
+
+  it('classifies the Invoice Against Uplaq tab by its Balance Payable column', () => {
+    expect(detectDepartmentalTableKind(IAU_HEADERS)).toBe('invoice_against_uplaq')
+  })
+
+  it('does not mistake Invoice Against Uplaq for advance_payment (no Uplaq Amount column)', () => {
+    // Both tabs carry an Invoice Amount; only ADP carries Uplaq Amount, and
+    // only IAU carries Balance Payable, so the two can never collide.
+    expect(detectDepartmentalTableKind(IAU_HEADERS)).not.toBe('advance_payment')
+    expect(detectDepartmentalTableKind(['UBBL NUMBER', 'Uplaq Amount', 'Invoice Amount'])).toBe(
+      'advance_payment'
+    )
+  })
+})
+
+// --- Invoice Against Uplaq rows (real tab, 2026-08-28) ---------------------
+
+describe('parsePortalTable (Invoice Against Uplaq tab)', () => {
+  const IAU_HEADERS = [
+    'UBBL NUMBER',
+    'MAIN NUMBER',
+    'BUDGET HEAD',
+    'VENDOR',
+    'BALANCE PAYABLE',
+    'INVOICE AMOUNT',
+    'STATUS',
+    'DATE',
+    'DEPARTMENT',
+    'ACTION BUTTON',
+  ]
+
+  const result = parsePortalTable({
+    headers: IAU_HEADERS,
+    rows: [
+      [
+        'IAU_202608272 Pending',
+        '-----',
+        'Venue setup (Dome Tents)',
+        'Lightwala mohammad irsad mohammad salim',
+        '14,72,625.00',
+        '20,00,000.00',
+        'Subject to Approval',
+        '27/08/2026',
+        'Venue Setup',
+        'View',
+      ],
+      [
+        'IAU_202608271 Pending',
+        '-----',
+        'Venue Setup (Electricals)',
+        'Pathan raees ahmed sakil ahmed',
+        '2,87,100.00',
+        '8,00,000.00',
+        'Subject to Approval',
+        '27/08/2026',
+        'Venue Setup',
+        'View',
+      ],
+    ],
+    sourceSystem: 'departmental',
+  })
+
+  it('parses both rows with no unrecognised columns', () => {
+    expect(result.rows).toHaveLength(2)
+    expect(result.warnings).toEqual([])
+  })
+
+  it('strips the status badge from the IAU_ identifier and nulls the dashes placeholder', () => {
+    expect(result.rows[0]!.ubblNumber).toBe('IAU_202608272')
+    expect(result.rows[0]!.mainNumber).toBeNull()
+  })
+
+  it('reads Balance Payable and Invoice Amount as separate figures', () => {
+    expect(result.rows[0]!.balancePayable).toBe(1472625)
+    expect(result.rows[0]!.amount).toBe(2000000)
+    expect(result.rows[1]!.balancePayable).toBe(287100)
+    expect(result.rows[1]!.amount).toBe(800000)
+  })
+
+  it('leaves uplaqAmount null — this tab has no Uplaq column', () => {
+    expect(result.rows[0]!.uplaqAmount).toBeNull()
+  })
+
+  /**
+   * Documents the arithmetic that ties this tab to the Advance Payment tab,
+   * verified exactly against both live rows and their matching ADP rows:
+   *   balance payable = (IAU invoice - advance uplaq) - 1% TDS
+   * Not implemented as a derivation anywhere — the portal is the authority on
+   * what is owed — but pinned here so a future change to either figure has to
+   * confront the relationship rather than silently break it.
+   */
+  it('matches the (invoice - advance) less 1% TDS relationship', () => {
+    const advanceUplaq = [512500, 510000]
+    result.rows.forEach((row, i) => {
+      const gross = row.amount! - advanceUplaq[i]!
+      expect(Math.round(gross - gross * 0.01)).toBe(row.balancePayable)
+    })
   })
 })
 
