@@ -20,6 +20,7 @@ import { isAdminOrAbove } from '@/lib/auth/roles'
 import { rankCandidates, type MatchableEntry } from '@/lib/matching'
 import { normalizeVendorName } from '@/lib/normalize'
 import { loadStaffKeymapPreferences } from '@/lib/shortcuts/load'
+import { formatBinding } from '@/lib/shortcuts/config'
 import { getSelectedEventId } from '@/lib/events/current'
 
 /**
@@ -142,7 +143,7 @@ export default async function ReviewPage({
   if (queue.length === 0) {
     return (
       <div className="flex flex-col gap-4">
-        <PageHeader scope={scope} />
+        <PageHeader scope={scope} helpHint={formatBinding(keymap.toggleHelp)} />
         <Card>
           <CardContent className="flex flex-col gap-2 pt-6">
             <p className="text-sm font-medium">Queue is empty</p>
@@ -151,8 +152,8 @@ export default async function ReviewPage({
                 ? // v_review_queue_all has no verified_at filter, so this can
                   // basically only happen when no document has ever been
                   // extracted at all -- still worth a correct, non-assuming message.
-                  'There are no extracted documents yet. New documents enter this queue as soon as extraction finishes (§8).'
-                : 'Every extracted document has been verified. New documents enter this queue as soon as extraction finishes (§8) -- nothing to do here right now.'}
+                  'There are no extracted documents yet. A document joins this queue as soon as its extraction finishes.'
+                : 'Every extracted document has been verified. A new document joins this queue as soon as its extraction finishes -- nothing to do here right now.'}
             </p>
           </CardContent>
         </Card>
@@ -205,7 +206,7 @@ export default async function ReviewPage({
 
     return (
       <div className="flex h-[calc(100vh-3rem)] flex-col gap-3">
-        <PageHeader total={queue.length} scope={scope} />
+        <PageHeader total={queue.length} scope={scope} helpHint={formatBinding(keymap.toggleHelp)} />
         <ReviewWorkspace
           key={`${detail.documentExtractionId}:${detail.currentExtractionRunId ?? 'none'}`}
           detail={detail}
@@ -246,6 +247,7 @@ export default async function ReviewPage({
         total={queue.length}
         scope={scope}
         truePendingTotal={truePendingTotal ?? undefined}
+        helpHint={formatBinding(keymap.toggleHelp)}
       />
       <ReviewWorkspace
         key={`${detail.documentExtractionId}:${detail.currentExtractionRunId ?? 'none'}`}
@@ -267,6 +269,7 @@ function PageHeader({
   total,
   scope,
   truePendingTotal,
+  helpHint,
 }: {
   position?: number
   total?: number
@@ -276,6 +279,12 @@ function PageHeader({
   // `total` -- i.e. only when QUEUE_ROW_CAP actually truncated the queue --
   // so the header never states a number smaller than what's on screen.
   truePendingTotal?: number
+  // Hub cert 2.1: the resolved help binding for this reviewer (formatBinding
+  // of keymap.toggleHelp), so the hint matches what actually fires and what
+  // the shortcuts overlay lists -- not a hardcoded bare "?". The gated
+  // states render before the keymap is loaded, so this falls back to the
+  // default binding's label.
+  helpHint?: string
 }) {
   return (
     <div className="flex flex-wrap items-center gap-3">
@@ -287,7 +296,9 @@ function PageHeader({
         </span>
       ) : null}
       {scope !== undefined ? <QueueScopeToggle current={scope} /> : null}
-      <span className="ml-auto text-xs text-muted-foreground">Press ? for keyboard shortcuts</span>
+      <span className="ml-auto text-xs text-muted-foreground">
+        Press {helpHint ?? formatBinding({ key: '?', alt: true })} for keyboard shortcuts
+      </span>
     </div>
   )
 }

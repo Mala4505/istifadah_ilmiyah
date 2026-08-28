@@ -22,8 +22,11 @@ import { toast } from 'sonner'
 import { ChevronLeft, ChevronRight, RefreshCw } from 'lucide-react'
 import { toastError } from '@/components/ui/error-toast'
 import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import { exceptionTypeLabel, severityBadgeVariant } from '@/components/exceptions/labels'
+import { formatDateTime } from '@/lib/reports/format'
 import { normalizeUnit, normalizeVendorName } from '@/lib/normalize'
 import {
   addLineItem,
@@ -38,7 +41,7 @@ import {
   type VendorSearchResult,
 } from '@/lib/actions/review'
 import { type ReviewDocumentDetail } from '@/lib/review/types'
-import { type Keymap, isSafeShortcutTarget, matchLineDigit, matchesBinding } from '@/lib/shortcuts/config'
+import { type Keymap, formatBinding, isSafeShortcutTarget, matchLineDigit, matchesBinding } from '@/lib/shortcuts/config'
 import { PdfViewer, type PdfViewerHandle } from './pdf-viewer'
 import {
   ExtractionForm,
@@ -422,7 +425,17 @@ export function ReviewWorkspace({
     setSubDepartmentId(detail.entrySubDepartmentId ? String(detail.entrySubDepartmentId) : NONE)
   }, [detail.entryId, detail.entryAdminHeadId, detail.entryZoneId, detail.entrySubDepartmentId])
 
-  const [claimState, setClaimState] = useState<'checking' | 'mine' | 'blocked'>('checking')
+  // Hub cert 2.6: seed from the claim snapshot review/page.tsx already loads
+  // (detail.claimedBy*), so the common case -- an unclaimed bill, or one this
+  // reviewer already holds -- renders straight into the live form instead of
+  // flashing ClaimBanner's "Checking claim…" with every input disabled on
+  // every queue navigation. The mount effect below still runs to actually
+  // write/confirm the claim server-side; only the "someone else holds it"
+  // case has to wait for that round trip (it needs the holder's display name,
+  // which isn't in the snapshot).
+  const [claimState, setClaimState] = useState<'checking' | 'mine' | 'blocked'>(() =>
+    detail.claimedBy === null || detail.claimedByIsMe ? 'mine' : 'checking'
+  )
   const [claimInfo, setClaimInfo] = useState<{ displayName: string; claimedAt: string } | null>(null)
   const [takingOver, setTakingOver] = useState(false)
 
@@ -513,7 +526,11 @@ export function ReviewWorkspace({
     let cancelled = false
     const sourceDocumentId = detail.sourceDocumentId
     claimedByMeRef.current = false
-    setClaimState('checking')
+    // No setClaimState('checking') here -- the initial state is already
+    // seeded from detail.claimedBy* (hub cert 2.6), and this component
+    // remounts (keyed) on every queue navigation, so the initializer re-runs
+    // for each document. Forcing 'checking' would just re-introduce the
+    // per-navigation disabled-form flash this item removed.
     void claimReviewDocument(sourceDocumentId).then((result) => {
       if (cancelled) return
       if (result.ok) {
@@ -932,7 +949,7 @@ export function ReviewWorkspace({
   function openHubStatus() {
     if (!detail.canSetHubStatus || detail.entryId === null) {
       toast.error(
-        'This document is not matched to an entry yet, so there is no Hub status to set (see the document inbox, Day 3).'
+        'This document is not matched to an entry yet, so there is no Hub status to set. Connect it to a ledger entry first.'
       )
       return
     }
@@ -953,37 +970,47 @@ export function ReviewWorkspace({
         return
       }
 
-      if (!isSafeShortcutTarget(document.activeElement)) return
-
-      // Always-on navigation: PageUp/PageDown/arrow-key PDF paging are core
-      // navigation, not "shortcuts" a user would think to disable via the
-      // master toggle, so these run regardless of shortcutsEnabled.
-      if (e.key === 'PageDown') {
-        e.preventDefault()
-        requestGoToDocument(nextId)
-        return
-      }
-      if (e.key === 'PageUp') {
-        e.preventDefault()
-        requestGoToDocument(prevId)
-        return
-      }
-      // Page navigation within the open document -- all four arrows work so
-      // either hand's natural rest position reaches one.
-      if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
-        e.preventDefault()
-        pdfViewerRef.current?.nextPage()
-        return
-      }
-      if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
-        e.preventDefault()
-        pdfViewerRef.current?.prevPage()
-        return
+      // Hub cert 2.2: the bare navigation keys (PageUp/PageDown, arrows)
+      // would fight typing or a field's own caret movement, so they stay
+      // gated to a "safe" focus target -- body, or a data-shortcut-safe
+      // element. The configurable commands further down are all Alt-gated
+      // (lib/shortcuts/config.ts) -- Alt+letter is a combination normal
+      // typing and text editing never produce -- so they must keep working
+      // while the cursor sits in a field, which is the normal state for a
+      // whole review session. Before this, tabbing into any input silently
+      // disarmed every shortcut until the reviewer clicked empty background.
+      if (isSafeShortcutTarget(document.activeElement)) {
+        // Always-on navigation: PageUp/PageDown/arrow-key PDF paging are core
+        // navigation, not "shortcuts" a user would think to disable via the
+        // master toggle, so these run regardless of shortcutsEnabled.
+        if (e.key === 'PageDown') {
+          e.preventDefault()
+          requestGoToDocument(nextId)
+          return
+        }
+        if (e.key === 'PageUp') {
+          e.preventDefault()
+          requestGoToDocument(prevId)
+          return
+        }
+        // Page navigation within the open document -- all four arrows work so
+        // either hand's natural rest position reaches one.
+        if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+          e.preventDefault()
+          pdfViewerRef.current?.nextPage()
+          return
+        }
+        if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+          e.preventDefault()
+          pdfViewerRef.current?.prevPage()
+          return
+        }
       }
 
       // Configurable commands, gated by the master enable/disable (plan
       // §2.1). Each trigger is looked up in the resolved keymap rather than
-      // hardcoded, so a staff member's remaps take effect immediately.
+      // hardcoded, so a staff member's remaps take effect immediately. All
+      // are Alt-gated, so they deliberately fire even with a field focused.
       if (!shortcutsEnabled) return
 
       if (matchesBinding(e, keymap.toggleHelp)) {
@@ -1088,6 +1115,14 @@ export function ReviewWorkspace({
   if (detail.legibility) toolbarInfoParts.push(detail.legibility)
   if (editedFieldCount > 0) toolbarInfoParts.push(`${editedFieldCount} changed from OCR`)
   if (detail.billCount > 1) toolbarInfoParts.push(`Bill ${detail.billIndex + 1} of ${detail.billCount} in this PDF`)
+  // Hub cert 2.6: the Hub status is loaded (detail.hubStatusCode) but was
+  // never surfaced anywhere the reviewer can see without opening the Hub
+  // status dialog. Show its human label when set.
+  if (detail.hubStatusCode) {
+    const hubStatusLabel =
+      detail.hubStatusOptions.find((o) => o.code === detail.hubStatusCode)?.label ?? detail.hubStatusCode
+    toolbarInfoParts.push(`Hub: ${hubStatusLabel}`)
+  }
   const toolbarInfoText = toolbarInfoParts.join(' · ')
   // 5.19: 'checking' was missing here -- the ClaimBanner visually gates the
   // form while "Checking claim…" is in flight, but the inputs themselves
@@ -1104,6 +1139,37 @@ export function ReviewWorkspace({
   const verifyStatus: StageStatus = stage2Done ? 'done' : 'current'
   const connectStatus: StageStatus = stage2Done ? 'done' : 'current'
   const classifyStatus: StageStatus = !stage2Done ? 'blocked' : stage3Done ? 'done' : 'current'
+
+  // Hub cert 2.4: land focus inside the form on every queue advance. The
+  // workspace is keyed per document + extraction run in review/page.tsx, so
+  // a mount here IS a queue advance -- without this every bill starts with a
+  // reach for the mouse, the single biggest tax on a throughput screen.
+  // Priority: first flagged (uncertain) field, else the first line-item jump
+  // target, else the first input. Gated on !formDisabled so focus doesn't
+  // land on an input the claim check is about to disable; the ref keeps it a
+  // one-shot even though formDisabled can flip more than once.
+  const didInitialFocusRef = useRef(false)
+  useEffect(() => {
+    if (didInitialFocusRef.current || formDisabled) return
+    didInitialFocusRef.current = true
+    const container = formContainerRef.current
+    if (!container) return
+    if (detail.uncertainFields.length > 0) {
+      setUncertainStepIndex(0)
+      focusUncertainField(0)
+      return
+    }
+    const firstLineJump = container.querySelector<HTMLElement>('[data-line-jump-index="1"]')
+    if (firstLineJump) {
+      firstLineJump.focus()
+      return
+    }
+    container
+      .querySelector<HTMLElement>(
+        'input:not([disabled]), textarea:not([disabled]), [role="combobox"]:not([disabled])'
+      )
+      ?.focus()
+  }, [formDisabled, detail.uncertainFields.length])
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2">
@@ -1128,7 +1194,7 @@ export function ReviewWorkspace({
           {isSaving ? 'Saving…' : 'Save (Ctrl/Cmd+Enter)'}
         </Button>
         <Button type="button" size="sm" variant="outline" onClick={() => setExceptionOpen(true)} disabled={formDisabled}>
-          Flag exception (E)
+          Flag exception ({formatBinding(keymap.openException)})
         </Button>
         {/* Plan §3: Re-extract/Hub status are deliberate, occasional
             overrides -- kept behind "More" so they don't compete for
@@ -1146,12 +1212,16 @@ export function ReviewWorkspace({
                   Documents inbox's "Extract now (Haiku)" — and Sonnet costs
                   materially more per document, so the choice should be
                   deliberate. */}
-              {reExtracting ? 'Re-extracting…' : 'Re-extract with Sonnet (Alt+R)'}
+              {reExtracting
+                ? 'Re-extracting…'
+                : `Re-extract with Sonnet (${formatBinding(keymap.reExtract)})`}
             </DropdownMenuItem>
             <DropdownMenuItem onClick={openHubStatus} disabled={!detail.canSetHubStatus || formDisabled}>
-              Hub status (S)
+              Hub status ({formatBinding(keymap.openHubStatus)})
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => setShortcutsOpen(true)}>Shortcuts (?)</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => setShortcutsOpen(true)}>
+              Shortcuts ({formatBinding(keymap.toggleHelp)})
+            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
 
@@ -1224,16 +1294,30 @@ export function ReviewWorkspace({
 
         {/* Redesign point 2: the ONE pill that stays an actual colored badge
             -- open exceptions are the one thing genuinely asking the
-            reviewer to act. Everything else in this row is plain text. */}
+            reviewer to act. Everything else in this row is plain text.
+            Hub cert 2.5: severity now drives the badge colour (shared
+            severityBadgeVariant, same as the Exceptions screen) instead of a
+            single amber for all three, and each carries an aria-label so a
+            screen reader announces the severity and what the exception is. */}
         {detail.openExceptions.map((ex) => (
-          <span
+          <Badge
             key={ex.id}
-            className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200"
+            variant={severityBadgeVariant(ex.severity)}
             title={ex.description ?? undefined}
+            aria-label={`${ex.severity} severity: ${exceptionTypeLabel(ex.exceptionType)}`}
           >
             {ex.severity.toUpperCase()} · {ex.exceptionType.replace(/_/g, ' ')}
-          </span>
+          </Badge>
         ))}
+
+        {/* Hub cert 2.6: detail.verifiedAt is loaded but was never shown, so
+            in the "All" queue scope a verified bill looked identical to a
+            pending one. */}
+        {detail.verifiedAt ? (
+          <Badge variant="success" title={`Verified ${formatDateTime(detail.verifiedAt)}`}>
+            Verified {formatDateTime(detail.verifiedAt)}
+          </Badge>
+        ) : null}
 
         {toolbarInfoText ? <span className="ml-auto text-xs text-muted-foreground">{toolbarInfoText}</span> : null}
       </div>
@@ -1244,6 +1328,7 @@ export function ReviewWorkspace({
           TallyFooter. Every value/handler here is lifted from this
           component's own state; ReviewStatusLine owns none of it. */}
       <ReviewStatusLine
+        keymap={keymap}
         verifyStatus={verifyStatus}
         vendorName={header.vendorName}
         vendorId={vendorId}
@@ -1348,6 +1433,7 @@ export function ReviewWorkspace({
         <div className="min-h-0 min-w-0 flex-1">
           <ExtractionForm
             ref={formContainerRef}
+            keymap={keymap}
             header={header}
             onHeaderChange={(field, value) => setHeader((h) => ({ ...h, [field]: value }))}
             lineItems={lineItems}
