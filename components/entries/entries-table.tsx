@@ -1,34 +1,46 @@
 'use client'
 
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { ArrowDown, ArrowUp, ArrowUpDown } from 'lucide-react'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { SortableTableHead, nextSort } from '@/components/ui/sortable-table-head'
 import { cn } from '@/lib/utils'
 import type { ColumnKey, EntriesSort, EntryEnriched, SortColumn } from './types'
-import { ALL_COLUMNS } from './types'
+import { ALL_COLUMNS, TYPE_LABELS } from './types'
 import { formatDate, formatMoney, hubStatusBadgeVariant, statusBadgeVariant } from './format'
 
-// Click-to-sort (hub-refinements-plan.md §1/§2): "amount, date, vendor, status
-// at minimum". Each key here is also a valid SortColumn (see types.ts) — the
-// values are identical strings on purpose, so no translation table is needed
-// between "which column was clicked" and "what to sort by".
+// Click-to-sort (docs/hub-screen-certification.md §3.2). Every key here is
+// also a valid SortColumn (see types.ts) — the strings are identical on
+// purpose, so no translation table is needed between "which column was
+// clicked" and "what to sort by".
 const SORTABLE_COLUMNS = new Set<ColumnKey>([
+  'type',
   'date',
   'amount',
   'vendor_display_name',
   'status_label',
+  'hub_status_label',
   'ubbl_number',
   'main_number',
   'budget_head_short_label',
+  'document_count',
 ])
+
+// Columns whose natural first-click direction is descending — newest date,
+// biggest amount, most documents first (§3.2).
+const DESCENDING_FIRST = new Set<SortColumn>(['date', 'amount', 'document_count'])
 
 export function EntriesTable({
   rows,
   visibleColumns,
   loading,
+  refetching = false,
+  activeFilterCount,
+  onClearFilters,
   selected,
   onToggleRow,
   onToggleAll,
@@ -37,12 +49,17 @@ export function EntriesTable({
 }: {
   rows: EntryEnriched[]
   visibleColumns: Set<ColumnKey>
+  /** True only for the very first load, when there is nothing to show yet. */
   loading: boolean
+  /** True while a background refetch runs over already-visible rows (§4.10). */
+  refetching?: boolean
+  activeFilterCount: number
+  onClearFilters: () => void
   selected: Set<number>
   onToggleRow: (id: number) => void
   onToggleAll: () => void
   sort: EntriesSort
-  onSortChange: (column: SortColumn) => void
+  onSortChange: (sort: EntriesSort) => void
 }) {
   const router = useRouter()
   const columns = ALL_COLUMNS.filter((c) => visibleColumns.has(c.key))
@@ -50,13 +67,9 @@ export function EntriesTable({
   const someOnPageSelected = rows.some((r) => selected.has(r.id))
 
   return (
-    // Phase 5 §7.7 (docs/pre-deploy-findings-and-plan.md): at 430px viewport
-    // width this table's columns (up to 16, several fixed-width money/date
-    // cells) pushed the page body wider than the viewport instead of
-    // scrolling internally — same `overflow-x-auto` convention as
-    // components/reports/data-table.tsx and
-    // components/review/extraction-form.tsx's line-items table. No columns
-    // removed; this is containment, not content reduction.
+    // Phase 5 §7.7 (docs/pre-deploy-findings-and-plan.md): contain wide
+    // content to a local horizontal scrollbar rather than pushing the page
+    // body past the viewport.
     <div className="overflow-x-auto rounded-lg border border-border">
       <Table>
         <TableHeader>
@@ -68,44 +81,26 @@ export function EntriesTable({
                 onCheckedChange={onToggleAll}
               />
             </TableHead>
-            {columns.map((col) => {
-              const sortable = SORTABLE_COLUMNS.has(col.key)
-              const isActive = sortable && sort.column === col.key
-              return (
-                <TableHead
+            {columns.map((col) =>
+              SORTABLE_COLUMNS.has(col.key) ? (
+                <SortableTableHead
                   key={col.key}
-                  className={col.align === 'right' ? 'text-right' : undefined}
-                  aria-sort={isActive ? (sort.direction === 'asc' ? 'ascending' : 'descending') : undefined}
-                >
-                  {sortable ? (
-                    <button
-                      type="button"
-                      className={cn(
-                        'inline-flex items-center gap-1 select-none hover:text-foreground',
-                        col.align === 'right' && 'flex-row-reverse'
-                      )}
-                      onClick={() => onSortChange(col.key as SortColumn)}
-                    >
-                      {col.label}
-                      {isActive ? (
-                        sort.direction === 'asc' ? (
-                          <ArrowUp className="h-3 w-3" />
-                        ) : (
-                          <ArrowDown className="h-3 w-3" />
-                        )
-                      ) : (
-                        <ArrowUpDown className="h-3 w-3 text-muted-foreground/50" />
-                      )}
-                    </button>
-                  ) : (
-                    col.label
-                  )}
+                  columnKey={col.key as SortColumn}
+                  label={col.label}
+                  activeColumn={sort.column}
+                  direction={sort.direction}
+                  align={col.align === 'right' ? 'right' : 'left'}
+                  onSort={(column) => onSortChange(nextSort(sort, column, DESCENDING_FIRST))}
+                />
+              ) : (
+                <TableHead key={col.key} className={col.align === 'right' ? 'text-right' : undefined}>
+                  {col.label}
                 </TableHead>
-              )
-            })}
+              ),
+            )}
           </TableRow>
         </TableHeader>
-        <TableBody>
+        <TableBody className={cn(refetching && 'pointer-events-none opacity-60 transition-opacity')}>
           {loading &&
             Array.from({ length: 10 }).map((_, i) => (
               <TableRow key={`skeleton-${i}`}>
@@ -122,8 +117,17 @@ export function EntriesTable({
 
           {!loading && rows.length === 0 && (
             <TableRow>
-              <TableCell colSpan={columns.length + 1} className="h-32 text-center text-sm text-muted-foreground">
-                No entries match your filters.
+              <TableCell colSpan={columns.length + 1} className="h-32 text-center">
+                {activeFilterCount === 0 ? (
+                  <p className="text-sm text-muted-foreground">No entries in this event yet.</p>
+                ) : (
+                  <div className="flex flex-col items-center gap-2">
+                    <p className="text-sm text-muted-foreground">No entries match your filters.</p>
+                    <Button variant="outline" size="sm" onClick={onClearFilters}>
+                      Clear all filters
+                    </Button>
+                  </div>
+                )}
               </TableCell>
             </TableRow>
           )}
@@ -143,9 +147,22 @@ export function EntriesTable({
                     onCheckedChange={() => onToggleRow(row.id)}
                   />
                 </TableCell>
-                {columns.map((col) => (
+                {columns.map((col, colIndex) => (
                   <TableCell key={col.key} className={cn(col.align === 'right' && 'text-right tabular-nums')}>
-                    {renderCell(row, col.key)}
+                    {colIndex === 0 ? (
+                      // §4.1: the first visible cell is a real link — keyboard
+                      // reachable, and middle-click / cmd-click open a new tab.
+                      // The row onClick stays for plain mouse convenience.
+                      <Link
+                        href={`/entries/${row.id}`}
+                        className="rounded-sm hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        {renderCell(row, col.key)}
+                      </Link>
+                    ) : (
+                      renderCell(row, col.key)
+                    )}
                   </TableCell>
                 ))}
               </TableRow>
@@ -158,6 +175,8 @@ export function EntriesTable({
 
 function renderCell(row: EntryEnriched, key: ColumnKey) {
   switch (key) {
+    case 'type':
+      return <Badge variant="outline">{TYPE_LABELS[row.type] ?? row.type}</Badge>
     case 'ubbl_number':
       return (
         <span className="inline-flex items-center gap-1.5">
@@ -187,7 +206,7 @@ function renderCell(row: EntryEnriched, key: ColumnKey) {
       return formatMoney(row.amount)
     case 'status_label':
       return row.status_label ? (
-        <Badge variant={statusBadgeVariant(row.status_label)}>{row.status_label}</Badge>
+        <Badge variant={statusBadgeVariant(row.status_label, row.status_code)}>{row.status_label}</Badge>
       ) : (
         '—'
       )

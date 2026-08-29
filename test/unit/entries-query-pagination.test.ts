@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest'
-import { applyEntriesFilters, buildPaginationPlan, computeNextCursor, type PageCursor } from '@/components/entries/query'
-import { DEFAULT_FILTERS, DEFAULT_SORT, type EntriesSort, type EntryEnriched } from '@/components/entries/types'
+import type { SupabaseClient } from '@supabase/supabase-js'
+import {
+  applyEntriesFilters,
+  buildPaginationPlan,
+  computeNextCursor,
+  fetchAllMatchingIds,
+  type PageCursor,
+} from '@/components/entries/query'
+import { DEFAULT_FILTERS, DEFAULT_SORT, type EntriesSort, type EntryEnriched, type SortColumn } from '@/components/entries/types'
+import { nextSort } from '@/components/ui/sortable-table-head'
 
 // Minimal fixture -- only `id` is read by the pure cursor logic under test here.
 function row(id: number): EntryEnriched {
@@ -157,6 +165,88 @@ describe('applyEntriesFilters -- vendor search with parentheses (hub-screen-cert
 
     const filterString = orFilterArg(calls)
     expect(filterString).toBe('vendor_display_name.ilike."%Acme Traders%",vendor_raw.ilike."%Acme Traders%"')
+  })
+})
+
+// A mock client whose `v_entry_enriched` "select('id')" query resolves to the
+// fixed id set, honouring the `.lt('id', cursor)` keyset cursor and `.limit()`
+// that fetchAllMatchingIds walks it with. Every filter method returns `this`.
+function createIdClient(allIds: number[]): SupabaseClient {
+  const sorted = [...allIds].sort((a, b) => b - a)
+  return {
+    from() {
+      return {
+        select() {
+          const state: { limit: number; lt: number | null } = { limit: Number.POSITIVE_INFINITY, lt: null }
+          const builder: Record<string, unknown> = {}
+          const passthrough = () => builder
+          for (const m of ['eq', 'gte', 'lte', 'is', 'neq', 'gt', 'or', 'order']) builder[m] = passthrough
+          builder.limit = (n: number) => {
+            state.limit = n
+            return builder
+          }
+          builder.lt = (_col: string, v: number) => {
+            state.lt = v
+            return builder
+          }
+          builder.then = (resolve: (r: { data: { id: number }[]; error: null }) => void) => {
+            let rows = sorted.map((id) => ({ id }))
+            if (state.lt !== null) rows = rows.filter((r) => r.id < (state.lt as number))
+            rows = rows.slice(0, state.limit)
+            resolve({ data: rows, error: null })
+          }
+          return builder
+        },
+      }
+    },
+  } as unknown as SupabaseClient
+}
+
+describe('fetchAllMatchingIds (hub-screen-certification.md §3.6)', () => {
+  it('returns every matching id, in id-desc order, walking multiple keyset batches', async () => {
+    const client = createIdClient([5, 1, 9, 3, 7])
+    const { ids, truncated } = await fetchAllMatchingIds(client, DEFAULT_FILTERS, { batchSize: 2 })
+    expect(ids).toEqual([9, 7, 5, 3, 1])
+    expect(truncated).toBe(false)
+  })
+
+  it('stops and flags truncated once maxRows is reached', async () => {
+    const client = createIdClient([10, 9, 8, 7, 6, 5, 4, 3, 2, 1])
+    const { ids, truncated } = await fetchAllMatchingIds(client, DEFAULT_FILTERS, { batchSize: 2, maxRows: 4 })
+    expect(ids).toEqual([10, 9, 8, 7])
+    expect(truncated).toBe(true)
+  })
+
+  it('returns an empty, non-truncated result when nothing matches', async () => {
+    const { ids, truncated } = await fetchAllMatchingIds(createIdClient([]), DEFAULT_FILTERS)
+    expect(ids).toEqual([])
+    expect(truncated).toBe(false)
+  })
+})
+
+describe('nextSort (hub-screen-certification.md §3.2)', () => {
+  const descendingFirst = new Set<SortColumn>(['date', 'amount', 'document_count'])
+  const from = (column: SortColumn, direction: 'asc' | 'desc') => ({ column, direction })
+
+  it('opens a descending-first column descending on first click', () => {
+    expect(nextSort(from('id', 'desc'), 'amount', descendingFirst)).toEqual({ column: 'amount', direction: 'desc' })
+    expect(nextSort(from('id', 'desc'), 'document_count', descendingFirst)).toEqual({
+      column: 'document_count',
+      direction: 'desc',
+    })
+  })
+
+  it('opens a normal column ascending on first click', () => {
+    expect(nextSort(from('id', 'desc'), 'vendor_display_name', descendingFirst)).toEqual({
+      column: 'vendor_display_name',
+      direction: 'asc',
+    })
+    expect(nextSort(from('amount', 'desc'), 'type', descendingFirst)).toEqual({ column: 'type', direction: 'asc' })
+  })
+
+  it('flips direction when the already-active column is clicked again', () => {
+    expect(nextSort(from('amount', 'desc'), 'amount', descendingFirst)).toEqual({ column: 'amount', direction: 'asc' })
+    expect(nextSort(from('amount', 'asc'), 'amount', descendingFirst)).toEqual({ column: 'amount', direction: 'desc' })
   })
 })
 

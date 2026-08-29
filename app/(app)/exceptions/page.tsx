@@ -9,7 +9,12 @@ import { getStaffContext } from '@/lib/export/auth'
 import { getSelectedEventId } from '@/lib/events/current'
 import { ExceptionsFilters } from '@/components/exceptions/exceptions-filters'
 import { ExceptionsTable, type ExceptionRow } from '@/components/exceptions/exceptions-table'
+import { ExceptionsPagination } from '@/components/exceptions/exceptions-pagination'
+import { SeverityCountChips } from '@/components/exceptions/severity-count-chips'
 import { SeverityLegend } from '@/components/exceptions/severity-legend'
+import { PAGE_SIZE_OPTIONS } from '@/components/ui/pagination-bar'
+import { parseQueueSort, sortQueue } from '@/components/exceptions/queue-sort'
+import { SEVERITY_VALUES } from '@/components/exceptions/labels'
 import { isAdminOrAbove } from '@/lib/auth/roles'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ReportSection } from '@/components/reports/report-section'
@@ -34,6 +39,16 @@ type RawExceptionRow = ExceptionRow & {
   source_document_id: number | null
 }
 
+/** The id fields resolveEventIds actually reads — lets the lightweight
+ *  severity-count query pass a narrower row shape. */
+type EventScopableRow = {
+  id: number
+  entry_id: number | null
+  document_extraction_id: number | null
+  import_batch_id: number | null
+  source_document_id: number | null
+}
+
 function uniqueIds(ids: (number | null)[]): number[] {
   return Array.from(new Set(ids.filter((id): id is number => id !== null)))
 }
@@ -50,7 +65,7 @@ function uniqueIds(ids: (number | null)[]): number[] {
  */
 async function resolveEventIds(
   supabase: SupabaseClient,
-  rows: RawExceptionRow[]
+  rows: EventScopableRow[]
 ): Promise<Map<number, number | null>> {
   const entryIds = uniqueIds(rows.map((r) => r.entry_id))
   const docExtractionIds = uniqueIds(rows.map((r) => r.document_extraction_id))
@@ -96,12 +111,54 @@ async function resolveEventIds(
   return resolved
 }
 
-// Item 1.2 (hub-screen-certification.md §3): page size for the exceptions
-// queue, and the per-severity fetch cap the server-side ordering below is
-// built from.
-const QUEUE_PAGE_SIZE = 100
+// Item 1.2 (hub-screen-certification.md §3): the per-severity fetch cap the
+// server-side ordering below is built from. §3.1: default page size 50,
+// selectable from PAGE_SIZE_OPTIONS, `page`/`size` in the URL.
+const QUEUE_DEFAULT_PAGE_SIZE = 50
 const QUEUE_SEVERITY_BUCKET_CAP = 1000
+const QUEUE_COUNT_CAP = 5000
 const SEVERITY_PRIORITY = ['high', 'medium', 'low'] as const
+
+function parsePageSize(raw: string | undefined): number {
+  const n = Number(raw)
+  return (PAGE_SIZE_OPTIONS as readonly number[]).includes(n) ? n : QUEUE_DEFAULT_PAGE_SIZE
+}
+
+function parsePageNumber(raw: string | undefined): number {
+  const n = Number(raw)
+  return Number.isInteger(n) && n >= 1 ? n : 1
+}
+
+/**
+ * High / Medium / Low counts among *open* exceptions (§3.7), event-scoped the
+ * same way the queue is. Independent of the queue's status/type/severity
+ * filters on purpose — the chips are a fixed reference the filter can be set
+ * from, not a reflection of it. Minimal column set (ids + severity only).
+ */
+async function loadOpenSeverityCounts(): Promise<Record<string, number>> {
+  const supabase = await createClient()
+  const { data } = await supabase
+    .from('reconciliation_exception')
+    .select('id, severity, entry_id, document_extraction_id, import_batch_id, source_document_id')
+    .eq('status', 'open')
+    .range(0, QUEUE_COUNT_CAP - 1)
+
+  const rows = (data ?? []) as (EventScopableRow & { severity: string })[]
+  const counts: Record<string, number> = { high: 0, medium: 0, low: 0 }
+  if (rows.length === 0) return counts
+
+  const selectedEventId = await getSelectedEventId(supabase)
+  let scoped = rows
+  if (selectedEventId !== null) {
+    const eventIdByRow = await resolveEventIds(supabase, rows)
+    scoped = rows.filter((r) => {
+      const resolved = eventIdByRow.get(r.id)
+      return resolved === null || resolved === undefined || resolved === selectedEventId
+    })
+  }
+  for (const r of scoped) counts[r.severity] = (counts[r.severity] ?? 0) + 1
+  return counts
+}
 
 /**
  * Queue tab (MASTER-PLAN §3.10, §5 row 8, §11.1 Day 5). Sorted by
@@ -138,7 +195,15 @@ const SEVERITY_PRIORITY = ['high', 'medium', 'low'] as const
  * above), the "true total" for the header is the post-event-scoping row
  * count rather than a DB-side `count`.
  */
-async function loadQueueData(params: { status: string; type: string }) {
+async function loadQueueData(params: {
+  status: string
+  type: string
+  severity: string
+  page: number
+  size: number
+  sort: ReturnType<typeof parseQueueSort>['column']
+  dir: ReturnType<typeof parseQueueSort>['direction']
+}) {
   const supabase = await createClient()
 
   function baseQuery() {
@@ -156,8 +221,14 @@ async function loadQueueData(params: { status: string; type: string }) {
     return q
   }
 
+  // §3.4: a severity filter narrows the fetch to a single bucket.
+  const severitiesToFetch =
+    params.severity === 'all'
+      ? SEVERITY_PRIORITY
+      : SEVERITY_PRIORITY.filter((s) => s === params.severity)
+
   const bucketResults = await Promise.all(
-    SEVERITY_PRIORITY.map((severity) =>
+    severitiesToFetch.map((severity) =>
       baseQuery()
         .eq('severity', severity)
         .order('amount_at_risk', { ascending: false, nullsFirst: false })
@@ -181,9 +252,23 @@ async function loadQueueData(params: { status: string; type: string }) {
     })
   }
 
+  // §3.2: the user-chosen sort is applied here, after event-scoping, over the
+  // assembled list. Severity rank is the default; every branch is
+  // id-tiebroken so repeat loads are stable.
+  const sorted = sortQueue(exceptions, params.sort, params.dir)
+
+  const totalCount = sorted.length
+  const maxPage = Math.max(1, Math.ceil(totalCount / params.size))
+  const page = Math.min(params.page, maxPage)
+  const start = (page - 1) * params.size
+  const pageRows = sorted.slice(start, start + params.size)
+
   return {
-    exceptions: exceptions.slice(0, QUEUE_PAGE_SIZE),
-    totalCount: exceptions.length,
+    exceptions: pageRows,
+    totalCount,
+    page,
+    rangeStart: totalCount === 0 ? 0 : start + 1,
+    rangeEnd: start + pageRows.length,
     error: bucketError,
   }
 }
@@ -356,11 +441,26 @@ async function loadReconciliationReportData() {
 export default async function ExceptionsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ status?: string; type?: string }>
+  searchParams: Promise<{
+    status?: string
+    type?: string
+    severity?: string
+    page?: string
+    size?: string
+    sort?: string
+    dir?: string
+  }>
 }) {
   const params = await searchParams
   const status = params.status ?? 'open'
   const type = params.type ?? 'all'
+  const severity =
+    params.severity && (SEVERITY_VALUES as readonly string[]).includes(params.severity)
+      ? params.severity
+      : 'all'
+  const size = parsePageSize(params.size)
+  const requestedPage = parsePageNumber(params.page)
+  const queueSort = parseQueueSort(params.sort, params.dir)
 
   const staff = await getStaffContext()
   if (!staff) {
@@ -390,8 +490,21 @@ export default async function ExceptionsPage({
 
   const canResolve = isAdminOrAbove(staff.role)
 
-  const [{ exceptions, totalCount: queueTotalCount, error: queueError }, reportData] = await Promise.all([
-    loadQueueData({ status, type }),
+  const [
+    { exceptions, totalCount: queueTotalCount, page: queuePage, rangeStart, rangeEnd, error: queueError },
+    severityCounts,
+    reportData,
+  ] = await Promise.all([
+    loadQueueData({
+      status,
+      type,
+      severity,
+      page: requestedPage,
+      size,
+      sort: queueSort.column,
+      dir: queueSort.direction,
+    }),
+    loadOpenSeverityCounts(),
     loadReconciliationReportData(),
   ])
 
@@ -454,7 +567,8 @@ export default async function ExceptionsPage({
         </TabsList>
 
         <TabsContent value="queue" className="flex flex-col gap-4">
-          <ExceptionsFilters status={status} type={type} />
+          <ExceptionsFilters status={status} type={type} severity={severity} />
+          <SeverityCountChips counts={severityCounts} activeSeverity={severity} />
 
           {queueError ? (
             <Card>
@@ -464,15 +578,23 @@ export default async function ExceptionsPage({
               </CardContent>
             </Card>
           ) : exceptions.length === 0 ? (
-            <QueueEmptyState isDefaultView={status === 'open' && type === 'all'} />
+            <QueueEmptyState isDefaultView={status === 'open' && type === 'all' && severity === 'all'} />
           ) : (
             <div className="flex flex-col gap-2">
-              <p className="text-xs text-muted-foreground">
-                Showing {exceptions.length.toLocaleString()} of {queueTotalCount.toLocaleString()} exception
-                {queueTotalCount === 1 ? '' : 's'}
-              </p>
+              <ExceptionsPagination
+                page={queuePage}
+                size={size}
+                rangeStart={rangeStart}
+                rangeEnd={rangeEnd}
+                total={queueTotalCount}
+              />
               <SeverityLegend />
-              <ExceptionsTable exceptions={exceptions} canResolve={canResolve} />
+              <ExceptionsTable
+                exceptions={exceptions}
+                canResolve={canResolve}
+                sortColumn={queueSort.column}
+                sortDirection={queueSort.direction}
+              />
             </div>
           )}
         </TabsContent>
@@ -603,13 +725,21 @@ function PageShell({ children }: { children: React.ReactNode }) {
 
 function QueueEmptyState({ isDefaultView }: { isDefaultView: boolean }) {
   return (
-    <div className="flex flex-col items-center gap-1 rounded-md border border-dashed border-border py-10 text-center">
+    <div className="flex flex-col items-center gap-2 rounded-md border border-dashed border-border py-10 text-center">
       <p className="text-sm font-medium">{isDefaultView ? 'No open exceptions' : 'No exceptions match these filters'}</p>
       <p className="max-w-md text-xs text-muted-foreground">
         {isDefaultView
           ? "This queue fills in as the importer, OCR pipeline, and reconciliation checks run — line-item tally mismatches, tenant/Main variances, allocation mismatches and the like (§3.10). It's expected to be empty or near-empty until an import has actually committed data and documents have been through review."
-          : 'Try a different status or exception type.'}
+          : 'Try a different status, severity, or exception type.'}
       </p>
+      {!isDefaultView && (
+        <Link
+          href="/exceptions"
+          className="text-xs font-medium text-primary underline-offset-2 hover:underline"
+        >
+          Clear all filters
+        </Link>
+      )}
     </div>
   )
 }

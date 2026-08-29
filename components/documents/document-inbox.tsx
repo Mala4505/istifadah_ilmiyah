@@ -259,6 +259,23 @@ export function DocumentInbox({
     })
   }
 
+  // Tri-state select-all for the current table page (hub certification §3.5).
+  // The table hands us the ids currently on screen; if every one is already
+  // selected this clears them, otherwise it adds the missing ones. Selection
+  // of documents on other pages is left untouched — it already survives
+  // paging and filtering (bulk actions read the full `selected` set).
+  function togglePage(documentIds: number[]) {
+    setSelected((current) => {
+      const allSelected = documentIds.length > 0 && documentIds.every((id) => current.has(id))
+      const next = new Set(current)
+      for (const id of documentIds) {
+        if (allSelected) next.delete(id)
+        else next.add(id)
+      }
+      return next
+    })
+  }
+
   function chooseEntry(documentId: number, entryId: number | null) {
     setChosenByDocument((current) => {
       const next = new Map(current)
@@ -428,6 +445,7 @@ export function DocumentInbox({
           canAct={canAct}
           selected={selected}
           onToggleSelected={toggleSelected}
+          onTogglePage={togglePage}
           chosenByDocument={chosenByDocument}
           onChooseEntry={chooseEntry}
           onMutated={removeDocumentLocally}

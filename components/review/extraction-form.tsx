@@ -17,7 +17,7 @@
  */
 
 import type { Ref } from 'react'
-import { Fragment, forwardRef, useState } from 'react'
+import { Fragment, forwardRef, useId, useState } from 'react'
 import { ChevronRight } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -34,9 +34,9 @@ export interface HeaderFormState {
   vendorPhone: string
   vendorEmail: string
   vendorAddress: string
-  /** Recipient/"Bill To" block -- plan §12 GST recipient-compliance check.
-   *  Only rendered (ExtractionForm) when `gstCharged` is true; not part of
-   *  UNCERTAIN_FIELD_NAMES, so these never carry the orange uncertainty ring. */
+  /** Recipient/"Bill To" block -- plan §12. Rendered on every bill
+   *  (ExtractionForm); not part of UNCERTAIN_FIELD_NAMES, so these never
+   *  carry the orange uncertainty ring. */
   buyerGstin: string
   buyerName: string
   invoiceNumber: string
@@ -252,9 +252,10 @@ export const ExtractionForm = forwardRef(function ExtractionForm(
      *  quiet bottom clarification line ("This page has N flagged fields…"). */
     currentPdfPage: number
     /** Plan §12: whether GST is actually charged on this bill (server-computed,
-     *  detail.gstCharged) -- gates the Buyer GSTIN/Buyer Name recipient-block
-     *  fields below. When false, that whole block is genuinely absent from
-     *  the DOM, not just hidden, per the plan's explicit requirement. */
+     *  detail.gstCharged). The Buyer GSTIN/Buyer Name recipient block renders
+     *  on every bill now (recipient-identity expansion, 2026-08-29); this
+     *  flag only varies the block's helper text ("required for input tax
+     *  credit" vs. plain "required on every bill"). */
     gstCharged: boolean
     /** Item 2.1: the resolved, user-remappable keymap -- shortcut hints in
      *  this form are rendered from it via formatBinding, never hard-coded. */
@@ -463,22 +464,28 @@ export const ExtractionForm = forwardRef(function ExtractionForm(
             uncertainOnCurrentPage={isOnCurrentPage(headerUncertainty('vendorAddress'))}
             edited={headerEdited('vendorAddress')} onJumpToPage={onJumpToPage} pageLabel={headerPageLabel(headerUncertainty('vendorAddress'))} />
         </div>
-        {gstCharged ? (
-          <>
-            {/* Plan §12: recipient/"Bill To" block -- required on a GST tax
-                invoice alongside the vendor's own identity above. Plain
-                editable fields (no uncertainty ring): buyer_gstin/buyer_name
-                aren't in UNCERTAIN_FIELD_NAMES, so they can only ever be
-                edited or not, never model-flagged. */}
-            <div className="col-span-2 -mb-1 mt-1 text-xs font-medium text-muted-foreground">Bill to (recipient)</div>
-            <Field label="Buyer GSTIN" disabled={disabled} onKeyDown={handleEnter}
-              value={header.buyerGstin} onChange={(v) => onHeaderChange('buyerGstin', v)}
-              edited={headerEdited('buyerGstin')} />
-            <Field label="Buyer name" disabled={disabled} onKeyDown={handleEnter}
-              value={header.buyerName} onChange={(v) => onHeaderChange('buyerName', v)}
-              edited={headerEdited('buyerName')} />
-          </>
-        ) : null}
+        {/* Plan §12: recipient/"Bill To" block -- our own GSTIN and name as
+            printed on the bill. Shown on every bill (recipient-identity
+            expansion, confirmed with the user 2026-08-29), not just tax
+            invoices: the community requires its identity on all filed
+            paperwork, and `gstCharged` now only varies the helper text. Plain
+            editable fields (no uncertainty ring): buyer_gstin/buyer_name
+            aren't in UNCERTAIN_FIELD_NAMES, so they can only ever be edited
+            or not, never model-flagged. */}
+        <div className="col-span-2 -mb-1 mt-1 flex flex-wrap items-baseline gap-x-2">
+          <span className="text-xs font-medium text-muted-foreground">Bill to (recipient)</span>
+          <span className="text-xs font-normal text-muted-foreground">
+            {gstCharged
+              ? 'Our GSTIN + name — required on every bill, and mandatory for input tax credit'
+              : 'Our GSTIN + name — required on every bill'}
+          </span>
+        </div>
+        <Field label="Buyer GSTIN" disabled={disabled} onKeyDown={handleEnter}
+          value={header.buyerGstin} onChange={(v) => onHeaderChange('buyerGstin', v)}
+          edited={headerEdited('buyerGstin')} />
+        <Field label="Buyer name" disabled={disabled} onKeyDown={handleEnter}
+          value={header.buyerName} onChange={(v) => onHeaderChange('buyerName', v)}
+          edited={headerEdited('buyerName')} />
         <Field label="Invoice number" disabled={disabled} onKeyDown={handleEnter}
           value={header.invoiceNumber} onChange={(v) => onHeaderChange('invoiceNumber', v)}
           uncertain={headerUncertainty('invoiceNumber')} uncertainIndex={uncertainIndexOf(headerUncertainty('invoiceNumber'))}
@@ -615,6 +622,7 @@ export const ExtractionForm = forwardRef(function ExtractionForm(
                       </td>
                       <td className="min-w-40 px-1 py-1">
                         <Input
+                          aria-label={`Line ${index + 1} description`}
                           data-line-jump-index={jumpIndex ?? undefined}
                           data-uncertain-index={descUncertainIndex}
                           disabled={disabled}
@@ -628,6 +636,7 @@ export const ExtractionForm = forwardRef(function ExtractionForm(
                       </td>
                       <td className="min-w-20 px-1 py-1">
                         <Input inputMode="decimal" disabled={disabled}
+                          aria-label={`Line ${index + 1} quantity`}
                           data-uncertain-index={qtyUncertainIndex}
                           data-validation-error={qtyError ? 'true' : undefined}
                           className={ringClass(qtyUncertain, 'quantity', qtyError)}
@@ -638,6 +647,7 @@ export const ExtractionForm = forwardRef(function ExtractionForm(
                       </td>
                       <td className="min-w-32 px-1 py-1">
                         <Input disabled={disabled} className={ringClass(undefined, 'unitNormalized')}
+                          aria-label={`Line ${index + 1} unit`}
                           title={titleFor(undefined, 'unitNormalized')} value={item.unitNormalized || item.unit}
                           onChange={(e) => onLineItemChange(item.id, 'unitNormalized', e.target.value)} onKeyDown={handleEnter} />
                         {focusedRowId === item.id ? (
@@ -658,6 +668,7 @@ export const ExtractionForm = forwardRef(function ExtractionForm(
                       </td>
                       <td className="min-w-24 px-1 py-1">
                         <Input inputMode="decimal" disabled={disabled}
+                          aria-label={`Line ${index + 1} rate`}
                           data-uncertain-index={rateUncertainIndex}
                           data-validation-error={rateError ? 'true' : undefined}
                           className={ringClass(rateUncertain, 'rate', rateError)}
@@ -668,6 +679,7 @@ export const ExtractionForm = forwardRef(function ExtractionForm(
                       </td>
                       <td className="min-w-24 px-1 py-1">
                         <Input inputMode="decimal" disabled={disabled}
+                          aria-label={`Line ${index + 1} amount`}
                           data-uncertain-index={amountUncertainIndex}
                           data-validation-error={amountError ? 'true' : undefined}
                           className={ringClass(amountUncertain, 'amount', amountError)}
@@ -806,9 +818,13 @@ function Field({
    *  pageNumberStart/End, which this presentational component doesn't have. */
   pageLabel?: string
 }) {
+  // §4.2: Radix Label does not auto-wrap its control, so without an explicit
+  // htmlFor/id pair clicking the label doesn't focus the input and a screen
+  // reader announces a bare "edit text". useId() gives a stable SSR-safe id.
+  const fieldId = useId()
   return (
     <div className="flex flex-col gap-1.5">
-      <Label>
+      <Label htmlFor={fieldId}>
         {label}
         {pageLabel ? <span className="ml-1 text-xs font-normal text-muted-foreground">· {pageLabel}</span> : null}
         {error ? (
@@ -820,6 +836,7 @@ function Field({
         ) : null}
       </Label>
       <Input
+        id={fieldId}
         type={type}
         inputMode={inputMode}
         disabled={disabled}

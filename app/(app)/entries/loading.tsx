@@ -10,10 +10,11 @@ import { Skeleton } from '@/components/ui/skeleton'
  * client-side useSearchParams hydration gap *after* this shell has already
  * painted; this one covers the gap *before* anything has painted at all.
  * Priority route per docs/pre-deploy-findings-and-plan.md §8.2, so this
- * mirrors more of the real shape than a generic skeleton would: the page
- * header, the four labelled filter-bar sections (filter-bar.tsx's Status /
- * Classification / Search / Flags groups), and the entries table's header
- * row plus a handful of body rows (entries-table.tsx).
+ * mirrors the real shape: the page header, the *collapsed* filter bar
+ * (filter-bar.tsx opens collapsed at ~40px — docs/hub-screen-certification.md
+ * §4.5, so painting the expanded 4-section panel here just collapses on
+ * hydration and shoves the table up), and the entries table's header row
+ * plus a handful of body rows (entries-table.tsx).
  */
 export default function EntriesLoading() {
   return (
@@ -23,11 +24,8 @@ export default function EntriesLoading() {
         <Skeleton className="h-8 w-40" />
       </div>
 
-      <div className="flex flex-col gap-4 rounded-lg border border-border bg-card p-3">
-        <FilterSectionSkeleton fieldCount={3} />
-        <FilterSectionSkeleton fieldCount={5} />
-        <FilterSectionSkeleton fieldCount={3} />
-        <FilterSectionSkeleton fieldCount={3} />
+      <div className="flex items-center justify-between gap-2 rounded-lg border border-border bg-card p-2.5">
+        <Skeleton className="h-5 w-40" />
       </div>
 
       <div className="overflow-hidden rounded-lg border border-border">
@@ -43,22 +41,6 @@ export default function EntriesLoading() {
             {Array.from({ length: 7 }).map((_, j) => (
               <Skeleton key={j} className="h-4 flex-1" />
             ))}
-          </div>
-        ))}
-      </div>
-    </div>
-  )
-}
-
-function FilterSectionSkeleton({ fieldCount }: { fieldCount: number }) {
-  return (
-    <div className="flex flex-col gap-2">
-      <Skeleton className="h-3 w-20" />
-      <div className="flex flex-wrap gap-3">
-        {Array.from({ length: fieldCount }).map((_, i) => (
-          <div key={i} className="flex flex-col gap-1">
-            <Skeleton className="h-2.5 w-16" />
-            <Skeleton className="h-8 w-36 rounded-md" />
           </div>
         ))}
       </div>

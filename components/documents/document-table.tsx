@@ -1,7 +1,7 @@
 'use client'
 
 import { Fragment, useEffect, useMemo, useState } from 'react'
-import { CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Eye, PenLine, X } from 'lucide-react'
+import { CheckCircle2, ChevronDown, ChevronUp, Eye, PenLine, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Dialog, DialogContent, DialogFooter, DialogTitle } from '@/components/ui/dialog'
@@ -9,12 +9,21 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { SelectNative } from '@/components/ui/select-native'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { PaginationBar, PAGE_SIZE_OPTIONS } from '@/components/ui/pagination-bar'
+import { SortableTableHead, nextSort } from '@/components/ui/sortable-table-head'
 import { DocumentCard, DocumentStageTracker, ReviewProgressBadge } from './document-card'
+import {
+  sortDocuments,
+  DEFAULT_DOCUMENT_SORT,
+  DOCUMENT_DESCENDING_FIRST,
+  type DocumentSort,
+  type DocumentSortColumn,
+} from './document-sort'
 import { formatDateTime, formatMoney } from './format'
 import type { InboxDocumentView } from './types'
 import type { LookupOption } from '@/components/entries/types'
 
-const PAGE_SIZE = 20
+const DEFAULT_PAGE_SIZE = 25
 
 type StatusFilter = '' | InboxDocumentView['uploadStatus']
 type ReviewFilter = '' | 'reviewed' | 'unreviewed'
@@ -83,6 +92,7 @@ export function DocumentTable({
   canAct,
   selected,
   onToggleSelected,
+  onTogglePage,
   chosenByDocument,
   onChooseEntry,
   onMutated,
@@ -93,6 +103,10 @@ export function DocumentTable({
   canAct: boolean
   selected: Set<number>
   onToggleSelected: (documentId: number) => void
+  /** Tri-state select-all for the current page (hub certification §3.5): the
+   *  table passes the ids currently on screen; document-inbox.tsx decides
+   *  whether that's an add-all or a remove-all. */
+  onTogglePage: (documentIds: number[]) => void
   chosenByDocument: Map<number, number | null>
   onChooseEntry: (documentId: number, entryId: number | null) => void
   onMutated: (documentId: number) => void
@@ -101,6 +115,8 @@ export function DocumentTable({
   zoneOptions: LookupOption[]
 }) {
   const [pageIndex, setPageIndex] = useState(0)
+  const [pageSize, setPageSize] = useState<number>(DEFAULT_PAGE_SIZE)
+  const [sort, setSort] = useState<DocumentSort>(DEFAULT_DOCUMENT_SORT)
   const [openDocumentId, setOpenDocumentId] = useState<number | null>(null)
   // Multi-bill documents (document_extraction is 1:many per source_document
   // since 20260817000002) expand in place to a per-bill list rather than
@@ -121,11 +137,20 @@ export function DocumentTable({
     [documents, filters]
   )
 
-  // A filter change can strand pageIndex past the new (smaller) page count —
-  // jump back to page 1 rather than showing an empty page.
+  // Sort the whole filtered set before slicing a page (hub certification
+  // §3.2) — client-side, like the filter above, since the full list is
+  // already in memory.
+  const sortedDocuments = useMemo(() => sortDocuments(filteredDocuments, sort), [filteredDocuments, sort])
+
+  // A filter or page-size change can strand pageIndex past the new (smaller)
+  // page count — jump back to page 1 rather than showing an empty page.
   useEffect(() => {
     setPageIndex(0)
-  }, [filters])
+  }, [filters, pageSize])
+
+  function handleSort(column: DocumentSortColumn) {
+    setSort((current) => nextSort(current, column, DOCUMENT_DESCENDING_FIRST))
+  }
 
   function toggleExpanded(documentId: number) {
     setExpandedDocumentIds((current) => {
@@ -140,11 +165,16 @@ export function DocumentTable({
     ([key, value]) => value !== DEFAULT_FILTERS[key as keyof DocumentFilters]
   ).length
 
-  const pageCount = Math.max(1, Math.ceil(filteredDocuments.length / PAGE_SIZE))
+  const total = filteredDocuments.length
+  const pageCount = Math.max(1, Math.ceil(total / pageSize))
   const clampedPageIndex = Math.min(pageIndex, pageCount - 1)
-  const start = clampedPageIndex * PAGE_SIZE
-  const pageDocuments = filteredDocuments.slice(start, start + PAGE_SIZE)
+  const start = clampedPageIndex * pageSize
+  const pageDocuments = sortedDocuments.slice(start, start + pageSize)
   const openDocument = documents.find((d) => d.id === openDocumentId) ?? null
+
+  const pageDocumentIds = pageDocuments.map((d) => d.id)
+  const allOnPageSelected = pageDocumentIds.length > 0 && pageDocumentIds.every((id) => selected.has(id))
+  const someOnPageSelected = pageDocumentIds.some((id) => selected.has(id))
 
   return (
     <div className="flex flex-col gap-3">
@@ -230,11 +260,43 @@ export function DocumentTable({
         <Table>
           <TableHeader>
             <TableRow>
-              {canAct && <TableHead className="w-10" />}
-              <TableHead>Filename</TableHead>
-              <TableHead>Vendor / Invoice # / Total</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead>Uploaded</TableHead>
+              {canAct && (
+                <TableHead className="w-10">
+                  <Checkbox
+                    aria-label="Select all documents on this page"
+                    checked={allOnPageSelected ? true : someOnPageSelected ? 'indeterminate' : false}
+                    onCheckedChange={() => onTogglePage(pageDocumentIds)}
+                  />
+                </TableHead>
+              )}
+              <SortableTableHead
+                columnKey="filename"
+                label="Filename"
+                activeColumn={sort.column}
+                direction={sort.direction}
+                onSort={handleSort}
+              />
+              <SortableTableHead
+                columnKey="total"
+                label="Vendor / Invoice # / Total"
+                activeColumn={sort.column}
+                direction={sort.direction}
+                onSort={handleSort}
+              />
+              <SortableTableHead
+                columnKey="status"
+                label="Status"
+                activeColumn={sort.column}
+                direction={sort.direction}
+                onSort={handleSort}
+              />
+              <SortableTableHead
+                columnKey="uploaded"
+                label="Uploaded"
+                activeColumn={sort.column}
+                direction={sort.direction}
+                onSort={handleSort}
+              />
               <TableHead className="text-right">Actions</TableHead>
             </TableRow>
           </TableHeader>
@@ -381,33 +443,22 @@ export function DocumentTable({
         </Table>
       </div>
 
-      <div className="flex items-center justify-between gap-3">
-        <p className="text-xs text-muted-foreground">
-          Page {clampedPageIndex + 1} of {pageCount} &middot; {filteredDocuments.length} document
-          {filteredDocuments.length === 1 ? '' : 's'}
-          {activeFilterCount > 0 && ` (of ${documents.length} total)`}
-        </p>
-        <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setPageIndex((p) => Math.max(0, p - 1))}
-            disabled={clampedPageIndex === 0}
-          >
-            <ChevronLeft className="h-3.5 w-3.5" aria-hidden="true" />
-            Prev
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setPageIndex((p) => Math.min(pageCount - 1, p + 1))}
-            disabled={clampedPageIndex >= pageCount - 1}
-          >
-            Next
-            <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" />
-          </Button>
-        </div>
-      </div>
+      <PaginationBar
+        noun="document"
+        rangeStart={start + 1}
+        rangeEnd={Math.min(start + pageSize, total)}
+        total={total}
+        pageSize={pageSize}
+        onPageSizeChange={(size) => {
+          setPageSize(size)
+          setPageIndex(0)
+        }}
+        pageSizeOptions={PAGE_SIZE_OPTIONS as unknown as number[]}
+        canPrev={clampedPageIndex > 0}
+        canNext={clampedPageIndex < pageCount - 1}
+        onPrev={() => setPageIndex((p) => Math.max(0, p - 1))}
+        onNext={() => setPageIndex((p) => Math.min(pageCount - 1, p + 1))}
+      />
 
       <Dialog open={openDocumentId !== null} onOpenChange={(open) => !open && setOpenDocumentId(null)}>
         <DialogContent className="max-h-[85vh] max-w-2xl overflow-y-auto">

@@ -36,10 +36,21 @@ function cellValue(row: EntryEnriched, key: ColumnKey): string {
  * via keyset pagination rather than trusting whatever happens to be in
  * client-side state, so the export always matches the filters exactly.
  */
-export async function exportEntriesToCsv(supabase: SupabaseClient, filters: EntriesFilters): Promise<{ rowCount: number }> {
-  const columns = ALL_COLUMNS
+export async function exportEntriesToCsv(
+  supabase: SupabaseClient,
+  filters: EntriesFilters,
+  visibleColumns?: ReadonlySet<ColumnKey>,
+): Promise<{ rowCount: number; truncated: boolean }> {
+  // §4.10: the CSV mirrors the column chooser rather than always dumping
+  // every column. Falls back to all columns when no set is passed (or an
+  // empty one somehow arrives) so a caller can't produce a header-only file.
+  const columns =
+    visibleColumns && visibleColumns.size > 0
+      ? ALL_COLUMNS.filter((c) => visibleColumns.has(c.key))
+      : ALL_COLUMNS
   let cursor: number | null = null
   let rowCount = 0
+  let truncated = false
   const lines: string[] = [columns.map((c) => csvEscape(c.label)).join(',')]
 
   for (;;) {
@@ -62,10 +73,20 @@ export async function exportEntriesToCsv(supabase: SupabaseClient, filters: Entr
     rowCount += rows.length
     cursor = rows[rows.length - 1]!.id
 
-    if (rows.length < EXPORT_BATCH_SIZE || rowCount >= MAX_EXPORT_ROWS) break
+    if (rows.length < EXPORT_BATCH_SIZE) break
+    if (rowCount >= MAX_EXPORT_ROWS) {
+      // §4.10: there are more matching rows than we're willing to build
+      // client-side. Flag it so the caller can warn rather than reporting a
+      // clean success on a silently clipped file.
+      truncated = true
+      break
+    }
   }
 
-  const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' })
+  // §4.10: lead with a UTF-8 BOM so Excel on Windows reads non-ASCII vendor
+  // names as UTF-8 instead of the system code page (mojibake otherwise).
+  const UTF8_BOM = '﻿'
+  const blob = new Blob([UTF8_BOM + lines.join('\n')], { type: 'text/csv;charset=utf-8;' })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')
@@ -76,5 +97,5 @@ export async function exportEntriesToCsv(supabase: SupabaseClient, filters: Entr
   document.body.removeChild(a)
   URL.revokeObjectURL(url)
 
-  return { rowCount }
+  return { rowCount, truncated }
 }

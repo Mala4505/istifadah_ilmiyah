@@ -51,7 +51,9 @@ const TableHead = React.forwardRef<HTMLTableCellElement, React.ThHTMLAttributes<
     <th
       ref={ref}
       className={cn(
-        'h-10 whitespace-nowrap px-3 text-left align-middle text-xs font-medium uppercase tracking-wide text-muted-foreground [&:has([role=checkbox])]:pr-0',
+        // bg-card so a `sticky` TableHeader isn't see-through as body rows
+        // scroll under it (docs/hub-screen-certification.md §4.3).
+        'h-10 whitespace-nowrap bg-card px-3 text-left align-middle text-xs font-medium uppercase tracking-wide text-muted-foreground [&:has([role=checkbox])]:pr-0',
         className
       )}
       {...props}

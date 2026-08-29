@@ -3,7 +3,12 @@
 import { useRouter, useSearchParams, usePathname } from 'next/navigation'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { EXCEPTION_TYPES, exceptionTypeLabel } from '@/components/exceptions/labels'
+import {
+  EXCEPTION_TYPES,
+  exceptionTypeLabel,
+  SEVERITY_GROUP_LABELS,
+  SEVERITY_VALUES,
+} from '@/components/exceptions/labels'
 
 const STATUS_TABS = [
   { value: 'open', label: 'Open' },
@@ -15,9 +20,11 @@ const STATUS_TABS = [
 export function ExceptionsFilters({
   status,
   type,
+  severity,
 }: {
   status: string
   type: string
+  severity: string
 }) {
   const router = useRouter()
   const pathname = usePathname()
@@ -30,6 +37,8 @@ export function ExceptionsFilters({
     } else {
       params.set(key, value)
     }
+    // Any filter change invalidates the current page position.
+    params.delete('page')
     const query = params.toString()
     router.push(query ? `${pathname}?${query}` : pathname)
   }
@@ -45,6 +54,20 @@ export function ExceptionsFilters({
           ))}
         </TabsList>
       </Tabs>
+
+      <Select value={severity} onValueChange={(v) => updateParam('severity', v)}>
+        <SelectTrigger className="w-44">
+          <SelectValue placeholder="All severities" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="all">All severities</SelectItem>
+          {SEVERITY_VALUES.map((s) => (
+            <SelectItem key={s} value={s}>
+              {SEVERITY_GROUP_LABELS[s]}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
 
       <Select value={type} onValueChange={(v) => updateParam('type', v)}>
         <SelectTrigger className="w-64">

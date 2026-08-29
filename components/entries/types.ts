@@ -1,9 +1,20 @@
 // Row shape read from `public.v_entry_enriched` (MASTER-PLAN §10.2). Hand-written
 // rather than generated — no `supabase gen types` run yet in this repo — but kept in
 // lockstep with supabase/migrations/20260808000028_reporting_views.sql's SELECT list.
+export type EntryType = 'invoice' | 'reimbursement' | 'advance_payment' | 'invoice_against_uplaq'
+
+/** Compact human labels for the four entry types (used by the table's Type
+ * column and any chip that names a type). */
+export const TYPE_LABELS: Record<EntryType, string> = {
+  invoice: 'Invoice',
+  reimbursement: 'Reimbursement',
+  advance_payment: 'Advance',
+  invoice_against_uplaq: 'IAU',
+}
+
 export type EntryEnriched = {
   id: number
-  type: 'invoice' | 'reimbursement' | 'advance_payment'
+  type: EntryType
   ubbl_number: string
   main_number: string | null
   department_id: number | null
@@ -103,6 +114,7 @@ export const PAGE_SIZE = 50
 // for (see query.ts's fetchEntriesPage header for why).
 export type SortColumn =
   | 'id'
+  | 'type'
   | 'amount'
   | 'date'
   | 'vendor_display_name'
@@ -110,11 +122,14 @@ export type SortColumn =
   | 'ubbl_number'
   | 'main_number'
   | 'budget_head_short_label'
+  | 'hub_status_label'
+  | 'document_count'
 export type SortDirection = 'asc' | 'desc'
 export type EntriesSort = { column: SortColumn; direction: SortDirection }
 export const DEFAULT_SORT: EntriesSort = { column: 'id', direction: 'desc' }
 
 export type ColumnKey =
+  | 'type'
   | 'ubbl_number'
   | 'main_number'
   | 'department_name'
@@ -139,6 +154,7 @@ export type ColumnDef = {
 }
 
 export const ALL_COLUMNS: ColumnDef[] = [
+  { key: 'type', label: 'Type', defaultVisible: true },
   { key: 'ubbl_number', label: 'UBBL #', defaultVisible: true },
   { key: 'main_number', label: 'Main #', defaultVisible: true },
   { key: 'date', label: 'Date', defaultVisible: true },

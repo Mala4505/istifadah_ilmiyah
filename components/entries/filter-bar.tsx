@@ -3,15 +3,36 @@
 import { useState } from 'react'
 import { ChevronDown, ChevronUp, Filter, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Checkbox } from '@/components/ui/checkbox'
 import { SelectNative } from '@/components/ui/select-native'
 import { DEFAULT_FILTERS, type EntriesFilters, type FilterOptions, type LookupOption } from './types'
 
-// Cap on how many terms the collapsed summary line spells out before folding
-// the rest into "+N more" (finding 7.2: keep the collapsed row to one line).
-const MAX_SUMMARY_TERMS = 3
+/**
+ * A single removable filter chip. `key` names the field(s) a click on the X
+ * resets — `'dateRange'` is the one synthetic key, clearing dateFrom+dateTo
+ * together the same way they collapse into one summary term
+ * (docs/hub-screen-certification.md §4.11).
+ */
+export type FilterChipKey = keyof EntriesFilters | 'dateRange'
+export type FilterChip = { label: string; key: FilterChipKey }
+
+/**
+ * How many of the 13 filters differ from their default. Exported so
+ * entries-explorer.tsx can thread the same count into the empty state (§4.4)
+ * without re-deriving it.
+ */
+export function countActiveFilters(filters: EntriesFilters): number {
+  return Object.entries(filters).filter(([key, value]) => value !== DEFAULT_FILTERS[key as keyof EntriesFilters]).length
+}
+
+/** Resets the field(s) a chip's X targets, returning the partial patch. */
+export function clearFilterChip(key: FilterChipKey): Partial<EntriesFilters> {
+  if (key === 'dateRange') return { dateFrom: '', dateTo: '' }
+  return { [key]: DEFAULT_FILTERS[key] } as Partial<EntriesFilters>
+}
 
 /**
  * Filter controls for the entries list (MASTER-PLAN §5 row 3; grouping per
@@ -22,15 +43,15 @@ const MAX_SUMMARY_TERMS = 3
  * All 13 filters stay — the plan's decision (§1) was explicit that every
  * group gets used regularly, so this is a reorganization into four labelled
  * sections, not a removal:
- *   - Status: Status, Audit status, Hub status
+ *   - Status: Status, Hub status
  *   - Classification: Department, Budget head, Admin head, Zone, Cost center
  *   - Search: Vendor, Date from, Date to
  *   - Flags: Export-pending, Missing Main #, Has document
  *
  * Collapsed by default (finding 7.2): the full panel used to take ~450px
  * before the first table row, so entries — the most-used screen — opens
- * hidden behind a wall of filters. Collapsed state shows a one-line summary
- * ("3 filters · Labour, Pending, Aug 2026") with a click target to expand.
+ * hidden behind a wall of filters. Collapsed state shows the active filters
+ * as removable chips (§4.11) with a click target to expand.
  */
 export function FilterBar({
   filters,
@@ -50,35 +71,44 @@ export function FilterBar({
     ? options.zones.filter((z) => z.department_id == null || String(z.department_id) === filters.department)
     : options.zones
 
-  const activeCount = Object.entries(filters).filter(([key, value]) => {
-    const def = DEFAULT_FILTERS[key as keyof EntriesFilters]
-    return value !== def
-  }).length
+  const activeCount = countActiveFilters(filters)
+  const chips = buildFilterSummary(filters, options)
 
-  const summaryParts = buildFilterSummary(filters, options)
-  const summaryText =
-    summaryParts.length === 0
-      ? ''
-      : summaryParts.length <= MAX_SUMMARY_TERMS
-        ? summaryParts.join(', ')
-        : `${summaryParts.slice(0, MAX_SUMMARY_TERMS).join(', ')} +${summaryParts.length - MAX_SUMMARY_TERMS} more`
-
-  const collapsedLabel =
-    activeCount === 0 ? 'No filters active' : `${activeCount} filter${activeCount === 1 ? '' : 's'} · ${summaryText}`
+  const chipRow =
+    chips.length > 0 ? (
+      <div className="flex flex-wrap items-center gap-1.5">
+        {chips.map((chip) => (
+          <Badge key={chip.key} variant="secondary" className="gap-1 pr-1 font-normal">
+            <span className="truncate">{chip.label}</span>
+            <button
+              type="button"
+              aria-label={`Remove filter: ${chip.label}`}
+              className="rounded-full p-0.5 hover:bg-foreground/10"
+              onClick={() => onChange(clearFilterChip(chip.key))}
+            >
+              <X className="h-3 w-3" aria-hidden="true" />
+            </button>
+          </Badge>
+        ))}
+      </div>
+    ) : null
 
   if (!expanded) {
     return (
-      <div className="flex items-center justify-between gap-2 rounded-lg border border-border bg-card p-2.5">
-        <button
-          type="button"
-          onClick={() => setExpanded(true)}
-          className="flex min-w-0 flex-1 items-center gap-2 text-left"
-          aria-expanded={false}
-        >
-          <Filter className="h-4 w-4 shrink-0 text-muted-foreground" />
-          <span className="truncate text-sm text-muted-foreground">{collapsedLabel}</span>
-          <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
-        </button>
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-card p-2.5">
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setExpanded(true)}
+            className="flex shrink-0 items-center gap-2 text-left text-sm text-muted-foreground hover:text-foreground"
+            aria-expanded={false}
+          >
+            <Filter className="h-4 w-4 shrink-0" />
+            <span>{activeCount === 0 ? 'No filters active' : `${activeCount} filter${activeCount === 1 ? '' : 's'}`}</span>
+            <ChevronDown className="h-4 w-4 shrink-0" />
+          </button>
+          {chipRow}
+        </div>
         {activeCount > 0 && (
           <Button
             variant="ghost"
@@ -106,6 +136,8 @@ export function FilterBar({
         Filters
         <ChevronUp className="h-4 w-4 text-muted-foreground" />
       </button>
+
+      {chipRow}
 
       <FilterSection label="Status">
         <Field label="Status">
@@ -256,37 +288,42 @@ export function FilterBar({
 }
 
 /**
- * Builds the collapsed-row summary terms from the same fields activeCount
- * iterates over (finding 7.2). Select-based filters resolve their ID to a
- * human label via the matching options.* array; dateFrom/dateTo collapse
- * into a single compact term (e.g. "Aug 2026" for a full-month range).
+ * Builds the removable filter chips (§4.11) — one per active filter, each
+ * carrying the field `key` its X should reset. Select-based filters resolve
+ * their ID to a human label via the matching options.* array;
+ * dateFrom/dateTo collapse into a single `dateRange` chip.
  */
-function buildFilterSummary(filters: EntriesFilters, options: FilterOptions): string[] {
-  const parts: string[] = []
+export function buildFilterSummary(filters: EntriesFilters, options: FilterOptions): FilterChip[] {
+  const parts: FilterChip[] = []
 
-  const pushSelect = (value: string, opts: LookupOption[], fallback: string) => {
+  const pushSelect = (
+    key: keyof EntriesFilters,
+    value: string,
+    opts: LookupOption[],
+    fallback: string,
+  ) => {
     if (!value) return
     const match = opts.find((o) => String(o.id) === value)
-    parts.push(match ? match.label : fallback)
+    parts.push({ key, label: match ? match.label : fallback })
   }
 
-  pushSelect(filters.status, options.statuses, 'Status')
-  pushSelect(filters.hubStatus, options.hubStatuses, 'Hub status')
-  pushSelect(filters.department, options.departments, 'Department')
-  pushSelect(filters.budgetHead, options.budgetHeads, 'Budget head')
-  pushSelect(filters.adminHead, options.adminHeads, 'Admin head')
-  pushSelect(filters.zone, options.zones, 'Zone')
-  pushSelect(filters.costCenter, options.costCenters, 'Cost center')
+  pushSelect('status', filters.status, options.statuses, 'Status')
+  pushSelect('hubStatus', filters.hubStatus, options.hubStatuses, 'Hub status')
+  pushSelect('department', filters.department, options.departments, 'Department')
+  pushSelect('budgetHead', filters.budgetHead, options.budgetHeads, 'Budget head')
+  pushSelect('adminHead', filters.adminHead, options.adminHeads, 'Admin head')
+  pushSelect('zone', filters.zone, options.zones, 'Zone')
+  pushSelect('costCenter', filters.costCenter, options.costCenters, 'Cost center')
 
-  if (filters.vendor) parts.push(`Vendor: "${filters.vendor}"`)
+  if (filters.vendor) parts.push({ key: 'vendor', label: `Vendor: "${filters.vendor}"` })
 
   if (filters.dateFrom || filters.dateTo) {
-    parts.push(formatDateRangeSummary(filters.dateFrom, filters.dateTo))
+    parts.push({ key: 'dateRange', label: formatDateRangeSummary(filters.dateFrom, filters.dateTo) })
   }
 
-  if (filters.exportPending) parts.push('Export-pending')
-  if (filters.hasVariance) parts.push('Missing Main #')
-  if (filters.hasDocument) parts.push('Has document')
+  if (filters.exportPending) parts.push({ key: 'exportPending', label: 'Export-pending' })
+  if (filters.hasVariance) parts.push({ key: 'hasVariance', label: 'Missing Main #' })
+  if (filters.hasDocument) parts.push({ key: 'hasDocument', label: 'Has document' })
 
   return parts
 }

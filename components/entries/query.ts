@@ -110,6 +110,12 @@ export type FetchPageResult = {
   hasMore: boolean
   /** Pass this back as `cursor` to fetch the page after this one. Null once hasMore is false. */
   nextCursor: PageCursor
+  /**
+   * Total rows matching the active filters (docs/hub-screen-certification.md
+   * §3.1) — carried back in `Content-Range` by `{ count: 'exact' }` on the
+   * select, at no extra round trip. `null` if the server didn't return one.
+   */
+  total: number | null
 }
 
 type PaginationPlan =
@@ -169,7 +175,9 @@ export async function fetchEntriesPage({
 }: FetchPageArgs): Promise<FetchPageResult> {
   const plan = buildPaginationPlan(sort, cursor)
 
-  let query = supabase.from('v_entry_enriched').select(ENTRIES_SELECT)
+  // `count: 'exact'` returns the full filtered total in Content-Range
+  // alongside the page slice — one request, not two (§3.1).
+  let query = supabase.from('v_entry_enriched').select(ENTRIES_SELECT, { count: 'exact' })
   query = applyEntriesFilters(query, filters)
 
   if (plan.mode === 'keyset') {
@@ -188,12 +196,61 @@ export async function fetchEntriesPage({
       .range(plan.offset, plan.offset + limit) // inclusive range -> limit+1 rows, same "fetch one extra" trick
   }
 
-  const { data, error } = await query
+  const { data, error, count } = await query
   if (error) throw error
   const rows = (data ?? []) as EntryEnriched[]
   const hasMore = rows.length > limit
   const pageRows = hasMore ? rows.slice(0, limit) : rows
   const nextCursor = computeNextCursor({ sort, cursor, pageRows, hasMore })
 
-  return { rows: pageRows, hasMore, nextCursor }
+  return { rows: pageRows, hasMore, nextCursor, total: count ?? null }
+}
+
+/**
+ * Fetches only the ids of every row matching the current filters (§3.6 —
+ * "select all N matching these filters"). Mirrors the keyset batch loop in
+ * csv-export.ts: same `applyEntriesFilters`, `id`-desc order, page through
+ * with `.lt('id', cursor)` — but selects `id` alone, so pulling tens of
+ * thousands of ids stays cheap.
+ */
+export async function fetchAllMatchingIds(
+  supabase: SupabaseClient,
+  filters: EntriesFilters,
+  opts?: { batchSize?: number; maxRows?: number }
+): Promise<{ ids: number[]; truncated: boolean }> {
+  const batchSize = opts?.batchSize ?? 1000
+  const maxRows = opts?.maxRows ?? 50000
+  const ids: number[] = []
+  let cursor: number | null = null
+  let truncated = false
+
+  for (;;) {
+    // applyEntriesFilters is generic over the default `select('*')` builder
+    // shape; narrowing the select to `id` up front trips its constraint, so
+    // filter first on a loosely-typed builder, then chain order/limit/lt
+    // (all return `this`) and cast the row shape on the way out.
+    let query = applyEntriesFilters(
+      supabase.from('v_entry_enriched').select('id') as unknown as EntriesQueryBuilder,
+      filters
+    )
+      .order('id', { ascending: false })
+      .limit(batchSize)
+    if (cursor !== null) query = query.lt('id', cursor)
+
+    const { data, error } = await query
+    if (error) throw error
+    const rows = (data ?? []) as unknown as { id: number }[]
+    if (rows.length === 0) break
+
+    for (const row of rows) ids.push(row.id)
+    cursor = rows[rows.length - 1]!.id
+
+    if (rows.length < batchSize) break
+    if (ids.length >= maxRows) {
+      truncated = true
+      break
+    }
+  }
+
+  return { ids, truncated }
 }

@@ -48,11 +48,14 @@ export function severityBadgeVariant(severity: string): 'destructive' | 'warning
   }
 }
 
-const SEVERITY_GROUP_LABELS: Record<string, string> = {
+export const SEVERITY_GROUP_LABELS: Record<string, string> = {
   high: 'High severity',
   medium: 'Medium severity',
   low: 'Low severity',
 }
+
+/** Severity values in rank order, for filter dropdowns and sort. */
+export const SEVERITY_VALUES = ['high', 'medium', 'low'] as const
 
 export function severityGroupLabel(severity: string): string {
   return SEVERITY_GROUP_LABELS[severity] ?? `${severity} severity`

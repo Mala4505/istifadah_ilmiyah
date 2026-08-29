@@ -333,7 +333,6 @@ export function UploadDropzone({
           if (err instanceof Error && err.message === 'Canceled.' && !filesRef.current.has(item.key)) {
             return
           }
-          filesRef.current.delete(item.key)
           logRawError('upload-dropzone', err)
           if (err instanceof UploadNetworkError) {
             // No response body ever arrived, so there's no documentId to
@@ -341,12 +340,20 @@ export function UploadDropzone({
             // server may well have already created the row and started
             // extraction before this HTTP round-trip fell over. Saying
             // "Upload failed" here would be a guess this component can't
-            // back up, so it says the honest, neutral thing instead.
+            // back up, so it says the honest, neutral thing instead. The
+            // File is dropped: no Retry is offered for 'connection-lost'
+            // because a blind re-submit could create a duplicate document
+            // (hub certification §4.8).
+            filesRef.current.delete(item.key)
             setItems((current) =>
               current.map((c) => (c.key === item.key ? { ...c, status: 'connection-lost' } : c))
             )
             return
           }
+          // A clean HTTP rejection (400/413/415/…): the request completed and
+          // really was refused, so the File is kept in filesRef.current for
+          // the error row's Retry button to re-submit without the user
+          // re-picking it from disk (hub certification §4.8).
           setItems((current) =>
             current.map((c) =>
               c.key === item.key
@@ -378,6 +385,19 @@ export function UploadDropzone({
     filesRef.current.delete(key)
     stopTracking(key)
     setItems((current) => current.filter((c) => c.key !== key))
+  }
+
+  function clearFinished() {
+    // Drop the retained File for any errored item too (kept around only for
+    // its Retry button — §4.8), plus any stray poll timer, so "Clear list"
+    // leaves nothing behind in the refs.
+    for (const item of items) {
+      if (isFinishedItem(item)) {
+        filesRef.current.delete(item.key)
+        stopTracking(item.key)
+      }
+    }
+    setItems((current) => current.filter((i) => !isFinishedItem(i)))
   }
 
   const stagedCount = items.filter((i) => i.status === 'staged').length
@@ -485,6 +505,17 @@ export function UploadDropzone({
                   {friendlyErrorMessage(item.error)}
                 </span>
               )}
+              {item.status === 'error' && filesRef.current.has(item.key) && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="flex-shrink-0"
+                  onClick={() => startUpload(item)}
+                >
+                  Retry
+                </Button>
+              )}
               {item.status === 'connection-lost' && (
                 <span className="flex flex-shrink-0 items-center gap-1.5 text-xs text-amber-700 dark:text-amber-400">
                   <WifiOff className="h-3.5 w-3.5" aria-hidden="true" />
@@ -508,12 +539,7 @@ export function UploadDropzone({
           ))}
           {hasFinished && (
             <div>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={() => setItems((current) => current.filter((i) => !isFinishedItem(i)))}
-              >
+              <Button type="button" variant="ghost" size="sm" onClick={clearFinished}>
                 Clear list
               </Button>
             </div>

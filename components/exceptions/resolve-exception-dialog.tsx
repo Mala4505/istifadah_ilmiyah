@@ -68,10 +68,31 @@ export function ResolveExceptionDialog({
   const [note, setNote] = React.useState('')
   const [outcome, setOutcome] = React.useState<ResolveExceptionOutcome>('resolved')
   const [isSubmitting, setIsSubmitting] = React.useState(false)
+  // §4.8: guard against silently discarding a typed note, and confirm a
+  // dismiss specifically (there is no reopen action anywhere).
+  const [confirmStep, setConfirmStep] = React.useState<null | 'discard' | 'dismiss'>(null)
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
-    if (note.trim() === '') return
+  function reset() {
+    setNote('')
+    setOutcome('resolved')
+    setConfirmStep(null)
+  }
+
+  function requestOpenChange(next: boolean) {
+    if (next) {
+      setOpen(true)
+      return
+    }
+    if (isSubmitting) return
+    if (note.trim() !== '' && confirmStep === null) {
+      setConfirmStep('discard')
+      return
+    }
+    reset()
+    setOpen(false)
+  }
+
+  async function runSubmit() {
     setIsSubmitting(true)
     try {
       const result = await resolveException({ exceptionId, outcome, note })
@@ -80,22 +101,72 @@ export function ResolveExceptionDialog({
         return
       }
       toast.success(outcome === 'resolved' ? 'Exception resolved' : 'Exception dismissed')
+      reset()
       setOpen(false)
-      setNote('')
       router.refresh()
     } finally {
       setIsSubmitting(false)
     }
   }
 
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    if (note.trim() === '') return
+    if (outcome === 'dismissed' && confirmStep !== 'dismiss') {
+      setConfirmStep('dismiss')
+      return
+    }
+    void runSubmit()
+  }
+
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={requestOpenChange}>
       <DialogTrigger asChild>
         <Button size="sm" variant="outline">
           Resolve
         </Button>
       </DialogTrigger>
       <DialogContent>
+        {confirmStep === 'discard' ? (
+          <div className="flex flex-col gap-4">
+            <DialogHeader>
+              <DialogTitle>Discard your note?</DialogTitle>
+              <DialogDescription>Your resolution note hasn&rsquo;t been submitted yet.</DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setConfirmStep(null)}>
+                Keep editing
+              </Button>
+              <Button
+                type="button"
+                variant="destructive"
+                onClick={() => {
+                  reset()
+                  setOpen(false)
+                }}
+              >
+                Discard
+              </Button>
+            </DialogFooter>
+          </div>
+        ) : confirmStep === 'dismiss' ? (
+          <div className="flex flex-col gap-4">
+            <DialogHeader>
+              <DialogTitle>Dismiss this exception?</DialogTitle>
+              <DialogDescription>
+                A dismissed exception stays in the audit trail but can&rsquo;t be reopened.
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setConfirmStep(null)} disabled={isSubmitting}>
+                Back
+              </Button>
+              <Button type="button" variant="destructive" onClick={() => void runSubmit()} disabled={isSubmitting}>
+                {isSubmitting ? 'Dismissing…' : 'Dismiss exception'}
+              </Button>
+            </DialogFooter>
+          </div>
+        ) : (
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
           <DialogHeader>
             <DialogTitle>Resolve exception</DialogTitle>
@@ -169,6 +240,7 @@ export function ResolveExceptionDialog({
             </Button>
           </DialogFooter>
         </form>
+        )}
       </DialogContent>
     </Dialog>
   )

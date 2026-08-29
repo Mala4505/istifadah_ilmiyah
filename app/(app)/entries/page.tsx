@@ -4,7 +4,17 @@ import { getSelectedEventId } from '@/lib/events/current'
 import { EntriesExplorer } from '@/components/entries/entries-explorer'
 import { Skeleton } from '@/components/ui/skeleton'
 import type { FilterOptions } from '@/components/entries/types'
+import type { EntryStatusCount } from '@/components/entries/status-count-chips'
 import type { StaffRole } from '@/lib/auth/roles'
+
+type EntryStatusCountRow = {
+  dimension: 'status' | 'hub_status'
+  status_id: number | null
+  status_code: string
+  status_label: string
+  sort_order: number
+  entry_count: number
+}
 
 // Screen 3 — Entries list (MASTER-PLAN §5 row 3, §11.1 Day 3). Reads from
 // `v_entry_enriched` (§10.2) rather than assembling joins here. Filter state
@@ -29,6 +39,8 @@ async function loadEntriesPageData(): Promise<{
   options: FilterOptions
   role: StaffRole | null
   ownDepartmentIds: number[]
+  statusCounts: EntryStatusCount[]
+  hubStatusCounts: EntryStatusCount[]
 }> {
   const supabase = await createClient()
   const selectedEventId = await getSelectedEventId(supabase)
@@ -51,7 +63,7 @@ async function loadEntriesPageData(): Promise<{
   const adminHeadMemberIds = (headMembership.data ?? []).map((r) => r.admin_head_id)
   const zoneMemberIds = (zoneMembership.data ?? []).map((r) => r.zone_id)
 
-  const [dept, bh, adminHead, zone, costCenter, status, hub, userRes] = await Promise.all([
+  const [dept, bh, adminHead, zone, costCenter, status, hub, userRes, statusCountsRes] = await Promise.all([
     selectedEventId === null
       ? supabase.from('department').select('id,name').eq('is_active', true).order('name')
       : supabase.from('department').select('id,name').eq('is_active', true).in('id', departmentMemberIds).order('name'),
@@ -76,6 +88,15 @@ async function loadEntriesPageData(): Promise<{
     supabase.from('entry_status').select('id,code,label,source_system').order('sort_order'),
     supabase.from('hub_status').select('id,code,label').order('sort_order'),
     supabase.auth.getUser(),
+    // Status-count chips (docs/hub-screen-certification.md §3.7). Event-scoped
+    // the same way app/(app)/page.tsx scopes this view — a plain
+    // `.eq('event_id', ...)`, since v_entry_status_counts.event_id resolves
+    // through entries.event_id which is `not null` on the base table.
+    supabase
+      .from('v_entry_status_counts')
+      .select('dimension, status_id, status_code, status_label, sort_order, entry_count')
+      .eq('event_id', selectedEventId)
+      .returns<EntryStatusCountRow[]>(),
   ])
 
   const options: FilterOptions = {
@@ -107,15 +128,34 @@ async function loadEntriesPageData(): Promise<{
     ownDepartmentIds = (deptRows ?? []).map((d) => d.department_id as number)
   }
 
-  return { options, role, ownDepartmentIds }
+  const statusCountRows = statusCountsRes.data ?? []
+  const toStatusCounts = (dimension: EntryStatusCountRow['dimension']): EntryStatusCount[] =>
+    statusCountRows
+      .filter((r) => r.dimension === dimension)
+      .sort((a, b) => a.sort_order - b.sort_order)
+      .map((r) => ({ id: r.status_id, code: r.status_code, label: r.status_label, count: r.entry_count }))
+
+  return {
+    options,
+    role,
+    ownDepartmentIds,
+    statusCounts: toStatusCounts('status'),
+    hubStatusCounts: toStatusCounts('hub_status'),
+  }
 }
 
 export default async function EntriesPage() {
-  const { options, role, ownDepartmentIds } = await loadEntriesPageData()
+  const { options, role, ownDepartmentIds, statusCounts, hubStatusCounts } = await loadEntriesPageData()
 
   return (
     <Suspense fallback={<EntriesPageSkeleton />}>
-      <EntriesExplorer initialOptions={options} initialRole={role} initialOwnDepartmentIds={ownDepartmentIds} />
+      <EntriesExplorer
+        initialOptions={options}
+        initialRole={role}
+        initialOwnDepartmentIds={ownDepartmentIds}
+        statusCounts={statusCounts}
+        hubStatusCounts={hubStatusCounts}
+      />
     </Suspense>
   )
 }
@@ -127,7 +167,9 @@ function EntriesPageSkeleton() {
         <Skeleton className="h-7 w-24" />
         <Skeleton className="h-8 w-40" />
       </div>
-      <Skeleton className="h-32 w-full" />
+      {/* §4.5: the filter bar is collapsed by default (~40px) — don't paint a
+          tall block that collapses on hydration and shoves the table up. */}
+      <Skeleton className="h-10 w-full" />
       <Skeleton className="h-96 w-full" />
     </div>
   )
