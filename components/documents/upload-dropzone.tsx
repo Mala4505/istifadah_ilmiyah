@@ -8,6 +8,8 @@ import { Button } from '@/components/ui/button'
 import { friendlyErrorMessage, logRawError } from '@/lib/friendly-error'
 import { stagesFor, type StageState } from './document-card'
 import { formatElapsed } from './format'
+import { AssigneePicker, assigneeFirstNames } from './assignee-picker'
+import type { AssignableStaff } from '@/lib/assignment/queries'
 import type { InboxDocumentView } from './types'
 
 /**
@@ -77,7 +79,9 @@ class UploadNetworkError extends Error {}
 function uploadOne(
   file: File,
   onProgress: (pct: number) => void,
-  onXhr: (xhr: XMLHttpRequest) => void
+  onXhr: (xhr: XMLHttpRequest) => void,
+  /** Comma-joined staff uuids to assign this document to on the way in, or '' for the shared pool ("dividing the document inbox", 2026-08-29). */
+  assignedTo: string
 ): Promise<{ documentId: number; inconclusive?: boolean }> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest()
@@ -128,6 +132,9 @@ function uploadOne(
 
     const form = new FormData()
     form.append('file', file)
+    // Optional — the ingest route treats an absent/empty value as "leave in
+    // the shared pool" (contract: comma-separated active-admin uuids).
+    if (assignedTo) form.append('assignedTo', assignedTo)
     xhr.send(form)
   })
 }
@@ -195,8 +202,14 @@ function StageTracker({
 export function UploadDropzone({
   onUploaded,
   compact = false,
+  assignableStaff = [],
 }: {
   onUploaded: () => void
+  /** Active admins + superadmins for the "assign this batch to" picker shown
+   *  in the staged-files confirmation area ("dividing the document inbox",
+   *  2026-08-29). Empty (the default) hides the picker entirely — e.g. for a
+   *  `dept` uploader, who can't assign. */
+  assignableStaff?: AssignableStaff[]
   /** Renders a slim, single-row drop target instead of the full ~230px
    *  invitation panel (MASTER-PLAN §7.8f). Passed by document-inbox.tsx once
    *  the inbox already holds documents — at that point the panel's job is
@@ -209,6 +222,16 @@ export function UploadDropzone({
   const inputRef = useRef<HTMLInputElement>(null)
   const [items, setItems] = useState<UploadItem[]>([])
   const [isDragging, setIsDragging] = useState(false)
+
+  // "Assign this batch to" — one choice for the whole staged set (batch
+  // level; per-file is a possible follow-up). `[]` = leave unassigned. Held
+  // in a ref too so startUpload reads the current value without being
+  // re-created (and re-triggering its effects) on every checkbox toggle.
+  const [assignSelection, setAssignSelection] = useState<string[]>([])
+  const assignSelectionRef = useRef<string[]>([])
+  useEffect(() => {
+    assignSelectionRef.current = assignSelection
+  }, [assignSelection])
 
   // None of these belong in React state — the File object isn't
   // serializable/comparable in a way that should trigger re-renders, the
@@ -318,7 +341,8 @@ export function UploadDropzone({
         },
         (xhr) => {
           xhrsRef.current.set(item.key, xhr)
-        }
+        },
+        assignSelectionRef.current.join(',')
       )
         .then(({ documentId, inconclusive }) => {
           filesRef.current.delete(item.key)
@@ -465,12 +489,29 @@ export function UploadDropzone({
       {items.length > 0 && (
         <div className="flex flex-col gap-1.5">
           {stagedCount > 0 && (
-            <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-primary/30 bg-primary/5 px-3 py-2">
+            <div className="flex flex-col gap-3 rounded-md border border-primary/30 bg-primary/5 px-3 py-2.5">
               <p className="text-xs font-medium">
                 Is this the {stagedCount === 1 ? 'file' : `${stagedCount} files`} you want to upload and extract?
               </p>
-              <Button type="button" size="sm" onClick={uploadAllStaged}>
-                {stagedCount === 1 ? 'Yes, upload & extract' : `Yes, upload all ${stagedCount}`}
+
+              {assignableStaff.length > 0 && (
+                <div className="flex flex-col gap-1.5 rounded-md border border-border bg-background p-2">
+                  <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                    Assign {stagedCount === 1 ? 'this file' : `all ${stagedCount} files`} to
+                  </span>
+                  <AssigneePicker staff={assignableStaff} value={assignSelection} onChange={setAssignSelection} />
+                </div>
+              )}
+
+              <Button type="button" size="sm" className="self-start" onClick={uploadAllStaged}>
+                {assignSelection.length > 0
+                  ? `Upload ${stagedCount} file${stagedCount === 1 ? '' : 's'} & assign to ${assigneeFirstNames(
+                      assignableStaff,
+                      assignSelection
+                    )}`
+                  : stagedCount === 1
+                    ? 'Yes, upload & extract'
+                    : `Yes, upload all ${stagedCount}`}
               </Button>
             </div>
           )}

@@ -8,10 +8,13 @@ import { toastError } from '@/components/ui/error-toast'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { bulkAttachDocuments, deleteDocuments, getInboxMatchCandidates } from '@/lib/actions/documents'
+import { setDocumentAssignees } from '@/lib/actions/assignment'
 import { BulkEnrichmentDialog } from '@/components/entries/bulk-enrichment-dialog'
 import type { LookupOption } from '@/components/entries/types'
+import type { AssignableStaff } from '@/lib/assignment/queries'
 import { UploadDropzone } from './upload-dropzone'
 import { DocumentTable } from './document-table'
+import { AssigneePicker, assigneeFirstNames } from './assignee-picker'
 import type { InboxDocumentView } from './types'
 
 /**
@@ -44,6 +47,8 @@ interface StatusResponseDoc {
 export function DocumentInbox({
   initialDocuments,
   canAct,
+  currentStaffId,
+  assignableStaff,
   queueStalled = false,
   adminHeadOptions,
   zoneOptions,
@@ -51,6 +56,10 @@ export function DocumentInbox({
 }: {
   initialDocuments: InboxDocumentView[]
   canAct: boolean
+  /** The viewer's own staff id — for the bulk "Assign to me" quick action. */
+  currentStaffId: string
+  /** Active admins + superadmins for the upload picker and the bulk "Assign to…" dialog ("dividing the document inbox", 2026-08-29). Empty for a non-admin viewer. */
+  assignableStaff: AssignableStaff[]
   /** True when the oldest queued `extract_document` job has been sitting for more than ~10 minutes (checklist 2.15, D8) — a stalled pipeline made visible instead of silent. */
   queueStalled?: boolean
   /** Passed straight through to DocumentTable → DocumentCard (checklist 5.11's inline zone/head prompt) and to the bulk-attach follow-up dialog below (checklist 5.12). Fetched once in app/(app)/documents/page.tsx rather than per-card. */
@@ -74,6 +83,12 @@ export function DocumentInbox({
   // classify entries whose document never got attached).
   const [enrichmentDialogOpen, setEnrichmentDialogOpen] = useState(false)
   const [enrichmentDialogEntryIds, setEnrichmentDialogEntryIds] = useState<number[]>([])
+  // Bulk assignment ("dividing the document inbox", 2026-08-29): "Assign to…"
+  // opens the shared AssigneePicker in a dialog; "Assign to me" is a
+  // one-click path through the same server action.
+  const [assignPending, setAssignPending] = useState(false)
+  const [assignDialogOpen, setAssignDialogOpen] = useState(false)
+  const [assignDraft, setAssignDraft] = useState<string[]>([])
 
   useEffect(() => {
     setDocuments(initialDocuments)
@@ -394,7 +409,47 @@ export function DocumentInbox({
     })()
   }
 
-  const anyPending = bulkPending || deletePending
+  /**
+   * Replace the assignee set for every selected document via the
+   * `set_source_document_assignees` RPC (`setDocumentAssignees`). An empty
+   * `staffIds` sends them back to the pool. Partial success (some rows
+   * refused by the anti-overtaking rule) comes back as `refusedCount` — a
+   * warning, not an error — matching bulkAttachDocuments' shape.
+   */
+  function runBulkAssign(staffIds: string[]) {
+    const ids = [...selected]
+    if (ids.length === 0) {
+      toast.error('Select at least one document to assign.')
+      return
+    }
+    setAssignPending(true)
+    void (async () => {
+      const result = await setDocumentAssignees(ids, staffIds)
+      setAssignPending(false)
+      if (!result.ok) {
+        toastError(result.error, { title: 'Assignment failed.', context: 'document-inbox' })
+        return
+      }
+      setAssignDialogOpen(false)
+      setSelected(new Set())
+      if (result.refusedCount > 0) {
+        toast.warning(
+          `${result.updatedCount} reassigned; ${result.refusedCount} left unchanged — a superadmin can move those.`
+        )
+      } else {
+        const target =
+          staffIds.length === 0
+            ? 'the pool'
+            : assigneeFirstNames(assignableStaff, staffIds) || 'the selected staff'
+        toast.success(
+          `Assigned ${result.updatedCount} document${result.updatedCount === 1 ? '' : 's'} to ${target}.`
+        )
+      }
+      router.refresh()
+    })()
+  }
+
+  const anyPending = bulkPending || deletePending || assignPending
 
   return (
     <div className="flex flex-col gap-6">
@@ -410,7 +465,11 @@ export function DocumentInbox({
       {/* Compact once the inbox already has documents to show (§7.8f) — the
           full-size, inviting panel is reserved for a first-time/empty inbox
           so it doesn't push the list below the fold as it grows. */}
-      <UploadDropzone onUploaded={() => router.refresh()} compact={documents.length > 0} />
+      <UploadDropzone
+        onUploaded={() => router.refresh()}
+        compact={documents.length > 0}
+        assignableStaff={canAct ? assignableStaff : []}
+      />
 
       {canAct && selectedCount > 0 && (
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border bg-muted/30 px-4 py-2.5">
@@ -421,6 +480,29 @@ export function DocumentInbox({
             <Button variant="ghost" size="sm" onClick={() => setSelected(new Set())} disabled={anyPending}>
               Clear
             </Button>
+            {assignableStaff.length > 0 && (
+              <>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => runBulkAssign([currentStaffId])}
+                  disabled={anyPending}
+                >
+                  {assignPending ? 'Assigning…' : 'Assign to me'}
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setAssignDraft([])
+                    setAssignDialogOpen(true)
+                  }}
+                  disabled={anyPending}
+                >
+                  Assign to…
+                </Button>
+              </>
+            )}
             <Button
               variant="ghost"
               size="sm"
@@ -463,6 +545,33 @@ export function DocumentInbox({
         costCenterOptions={costCenterOptions}
         onDone={() => router.refresh()}
       />
+
+      <Dialog open={assignDialogOpen} onOpenChange={setAssignDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              Assign {selectedCount} {selectedCount === 1 ? 'document' : 'documents'}
+            </DialogTitle>
+            <DialogDescription>
+              Pick one or more admins, or leave unassigned to send these back to the shared pool. This replaces
+              the current assignment.
+            </DialogDescription>
+          </DialogHeader>
+          <AssigneePicker staff={assignableStaff} value={assignDraft} onChange={setAssignDraft} />
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setAssignDialogOpen(false)} disabled={assignPending}>
+              Cancel
+            </Button>
+            <Button type="button" onClick={() => runBulkAssign(assignDraft)} disabled={assignPending}>
+              {assignPending
+                ? 'Assigning…'
+                : assignDraft.length === 0
+                  ? 'Send to pool'
+                  : `Assign to ${assigneeFirstNames(assignableStaff, assignDraft)}`}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
         <DialogContent>

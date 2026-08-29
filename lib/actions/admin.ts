@@ -117,6 +117,25 @@ export async function updateStaffProfile(input: {
 
   if (error) return { ok: false, error: logRawError('admin.updateStaffProfile:profile', error.message) }
 
+  // Document assignment ("dividing the document inbox", 2026-08-29): a
+  // deactivated account can't remain an assignee, so drop its
+  // source_document_assignee rows — any document left with no assignees falls
+  // back to the shared pool. The junction table has no DELETE grant for
+  // `authenticated` (writes normally go through the
+  // set_source_document_assignees RPC), so this clean-up runs on the
+  // service-role client, safe here after the requireSuperadmin() gate above —
+  // same posture as createStaffUser.
+  if (!input.isActive) {
+    const { error: assigneeError } = await createAdminClient()
+      .from('source_document_assignee')
+      .delete()
+      .eq('staff_id', input.id)
+
+    if (assigneeError) {
+      return { ok: false, error: logRawError('admin.updateStaffProfile:assignees', assigneeError.message) }
+    }
+  }
+
   const { error: deleteError } = await supabase
     .from('staff_department')
     .delete()

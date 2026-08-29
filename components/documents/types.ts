@@ -1,5 +1,10 @@
 /** Shared types for the /documents inbox (MASTER-PLAN §5 row 6, §11.2 Day 3). */
 
+import type { DocumentAssignee } from '@/lib/assignment/queries'
+
+/** Re-exported so the inbox components have one import site for the chip data. */
+export type { DocumentAssignee } from '@/lib/assignment/queries'
+
 export interface CandidateEntryView {
   entryId: number
   score: number
@@ -58,4 +63,10 @@ export interface InboxDocumentView {
   extraction: DocumentExtractionSummary[]
   /** Latest `ocr_extraction_run.error_message` for this document — populated only when `uploadStatus` is `'failed'`. */
   failureReason: string | null
+  /**
+   * Who this document is assigned to ("dividing the document inbox",
+   * 2026-08-29). Empty array = unassigned / shared pool. Folded in by
+   * app/(app)/documents/page.tsx from `getDocumentAssignees`.
+   */
+  assignees: DocumentAssignee[]
 }

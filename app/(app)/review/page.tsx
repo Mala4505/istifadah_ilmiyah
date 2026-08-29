@@ -5,6 +5,8 @@ import { getStaffContext } from '@/lib/export/auth'
 import { Card, CardContent } from '@/components/ui/card'
 import { ReviewWorkspace } from '@/components/review/review-workspace'
 import { QueueScopeToggle } from '@/components/review/queue-scope-toggle'
+import { QueueAssigneeFilter } from '@/components/review/queue-assignee-filter'
+import { listAssignableStaff, type AssignableStaff } from '@/lib/assignment/queries'
 import type {
   LineItemDetail,
   MatchCandidate,
@@ -16,7 +18,7 @@ import type {
   UncertainField,
 } from '@/lib/review/types'
 import { friendlyErrorMessage } from '@/lib/friendly-error'
-import { isAdminOrAbove } from '@/lib/auth/roles'
+import { isAdminOrAbove, isSuperadmin } from '@/lib/auth/roles'
 import { rankCandidates, type MatchableEntry } from '@/lib/matching'
 import { normalizeVendorName } from '@/lib/normalize'
 import { loadStaffKeymapPreferences } from '@/lib/shortcuts/load'
@@ -61,6 +63,14 @@ export default async function ReviewPage({
     )
   }
 
+  // Document-assignment (2026-08-29): a non-superadmin admin's queue is
+  // already RLS-scoped to their own assigned + pool documents, so the only
+  // change for them is the header label. A superadmin sees the whole queue
+  // and gets the reviewer filter (QueueAssigneeFilter) next to the
+  // Unverified/All toggle.
+  const isSuperadminReviewer = isSuperadmin(staff.role)
+  const queueHeading = isSuperadminReviewer ? 'Review queue' : 'Your review queue'
+
   const supabase = await createClient()
   const { id: idParam, page: pageParam } = await searchParams
   // review-workspace.tsx's PDF thumbnail rail spans every page of the source
@@ -83,7 +93,18 @@ export default async function ReviewPage({
   // setReviewQueueScope's doc comment) lets a reviewer opt into
   // v_review_queue_all, the superset view with verified_at added, without
   // review-workspace.tsx's Prev/Next needing to carry a scope param through.
-  const scope = (await cookies()).get('review_queue_scope')?.value === 'all' ? 'all' : 'pending'
+  const cookieStore = await cookies()
+  const scope = cookieStore.get('review_queue_scope')?.value === 'all' ? 'all' : 'pending'
+
+  // Document-assignment (2026-08-29): the reviewer filter, like the scope
+  // toggle above, is a cookie rather than a `?assignee=` param so
+  // review-workspace.tsx's param-less Prev/Next navigation can't reset it.
+  // Honoured only for a superadmin -- a non-SA admin's RLS already limits
+  // their queue and the control is never rendered for them. The queue views
+  // themselves are unchanged; the filter is applied in-page below.
+  const assigneeFilterId = isSuperadminReviewer
+    ? (cookieStore.get('review_queue_assignee')?.value ?? null)
+    : null
 
   // Phase 6 Step 2 (event-scoping-and-review-fixes-plan.md §1): the queue is
   // scoped to whichever event is currently selected (cookie-backed, defaults
@@ -108,7 +129,12 @@ export default async function ReviewPage({
     queueQuery = queueQuery.eq('event_id', selectedEventId)
     queueCountQuery = queueCountQuery.eq('event_id', selectedEventId)
   }
-  const [{ data: queueRows, error: queueError }, { count: truePendingTotal }] = await Promise.all([
+  const [
+    { data: queueRows, error: queueError },
+    { count: truePendingTotal },
+    reviewerOptions,
+    assignedSourceDocIds,
+  ] = await Promise.all([
     queueQuery
       .order('max_open_severity_rank', { ascending: false })
       .order('extraction_confidence', { ascending: true, nullsFirst: true })
@@ -120,6 +146,19 @@ export default async function ReviewPage({
       .order('document_extraction_id', { ascending: true })
       .limit(QUEUE_ROW_CAP),
     queueCountQuery,
+    // Reviewer dropdown options + (when a reviewer is selected) the set of
+    // source_document ids assigned to them -- both superadmin-only, folded
+    // into this Promise.all so they add no waterfall to the queue fetch.
+    isSuperadminReviewer
+      ? listAssignableStaff(supabase)
+      : Promise.resolve([] as AssignableStaff[]),
+    assigneeFilterId
+      ? supabase
+          .from('source_document_assignee')
+          .select('source_document_id')
+          .eq('staff_id', assigneeFilterId)
+          .then(({ data }) => new Set((data ?? []).map((r) => r.source_document_id as number)))
+      : Promise.resolve(null as Set<number> | null),
   ])
 
   if (queueError) {
@@ -128,33 +167,65 @@ export default async function ReviewPage({
     )
   }
 
-  const queue: QueueEntry[] = (queueRows ?? []).map((r) => ({
-    sourceDocumentId: r.source_document_id as number,
-    documentExtractionId: r.document_extraction_id as number,
-    originalFilename: r.original_filename as string,
-    extractionConfidence: r.extraction_confidence as number | null,
-    maxOpenSeverityRank: r.max_open_severity_rank as number,
-    openIssueCount: r.open_issue_count as number,
-    queueAmount: r.queue_amount as number | null,
-    billIndex: r.bill_index as number,
-    billCount: r.bill_count as number,
-  }))
+  const queue: QueueEntry[] = (queueRows ?? [])
+    .map((r) => ({
+      sourceDocumentId: r.source_document_id as number,
+      documentExtractionId: r.document_extraction_id as number,
+      originalFilename: r.original_filename as string,
+      extractionConfidence: r.extraction_confidence as number | null,
+      maxOpenSeverityRank: r.max_open_severity_rank as number,
+      openIssueCount: r.open_issue_count as number,
+      queueAmount: r.queue_amount as number | null,
+      billIndex: r.bill_index as number,
+      billCount: r.bill_count as number,
+    }))
+    // Document-assignment (2026-08-29): the superadmin reviewer filter, applied
+    // here rather than in v_review_queue (unchanged). null = "All reviewers".
+    .filter((q) => (assignedSourceDocIds ? assignedSourceDocIds.has(q.sourceDocumentId) : true))
+
+  // Header props for the superadmin reviewer filter -- spread into every
+  // PageHeader render below. Empty for a non-superadmin, so the control never
+  // renders for them.
+  const assigneeControlProps: {
+    reviewers?: { id: string; displayName: string }[]
+    currentAssignee?: string | null
+  } = isSuperadminReviewer
+    ? { reviewers: reviewerOptions, currentAssignee: assigneeFilterId }
+    : {}
 
   if (queue.length === 0) {
     return (
       <div className="flex flex-col gap-4">
-        <PageHeader scope={scope} helpHint={formatBinding(keymap.toggleHelp)} />
+        <PageHeader
+          scope={scope}
+          helpHint={formatBinding(keymap.toggleHelp)}
+          heading={queueHeading}
+          {...assigneeControlProps}
+        />
         <Card>
           <CardContent className="flex flex-col gap-2 pt-6">
-            <p className="text-sm font-medium">Queue is empty</p>
-            <p className="text-sm text-muted-foreground">
-              {scope === 'all'
-                ? // v_review_queue_all has no verified_at filter, so this can
-                  // basically only happen when no document has ever been
-                  // extracted at all -- still worth a correct, non-assuming message.
-                  'There are no extracted documents yet. A document joins this queue as soon as its extraction finishes.'
-                : 'Every extracted document has been verified. A new document joins this queue as soon as its extraction finishes -- nothing to do here right now.'}
-            </p>
+            {assigneeFilterId ? (
+              <>
+                <p className="text-sm font-medium">No documents for this reviewer</p>
+                <p className="text-sm text-muted-foreground">
+                  Nothing in the {scope === 'all' ? 'full' : 'pending'} queue is currently assigned to
+                  the selected reviewer. Switch back to &ldquo;All reviewers&rdquo; to see the whole
+                  queue.
+                </p>
+              </>
+            ) : (
+              <>
+                <p className="text-sm font-medium">Queue is empty</p>
+                <p className="text-sm text-muted-foreground">
+                  {scope === 'all'
+                    ? // v_review_queue_all has no verified_at filter, so this can
+                      // basically only happen when no document has ever been
+                      // extracted at all -- still worth a correct, non-assuming message.
+                      'There are no extracted documents yet. A document joins this queue as soon as its extraction finishes.'
+                    : 'Every extracted document has been verified. A new document joins this queue as soon as its extraction finishes -- nothing to do here right now.'}
+                </p>
+              </>
+            )}
           </CardContent>
         </Card>
       </div>
@@ -206,7 +277,13 @@ export default async function ReviewPage({
 
     return (
       <div className="flex h-[calc(100vh-3rem)] flex-col gap-3">
-        <PageHeader total={queue.length} scope={scope} helpHint={formatBinding(keymap.toggleHelp)} />
+        <PageHeader
+          total={queue.length}
+          scope={scope}
+          helpHint={formatBinding(keymap.toggleHelp)}
+          heading={queueHeading}
+          {...assigneeControlProps}
+        />
         <ReviewWorkspace
           key={`${detail.documentExtractionId}:${detail.currentExtractionRunId ?? 'none'}`}
           detail={detail}
@@ -248,6 +325,8 @@ export default async function ReviewPage({
         scope={scope}
         truePendingTotal={truePendingTotal ?? undefined}
         helpHint={formatBinding(keymap.toggleHelp)}
+        heading={queueHeading}
+        {...assigneeControlProps}
       />
       <ReviewWorkspace
         key={`${detail.documentExtractionId}:${detail.currentExtractionRunId ?? 'none'}`}
@@ -270,6 +349,9 @@ function PageHeader({
   scope,
   truePendingTotal,
   helpHint,
+  heading = 'Review queue',
+  reviewers,
+  currentAssignee,
 }: {
   position?: number
   total?: number
@@ -285,10 +367,19 @@ function PageHeader({
   // states render before the keymap is loaded, so this falls back to the
   // default binding's label.
   helpHint?: string
+  // Document-assignment (2026-08-29): "Your review queue" for a non-superadmin
+  // admin (their queue is RLS-scoped to just their own), plain "Review queue"
+  // for a superadmin who sees everything.
+  heading?: string
+  // Superadmin only -- when present, the reviewer filter renders next to the
+  // scope toggle. `currentAssignee` is the selected staff id (or null for
+  // "All reviewers").
+  reviewers?: { id: string; displayName: string }[]
+  currentAssignee?: string | null
 }) {
   return (
     <div className="flex flex-wrap items-center gap-3">
-      <h1 className="text-xl font-semibold tracking-tight">Review queue</h1>
+      <h1 className="text-xl font-semibold tracking-tight">{heading}</h1>
       {position !== undefined && total !== undefined ? (
         <span className="text-sm text-muted-foreground">
           Bill {position} of {total}
@@ -296,6 +387,9 @@ function PageHeader({
         </span>
       ) : null}
       {scope !== undefined ? <QueueScopeToggle current={scope} /> : null}
+      {reviewers !== undefined ? (
+        <QueueAssigneeFilter reviewers={reviewers} current={currentAssignee ?? null} />
+      ) : null}
       <span className="ml-auto text-xs text-muted-foreground">
         Press {helpHint ?? formatBinding({ key: '?', alt: true })} for keyboard shortcuts
       </span>

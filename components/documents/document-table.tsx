@@ -12,6 +12,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { PaginationBar, PAGE_SIZE_OPTIONS } from '@/components/ui/pagination-bar'
 import { SortableTableHead, nextSort } from '@/components/ui/sortable-table-head'
 import { DocumentCard, DocumentStageTracker, ReviewProgressBadge } from './document-card'
+import { AssigneeChip } from './assignee-chip'
 import {
   sortDocuments,
   DEFAULT_DOCUMENT_SORT,
@@ -290,6 +291,7 @@ export function DocumentTable({
                 direction={sort.direction}
                 onSort={handleSort}
               />
+              <TableHead>Assignee</TableHead>
               <SortableTableHead
                 columnKey="uploaded"
                 label="Uploaded"
@@ -303,7 +305,7 @@ export function DocumentTable({
           <TableBody>
             {pageDocuments.length === 0 && (
               <TableRow>
-                <TableCell colSpan={5 + (canAct ? 1 : 0)} className="py-8 text-center text-sm text-muted-foreground">
+                <TableCell colSpan={6 + (canAct ? 1 : 0)} className="py-8 text-center text-sm text-muted-foreground">
                   No documents match these filters.
                 </TableCell>
               </TableRow>
@@ -312,7 +314,7 @@ export function DocumentTable({
               const bills = doc.extraction
               const isMultiBill = bills.length > 1
               const isExpanded = expandedDocumentIds.has(doc.id)
-              const colSpan = 5 + (canAct ? 1 : 0)
+              const colSpan = 6 + (canAct ? 1 : 0)
 
               return (
                 <Fragment key={doc.id}>
@@ -391,6 +393,9 @@ export function DocumentTable({
                         <DocumentStageTracker uploadStatus={doc.uploadStatus} uploadedAt={doc.uploadedAt} size="sm" />
                         <ReviewProgressBadge bills={bills} size="sm" />
                       </div>
+                    </TableCell>
+                    <TableCell>
+                      <AssigneeChip assignees={doc.assignees} />
                     </TableCell>
                     <TableCell>
                       <span className="text-xs text-muted-foreground">{formatDateTime(doc.uploadedAt)}</span>

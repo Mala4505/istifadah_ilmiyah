@@ -39,6 +39,7 @@ function doc(overrides: Partial<InboxDocumentView> = {}): InboxDocumentView {
     pageCount: 1,
     extraction: [],
     failureReason: null,
+    assignees: [],
     ...overrides,
   }
 }

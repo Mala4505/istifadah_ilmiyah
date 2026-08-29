@@ -243,7 +243,15 @@ function buildSystemPrompt(communityGstin: string | null, communityName: string 
     '— one for the party issuing the bill and a second, usually smaller or lower on the page, for the ' +
     'party it is billed to — read the issuing party into the vendor_* fields and the billed-to party into ' +
     'buyer_gstin/buyer_name; copying the wrong block into the wrong field is one of the most common ' +
-    'mistakes on this kind of document, so double-check which block is which before extracting either one.'
+    'mistakes on this kind of document, so double-check which block is which before extracting either one. ' +
+    'Whenever a GSTIN appears anywhere in the seller\'s own block — on the letterhead, next to the vendor ' +
+    'name, inside a rubber stamp or seal, or in a footer or signature area — transcribe it into ' +
+    'vendor_gstin exactly as printed, character for character, even when part of it is faint, smudged, ' +
+    'handwritten, or only partly legible: record your best reading of every character and express any ' +
+    'doubt through the confidence fields, rather than leaving vendor_gstin empty. A GSTIN you are only ' +
+    'partly sure of is something a reviewer can correct one character at a time against the document; a ' +
+    'blank field is not. Leave vendor_gstin empty only when the seller\'s block genuinely shows no GSTIN ' +
+    'at all.'
 
   let prompt = base
 

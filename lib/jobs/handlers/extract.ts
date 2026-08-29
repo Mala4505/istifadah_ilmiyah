@@ -315,14 +315,21 @@ export async function persistExtractionPipelineResult(
     // Checksum guard: a GSTIN's own last character is a check digit computed
     // over the other fourteen (validateGstin, lib/analytics/gstin.ts — already
     // written and unit-tested, previously wired only into the compliance
-    // analytics pass, never into what gets written here). Unlike the own-org
-    // exclusion above, this isn't a judgment call about which party a GSTIN
-    // belongs to — a failed checksum means the GSTIN is definitionally wrong,
-    // mis-typed on the document or mis-read by OCR, so there is no scenario
-    // where writing it as-is is the right move. Skipped when it's already
-    // null (nothing extracted — not this guard's concern) or already caught
-    // by the own-org check above (one wrong-value reason per bill, not two
-    // exceptions saying similar things).
+    // analytics pass, never into what gets written here). A failed checksum
+    // means the GSTIN is wrong somewhere — mis-typed on the document or, far
+    // more often, one character mis-read by OCR (0/O, 1/I, 5/S, 8/B).
+    //
+    // Unlike the own-org exclusion above, this is NOT a reason to blank the
+    // field: a near-correct GSTIN a reviewer can fix one character at a time
+    // is far more useful than an empty box they have to retype in full from
+    // the document, and a blanked vendor GSTIN on a tax invoice also trips the
+    // `high`-severity `gstin_missing` analytics flag (lib/analytics/rules/compliance.ts)
+    // as if the seller's GSTIN were genuinely absent from the page. So the raw
+    // value is written through as-is (see the upsert payload below); the
+    // `vendor_gstin_invalid_checksum` exception raised further down is what
+    // tells the reviewer the value needs a correction before it can be trusted.
+    // Skipped when it's already null (nothing extracted) or already caught by
+    // the own-org check above (one wrong-value reason per bill, not two).
     const gstinChecksum =
       !isOwnOrgGstin && bill.vendor_gstin !== null ? validateGstin(bill.vendor_gstin) : null
     const isInvalidGstinChecksum = gstinChecksum !== null && !gstinChecksum.valid
@@ -348,7 +355,10 @@ export async function persistExtractionPipelineResult(
       page_number_start: bill.page_number_start,
       page_number_end: bill.page_number_end,
       vendor_name_ocr: bill.vendor_name,
-      vendor_gstin_ocr: isOwnOrgGstin || isInvalidGstinChecksum ? null : bill.vendor_gstin,
+      // isOwnOrgGstin blanks it (wrong party — see above); a failed checksum
+      // does NOT (the near-correct value is kept for the reviewer to fix, and
+      // flagged via vendor_gstin_invalid_checksum below).
+      vendor_gstin_ocr: isOwnOrgGstin ? null : bill.vendor_gstin,
       // Recipient/"Bill To" block (redesign plan §12) — read separately from
       // the vendor block above (buildSystemPrompt, lib/claude-client.ts).
       // buyer_gstin_ocr already reflects the checksum guard above.
@@ -430,9 +440,9 @@ export async function persistExtractionPipelineResult(
           severity: 'low',
           description:
             `Extracted vendor_gstin "${gstinChecksum!.gstin}" fails its own checksum ` +
-            `(${gstinChecksum!.message}) — mis-typed on the document or mis-read by OCR, never a valid ` +
-            'GSTIN. vendor_gstin_ocr was left blank rather than written with a value known to be wrong; ' +
-            'enter the correct GSTIN on review if legible.',
+            `(${gstinChecksum!.message}) — usually a single character mis-read by OCR. The value has ` +
+            'been kept as read so you can correct the wrong character(s) against the document on review, ' +
+            'rather than retyping the whole GSTIN — check it and save.',
           dedup_key: `vendor_gstin_invalid_checksum:${documentExtractionId}:${currentRunId}:${billIndex}`,
         },
         { onConflict: 'dedup_key' }

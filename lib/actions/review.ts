@@ -15,6 +15,8 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { getSignedUrl } from '@/lib/storage'
 import { logRawError } from '@/lib/friendly-error'
 import { normalizeVendorName } from '@/lib/normalize'
+import { isSameGstin, validateGstin } from '@/lib/analytics/gstin'
+import { serverEnv } from '@/lib/env.server'
 import { getStaffContext } from '@/lib/export/auth'
 import { isAdminOrAbove } from '@/lib/auth/roles'
 import { reExtractFieldScoped, reExtractPageScoped } from '@/lib/jobs/handlers/rescope-extract'
@@ -126,6 +128,33 @@ export async function saveVerification(input: SaveVerificationInput): Promise<Sa
     line_items_updated: number
     rate_reference_rows_inserted: number
   } | null
+
+  // The extract handler raises vendor_gstin_invalid_checksum /
+  // vendor_gstin_is_own_org against the OCR value (lib/jobs/handlers/extract.ts);
+  // validateGstin/isSameGstin only run in that job, never on the verified
+  // value. Once the reviewer has corrected vendor_gstin and saved, close those
+  // exceptions here so they don't need a second trip to /exceptions. Only when
+  // the corrected value is unambiguously good — present, passes its checksum,
+  // and isn't the community's own GSTIN; anything short of that leaves the
+  // exception open for a human to judge.
+  const verifiedGstin = input.header.vendor_gstin?.trim() ?? ''
+  const gstinNowClean =
+    verifiedGstin !== '' &&
+    validateGstin(verifiedGstin).valid &&
+    !(serverEnv.COMMUNITY_GSTIN !== '' && isSameGstin(verifiedGstin, serverEnv.COMMUNITY_GSTIN))
+  if (gstinNowClean) {
+    await supabase
+      .from('reconciliation_exception')
+      .update({
+        status: 'resolved',
+        resolution_note: 'Vendor GSTIN corrected and verified on review.',
+        resolved_by: user.id,
+        resolved_at: new Date().toISOString(),
+      })
+      .eq('document_extraction_id', input.documentExtractionId)
+      .eq('status', 'open')
+      .in('exception_type', ['vendor_gstin_invalid_checksum', 'vendor_gstin_is_own_org'])
+  }
 
   revalidatePath('/review')
 
@@ -684,6 +713,25 @@ export async function confirmVendorAlias(input: {
  */
 export async function setReviewQueueScope(scope: 'pending' | 'all'): Promise<{ ok: true }> {
   ;(await cookies()).set('review_queue_scope', scope, { path: '/', maxAge: 60 * 60 * 24 * 365 })
+  return { ok: true }
+}
+
+/**
+ * Superadmin-only reviewer filter for the /review queue (document-assignment,
+ * 2026-08-29). Same cookie-not-query-param reasoning as setReviewQueueScope
+ * above -- review-workspace.tsx's Prev/Next carries no params, so a URL-only
+ * filter would reset on every click. `null` (or '') clears the filter, i.e.
+ * back to "All reviewers". app/(app)/review/page.tsx reads the cookie and,
+ * when set, keeps only queue rows whose source_document is assigned to that
+ * staff id.
+ */
+export async function setReviewQueueAssignee(value: string | null): Promise<{ ok: true }> {
+  const jar = await cookies()
+  if (value) {
+    jar.set('review_queue_assignee', value, { path: '/', maxAge: 60 * 60 * 24 * 365 })
+  } else {
+    jar.delete('review_queue_assignee')
+  }
   return { ok: true }
 }
 

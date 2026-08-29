@@ -20,6 +20,14 @@ import { getMaxUploadPages } from '@/lib/upload-limits'
  *   entryId     (optional)  attach straight to an entry; normally null,
  *                           because ~18 of the 21 real samples have no
  *                           matching entry (§11.2 Day 3)
+ *   assignedTo  (optional)  comma-separated staff uuids to assign this
+ *                           document to (document-assignment feature,
+ *                           2026-08-29). Absent/empty = unassigned, which is
+ *                           the pre-feature behaviour. Each id is validated as
+ *                           an active admin/superadmin before an
+ *                           `source_document_assignee` row is written; a
+ *                           failure there is logged but never fails the upload
+ *                           (the document already exists by that point).
  *
  * Creates `source_document` + one `document_page` per page, stores the
  * original in the private `invoice-documents` bucket, and queues an
@@ -197,6 +205,23 @@ async function handlePOST(request: NextRequest) {
       ? Number(entryIdRaw)
       : null
 
+  // Optional multi-assignee list (document-assignment feature, 2026-08-29): a
+  // comma-separated list of staff uuids. Parsed here; validated and written
+  // only after the source_document row exists (below), so an absent/empty
+  // value is a no-op that leaves current behaviour untouched.
+  const assignedToRaw = form.get('assignedTo')
+  const assignedToIds =
+    typeof assignedToRaw === 'string'
+      ? Array.from(
+          new Set(
+            assignedToRaw
+              .split(',')
+              .map((s) => s.trim())
+              .filter((s) => s !== '')
+          )
+        )
+      : []
+
   // §8 point 2: a hash collision is a SOFT warning. The same bill legitimately
   // gets re-scanned, so the upload proceeds and an exception row is raised for
   // a human to look at.
@@ -243,6 +268,48 @@ async function handlePOST(request: NextRequest) {
   }
 
   const documentId = inserted.id as number
+
+  // Document-assignment (2026-08-29): if the upload named one or more
+  // assignees, validate each is an active admin/superadmin and write the
+  // `source_document_assignee` rows. Best-effort by design -- the
+  // `source_document` row already exists and its extraction is already
+  // queued, so a failure here is logged (console + Sentry, like the
+  // page-count path above) but must NOT fail the upload. The service-role
+  // `admin` client is deliberate: the same reason the rest of this route
+  // uses it (no session, and the assignee table's RLS is a
+  // read-visibility gate, not a writer one).
+  if (assignedToIds.length > 0) {
+    try {
+      const { data: validStaff, error: staffError } = await admin
+        .from('staff_profile')
+        .select('id')
+        .in('id', assignedToIds)
+        .eq('is_active', true)
+        .in('role', ['admin', 'superadmin'])
+      if (staffError) throw staffError
+
+      const validIds = (validStaff ?? []).map((s) => s.id as string)
+      if (validIds.length > 0) {
+        const { error: assigneeError } = await admin.from('source_document_assignee').insert(
+          validIds.map((staff_id) => ({
+            source_document_id: documentId,
+            staff_id,
+            assigned_by: staff.userId,
+          }))
+        )
+        if (assigneeError) throw assigneeError
+      }
+    } catch (err) {
+      console.error(
+        `[ingest] failed to assign source_document ${documentId} to [${assignedToIds.join(', ')}]:`,
+        err
+      )
+      Sentry.captureException(err, {
+        tags: { route: 'documents-ingest', phase: 'write_assignees' },
+        extra: { documentId, assignedToIds },
+      })
+    }
+  }
 
   // One document_page per page. `image_storage_path` stays null — the page
   // image is a derived artifact (§3.8) and nothing rasterises it today.

@@ -39,6 +39,7 @@ import { flagReviewException } from '@/lib/actions/review'
 import { extractionFailureGuidance } from '@/lib/friendly-error'
 import type { LookupOption } from '@/components/entries/types'
 import { formatDate, formatDateTime, formatElapsed, formatMoney, formatScore } from './format'
+import { AssigneeChip } from './assignee-chip'
 import type { CandidateEntryView, InboxDocumentView } from './types'
 
 /** Sentinel for "no selection" in the zone/admin-head Selects below — same convention as components/entries/detail/enrichment-form.tsx's NONE. */
@@ -470,12 +471,16 @@ export function DocumentCard({
               className="mt-1"
             />
           )}
-          <div>
+          <div className="flex flex-col gap-1">
             <p className="break-all text-sm font-medium">{document.originalFilename}</p>
             <p className="text-xs text-muted-foreground">
               Uploaded {formatDateTime(document.uploadedAt)}
               {document.pageCount ? ` · ${document.pageCount} page${document.pageCount === 1 ? '' : 's'}` : ''}
             </p>
+            <div className="flex items-center gap-1.5">
+              <span className="text-[11px] uppercase tracking-wide text-muted-foreground">Assigned to</span>
+              <AssigneeChip assignees={document.assignees} />
+            </div>
           </div>
         </div>
         <div className="flex flex-shrink-0 flex-col items-end gap-1.5">

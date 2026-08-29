@@ -4,10 +4,12 @@ import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { getStaffContext } from '@/lib/export/auth'
 import { DocumentInbox } from '@/components/documents/document-inbox'
+import { AssignmentScope, type DocumentScope } from '@/components/documents/assignment-scope'
 import type { DocumentExtractionSummary, InboxDocumentView } from '@/components/documents/types'
 import type { LookupOption } from '@/components/entries/types'
-import { isAdminOrAbove } from '@/lib/auth/roles'
+import { isAdminOrAbove, isSuperadmin } from '@/lib/auth/roles'
 import { getSelectedEventId } from '@/lib/events/current'
+import { getDocumentAssignees, listAssignableStaff, type AssignableStaff } from '@/lib/assignment/queries'
 
 /** A stalled queue is "the oldest queued job has been waiting longer than this" (checklist 2.15, D8) — long enough that a normal extraction backlog doesn't false-positive. */
 const STALLED_QUEUE_THRESHOLD_MS = 10 * 60 * 1000
@@ -42,7 +44,13 @@ const DOCUMENT_QUERY_CAP = 200
  * every other reviewer capability) in lib/actions/documents.ts, and hidden
  * here for a dept account as a courtesy, not as the actual gate.
  */
-export default async function DocumentsPage() {
+export default async function DocumentsPage({
+  searchParams,
+}: {
+  // Scope is a plain URL param (like /review's queue scope), read here and
+  // used to filter the RLS-scoped list in-page — see the scope block below.
+  searchParams: Promise<{ scope?: string; assignee?: string }>
+}) {
   const staff = await getStaffContext()
 
   if (!staff) {
@@ -71,6 +79,7 @@ export default async function DocumentsPage() {
   }
 
   const canAct = isAdminOrAbove(staff.role)
+  const isSA = isSuperadmin(staff.role)
   const supabase = await createClient()
 
   // Phase 6 Step 2 §1: the inbox is scoped to whichever event is currently
@@ -109,6 +118,15 @@ export default async function DocumentsPage() {
   const docsTruncated = docsFetched.length > DOCUMENT_QUERY_CAP
   const docs = docsTruncated ? docsFetched.slice(0, DOCUMENT_QUERY_CAP) : docsFetched
   const docIds = docs.map((d) => d.id)
+
+  // Assignment ("dividing the document inbox", 2026-08-29). RLS on
+  // source_document already scoped `docs` to what this viewer may see
+  // (their assigned + the unassigned pool for an admin, everything for a
+  // superadmin); the assignee rows drive the in-page scope filter and the
+  // per-row chip. `assignableStaff` is only needed for the assign controls,
+  // which are admin-or-above only.
+  const assigneesByDoc = await getDocumentAssignees(supabase, docIds)
+  const assignableStaff: AssignableStaff[] = canAct ? await listAssignableStaff(supabase) : []
 
   // document_extraction is fetched separately (rather than embedded in the
   // select above) so this file never has to guess whether PostgREST returns
@@ -261,8 +279,60 @@ export default async function DocumentsPage() {
       pageCount: doc.page_count,
       extraction: bills,
       failureReason: doc.upload_status === 'failed' ? failureReasonByDocId.get(doc.id) ?? null : null,
+      assignees: assigneesByDoc.get(doc.id) ?? [],
     }
   })
+
+  // Scope filter (Direction B). RLS decides what's *visible*; this decides
+  // which slice of the visible set the header shows, mirroring /review's
+  // URL-param scope. Counts are over the full visible set so the segmented
+  // control's hints stay honest regardless of the active tab.
+  const sp = await searchParams
+  const assigneeParam =
+    isSA && typeof sp.assignee === 'string' && sp.assignee.trim() !== '' ? sp.assignee.trim() : null
+  const scope: DocumentScope = (() => {
+    const raw = sp.scope
+    if (raw === 'mine' || raw === 'unassigned') return raw
+    if (raw === 'everyone' && isSA) return 'everyone'
+    if (raw === 'all' && !isSA) return 'all'
+    // Admin default is `all` (their assigned + the unassigned pool) so a fresh
+    // visit — and rollout day, when every document is still unassigned —
+    // shows a populated inbox rather than an empty "Mine".
+    return isSA ? 'everyone' : 'all'
+  })()
+
+  const isAssignedToMe = (d: InboxDocumentView) => d.assignees.some((a) => a.staffId === staff.userId)
+  const scopeCounts = {
+    mine: inboxDocuments.filter(isAssignedToMe).length,
+    unassigned: inboxDocuments.filter((d) => d.assignees.length === 0).length,
+    everyone: inboxDocuments.length,
+  }
+
+  // Only admin-or-above get a scope: a `dept` viewer is never an assignee, so
+  // applying the `mine` default to them would empty their inbox. They keep
+  // the full RLS-scoped list and no scope control.
+  const visibleDocuments = !canAct
+    ? inboxDocuments
+    : assigneeParam
+      ? inboxDocuments.filter((d) => d.assignees.some((a) => a.staffId === assigneeParam))
+      : scope === 'mine'
+        ? inboxDocuments.filter(isAssignedToMe)
+        : scope === 'unassigned'
+          ? inboxDocuments.filter((d) => d.assignees.length === 0)
+          : inboxDocuments
+
+  const assigneeName = assigneeParam
+    ? assignableStaff.find((s) => s.id === assigneeParam)?.displayName ?? null
+    : null
+  const headerLabel = assigneeParam
+    ? `Assigned to ${assigneeName ?? 'someone'}`
+    : scope === 'mine'
+      ? 'Your assigned'
+      : scope === 'unassigned'
+        ? 'Unassigned'
+        : scope === 'all'
+          ? 'Your inbox'
+          : 'All documents'
 
   // job_queue's RLS restricts select to admins only (job_queue_select_admin),
   // but the inbox itself is visible to every active staff member — so this
@@ -286,10 +356,27 @@ export default async function DocumentsPage() {
   )
 
   return (
-    <PageShell count={inboxDocuments.length} truncated={docsTruncated}>
+    <PageShell
+      label={canAct ? headerLabel : undefined}
+      count={visibleDocuments.length}
+      truncated={docsTruncated}
+      scopeControl={
+        canAct ? (
+          <AssignmentScope
+            isSuperadmin={isSA}
+            scope={scope}
+            assigneeId={assigneeParam}
+            staff={assignableStaff}
+            counts={scopeCounts}
+          />
+        ) : null
+      }
+    >
       <DocumentInbox
-        initialDocuments={inboxDocuments}
+        initialDocuments={visibleDocuments}
         canAct={canAct}
+        currentStaffId={staff.userId}
+        assignableStaff={assignableStaff}
         queueStalled={queueStalled}
         adminHeadOptions={adminHeadOptions}
         zoneOptions={zoneOptions}
@@ -301,12 +388,17 @@ export default async function DocumentsPage() {
 
 function PageShell({
   children,
+  label,
   count,
   truncated,
+  scopeControl,
 }: {
   children: React.ReactNode
+  /** Scope-aware heading suffix ("Your inbox", "Unassigned", …); undefined for a viewer with no scope. */
+  label?: string
   count?: number
   truncated?: boolean
+  scopeControl?: React.ReactNode
 }) {
   return (
     <div className="flex flex-col gap-6">
@@ -314,10 +406,12 @@ function PageShell({
         <h1 className="text-xl font-semibold tracking-tight">Document inbox</h1>
         {count !== undefined && (
           <span className="text-sm text-muted-foreground">
-            {count} unmatched {count === 1 ? 'document' : 'documents'}
+            {label ? `${label} — ` : ''}
+            {count} {label ? (count === 1 ? 'document' : 'documents') : `unmatched ${count === 1 ? 'document' : 'documents'}`}
             {truncated && ` — showing the latest ${DOCUMENT_QUERY_CAP}`}
           </span>
         )}
+        {scopeControl && <div className="ml-auto">{scopeControl}</div>}
       </div>
       {children}
     </div>
