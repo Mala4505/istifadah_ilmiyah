@@ -46,8 +46,9 @@ export interface HeaderFieldSet<T> {
   vendorPhone: T
   vendorEmail: T
   vendorAddress: T
-  /** Recipient/"Bill To" block -- plan §12 GST recipient-compliance check.
-   *  Only meaningful (and only rendered) when `gstCharged` is true. */
+  /** Recipient/"Bill To" block -- plan §12. Rendered on every bill
+   *  (recipient-identity expansion, 2026-08-29); `gstCharged` only varies
+   *  the block's helper text now. */
   buyerGstin: T
   buyerName: T
   invoiceNumber: T

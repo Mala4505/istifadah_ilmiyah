@@ -87,6 +87,10 @@ export function BillViewModal({
                 <Field label="Vendor" value={detail.vendorName} />
                 <Field label="GSTIN" value={detail.vendorGstin} />
                 <Field label="Phone" value={detail.vendorPhone} />
+                {/* Recipient/"Bill To" block (plan §12): our own name + GSTIN
+                    as printed on the bill -- expected on every bill. */}
+                <Field label="Billed to" value={detail.buyerName} />
+                <Field label="Buyer GSTIN" value={detail.buyerGstin} />
                 <Field label="Invoice #" value={detail.invoiceNumber} />
                 <Field label="Invoice date" value={detail.invoiceDate ? formatDate(detail.invoiceDate) : null} />
                 <Field label="Reviewed" value={detail.verifiedAt ? formatDate(detail.verifiedAt) : 'Not yet reviewed'} />

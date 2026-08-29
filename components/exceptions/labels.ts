@@ -28,6 +28,8 @@ export const EXCEPTION_TYPE_LABELS: Record<string, string> = {
   gst_recipient_compliance_missing: 'GST recipient details missing',
   // meta-commentary landing in an OCR text field (finding 10.1)
   ocr_meta_commentary: 'OCR meta-commentary',
+  // our own GSTIN/name missing on a non-tax bill (plan §12 recipient-identity expansion)
+  recipient_identity_missing: 'Our GSTIN / name missing from bill',
 }
 
 /** In CHECK-constraint order (MASTER-PLAN §3.10 migration). */

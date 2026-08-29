@@ -439,13 +439,16 @@ export async function persistExtractionPipelineResult(
       )
     }
 
-    // GST recipient-compliance check (redesign plan §12): only runs when GST
-    // is actually charged on this bill; when it does, all three of buyer
-    // GSTIN / buyer name / invoice number are required for the community to
-    // claim input tax credit. One combined exception per bill (not one per
-    // missing item) — high severity, unlike the low-severity GSTIN checks
-    // above, since a missing item here has real ITC-claim consequences
-    // rather than just being an OCR-quality signal.
+    // GST recipient-compliance check (redesign plan §12; recipient-identity
+    // expansion confirmed with the user 2026-08-29). Two rules, one combined
+    // exception per bill each (not one per missing item):
+    //   - GST charged  → buyer GSTIN + name + invoice number all required for
+    //     the community to claim input tax credit. `high` severity — real
+    //     ITC-claim consequences, unlike the low-severity OCR-quality checks
+    //     above.
+    //   - GST not charged → our own GSTIN and name must still appear on the
+    //     bill. `low` severity: a house rule for filed paperwork, no ITC
+    //     stake, so it sits alongside the other advisory flags.
     const compliance = checkGstRecipientCompliance({
       buyerGstin: buyerGstinOcr,
       buyerName: bill.buyer_name,
@@ -459,22 +462,35 @@ export async function persistExtractionPipelineResult(
       instrumentType: bill.instrument_type,
     })
 
-    if (compliance.triggered && compliance.missing.length > 0) {
+    if (compliance.missing.length > 0) {
       const missingLabels: Record<GstComplianceMissingItem, string> = {
         buyer_gstin: 'buyer GSTIN',
         buyer_name: 'buyer name',
         invoice_number: 'invoice number',
       }
       const missingText = compliance.missing.map((item) => missingLabels[item]).join(', ')
+      const { exceptionType, severity, description } = compliance.taxInvoice
+        ? {
+            exceptionType: 'gst_recipient_compliance_missing',
+            severity: 'high' as const,
+            description:
+              `This bill has GST charged but is missing: ${missingText} — required for the community ` +
+              'to claim input tax credit.',
+          }
+        : {
+            exceptionType: 'recipient_identity_missing',
+            severity: 'low' as const,
+            description:
+              `This bill does not clearly show the community's own ${missingText} — every bill should ` +
+              'carry our GSTIN and name, even when no GST is charged.',
+          }
       await admin.from('reconciliation_exception').upsert(
         {
           document_extraction_id: documentExtractionId,
-          exception_type: 'gst_recipient_compliance_missing',
-          severity: 'high',
-          description:
-            `This bill has GST charged but is missing: ${missingText} — required for the community ` +
-            'to claim input tax credit.',
-          dedup_key: `gst_recipient_compliance_missing:${documentExtractionId}:${currentRunId}:${billIndex}`,
+          exception_type: exceptionType,
+          severity,
+          description,
+          dedup_key: `${exceptionType}:${documentExtractionId}:${currentRunId}:${billIndex}`,
         },
         { onConflict: 'dedup_key' }
       )

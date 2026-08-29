@@ -501,6 +501,11 @@ export interface DocumentViewDetail {
   vendorPhone: string | null
   vendorEmail: string | null
   vendorAddress: string | null
+  /** Recipient/"Bill To" block -- plan §12. Our own GSTIN/name as printed on
+   *  the bill; surfaced read-only here so a reviewer can confirm every filed
+   *  bill carries them without re-entering /review. */
+  buyerGstin: string | null
+  buyerName: string | null
   invoiceNumber: string | null
   invoiceDate: string | null
   subtotal: number | null
@@ -540,7 +545,7 @@ export async function getDocumentViewDetail(
     supabase
       .from('document_extraction')
       .select(
-        'id, bill_index, entry_id, verified_at, vendor_name_ocr, vendor_name_verified, vendor_gstin_ocr, vendor_gstin_verified, vendor_phone_ocr, vendor_phone_verified, vendor_email_ocr, vendor_email_verified, vendor_address_ocr, vendor_address_verified, invoice_number_ocr, invoice_number_verified, invoice_date_ocr, invoice_date_verified, subtotal_ocr, subtotal_verified, tax_amount_ocr, tax_amount_verified, total_amount_ocr, total_amount_verified, notes_ocr, notes_verified'
+        'id, bill_index, entry_id, verified_at, vendor_name_ocr, vendor_name_verified, vendor_gstin_ocr, vendor_gstin_verified, vendor_phone_ocr, vendor_phone_verified, vendor_email_ocr, vendor_email_verified, vendor_address_ocr, vendor_address_verified, buyer_gstin_ocr, buyer_gstin_verified, buyer_name_ocr, buyer_name_verified, invoice_number_ocr, invoice_number_verified, invoice_date_ocr, invoice_date_verified, subtotal_ocr, subtotal_verified, tax_amount_ocr, tax_amount_verified, total_amount_ocr, total_amount_verified, notes_ocr, notes_verified'
       )
       .eq('source_document_id', documentId)
       .order('bill_index'),
@@ -581,6 +586,8 @@ export async function getDocumentViewDetail(
       vendorPhone: (extraction.vendor_phone_verified ?? extraction.vendor_phone_ocr) as string | null,
       vendorEmail: (extraction.vendor_email_verified ?? extraction.vendor_email_ocr) as string | null,
       vendorAddress: (extraction.vendor_address_verified ?? extraction.vendor_address_ocr) as string | null,
+      buyerGstin: (extraction.buyer_gstin_verified ?? extraction.buyer_gstin_ocr) as string | null,
+      buyerName: (extraction.buyer_name_verified ?? extraction.buyer_name_ocr) as string | null,
       invoiceNumber: (extraction.invoice_number_verified ?? extraction.invoice_number_ocr) as string | null,
       invoiceDate: (extraction.invoice_date_verified ?? extraction.invoice_date_ocr) as string | null,
       subtotal: (extraction.subtotal_verified ?? extraction.subtotal_ocr) as number | null,

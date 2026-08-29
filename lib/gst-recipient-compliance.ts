@@ -7,9 +7,12 @@
  *
  * Under GST rules, a valid tax invoice a registered recipient can claim
  * input tax credit against must show the recipient's name, GSTIN, and the
- * invoice number — not just the seller's details. This module decides,
- * from already-extracted fields, whether that requirement is triggered on a
- * given bill and, if so, which of the three items are missing. The model
+ * invoice number — not just the seller's details. Separately, the community
+ * requires its own GSTIN and name to appear on *every* bill it files, tax
+ * or not. This module decides, from already-extracted fields, which of
+ * buyer GSTIN / buyer name / invoice number are missing on a given bill and
+ * whether GST is charged on it, so the caller can raise the ITC rule at
+ * `high` severity and the always-on identity rule at `low`. The model
  * only writes what it read (or blank) into buyer_gstin/buyer_name — mirroring
  * isOwnOrgGstin/validateGstin in lib/analytics/gstin.ts and
  * lib/jobs/handlers/extract.ts, the compliance *decision* itself stays here
@@ -65,7 +68,26 @@ export interface GstRecipientComplianceInput {
 export type GstComplianceMissingItem = 'buyer_gstin' | 'buyer_name' | 'invoice_number'
 
 export interface GstRecipientComplianceResult {
-  triggered: boolean
+  /**
+   * True when GST is actually charged on this bill (any tax component present
+   * and non-zero, or instrument_type === 'tax_invoice'). Distinguishes the
+   * two rules the caller enforces at different severities:
+   *   - taxInvoice true  → the ITC rule: buyer GSTIN + buyer name + invoice
+   *     number must all be present and correct, raised `high`.
+   *   - taxInvoice false → the always-on recipient-identity rule: our own
+   *     GSTIN and name must still appear on every bill, raised `low`.
+   */
+  taxInvoice: boolean
+  /**
+   * Which required items fail their check. buyer_gstin / buyer_name are
+   * evaluated on every bill; invoice_number only when `taxInvoice` is true
+   * (its presence is an ITC-claim requirement, not part of always-on
+   * recipient identity). Under the always-on rule an item is only reported
+   * when there is a configured community target to check it against —
+   * under the tax-invoice rule an unconfigured target still counts as
+   * missing (there is no known value to confirm, so the bill can't be shown
+   * compliant). Empty array = compliant for whichever rule applies.
+   */
   missing: GstComplianceMissingItem[]
 }
 
@@ -84,39 +106,43 @@ function hasNonZeroAmount(value: number | null): boolean {
 }
 
 /**
- * Decides whether the GST recipient-compliance check applies to a bill and,
- * if so, which of buyer GSTIN / buyer name / invoice number are missing.
+ * Decides which of buyer GSTIN / buyer name / invoice number fail their check
+ * on a bill, and whether GST is charged on it (`taxInvoice`) so the caller
+ * can pick the right severity.
  *
- * Trigger condition (redesign plan §12, locked): any of
- * cgst/sgst/igst/tax_amount present and non-zero, OR instrument_type ===
- * 'tax_invoice'. When neither holds, the check does not run at all —
- * `{ triggered: false, missing: [] }`, nothing else evaluated.
+ * Two rules, both evaluated here (redesign plan §12; recipient-identity
+ * expansion confirmed with the user 2026-08-29):
  *
- * When triggered, all three are checked independently (missing any one is
- * enough to add it to `missing`; a bill can be missing all three, some, or
- * none):
+ *   1. Always-on recipient identity — our own GSTIN and name must appear on
+ *      *every* bill, tax or not. buyer_gstin / buyer_name are checked on
+ *      every call. An item is only reported when there is a configured
+ *      community target to check against (communityGstin / communityName
+ *      non-null): with no known value there is nothing to assert against a
+ *      non-tax bill.
+ *
+ *   2. Tax-invoice ITC rule — when `taxInvoice` is true (any of
+ *      cgst/sgst/igst/tax_amount present and non-zero, OR instrument_type ===
+ *      'tax_invoice'), invoice_number is additionally required, and an
+ *      unconfigured community target still counts as missing (there is no
+ *      known value to confirm the bill against, so it can't be shown
+ *      compliant).
+ *
+ * Each item is checked independently — a bill can fail all three, some, or
+ * none. Match logic:
  *   - buyer_gstin: present AND matches communityGstin (isSameGstin).
  *   - buyer_name: present AND fuzzy-matches communityName at or above
  *     BUYER_NAME_SIMILARITY_THRESHOLD (vendorSimilarity).
- *   - invoice_number: present (no match target — the invoice number is
- *     genuinely bill-specific).
- * communityGstin/communityName unset (empty COMMUNITY_GSTIN/COMMUNITY_NAME,
- * mapped to null by the caller) means those two checks can never pass while
- * triggered — there is no known value to confirm against, so buyer_gstin/
- * buyer_name are always reported missing in that case regardless of what
- * was read off the page.
+ *   - invoice_number: present (no match target — genuinely bill-specific).
  */
 export function checkGstRecipientCompliance(
   input: GstRecipientComplianceInput
 ): GstRecipientComplianceResult {
-  const triggered =
+  const taxInvoice =
     hasNonZeroAmount(input.cgstAmount) ||
     hasNonZeroAmount(input.sgstAmount) ||
     hasNonZeroAmount(input.igstAmount) ||
     hasNonZeroAmount(input.taxAmount) ||
     input.instrumentType === 'tax_invoice'
-
-  if (!triggered) return { triggered: false, missing: [] }
 
   const missing: GstComplianceMissingItem[] = []
 
@@ -124,15 +150,18 @@ export function checkGstRecipientCompliance(
     isPresent(input.buyerGstin) &&
     isPresent(input.communityGstin) &&
     isSameGstin(input.buyerGstin, input.communityGstin)
-  if (!buyerGstinOk) missing.push('buyer_gstin')
+  // On a tax invoice the item is always asserted (an unconfigured target
+  // can't clear it). On a non-tax bill it's only asserted when we have a
+  // configured GSTIN to compare against.
+  if (!buyerGstinOk && (taxInvoice || isPresent(input.communityGstin))) missing.push('buyer_gstin')
 
   const buyerNameOk =
     isPresent(input.buyerName) &&
     isPresent(input.communityName) &&
     vendorSimilarity(input.buyerName, input.communityName) >= BUYER_NAME_SIMILARITY_THRESHOLD
-  if (!buyerNameOk) missing.push('buyer_name')
+  if (!buyerNameOk && (taxInvoice || isPresent(input.communityName))) missing.push('buyer_name')
 
-  if (!isPresent(input.invoiceNumber)) missing.push('invoice_number')
+  if (taxInvoice && !isPresent(input.invoiceNumber)) missing.push('invoice_number')
 
-  return { triggered: true, missing }
+  return { taxInvoice, missing }
 }

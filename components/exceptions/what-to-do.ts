@@ -110,6 +110,11 @@ export function getExceptionAction(row: ExceptionActionRow): ExceptionAction {
         whatToDo: 'Buyer GSTIN or name is missing or wrong on the bill.',
         destination: reviewBillLink(row),
       }
+    case 'recipient_identity_missing':
+      return {
+        whatToDo: "Add the community's own GSTIN and name from the bill's recipient block, if they're legible on the document.",
+        destination: reviewBillLink(row),
+      }
     case 'vendor_gstin_is_own_org':
       return {
         whatToDo: 'OCR read our own GSTIN as the vendor’s — correct it.',
