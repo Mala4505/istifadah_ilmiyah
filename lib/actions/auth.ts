@@ -32,16 +32,30 @@ async function recordAttempt(itsNumber: string, ip: string | null, success: bool
 }
 
 const RATE_LIMIT_WINDOW_MINUTES = 15
-const MAX_FAILED_ATTEMPTS_PER_ITS = 5
-const MAX_FAILED_ATTEMPTS_PER_IP = 20
+const MAX_FAILED_ATTEMPTS_PER_ITS = 10
+
+// Per-IP protection counts DISTINCT ITS numbers, not raw failures. Many
+// legitimate users share one public IP — an office behind a single NAT, and
+// especially phones on mobile carrier-grade NAT (hundreds of unrelated users
+// on one address; §5 has staff uploading bills from their phones). A raw
+// per-IP failure cap locks out everyone at that location the moment a handful
+// of them mistype a password around the same time, which is exactly what a
+// rollout looks like. What actually signals an attack from one source is
+// failures sprayed across many different accounts (credential stuffing / ITS
+// sweep) — that is what this threshold catches, and shared-IP traffic from
+// real users does not come close to it.
+const MAX_FAILED_DISTINCT_ITS_PER_IP = 30
+// Bounds the per-IP read. A real sweep trips the distinct-count threshold
+// long before this many rows accumulate; legitimate traffic never gets here.
+const IP_ATTEMPT_SCAN_LIMIT = 3000
 
 /**
- * Two plain counts rather than a database function: `private` (where the
+ * Two plain reads rather than a database function: `private` (where the
  * app's other SECURITY DEFINER helpers live) is deliberately never exposed
  * to PostgREST (20260808000002), so nothing there is reachable via
- * supabase-js's `.rpc()`. Locked out when EITHER window trips — the IP
- * check catches one source sweeping many ITS numbers. Time-based, not
- * attempt-based, so a lockout can't be raced by succeeding once elsewhere.
+ * supabase-js's `.rpc()`. Locked out when EITHER window trips. Time-based,
+ * not attempt-based, so a lockout can't be raced by succeeding once
+ * elsewhere.
  */
 async function isRateLimited(itsNumber: string, ip: string | null): Promise<boolean> {
   const admin = createAdminClient()
@@ -56,13 +70,20 @@ async function isRateLimited(itsNumber: string, ip: string | null): Promise<bool
   if ((itsFailures ?? 0) >= MAX_FAILED_ATTEMPTS_PER_ITS) return true
 
   if (ip) {
-    const { count: ipFailures } = await admin
+    // DISTINCT its_number, computed here: PostgREST has no COUNT(DISTINCT),
+    // and the app keeps no callable RPC for this by design (see
+    // 20260810000002_auth_login_attempt.sql).
+    const { data: ipRows } = await admin
       .from('auth_login_attempt')
-      .select('id', { count: 'exact', head: true })
+      .select('its_number')
       .eq('ip', ip)
       .eq('success', false)
       .gt('created_at', since)
-    if ((ipFailures ?? 0) >= MAX_FAILED_ATTEMPTS_PER_IP) return true
+      .limit(IP_ATTEMPT_SCAN_LIMIT)
+    if (ipRows) {
+      const distinctIts = new Set(ipRows.map((row) => row.its_number)).size
+      if (distinctIts >= MAX_FAILED_DISTINCT_ITS_PER_IP) return true
+    }
   }
 
   return false

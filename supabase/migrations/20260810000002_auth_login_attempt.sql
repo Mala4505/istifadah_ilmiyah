@@ -15,10 +15,12 @@ create table public.auth_login_attempt (
   created_at timestamptz not null default now()
 );
 
--- Both lockout-window counts in lib/actions/auth.ts (5 failed attempts per
--- ITS number / 20 per IP within 15 minutes — see that file for the actual
--- check) scan by (key, created_at) — indexed accordingly. The check runs as
--- two plain PostgREST counts through the admin client rather than a
+-- Both lockout-window checks in lib/actions/auth.ts (failed attempts per ITS
+-- number, and failures across many DISTINCT ITS numbers per IP, within
+-- 15 minutes — see that file for the current thresholds and the reasoning
+-- for a distinct-account per-IP rule) scan by (key, created_at) — indexed
+-- accordingly. The check runs as two plain PostgREST reads through the admin
+-- client rather than a
 -- database function: `private` is deliberately never in `pgrst.db_schemas`
 -- (20260808000002), so a `private.*` function is not reachable via
 -- supabase-js's `.rpc()` at all, and a `public` one would need its own
