@@ -12,7 +12,7 @@ import { ExceptionsTable, type ExceptionRow } from '@/components/exceptions/exce
 import { ExceptionsPagination } from '@/components/exceptions/exceptions-pagination'
 import { SeverityCountChips } from '@/components/exceptions/severity-count-chips'
 import { SeverityLegend } from '@/components/exceptions/severity-legend'
-import { PAGE_SIZE_OPTIONS } from '@/components/ui/pagination-bar'
+import { PAGE_SIZE_OPTIONS } from '@/components/ui/pagination-bar-options'
 import { parseQueueSort, sortQueue } from '@/components/exceptions/queue-sort'
 import { SEVERITY_VALUES } from '@/components/exceptions/labels'
 import { isAdminOrAbove } from '@/lib/auth/roles'

@@ -4,8 +4,9 @@ import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { SelectNative } from '@/components/ui/select-native'
 import { cn } from '@/lib/utils'
+import { PAGE_SIZE_OPTIONS } from '@/components/ui/pagination-bar-options'
 
-export const PAGE_SIZE_OPTIONS = [25, 50, 100, 200] as const
+export { PAGE_SIZE_OPTIONS }
 
 /**
  * Shared pagination bar for every list screen
