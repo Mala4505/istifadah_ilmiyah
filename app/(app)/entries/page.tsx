@@ -10,6 +10,7 @@ import {
   getCachedAdminHeads,
   getCachedZones,
   getCachedBudgetHeads,
+  getCachedEntryTypes,
 } from '@/lib/cache/reference-data'
 import { EntriesExplorer } from '@/components/entries/entries-explorer'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -91,7 +92,7 @@ async function loadEntriesPageData(): Promise<{
   const zoneMemberIds = (zoneMembership.data ?? []).map((r) => r.zone_id)
   const userId = user?.id ?? null
 
-  const [departmentRows, bhRows, adminHeadRows, zoneRows, costCenterRows, statusRows, hubRows, statusCountsRes] = await Promise.all([
+  const [departmentRows, bhRows, adminHeadRows, zoneRows, costCenterRows, statusRows, hubRows, typeRows, statusCountsRes] = await Promise.all([
     getCachedDepartments(supabase),
     getCachedBudgetHeads(supabase, userId),
     getCachedAdminHeads(supabase, userId),
@@ -99,6 +100,7 @@ async function loadEntriesPageData(): Promise<{
     getCachedCostCenters(supabase),
     getCachedEntryStatuses(supabase),
     getCachedHubStatuses(supabase),
+    getCachedEntryTypes(supabase),
     // Status-count chips (docs/hub-screen-certification.md §3.7). Event-scoped
     // the same way app/(app)/page.tsx scopes this view — a plain
     // `.eq('event_id', ...)`, since v_entry_status_counts.event_id resolves
@@ -139,6 +141,7 @@ async function loadEntriesPageData(): Promise<{
     costCenters: costCenterRows.map((c) => ({ id: c.id, label: c.name })),
     statuses: statusRows.map((s) => ({ id: s.id, label: s.label, code: s.code })),
     hubStatuses: hubRows.map((h) => ({ id: h.id, label: h.label, code: h.code })),
+    entryTypes: typeRows.map((t) => ({ id: t.code, label: t.label, code: t.code })),
   }
 
   let role: StaffRole | null = null

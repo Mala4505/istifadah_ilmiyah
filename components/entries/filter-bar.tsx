@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Checkbox } from '@/components/ui/checkbox'
 import { SelectNative } from '@/components/ui/select-native'
-import { DEFAULT_FILTERS, type EntriesFilters, type FilterOptions, type LookupOption } from './types'
+import { DEFAULT_FILTERS, type EntriesFilters, type FilterOptions } from './types'
 
 /**
  * A single removable filter chip. `key` names the field(s) a click on the X
@@ -43,7 +43,7 @@ export function clearFilterChip(key: FilterChipKey): Partial<EntriesFilters> {
  * All 13 filters stay — the plan's decision (§1) was explicit that every
  * group gets used regularly, so this is a reorganization into four labelled
  * sections, not a removal:
- *   - Status: Status, Hub status
+ *   - Status: Type, Status, Hub status
  *   - Classification: Department, Budget head, Admin head, Zone, Cost center
  *   - Search: Vendor, Date from, Date to
  *   - Flags: Export-pending, Missing Main #, Has document
@@ -140,6 +140,17 @@ export function FilterBar({
       {chipRow}
 
       <FilterSection label="Status">
+        <Field label="Type">
+          <SelectNative value={filters.type} onChange={(e) => onChange({ type: e.target.value })}>
+            <option value="">Any type</option>
+            {options.entryTypes.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.label}
+              </option>
+            ))}
+          </SelectNative>
+        </Field>
+
         <Field label="Status">
           <SelectNative value={filters.status} onChange={(e) => onChange({ status: e.target.value })}>
             <option value="">Any status</option>
@@ -299,7 +310,7 @@ export function buildFilterSummary(filters: EntriesFilters, options: FilterOptio
   const pushSelect = (
     key: keyof EntriesFilters,
     value: string,
-    opts: LookupOption[],
+    opts: { id: string | number; label: string }[],
     fallback: string,
   ) => {
     if (!value) return
@@ -307,6 +318,7 @@ export function buildFilterSummary(filters: EntriesFilters, options: FilterOptio
     parts.push({ key, label: match ? match.label : fallback })
   }
 
+  pushSelect('type', filters.type, options.entryTypes, 'Type')
   pushSelect('status', filters.status, options.statuses, 'Status')
   pushSelect('hubStatus', filters.hubStatus, options.hubStatuses, 'Hub status')
   pushSelect('department', filters.department, options.departments, 'Department')

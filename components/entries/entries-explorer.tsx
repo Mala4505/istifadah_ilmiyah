@@ -25,6 +25,7 @@ import { isAdminOrAbove, type StaffRole } from '@/lib/auth/roles'
 
 function filtersToSearchParams(filters: EntriesFilters): URLSearchParams {
   const sp = new URLSearchParams()
+  if (filters.type) sp.set('tp', filters.type)
   if (filters.department) sp.set('dept', filters.department)
   if (filters.budgetHead) sp.set('bh', filters.budgetHead)
   if (filters.adminHead) sp.set('ahead', filters.adminHead)
@@ -43,6 +44,7 @@ function filtersToSearchParams(filters: EntriesFilters): URLSearchParams {
 
 function searchParamsToFilters(sp: URLSearchParams): EntriesFilters {
   return {
+    type: sp.get('tp') ?? '',
     department: sp.get('dept') ?? '',
     budgetHead: sp.get('bh') ?? '',
     adminHead: sp.get('ahead') ?? '',

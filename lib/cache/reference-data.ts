@@ -54,6 +54,7 @@ export const REFERENCE_DATA_TAGS = {
   costCenter: 'ref:cost_center',
   entryStatus: 'ref:entry_status',
   hubStatus: 'ref:hub_status',
+  entryType: 'ref:entry_type',
 } as const
 
 export interface CachedDepartment {
@@ -105,6 +106,12 @@ export interface CachedHubStatus {
   is_exportable: boolean
 }
 
+export interface CachedEntryType {
+  code: string
+  label: string
+  sort_order: number
+}
+
 // ---- Org-wide (is_staff() only) -------------------------------------------
 
 export function getCachedDepartments(supabase: SupabaseClient): Promise<CachedDepartment[]> {
@@ -154,6 +161,17 @@ export function getCachedHubStatuses(supabase: SupabaseClient): Promise<CachedHu
     },
     ['ref-hub-status'],
     { revalidate: REVALIDATE_SECONDS, tags: [REFERENCE_DATA_TAGS.hubStatus] }
+  )()
+}
+
+export function getCachedEntryTypes(supabase: SupabaseClient): Promise<CachedEntryType[]> {
+  return unstable_cache(
+    async () => {
+      const { data } = await supabase.from('entry_type').select('code,label,sort_order').order('sort_order')
+      return (data ?? []) as CachedEntryType[]
+    },
+    ['ref-entry-type'],
+    { revalidate: REVALIDATE_SECONDS, tags: [REFERENCE_DATA_TAGS.entryType] }
   )()
 }
 

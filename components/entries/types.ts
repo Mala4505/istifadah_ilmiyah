@@ -58,6 +58,10 @@ export type EntryEnriched = {
 
 export type LookupOption = { id: number; label: string; department_id?: number | null; code?: string }
 
+// entry_type.code (invoice/reimbursement/...) is the natural key -- unlike
+// every other lookup table here, there is no numeric id to filter on.
+export type EntryTypeOption = { id: string; label: string }
+
 export type FilterOptions = {
   departments: LookupOption[]
   budgetHeads: LookupOption[]
@@ -66,11 +70,15 @@ export type FilterOptions = {
   costCenters: LookupOption[]
   statuses: LookupOption[]
   hubStatuses: LookupOption[]
+  // DB-backed (public.entry_type), not the EntryType TS union below -- so a
+  // type added in the database shows up here without a code change.
+  entryTypes: EntryTypeOption[]
 }
 
 // Every filter the entries list supports (MASTER-PLAN §5 row 3), mirrored 1:1 into URL
 // search params so a filtered view is shareable/bookmarkable.
 export type EntriesFilters = {
+  type: string
   department: string
   budgetHead: string
   adminHead: string
@@ -87,6 +95,7 @@ export type EntriesFilters = {
 }
 
 export const DEFAULT_FILTERS: EntriesFilters = {
+  type: '',
   department: '',
   budgetHead: '',
   adminHead: '',

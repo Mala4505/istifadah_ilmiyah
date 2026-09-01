@@ -23,6 +23,7 @@ type EntriesQueryBuilder = ReturnType<ReturnType<SupabaseClient['from']>['select
 export function applyEntriesFilters<T extends EntriesQueryBuilder>(query: T, filters: EntriesFilters): T {
   let q = query
 
+  if (filters.type) q = q.eq('type', filters.type)
   if (filters.department) q = q.eq('department_id', filters.department)
   if (filters.budgetHead) q = q.eq('budget_head_id', filters.budgetHead)
   if (filters.adminHead) q = q.eq('admin_head_id', filters.adminHead)
