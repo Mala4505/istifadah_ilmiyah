@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 import { Logo } from '@/components/app-shell/logo'
+import { FriendlyError } from '@/components/ui/friendly-error'
 
 // Screen 1 — Sign in (MASTER-PLAN §5). ITS number + password: the server
 // action (lib/actions/auth.ts) resolves the ITS number to Supabase Auth's
@@ -75,9 +76,9 @@ export default function LoginPage() {
               />
             </div>
             {error && (
-              <p role="alert" className="text-sm text-destructive">
-                {error}
-              </p>
+              <div role="alert">
+                <FriendlyError message={error} />
+              </div>
             )}
             <Button type="submit" disabled={isPending} className="mt-1">
               {isPending ? 'Signing in…' : 'Sign in'}

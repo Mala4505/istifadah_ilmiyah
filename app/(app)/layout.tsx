@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation'
 import { cookies } from 'next/headers'
-import { createClient } from '@/lib/supabase/server'
+import { getCachedUser } from '@/lib/supabase/server'
+import { getCachedStaffProfile } from '@/lib/export/auth'
 import { NavRail, NAV_RAIL_COLLAPSED_COOKIE } from '@/components/app-shell/nav-rail'
 import { CommandPalette } from '@/components/app-shell/command-palette'
 
@@ -8,20 +9,13 @@ import { CommandPalette } from '@/components/app-shell/command-palette'
 // /login. Redirects server-side if there is no session — no flash of
 // protected content while a client-side check catches up.
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
-  const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const user = await getCachedUser()
 
   if (!user) {
     redirect('/login')
   }
 
-  const { data: profile } = await supabase
-    .from('staff_profile')
-    .select('display_name, role, its_number')
-    .eq('id', user.id)
-    .maybeSingle()
+  const profile = await getCachedStaffProfile(user.id)
 
   // Task 7.8: read the rail's collapse preference here, server-side, so the
   // client's first render already matches it -- see nav-rail.tsx's cookie
@@ -39,7 +33,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         }}
         initialCollapsed={initialCollapsed}
       />
-      <main className="min-w-0 flex-1 p-6">{children}</main>
+      <main className="min-w-0 flex-1 p-3 sm:p-6">{children}</main>
       <CommandPalette />
     </div>
   )

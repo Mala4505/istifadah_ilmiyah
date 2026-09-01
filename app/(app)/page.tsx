@@ -1,7 +1,8 @@
 import { friendlyDataError } from '@/lib/friendly-error'
 import Link from 'next/link'
 import { ScanLine, TriangleAlert, Wallet, UploadCloud, FileScan, ArrowRight, ListChecks, Tag } from 'lucide-react'
-import { createClient } from '@/lib/supabase/server'
+import { createClient, getCachedUser } from '@/lib/supabase/server'
+import { getCachedStaffProfile } from '@/lib/export/auth'
 import { getSelectedEventId } from '@/lib/events/current'
 import { StatTile } from '@/components/dashboard/stat-tile'
 import { StatusCountCard, dashboardStatusBadgeVariant, type StatusCount } from '@/components/dashboard/status-count-card'
@@ -93,11 +94,10 @@ async function loadDashboardData() {
         .eq('event_id', selectedEventId)
         .in('match_status', ['unmatched', 'suggested']),
       (async () => {
-        const {
-          data: { user },
-        } = await supabase.auth.getUser()
+        const user = await getCachedUser()
         if (!user) return { data: null }
-        return supabase.from('staff_profile').select('role, is_active').eq('id', user.id).maybeSingle()
+        const profile = await getCachedStaffProfile(user.id)
+        return { data: profile }
       })(),
       supabase
         .from('v_entry_status_counts')

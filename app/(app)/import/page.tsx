@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
-import { createClient } from '@/lib/supabase/server'
+import { getCachedUser } from '@/lib/supabase/server'
+import { getCachedStaffProfile } from '@/lib/export/auth'
 import { publicEnv } from '@/lib/env'
 import { ImportPageClient } from '@/components/import/import-page-client'
 import { isAdminOrAbove } from '@/lib/auth/roles'
@@ -19,18 +20,11 @@ import { isAdminOrAbove } from '@/lib/auth/roles'
 export const dynamic = 'force-dynamic'
 
 export default async function ImportPage() {
-  const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const user = await getCachedUser()
 
   let isAdmin = false
   if (user) {
-    const { data: profile } = await supabase
-      .from('staff_profile')
-      .select('role, is_active')
-      .eq('id', user.id)
-      .maybeSingle()
+    const profile = await getCachedStaffProfile(user.id)
     isAdmin = Boolean(profile?.is_active && isAdminOrAbove(profile.role))
   }
 

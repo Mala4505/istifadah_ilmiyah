@@ -1,6 +1,6 @@
 'use server'
 
-import { revalidatePath } from 'next/cache'
+import { revalidatePath, revalidateTag } from 'next/cache'
 import { z } from 'zod'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
@@ -8,6 +8,7 @@ import { requireSuperadmin } from '@/lib/export/auth'
 import { itsNumberSchema, itsNumberToLoginEmail } from '@/lib/auth/its'
 import { logRawError } from '@/lib/friendly-error'
 import { getSelectedEvent, isEventMutable } from '@/lib/events/current'
+import { REFERENCE_DATA_TAGS } from '@/lib/cache/reference-data'
 
 type ActionResult = { ok: true } | { ok: false; error: string }
 
@@ -84,6 +85,43 @@ export async function createStaffUser(input: {
   if (createError) return { ok: false, error: logRawError('admin.createStaffUser', createError.message) }
 
   revalidatePath('/admin')
+  return { ok: true }
+}
+
+const resetStaffPasswordSchema = z.object({
+  id: z.string().uuid(),
+  password: z.string().min(10, 'Password must be at least 10 characters.'),
+})
+
+/**
+ * Sets a new password for an existing staff account (perf-ux-audit-checklist
+ * §4.2: there was previously no in-app lever for this at all -- an admin
+ * could set a password at account creation via createStaffUser, but nothing
+ * updated one afterward, and createStaffUser itself rejects an
+ * already-registered ITS number, so "recreate the account" wasn't a
+ * workaround either). Same posture as createStaffUser: superadmin gate
+ * checked first, then the service-role admin client, since
+ * `auth.admin.updateUserById` bypasses RLS entirely and there is no
+ * database-level backstop for it.
+ *
+ * Resetting a staff password is a superadmin-only action.
+ */
+export async function resetStaffPassword(input: { id: string; password: string }): Promise<ActionResult> {
+  const gate = await requireSuperadmin()
+  if (!gate.ok) {
+    return { ok: false, error: 'Resetting a staff password is a superadmin-only action.' }
+  }
+
+  const parsed = resetStaffPasswordSchema.safeParse(input)
+  if (!parsed.success) {
+    return { ok: false, error: parsed.error.issues[0]!.message }
+  }
+
+  const admin = createAdminClient()
+
+  const { error } = await admin.auth.admin.updateUserById(parsed.data.id, { password: parsed.data.password })
+  if (error) return { ok: false, error: logRawError('admin.resetStaffPassword', error.message) }
+
   return { ok: true }
 }
 
@@ -178,6 +216,7 @@ export async function updateBudgetHeadMapping(input: {
   if (error) return { ok: false, error: logRawError('admin.updateBudgetHeadMapping', error.message) }
 
   revalidatePath('/admin')
+  revalidateTag(REFERENCE_DATA_TAGS.budgetHead)
   return { ok: true }
 }
 

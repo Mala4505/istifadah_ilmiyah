@@ -18,11 +18,13 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition, type PointerEvent as ReactPointerEvent } from 'react'
 import { useRouter } from 'next/navigation'
+import dynamic from 'next/dynamic'
 import { toast } from 'sonner'
 import { ChevronLeft, ChevronRight, RefreshCw } from 'lucide-react'
 import { toastError } from '@/components/ui/error-toast'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { Skeleton } from '@/components/ui/skeleton'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { exceptionTypeLabel, severityBadgeVariant } from '@/components/exceptions/labels'
@@ -42,7 +44,7 @@ import {
 } from '@/lib/actions/review'
 import { type ReviewDocumentDetail } from '@/lib/review/types'
 import { type Keymap, formatBinding, isSafeShortcutTarget, matchLineDigit, matchesBinding } from '@/lib/shortcuts/config'
-import { PdfViewer, type PdfViewerHandle } from './pdf-viewer'
+import type { PdfViewerHandle } from './pdf-viewer'
 import {
   ExtractionForm,
   type EditedFieldSets,
@@ -56,6 +58,24 @@ import { ShortcutsOverlay } from './shortcuts-overlay'
 import { ExceptionDialog } from './exception-dialog'
 import { HubStatusDialog } from './hub-status-dialog'
 import { ReviewStatusLine, type StageStatus } from './review-status-line'
+
+// Perf audit 3.1: pdf-viewer.tsx wraps pdf.js (worker/wasm assets) -- eagerly
+// bundling it into /review's first paint costs bytes no reviewer needs until
+// a bill is actually open. `ssr: false` because pdf.js reaches for browser
+// APIs (Worker, canvas) that don't exist server-side; PdfViewerHandle stays a
+// type-only import above (zero runtime cost) since only the value needs
+// deferring. The loading placeholder matches the left pane's own dimensions
+// (see the wrapping div's `width` a few hundred lines down) so swapping in
+// the real PdfViewer doesn't jank the layout, and reuses pdf-viewer.tsx's own
+// internal loading Skeleton (same aspect ratio it uses while pdf.js loads).
+const PdfViewer = dynamic(() => import('./pdf-viewer').then((mod) => mod.PdfViewer), {
+  ssr: false,
+  loading: () => (
+    <div className="flex h-full min-w-0 flex-col overflow-hidden rounded-md border border-border bg-muted/30 p-3">
+      <Skeleton className="mx-auto h-full max-h-[80vh] w-full max-w-md" style={{ aspectRatio: '1 / 1.414' }} />
+    </div>
+  ),
+})
 
 const NONE = '__none__'
 

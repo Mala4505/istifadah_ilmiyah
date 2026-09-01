@@ -18,13 +18,7 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog'
 import { createStaffUser } from '@/lib/actions/admin'
-
-/** Random, readable-enough temporary password — the admin hands it to the new user out of band. */
-function generatePassword(): string {
-  const bytes = new Uint8Array(12)
-  crypto.getRandomValues(bytes)
-  return Array.from(bytes, (b) => b.toString(36).padStart(2, '0')).join('').slice(0, 16)
-}
+import { generateTemporaryPassword } from '@/lib/generate-password'
 
 export function CreateUserDialog({ departments }: { departments: { id: number; name: string }[] }) {
   const [open, setOpen] = useState(false)
@@ -137,7 +131,7 @@ export function CreateUserDialog({ departments }: { departments: { id: number; n
                 onChange={(event) => setPassword(event.target.value)}
                 placeholder="At least 10 characters"
               />
-              <Button type="button" variant="outline" onClick={() => setPassword(generatePassword())}>
+              <Button type="button" variant="outline" onClick={() => setPassword(generateTemporaryPassword())}>
                 Generate
               </Button>
             </div>

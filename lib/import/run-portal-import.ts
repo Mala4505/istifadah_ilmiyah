@@ -45,6 +45,7 @@
 
 import { createHash } from 'node:crypto'
 import type { PoolClient } from 'pg'
+import { normalizeVendorName } from '@/lib/normalize'
 import {
   getPool,
   newCaches,
@@ -284,6 +285,171 @@ async function flushExceptions(
   }
 }
 
+/**
+ * Warms every resolver cache with ONE batched query per master table, before
+ * the row loop runs a single `resolve*` call.
+ *
+ * Measured cause of the "commit takes 20-30s for 5 rows" complaint: each of
+ * resolveVendor/resolveDepartment/resolveBudgetHead/resolveStatus does its
+ * own SELECT (and, on a cache miss, an INSERT plus an event-membership
+ * INSERT) — and `newCaches()` starts EMPTY on every request, so Preview and
+ * Commit each pay this cost from scratch even though Preview just resolved
+ * the exact same values. On a pooled connection with real network latency to
+ * Postgres, a handful of sequential round trips per row is what made 5 rows
+ * take 20-30s and 30-50 rows take minutes — the row count multiplies the
+ * round-trip count, not the row count multiplying real work.
+ *
+ * This does the same job `prefetchedEntries` above already does for
+ * `entries`: read every value the batch could need in one `= any($1::text[])`
+ * query, so a `resolve*` call for a value that already exists is a cache hit
+ * (zero round trips) instead of a fresh SELECT. Only a value that is
+ * genuinely NEW to the batch still falls through to the per-row insert path
+ * in resolveVendor/resolveDepartment/resolveBudgetHead/resolveStatus — which
+ * is correct, since creating a row still needs its own INSERT to get an id,
+ * and is also the rare case once a portal's vendor/department/budget-head
+ * list has stabilised.
+ *
+ * Deliberately does NOT try to prefetch budget_head's second-tier
+ * (department_id, short_label) fallback match (see resolveBudgetHead) — that
+ * needs department ids resolved first and only fires when a raw_label is
+ * genuinely new but a differently-cased sibling already exists, which is
+ * rare within one scrape. Left on the per-row path.
+ */
+async function prefetchResolverCaches(
+  client: PoolClient,
+  caches: ResolverCaches,
+  eventId: number,
+  rows: readonly ParsedPortalRow[]
+): Promise<void> {
+  const active = rows.filter((r) => !r.skipReason)
+
+  const vendorNames = new Set<string>()
+  const departmentNames = new Set<string>()
+  const budgetHeadLabels = new Set<string>()
+  const statusCodes = new Set<string>()
+
+  for (const row of active) {
+    if (row.vendorRaw) vendorNames.add(row.vendorRaw)
+    if (row.reimburseTo) vendorNames.add(row.reimburseTo)
+    if (row.departmentRaw) departmentNames.add(row.departmentRaw)
+    if (row.budgetHeadRaw) budgetHeadLabels.add(row.budgetHeadRaw)
+    if (row.status) statusCodes.add(row.status.code)
+    if (row.auditStatus) statusCodes.add(row.auditStatus.code)
+    if (row.verificationStatus) statusCodes.add(row.verificationStatus.code)
+  }
+
+  // Sequential, not Promise.all: these all share one PoolClient/connection,
+  // so concurrent calls on it would just queue on the same socket anyway —
+  // the win here is going from "one query per unique value" to "one query
+  // per master table", not from concurrency.
+  await prefetchVendorCache(client, caches, [...vendorNames])
+  await prefetchDepartmentCache(client, caches, eventId, [...departmentNames])
+  await prefetchBudgetHeadCache(client, caches, eventId, [...budgetHeadLabels])
+  await prefetchStatusCache(client, caches, [...statusCodes])
+}
+
+async function prefetchVendorCache(
+  client: PoolClient,
+  caches: ResolverCaches,
+  rawNames: readonly string[]
+): Promise<void> {
+  if (rawNames.length === 0) return
+
+  const normalizedToRaw = new Map<string, string>()
+  for (const raw of rawNames) normalizedToRaw.set(normalizeVendorName(raw), raw)
+  const normalizedList = [...normalizedToRaw.keys()]
+
+  const byNormalized = await client.query<{ id: number; normalized_name: string }>(
+    'select id, normalized_name from public.vendor where normalized_name = any($1::text[])',
+    [normalizedList]
+  )
+  for (const found of byNormalized.rows) {
+    caches.vendorByNormalizedName.set(found.normalized_name, found.id)
+  }
+
+  const stillMissing = normalizedList.filter((n) => !caches.vendorByNormalizedName.has(n))
+  if (stillMissing.length === 0) return
+
+  // vendor_alias is keyed on the raw text as scraped, not the normalized
+  // form, so the lookup goes back through the original raw names.
+  const rawNamesToCheck = stillMissing.map((n) => normalizedToRaw.get(n)!)
+  const byAlias = await client.query<{ vendor_id: number; raw_name: string }>(
+    'select vendor_id, raw_name from public.vendor_alias where raw_name = any($1::text[])',
+    [rawNamesToCheck]
+  )
+  for (const found of byAlias.rows) {
+    caches.vendorByNormalizedName.set(normalizeVendorName(found.raw_name), found.vendor_id)
+  }
+}
+
+async function prefetchDepartmentCache(
+  client: PoolClient,
+  caches: ResolverCaches,
+  eventId: number,
+  names: readonly string[]
+): Promise<void> {
+  if (names.length === 0) return
+
+  const found = await client.query<{ id: number; name: string }>(
+    'select id, name from public.department where name = any($1::text[])',
+    [names]
+  )
+  if (found.rows.length === 0) return
+
+  for (const row of found.rows) caches.departmentByName.set(row.name, row.id)
+
+  // Same membership assertion resolveDepartment's cache-miss branch makes
+  // per row (see registerEventDepartment's header comment) — batched here
+  // since these rows are about to be served from cache and would otherwise
+  // never call it.
+  await client.query(
+    `insert into public.event_department (event_id, department_id)
+     select $1, unnest($2::bigint[])
+     on conflict do nothing`,
+    [eventId, [...new Set(found.rows.map((r) => r.id))]]
+  )
+}
+
+async function prefetchBudgetHeadCache(
+  client: PoolClient,
+  caches: ResolverCaches,
+  eventId: number,
+  rawLabels: readonly string[]
+): Promise<void> {
+  if (rawLabels.length === 0) return
+
+  const found = await client.query<{ id: number; raw_label: string; department_id: number | null }>(
+    'select id, raw_label, department_id from public.budget_head where raw_label = any($1::text[])',
+    [rawLabels]
+  )
+  if (found.rows.length === 0) return
+
+  for (const row of found.rows) {
+    caches.budgetHeadByRawLabel.set(row.raw_label, { id: row.id, departmentId: row.department_id })
+  }
+
+  await client.query(
+    `insert into public.event_budget_head (event_id, budget_head_id)
+     select $1, unnest($2::bigint[])
+     on conflict do nothing`,
+    [eventId, [...new Set(found.rows.map((r) => r.id))]]
+  )
+}
+
+async function prefetchStatusCache(
+  client: PoolClient,
+  caches: ResolverCaches,
+  codes: readonly string[]
+): Promise<void> {
+  if (codes.length === 0) return
+
+  const found = await client.query<{ id: number; code: string }>(
+    'select id, code from public.entry_status where code = any($1::text[])',
+    [codes]
+  )
+  for (const row of found.rows) caches.statusByCode.set(row.code, row.id)
+}
+
 /** Resolves a parsed status chip to an entry_status id, or null if absent. */
 async function resolvePortalStatus(
   client: PoolClient,
@@ -403,6 +569,11 @@ export async function runPortalImport(
         for (const found of existingRows.rows) prefetchedEntries.set(found.ubbl_number, found)
       }
     }
+
+    // Warms the resolver caches with ONE batched query per master table instead
+    // of a query per unique value per row — see prefetchResolverCaches's own
+    // header for why this is the dominant cost on a live commit.
+    await prefetchResolverCaches(client, caches, eventId, parsed.rows)
 
     for (const row of parsed.rows) {
       try {

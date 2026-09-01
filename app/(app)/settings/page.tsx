@@ -19,6 +19,7 @@ import {
   type SubDepartmentBudgetRow,
 } from '@/components/settings/sub-department-budget-table'
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { getCachedDepartments, getCachedAdminHeads, getCachedZones, getCachedBudgetHeads } from '@/lib/cache/reference-data'
 
 /**
  * /settings -- folds the former /admin (superadmin-only: Users & Roles,
@@ -326,31 +327,43 @@ export default async function SettingsPage() {
   ])
   const selectedEventId = selectedEvent?.id ?? null
 
-  const [departmentRes, adminHeadRes, zoneRes, budgetHeadRes, subDepartmentRes, superadminData] = await Promise.all([
-    supabase.from('department').select('id, name').eq('is_active', true).order('name'),
-    supabase.from('admin_head').select('id, name, head_number').eq('is_active', true).order('head_number'),
-    supabase.from('zone').select('id, name, zone_number').eq('is_active', true).order('zone_number'),
-    supabase.from('budget_head').select('id, raw_label, short_label').order('raw_label'),
-    supabase.from('sub_department').select('id, name').eq('is_active', true).order('name'),
-    superadmin ? loadSuperadminData(supabase, selectedEventId) : Promise.resolve(null),
-  ])
+  const [departmentData, adminHeadData, zoneData, budgetHeadData, subDepartmentRes, superadminData] =
+    await Promise.all([
+      getCachedDepartments(supabase),
+      getCachedAdminHeads(supabase, staff.userId),
+      getCachedZones(supabase, staff.userId),
+      getCachedBudgetHeads(supabase, staff.userId),
+      supabase.from('sub_department').select('id, name').eq('is_active', true).order('name'),
+      superadmin ? loadSuperadminData(supabase, selectedEventId) : Promise.resolve(null),
+    ])
 
-  const eventDepartmentOptions: MasterOption[] = (departmentRes.data ?? []).map((row) => ({
-    id: row.id,
-    label: row.name,
-  }))
-  const eventAdminHeadOptions: MasterOption[] = (adminHeadRes.data ?? []).map((row) => ({
-    id: row.id,
-    label: `${row.head_number}. ${row.name}`,
-  }))
-  const eventZoneOptions: MasterOption[] = (zoneRes.data ?? []).map((row) => ({
-    id: row.id,
-    label: `${row.zone_number}. ${row.name}`,
-  }))
-  const eventBudgetHeadOptions: MasterOption[] = (budgetHeadRes.data ?? []).map((row) => ({
-    id: row.id,
-    label: row.short_label ?? row.raw_label,
-  }))
+  const eventDepartmentOptions: MasterOption[] = departmentData
+    .filter((row) => row.is_active)
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map((row) => ({
+      id: row.id,
+      label: row.name,
+    }))
+  const eventAdminHeadOptions: MasterOption[] = adminHeadData
+    .filter((row) => row.is_active)
+    .sort((a, b) => a.head_number - b.head_number)
+    .map((row) => ({
+      id: row.id,
+      label: `${row.head_number}. ${row.name}`,
+    }))
+  const eventZoneOptions: MasterOption[] = zoneData
+    .filter((row) => row.is_active)
+    .sort((a, b) => a.zone_number - b.zone_number)
+    .map((row) => ({
+      id: row.id,
+      label: `${row.zone_number}. ${row.name}`,
+    }))
+  const eventBudgetHeadOptions: MasterOption[] = [...budgetHeadData]
+    .sort((a, b) => a.raw_label.localeCompare(b.raw_label))
+    .map((row) => ({
+      id: row.id,
+      label: row.short_label ?? row.raw_label,
+    }))
   const eventSubDepartmentOptions: MasterOption[] = (subDepartmentRes.data ?? []).map((row) => ({
     id: row.id,
     label: row.name,

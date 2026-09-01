@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { Logo } from '@/components/app-shell/logo'
@@ -66,6 +66,25 @@ const NAV_ITEMS = [
   { label: 'Settings', href: '/settings', icon: Settings, adminOnly: true },
 ] as const
 
+// Below this width the expanded (w-56) rail would eat most of a phone
+// viewport, so the rail renders icon-only regardless of the user's saved
+// collapse preference. useSyncExternalStore (not useEffect+useState) so the
+// server snapshot (`false` -- assume desktop) is used for SSR and the first
+// client render, matching how React itself recommends subscribing to
+// browser-only state without a hydration-mismatch warning.
+const NARROW_VIEWPORT_QUERY = '(max-width: 639px)'
+function subscribeToNarrowViewport(onChange: () => void) {
+  const mql = window.matchMedia(NARROW_VIEWPORT_QUERY)
+  mql.addEventListener('change', onChange)
+  return () => mql.removeEventListener('change', onChange)
+}
+function getIsNarrowViewport() {
+  return window.matchMedia(NARROW_VIEWPORT_QUERY).matches
+}
+function getIsNarrowViewportServerSnapshot() {
+  return false
+}
+
 function initialsFor(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean)
   if (parts.length === 0) return '?'
@@ -87,6 +106,15 @@ export function NavRail({
   const [collapsed, setCollapsed] = useState(() =>
     pathname.startsWith('/review') ? true : initialCollapsed
   )
+  const isNarrowViewport = useSyncExternalStore(
+    subscribeToNarrowViewport,
+    getIsNarrowViewport,
+    getIsNarrowViewportServerSnapshot
+  )
+  // Rendering decision only -- the saved cookie preference (`collapsed`
+  // itself) is untouched by viewport width, so widening the window restores
+  // exactly what the user last chose.
+  const effectiveCollapsed = collapsed || isNarrowViewport
 
   const isAdmin = isAdminOrAbove(user.role)
   const isSuperadminUser = isSuperadmin(user.role)
@@ -145,16 +173,16 @@ export function NavRail({
       <nav
         className={cn(
           'sticky top-0 flex h-screen shrink-0 flex-col border-r border-border bg-card transition-[width] duration-200',
-          collapsed ? 'w-14' : 'w-56'
+          effectiveCollapsed ? 'w-14' : 'w-56'
         )}
       >
         <div
           className={cn(
             'flex items-center justify-center border-b border-border',
-            collapsed ? 'px-2 py-6' : 'px-4 py-8'
+            effectiveCollapsed ? 'px-2 py-6' : 'px-4 py-8'
           )}
         >
-          <Logo imageClassName={collapsed ? 'w-9' : 'w-32'} />
+          <Logo imageClassName={effectiveCollapsed ? 'w-9' : 'w-32'} />
         </div>
 
         {/* Collapse/expand handle: docked on the rail's right border, faint
@@ -164,7 +192,7 @@ export function NavRail({
           type="button"
           onClick={toggleCollapsed}
           aria-label={toggleLabel}
-          className="group/edge absolute inset-y-0 -right-[18px] z-10 flex w-9 items-center justify-center"
+          className="group/edge absolute inset-y-0 -right-[18px] z-10 flex w-9 items-center justify-center max-sm:hidden"
         >
           <span className="flex h-7 w-7 items-center justify-center rounded-full border border-border bg-card text-muted-foreground opacity-30 shadow-sm transition-opacity duration-150 group-hover/edge:opacity-100 group-focus-visible/edge:opacity-100">
             {collapsed ? (
@@ -184,19 +212,19 @@ export function NavRail({
                 href={item.href}
                 className={cn(
                   'flex items-center rounded-md py-2 text-sm transition-colors',
-                  collapsed ? 'justify-center px-0' : 'gap-2.5 px-3',
+                  effectiveCollapsed ? 'justify-center px-0' : 'gap-2.5 px-3',
                   isActive
                     ? 'bg-accent font-medium text-accent-foreground shadow-[inset_2px_0_0_hsl(var(--primary))]'
                     : 'text-muted-foreground hover:bg-secondary/60 hover:text-foreground'
                 )}
               >
                 <Icon className="h-4 w-4 shrink-0" strokeWidth={1.75} aria-hidden="true" />
-                <span className={cn('truncate', collapsed && 'sr-only')}>{item.label}</span>
+                <span className={cn('truncate', effectiveCollapsed && 'sr-only')}>{item.label}</span>
               </Link>
             )
             return (
               <li key={item.href}>
-                {collapsed ? (
+                {effectiveCollapsed ? (
                   <Tooltip>
                     <TooltipTrigger asChild>{link}</TooltipTrigger>
                     <TooltipContent side="right">{item.label}</TooltipContent>
@@ -212,7 +240,7 @@ export function NavRail({
         {/* Account footer: one row (avatar, and name/role when expanded)
             that opens a popover for everything else — shortcut hint, theme
             toggle, sign-out — instead of stacking them underneath. */}
-        <div className={cn('border-t border-border', collapsed ? 'p-2' : 'p-3')}>
+        <div className={cn('border-t border-border', effectiveCollapsed ? 'p-2' : 'p-3')}>
           <Popover>
             <PopoverTrigger asChild>
               <button
@@ -220,7 +248,7 @@ export function NavRail({
                 aria-label={`${user.displayName}${user.role ? ` — ${user.role}` : ''}, account menu`}
                 className={cn(
                   'flex w-full items-center rounded-md transition-colors hover:bg-secondary/60',
-                  collapsed ? 'justify-center p-1.5' : 'gap-2.5 p-1.5'
+                  effectiveCollapsed ? 'justify-center p-1.5' : 'gap-2.5 p-1.5'
                 )}
               >
                 <div
@@ -229,7 +257,7 @@ export function NavRail({
                 >
                   {initialsFor(user.displayName)}
                 </div>
-                {!collapsed && (
+                {!effectiveCollapsed && (
                   <>
                     <div className="min-w-0 flex-1 text-left">
                       <p className="truncate text-sm font-medium leading-tight text-foreground">
@@ -246,7 +274,7 @@ export function NavRail({
                 )}
               </button>
             </PopoverTrigger>
-            <PopoverContent side="top" align={collapsed ? 'center' : 'start'} sideOffset={8} className="w-56 p-2">
+            <PopoverContent side="top" align={effectiveCollapsed ? 'center' : 'start'} sideOffset={8} className="w-56 p-2">
               <div className="px-1.5 py-1">
                 <p className="truncate text-sm font-medium text-foreground">{user.displayName}</p>
                 {user.role && (

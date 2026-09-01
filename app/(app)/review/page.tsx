@@ -1,6 +1,6 @@
 import { redirect } from 'next/navigation'
 import { cookies } from 'next/headers'
-import { createClient } from '@/lib/supabase/server'
+import { createClient, getCachedUser } from '@/lib/supabase/server'
 import { getStaffContext } from '@/lib/export/auth'
 import { Card, CardContent } from '@/components/ui/card'
 import { ReviewWorkspace } from '@/components/review/review-workspace'
@@ -24,6 +24,7 @@ import { normalizeVendorName } from '@/lib/normalize'
 import { loadStaffKeymapPreferences } from '@/lib/shortcuts/load'
 import { formatBinding } from '@/lib/shortcuts/config'
 import { getSelectedEventId } from '@/lib/events/current'
+import { getCachedDepartments, getCachedHubStatuses, getCachedAdminHeads, getCachedZones } from '@/lib/cache/reference-data'
 
 /**
  * /review -- Screen 7, the throughput screen (MASTER-PLAN §5 row 7, §7,
@@ -419,9 +420,7 @@ async function loadDocumentDetail(
   documentExtractionId: number,
   selectedEventId: number | null
 ): Promise<ReviewDocumentDetail | null> {
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const user = await getCachedUser()
   if (!user) return null
 
   const [sourceDocRes, extractionRes, lineItemsRes, pagesRes, siblingBillsRes] = await Promise.all([
@@ -480,7 +479,7 @@ async function loadDocumentDetail(
       ? normalizeVendorName(extraction.vendor_name_ocr as string)
       : ''
 
-  const [runRes, entryRes, exceptionsRes, hubStatusRes, matchedRowsRes, candidateEntriesRes, vendorAliasRes] =
+  const [runRes, entryRes, exceptionsRes, hubStatuses, matchedRowsRes, candidateEntriesRes, vendorAliasRes] =
     await Promise.all([
     extraction.current_extraction_run_id
       ? supabase
@@ -507,9 +506,12 @@ async function loadDocumentDetail(
           ? `document_extraction_id.eq.${documentExtractionId},entry_id.eq.${entryId}`
           : `document_extraction_id.eq.${documentExtractionId}`
       ),
-    entryId
-      ? supabase.from('hub_status').select('id, code, label').order('sort_order')
-      : Promise.resolve({ data: [] }),
+    // Perf audit Phase 2: cached hub_status list (lib/cache/reference-data.ts)
+    // instead of a live query. Fetched unconditionally (cheap once warm) and
+    // reused below both for hubStatusOptions (still gated on entryId, same
+    // as before) and the entry's hub-status code lookup just past this
+    // Promise.all -- one fetch instead of two.
+    getCachedHubStatuses(supabase),
     // Match-strip "suggested" state (§7): only meaningful when this bill has
     // no ledger match yet -- same exclusion-pool pattern as
     // app/(app)/documents/page.tsx's rankCandidates usage. Run alongside the
@@ -553,12 +555,15 @@ async function loadDocumentDetail(
   let entryHubStatusCode: string | null = null
   let entryDepartmentName: string | null = null
   if (entry?.department_id) {
-    const { data: dept } = await supabase.from('department').select('name').eq('id', entry.department_id).maybeSingle()
-    entryDepartmentName = (dept?.name as string | undefined) ?? null
+    // Perf audit Phase 2: cached departments list, looked up by id in JS
+    // instead of a live `.eq('id', ...)` query.
+    const departments = await getCachedDepartments(supabase)
+    entryDepartmentName = departments.find((d) => d.id === entry.department_id)?.name ?? null
   }
   if (entry?.hub_status_id) {
-    const { data: hs } = await supabase.from('hub_status').select('code').eq('id', entry.hub_status_id).maybeSingle()
-    entryHubStatusCode = (hs?.code as string | undefined) ?? null
+    // hubStatuses already resolved above (same fetch as hubStatusOptions) --
+    // no second hub_status round trip needed here.
+    entryHubStatusCode = hubStatuses.find((h) => h.id === entry.hub_status_id)?.code ?? null
   }
 
   // Stage 3 (Classify, §8) options, scoped to the matched entry's
@@ -595,20 +600,6 @@ async function loadDocumentDetail(
       ? (activeSubDepartmentIdsRes.data as { sub_department_id: number }[]).map((r) => r.sub_department_id)
       : null
 
-    let adminHeadQuery = supabase
-      .from('admin_head')
-      .select('id, head_number, name')
-      .eq('department_id', entry.department_id)
-      .eq('is_active', true)
-    if (activeAdminHeadIds !== null) adminHeadQuery = adminHeadQuery.in('id', activeAdminHeadIds)
-
-    let zoneQuery = supabase
-      .from('zone')
-      .select('id, zone_number, name')
-      .eq('department_id', entry.department_id)
-      .eq('is_active', true)
-    if (activeZoneIds !== null) zoneQuery = zoneQuery.in('id', activeZoneIds)
-
     let subDepartmentQuery = supabase
       .from('sub_department')
       .select('id, name')
@@ -616,21 +607,35 @@ async function loadDocumentDetail(
       .eq('is_active', true)
     if (activeSubDepartmentIds !== null) subDepartmentQuery = subDepartmentQuery.in('id', activeSubDepartmentIds)
 
-    const [adminHeadsRes, zonesRes, subDepartmentsRes] = await Promise.all([
-      adminHeadQuery.order('head_number'),
-      zoneQuery.order('zone_number'),
+    // Perf audit Phase 2: admin_head/zone come from the per-user cache
+    // (RLS on these two is can_see_department()-gated, hence the userId
+    // cache key -- see lib/cache/reference-data.ts's doc comment). `user` is
+    // already resolved via getCachedUser() at the top of this function, so
+    // it's reused here rather than fetching it again. sub_department stays a
+    // live query -- out of scope for this cache pass.
+    const [cachedAdminHeads, cachedZones, subDepartmentsRes] = await Promise.all([
+      getCachedAdminHeads(supabase, user.id),
+      getCachedZones(supabase, user.id),
       subDepartmentQuery.order('name'),
     ])
-    adminHeadOptions = (adminHeadsRes.data ?? []).map((h) => ({
-      id: h.id as number,
-      head_number: h.head_number as number,
-      name: h.name as string,
-    }))
-    zoneOptions = (zonesRes.data ?? []).map((z) => ({
-      id: z.id as number,
-      zone_number: z.zone_number as number,
-      name: z.name as string,
-    }))
+    adminHeadOptions = cachedAdminHeads
+      .filter(
+        (h) =>
+          h.department_id === entry.department_id &&
+          h.is_active &&
+          (activeAdminHeadIds === null || activeAdminHeadIds.includes(h.id))
+      )
+      .sort((a, b) => a.head_number - b.head_number)
+      .map((h) => ({ id: h.id, head_number: h.head_number, name: h.name }))
+    zoneOptions = cachedZones
+      .filter(
+        (z) =>
+          z.department_id === entry.department_id &&
+          z.is_active &&
+          (activeZoneIds === null || activeZoneIds.includes(z.id))
+      )
+      .sort((a, b) => a.zone_number - b.zone_number)
+      .map((z) => ({ id: z.id, zone_number: z.zone_number, name: z.name }))
     subDepartmentOptions = (subDepartmentsRes.data ?? []).map((s) => ({
       id: s.id as number,
       name: s.name as string,
@@ -674,11 +679,15 @@ async function loadDocumentDetail(
         : { data: [] as { department_id: number }[] }
     const activeDepartmentIds = new Set((eventDepartmentRows ?? []).map((r) => r.department_id as number))
     const departmentIdsToResolve = candidateDepartmentIds.filter((id) => activeDepartmentIds.has(id))
-    const { data: departmentsData } =
-      departmentIdsToResolve.length > 0
-        ? await supabase.from('department').select('id, name').in('id', departmentIdsToResolve)
-        : { data: [] as { id: number; name: string }[] }
-    const departmentNameById = new Map((departmentsData ?? []).map((d) => [d.id as number, d.name as string]))
+    // Perf audit Phase 2: cached departments list, filtered down to the ids
+    // that matter here, instead of a live `.in('id', ...)` query.
+    const departmentsForCandidates =
+      departmentIdsToResolve.length > 0 ? await getCachedDepartments(supabase) : []
+    const departmentNameById = new Map(
+      departmentsForCandidates
+        .filter((d) => departmentIdsToResolve.includes(d.id))
+        .map((d) => [d.id, d.name])
+    )
 
     matchCandidates = rankCandidates(
       {
@@ -858,6 +867,8 @@ async function loadDocumentDetail(
     openExceptions,
     canSetHubStatus: entryId !== null,
     hubStatusCode: entryHubStatusCode,
-    hubStatusOptions: (hubStatusRes.data ?? []).map((h) => ({ id: h.id as number, code: h.code as string, label: h.label as string })),
+    hubStatusOptions: entryId
+      ? hubStatuses.map((h) => ({ id: h.id, code: h.code, label: h.label }))
+      : [],
   }
 }

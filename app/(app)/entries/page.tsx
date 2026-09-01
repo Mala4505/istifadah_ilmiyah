@@ -1,6 +1,16 @@
 import { Suspense } from 'react'
-import { createClient } from '@/lib/supabase/server'
+import { createClient, getCachedUser } from '@/lib/supabase/server'
+import { getCachedStaffProfile } from '@/lib/export/auth'
 import { getSelectedEventId } from '@/lib/events/current'
+import {
+  getCachedDepartments,
+  getCachedCostCenters,
+  getCachedEntryStatuses,
+  getCachedHubStatuses,
+  getCachedAdminHeads,
+  getCachedZones,
+  getCachedBudgetHeads,
+} from '@/lib/cache/reference-data'
 import { EntriesExplorer } from '@/components/entries/entries-explorer'
 import { Skeleton } from '@/components/ui/skeleton'
 import type { FilterOptions } from '@/components/entries/types'
@@ -51,43 +61,44 @@ async function loadEntriesPageData(): Promise<{
   // of docs/event-scoping-and-review-fixes-plan.md §1): a switch to a new
   // event presents its own "clean slate" (§1.1) rather than every master row
   // that has ever existed.
-  const [deptMembership, headMembership, zoneMembership] =
+  //
+  // Perf audit Phase 2: getCachedAdminHeads/getCachedZones/getCachedBudgetHeads
+  // need the current user's id *synchronously* (it's part of their cache
+  // key — see lib/cache/reference-data.ts), so getCachedUser() is resolved
+  // here alongside the membership queries rather than inside the big
+  // Promise.all below. That big Promise.all already waited on this
+  // membership step when an event is selected, so folding the user lookup in
+  // here doesn't add a new serial wait in that case; only the no-event-
+  // selected branch (which previously fired zero queries at this point)
+  // gains one extra parallelized round trip.
+  const [membership, user] = await Promise.all([
     selectedEventId === null
-      ? [{ data: [] as { department_id: number }[] }, { data: [] as { admin_head_id: number }[] }, { data: [] as { zone_id: number }[] }]
-      : await Promise.all([
+      ? Promise.resolve([
+          { data: [] as { department_id: number }[] },
+          { data: [] as { admin_head_id: number }[] },
+          { data: [] as { zone_id: number }[] },
+        ] as const)
+      : Promise.all([
           supabase.from('event_department').select('department_id').eq('event_id', selectedEventId),
           supabase.from('event_admin_head').select('admin_head_id').eq('event_id', selectedEventId),
           supabase.from('event_zone').select('zone_id').eq('event_id', selectedEventId),
-        ])
+        ]),
+    getCachedUser(),
+  ])
+  const [deptMembership, headMembership, zoneMembership] = membership
   const departmentMemberIds = (deptMembership.data ?? []).map((r) => r.department_id)
   const adminHeadMemberIds = (headMembership.data ?? []).map((r) => r.admin_head_id)
   const zoneMemberIds = (zoneMembership.data ?? []).map((r) => r.zone_id)
+  const userId = user?.id ?? null
 
-  const [dept, bh, adminHead, zone, costCenter, status, hub, userRes, statusCountsRes] = await Promise.all([
-    selectedEventId === null
-      ? supabase.from('department').select('id,name').eq('is_active', true).order('name')
-      : supabase.from('department').select('id,name').eq('is_active', true).in('id', departmentMemberIds).order('name'),
-    supabase.from('budget_head').select('id,raw_label,short_label,department_id').order('raw_label'),
-    selectedEventId === null
-      ? supabase.from('admin_head').select('id,name,head_number,department_id').eq('is_active', true).order('head_number')
-      : supabase
-          .from('admin_head')
-          .select('id,name,head_number,department_id')
-          .eq('is_active', true)
-          .in('id', adminHeadMemberIds)
-          .order('head_number'),
-    selectedEventId === null
-      ? supabase.from('zone').select('id,name,zone_number,department_id').eq('is_active', true).order('zone_number')
-      : supabase
-          .from('zone')
-          .select('id,name,zone_number,department_id')
-          .eq('is_active', true)
-          .in('id', zoneMemberIds)
-          .order('zone_number'),
-    supabase.from('cost_center').select('id,name').order('name'),
-    supabase.from('entry_status').select('id,code,label,source_system').order('sort_order'),
-    supabase.from('hub_status').select('id,code,label').order('sort_order'),
-    supabase.auth.getUser(),
+  const [departmentRows, bhRows, adminHeadRows, zoneRows, costCenterRows, statusRows, hubRows, statusCountsRes] = await Promise.all([
+    getCachedDepartments(supabase),
+    getCachedBudgetHeads(supabase, userId),
+    getCachedAdminHeads(supabase, userId),
+    getCachedZones(supabase, userId),
+    getCachedCostCenters(supabase),
+    getCachedEntryStatuses(supabase),
+    getCachedHubStatuses(supabase),
     // Status-count chips (docs/hub-screen-certification.md §3.7). Event-scoped
     // the same way app/(app)/page.tsx scopes this view — a plain
     // `.eq('event_id', ...)`, since v_entry_status_counts.event_id resolves
@@ -99,25 +110,41 @@ async function loadEntriesPageData(): Promise<{
       .returns<EntryStatusCountRow[]>(),
   ])
 
+  // The cached fetchers return the FULL table (active + inactive, every
+  // department) — is_active / event-membership filtering that used to be a
+  // Postgres predicate now happens here in JS instead, see
+  // lib/cache/reference-data.ts's file header for why.
+  const dept = departmentRows
+    .filter((d) => d.is_active)
+    .filter((d) => selectedEventId === null || departmentMemberIds.includes(d.id))
+    .sort((a, b) => a.name.localeCompare(b.name))
+  const adminHead = adminHeadRows
+    .filter((h) => h.is_active)
+    .filter((h) => selectedEventId === null || adminHeadMemberIds.includes(h.id))
+    .sort((a, b) => a.head_number - b.head_number)
+  const zone = zoneRows
+    .filter((z) => z.is_active)
+    .filter((z) => selectedEventId === null || zoneMemberIds.includes(z.id))
+    .sort((a, b) => a.zone_number - b.zone_number)
+
   const options: FilterOptions = {
-    departments: (dept.data ?? []).map((d) => ({ id: d.id, label: d.name })),
-    budgetHeads: (bh.data ?? []).map((b) => ({
+    departments: dept.map((d) => ({ id: d.id, label: d.name })),
+    budgetHeads: bhRows.map((b) => ({
       id: b.id,
       label: b.short_label ?? b.raw_label,
       department_id: b.department_id,
     })),
-    adminHeads: (adminHead.data ?? []).map((h) => ({ id: h.id, label: `${h.head_number}. ${h.name}`, department_id: h.department_id })),
-    zones: (zone.data ?? []).map((z) => ({ id: z.id, label: `${z.zone_number}. ${z.name}`, department_id: z.department_id })),
-    costCenters: (costCenter.data ?? []).map((c) => ({ id: c.id, label: c.name })),
-    statuses: (status.data ?? []).map((s) => ({ id: s.id, label: s.label, code: s.code })),
-    hubStatuses: (hub.data ?? []).map((h) => ({ id: h.id, label: h.label, code: h.code })),
+    adminHeads: adminHead.map((h) => ({ id: h.id, label: `${h.head_number}. ${h.name}`, department_id: h.department_id })),
+    zones: zone.map((z) => ({ id: z.id, label: `${z.zone_number}. ${z.name}`, department_id: z.department_id })),
+    costCenters: costCenterRows.map((c) => ({ id: c.id, label: c.name })),
+    statuses: statusRows.map((s) => ({ id: s.id, label: s.label, code: s.code })),
+    hubStatuses: hubRows.map((h) => ({ id: h.id, label: h.label, code: h.code })),
   }
 
   let role: StaffRole | null = null
   let ownDepartmentIds: number[] = []
-  const user = userRes.data.user
   if (user) {
-    const { data: profile } = await supabase.from('staff_profile').select('role').eq('id', user.id).maybeSingle()
+    const profile = await getCachedStaffProfile(user.id)
     // department_id no longer lives on staff_profile (20260819000003) — a
     // dept account may now hold several departments via staff_department.
     const { data: deptRows } =

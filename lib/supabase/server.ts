@@ -1,5 +1,6 @@
 import { createServerClient, type CookieOptions } from '@supabase/ssr'
 import { cookies } from 'next/headers'
+import { cache } from 'react'
 import { publicEnv } from '@/lib/env'
 
 /**
@@ -38,3 +39,24 @@ export async function createClient() {
     }
   )
 }
+
+/**
+ * Perf audit Phase 1.1 (docs/perf-ux-audit-checklist.md): every layout, page,
+ * and `getStaffContext()` call used to run its own `supabase.auth.getUser()`
+ * — 3-4 redundant round-trips per navigation, traced on `/entries/[id]` and
+ * `/review`. React's `cache()` de-dupes calls within one request by identity
+ * of this function + its (here, absent) arguments, so every caller below
+ * this one in the same render gets the first call's answer instead of
+ * issuing its own. Takes no `supabase` client argument on purpose — each
+ * caller still creates its own client for its own queries, but a fresh
+ * `createClient()` call is cheap (no I/O); only `auth.getUser()` itself was
+ * the redundant network round trip. Does NOT cover `middleware.ts`, which
+ * runs in a separate Edge-runtime request lifecycle (see checklist note).
+ */
+export const getCachedUser = cache(async () => {
+  const supabase = await createClient()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+  return user
+})

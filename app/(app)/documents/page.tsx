@@ -10,6 +10,7 @@ import type { LookupOption } from '@/components/entries/types'
 import { isAdminOrAbove, isSuperadmin } from '@/lib/auth/roles'
 import { getSelectedEventId } from '@/lib/events/current'
 import { getDocumentAssignees, listAssignableStaff, type AssignableStaff } from '@/lib/assignment/queries'
+import { getCachedAdminHeads, getCachedZones, getCachedCostCenters } from '@/lib/cache/reference-data'
 
 /** A stalled queue is "the oldest queued job has been waiting longer than this" (checklist 2.15, D8) — long enough that a normal extraction backlog doesn't false-positive. */
 const STALLED_QUEUE_THRESHOLD_MS = 10 * 60 * 1000
@@ -219,32 +220,28 @@ export default async function DocumentsPage({
   // membership, on top of the pre-existing is_active flag -- a head/zone
   // retired from THIS event's carry-forward shouldn't appear even if its
   // own is_active flag (a separate, master-level concept) is still true.
-  const [adminHeadLookupResult, zoneLookupResult, costCenterLookupResult] = await Promise.all([
-    supabase
-      .from('admin_head')
-      .select('id, department_id, head_number, name')
-      .eq('is_active', true)
-      .in('id', activeAdminHeadIds)
-      .order('head_number'),
-    supabase
-      .from('zone')
-      .select('id, department_id, zone_number, name')
-      .eq('is_active', true)
-      .in('id', activeZoneIds)
-      .order('zone_number'),
-    supabase.from('cost_center').select('id, name').order('name'),
+  const [adminHeadLookupData, zoneLookupData, costCenterLookupData] = await Promise.all([
+    getCachedAdminHeads(supabase, staff.userId),
+    getCachedZones(supabase, staff.userId),
+    getCachedCostCenters(supabase),
   ])
-  const adminHeadOptions: LookupOption[] = (adminHeadLookupResult.data ?? []).map((h) => ({
-    id: h.id,
-    label: `${h.head_number}. ${h.name}`,
-    department_id: h.department_id,
-  }))
-  const zoneOptions: LookupOption[] = (zoneLookupResult.data ?? []).map((z) => ({
-    id: z.id,
-    label: `${z.zone_number}. ${z.name}`,
-    department_id: z.department_id,
-  }))
-  const costCenterOptions: LookupOption[] = (costCenterLookupResult.data ?? []).map((c) => ({
+  const adminHeadOptions: LookupOption[] = adminHeadLookupData
+    .filter((h) => h.is_active && activeAdminHeadIds.includes(h.id))
+    .sort((a, b) => a.head_number - b.head_number)
+    .map((h) => ({
+      id: h.id,
+      label: `${h.head_number}. ${h.name}`,
+      department_id: h.department_id,
+    }))
+  const zoneOptions: LookupOption[] = zoneLookupData
+    .filter((z) => z.is_active && activeZoneIds.includes(z.id))
+    .sort((a, b) => a.zone_number - b.zone_number)
+    .map((z) => ({
+      id: z.id,
+      label: `${z.zone_number}. ${z.name}`,
+      department_id: z.department_id,
+    }))
+  const costCenterOptions: LookupOption[] = costCenterLookupData.map((c) => ({
     id: c.id,
     label: c.name,
   }))

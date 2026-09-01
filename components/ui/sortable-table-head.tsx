@@ -49,7 +49,7 @@ export function SortableTableHead<K extends string>({
       <button
         type="button"
         className={cn(
-          'inline-flex select-none items-center gap-1 rounded-sm hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+          '-m-2 inline-flex select-none items-center gap-1 rounded-sm p-2 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
           align === 'right' && 'flex-row-reverse'
         )}
         onClick={() => onSort(columnKey)}

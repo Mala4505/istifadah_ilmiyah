@@ -26,10 +26,16 @@ import type {
   HubStatusOption,
   ZoneOption,
 } from '@/components/entries/detail/types'
-import { createClient } from '@/lib/supabase/server'
+import { createClient, getCachedUser } from '@/lib/supabase/server'
 import { getSelectedEventId } from '@/lib/events/current'
 import { getStaffContext } from '@/lib/export/auth'
 import { isAdminOrAbove } from '@/lib/auth/roles'
+import {
+  getCachedAdminHeads,
+  getCachedZones,
+  getCachedCostCenters,
+  getCachedHubStatuses,
+} from '@/lib/cache/reference-data'
 
 export const dynamic = 'force-dynamic'
 
@@ -52,9 +58,7 @@ export default async function EntryDetailPage({
   // membership tables, same as the entries list explorer.
   const selectedEventId = await getSelectedEventId(supabase)
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const user = await getCachedUser()
 
   // §3.3 — resolving an exception/flag from this page's Issues card is
   // gated the same way the /exceptions queue gates it (isAdminOrAbove);
@@ -94,10 +98,10 @@ export default async function EntryDetailPage({
   // still subject to RLS on the underlying tables (20260808000026), so a
   // department-scoped reviewer only ever sees what they're allowed to.
   const [
-    adminHeadsResult,
-    zonesResult,
-    costCentersResult,
-    hubStatusResult,
+    cachedAdminHeads,
+    cachedZones,
+    cachedCostCenters,
+    cachedHubStatuses,
     changeLogResult,
     entryCoreResult,
     vendorResult,
@@ -105,24 +109,10 @@ export default async function EntryDetailPage({
     adminHeadMembershipResult,
     zoneMembershipResult,
   ] = await Promise.all([
-    entry.department_id
-      ? supabase
-          .from('admin_head')
-          .select('id, head_number, name')
-          .eq('department_id', entry.department_id)
-          .eq('is_active', true)
-          .order('head_number')
-      : Promise.resolve({ data: [], error: null }),
-    entry.department_id
-      ? supabase
-          .from('zone')
-          .select('id, zone_number, name')
-          .eq('department_id', entry.department_id)
-          .eq('is_active', true)
-          .order('zone_number')
-      : Promise.resolve({ data: [], error: null }),
-    supabase.from('cost_center').select('id, name').order('name'),
-    supabase.from('hub_status').select('id, code, label, sort_order, is_exportable').order('sort_order'),
+    getCachedAdminHeads(supabase, user?.id ?? null),
+    getCachedZones(supabase, user?.id ?? null),
+    getCachedCostCenters(supabase),
+    getCachedHubStatuses(supabase),
     supabase
       .from('entry_change_log')
       .select('id, entry_id, changed_by, changed_at, source, changes')
@@ -153,14 +143,32 @@ export default async function EntryDetailPage({
   // silently emptying every dropdown.
   const adminHeadMemberIds = new Set((adminHeadMembershipResult.data ?? []).map((r) => r.admin_head_id as number))
   const zoneMemberIds = new Set((zoneMembershipResult.data ?? []).map((r) => r.zone_id as number))
-  const adminHeadOptions = (adminHeadsResult.data ?? []).filter(
-    (h) => selectedEventId === null || adminHeadMemberIds.has(h.id as number)
-  ) as AdminHeadOption[]
-  const zoneOptions = (zonesResult.data ?? []).filter(
-    (z) => selectedEventId === null || zoneMemberIds.has(z.id as number)
-  ) as ZoneOption[]
-  const costCenterOptions = (costCentersResult.data ?? []) as CostCenterOption[]
-  const hubStatusOptions = (hubStatusResult.data ?? []) as HubStatusOption[]
+  // The cached fetchers return the full org-wide table (every department,
+  // active and inactive) — reproduce this page's original per-department,
+  // active-only query semantics as JS filters, same as before caching
+  // (lib/cache/reference-data.ts). department_id === null (entry not tied to
+  // a department) still yields an empty array, matching the old
+  // Promise.resolve({ data: [], error: null }) short-circuit.
+  const scopedAdminHeads =
+    entry.department_id === null
+      ? []
+      : cachedAdminHeads
+          .filter((h) => h.is_active && h.department_id === entry.department_id)
+          .sort((a, b) => a.head_number - b.head_number)
+  const scopedZones =
+    entry.department_id === null
+      ? []
+      : cachedZones
+          .filter((z) => z.is_active && z.department_id === entry.department_id)
+          .sort((a, b) => a.zone_number - b.zone_number)
+  const adminHeadOptions = scopedAdminHeads
+    .filter((h) => selectedEventId === null || adminHeadMemberIds.has(h.id))
+    .map((h): AdminHeadOption => ({ id: h.id, head_number: h.head_number, name: h.name }))
+  const zoneOptions = scopedZones
+    .filter((z) => selectedEventId === null || zoneMemberIds.has(z.id))
+    .map((z): ZoneOption => ({ id: z.id, zone_number: z.zone_number, name: z.name }))
+  const costCenterOptions = cachedCostCenters as CostCenterOption[]
+  const hubStatusOptions = cachedHubStatuses as HubStatusOption[]
   const changeLogRows = (changeLogResult.data ?? []) as ChangeLogRow[]
   const budgetHeadRaw = (entryCoreResult.data as { budget_head_raw: string | null } | null)
     ?.budget_head_raw ?? null

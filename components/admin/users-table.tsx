@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { updateStaffProfile } from '@/lib/actions/admin'
 import { DepartmentPicker } from '@/components/admin/department-picker'
+import { ResetPasswordDialog } from '@/components/admin/reset-password-dialog'
 
 export type StaffRow = {
   id: string
@@ -62,7 +63,7 @@ export function UsersTable({
           <TableHead>Role</TableHead>
           <TableHead>Department</TableHead>
           <TableHead>Active</TableHead>
-          <TableHead className="text-right">Save</TableHead>
+          <TableHead className="text-right">Actions</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -175,9 +176,12 @@ function UserRow({
         <Checkbox checked={isActive} onCheckedChange={(value) => setIsActive(value === true)} />
       </TableCell>
       <TableCell className="text-right">
-        <Button size="sm" disabled={!isDirty || isPending} onClick={handleSave}>
-          {isPending ? 'Saving…' : 'Save'}
-        </Button>
+        <div className="flex items-center justify-end gap-2">
+          <ResetPasswordDialog staffId={row.id} displayName={row.displayName} />
+          <Button size="sm" disabled={!isDirty || isPending} onClick={handleSave}>
+            {isPending ? 'Saving…' : 'Save'}
+          </Button>
+        </div>
       </TableCell>
     </TableRow>
   )
