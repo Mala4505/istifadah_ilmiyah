@@ -95,7 +95,6 @@ export interface CachedEntryStatus {
   id: number
   code: string
   label: string
-  source_system: string
 }
 
 export interface CachedHubStatus {
@@ -141,7 +140,7 @@ export function getCachedEntryStatuses(supabase: SupabaseClient): Promise<Cached
     async () => {
       const { data } = await supabase
         .from('entry_status')
-        .select('id,code,label,source_system')
+        .select('id,code,label')
         .order('sort_order')
       return (data ?? []) as CachedEntryStatus[]
     },

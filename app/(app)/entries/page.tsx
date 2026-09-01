@@ -19,7 +19,7 @@ import type { EntryStatusCount } from '@/components/entries/status-count-chips'
 import type { StaffRole } from '@/lib/auth/roles'
 
 type EntryStatusCountRow = {
-  dimension: 'status' | 'hub_status'
+  dimension: 'status' | 'hub_status' | 'type'
   status_id: number | null
   status_code: string
   status_label: string
@@ -50,6 +50,7 @@ async function loadEntriesPageData(): Promise<{
   options: FilterOptions
   role: StaffRole | null
   ownDepartmentIds: number[]
+  typeCounts: EntryStatusCount[]
   statusCounts: EntryStatusCount[]
   hubStatusCounts: EntryStatusCount[]
 }> {
@@ -159,23 +160,30 @@ async function loadEntriesPageData(): Promise<{
   }
 
   const statusCountRows = statusCountsRes.data ?? []
-  const toStatusCounts = (dimension: EntryStatusCountRow['dimension']): EntryStatusCount[] =>
+  // `type` has no numeric id (entries.type is a CHECK-constrained text
+  // column, not an FK) -- its code is what `/entries` filters on, so its
+  // chips carry `status_code` as `id` instead of the (always-null) status_id.
+  const toStatusCounts = (
+    dimension: EntryStatusCountRow['dimension'],
+    idField: 'status_id' | 'status_code' = 'status_id'
+  ): EntryStatusCount[] =>
     statusCountRows
       .filter((r) => r.dimension === dimension)
       .sort((a, b) => a.sort_order - b.sort_order)
-      .map((r) => ({ id: r.status_id, code: r.status_code, label: r.status_label, count: r.entry_count }))
+      .map((r) => ({ id: r[idField], code: r.status_code, label: r.status_label, count: r.entry_count }))
 
   return {
     options,
     role,
     ownDepartmentIds,
+    typeCounts: toStatusCounts('type', 'status_code'),
     statusCounts: toStatusCounts('status'),
     hubStatusCounts: toStatusCounts('hub_status'),
   }
 }
 
 export default async function EntriesPage() {
-  const { options, role, ownDepartmentIds, statusCounts, hubStatusCounts } = await loadEntriesPageData()
+  const { options, role, ownDepartmentIds, typeCounts, statusCounts, hubStatusCounts } = await loadEntriesPageData()
 
   return (
     <Suspense fallback={<EntriesPageSkeleton />}>
@@ -183,6 +191,7 @@ export default async function EntriesPage() {
         initialOptions={options}
         initialRole={role}
         initialOwnDepartmentIds={ownDepartmentIds}
+        typeCounts={typeCounts}
         statusCounts={statusCounts}
         hubStatusCounts={hubStatusCounts}
       />

@@ -6,8 +6,10 @@ import { formatNumber } from '@/lib/reports/format'
 import { statusBadgeVariant } from '@/lib/status-badge'
 
 export type EntryStatusCount = {
-  /** null for the synthetic "not set" bucket — nothing to filter `/entries` on. */
-  id: number | null
+  /** null for the synthetic "not set" bucket — nothing to filter `/entries` on.
+   *  string for the `type` dimension, which has no numeric id — its code
+   *  itself (e.g. "invoice") is what `/entries` filters on. */
+  id: number | string | null
   code: string
   label: string
   count: number
@@ -21,24 +23,36 @@ export type EntryStatusCount = {
  * currently-applied value reads as selected.
  */
 export function StatusCountChips({
+  typeCounts,
   statusCounts,
   hubStatusCounts,
+  activeType,
   activeStatus,
   activeHubStatus,
+  onSelectType,
   onSelectStatus,
   onSelectHubStatus,
 }: {
+  typeCounts: EntryStatusCount[]
   statusCounts: EntryStatusCount[]
   hubStatusCounts: EntryStatusCount[]
+  activeType: string
   activeStatus: string
   activeHubStatus: string
+  onSelectType: (id: string) => void
   onSelectStatus: (id: string) => void
   onSelectHubStatus: (id: string) => void
 }) {
-  if (statusCounts.length === 0 && hubStatusCounts.length === 0) return null
+  if (typeCounts.length === 0 && statusCounts.length === 0 && hubStatusCounts.length === 0) return null
 
   return (
     <div className="flex flex-col gap-2 rounded-lg border border-border bg-card p-2.5 text-xs">
+      <ChipGroup
+        label="Type"
+        rows={typeCounts}
+        active={activeType}
+        onSelect={onSelectType}
+      />
       <ChipGroup
         label="Status"
         rows={statusCounts}

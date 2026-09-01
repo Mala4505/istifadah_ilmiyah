@@ -144,12 +144,14 @@ export function EntriesExplorer({
   initialOptions,
   initialRole,
   initialOwnDepartmentIds,
+  typeCounts,
   statusCounts,
   hubStatusCounts,
 }: {
   initialOptions: FilterOptions
   initialRole: StaffRole | null
   initialOwnDepartmentIds: number[]
+  typeCounts: EntryStatusCount[]
   statusCounts: EntryStatusCount[]
   hubStatusCounts: EntryStatusCount[]
 }) {
@@ -485,10 +487,13 @@ export function EntriesExplorer({
           <FilterBar filters={filters} options={options} onChange={handleFilterChange} />
 
           <StatusCountChips
+            typeCounts={typeCounts}
             statusCounts={statusCounts}
             hubStatusCounts={hubStatusCounts}
+            activeType={filters.type}
             activeStatus={filters.status}
             activeHubStatus={filters.hubStatus}
+            onSelectType={(id) => handleFilterChange({ type: id })}
             onSelectStatus={(id) => handleFilterChange({ status: id })}
             onSelectHubStatus={(id) => handleFilterChange({ hubStatus: id })}
           />
