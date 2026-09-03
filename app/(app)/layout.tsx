@@ -25,15 +25,21 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
   return (
     <div className="flex min-h-screen bg-background">
-      <NavRail
-        user={{
-          displayName: profile?.display_name ?? user.email ?? 'Staff',
-          role: profile?.role ?? null,
-          itsNumber: profile?.its_number ?? null,
-        }}
-        initialCollapsed={initialCollapsed}
-      />
-      <main className="min-w-0 flex-1 p-3 sm:p-6">{children}</main>
+      {/* display:contents keeps this wrapper out of the flex box tree so
+          <nav> (which carries shrink-0) is still the direct flex item --
+          purely a hook for the data-app-nav-rail selector below, not a
+          layout participant. */}
+      <div data-app-nav-rail className="contents">
+        <NavRail
+          user={{
+            displayName: profile?.display_name ?? user.email ?? 'Staff',
+            role: profile?.role ?? null,
+            itsNumber: profile?.its_number ?? null,
+          }}
+          initialCollapsed={initialCollapsed}
+        />
+      </div>
+      <main className="min-w-0 flex-1 p-3 sm:p-6" data-app-main>{children}</main>
       <CommandPalette />
     </div>
   )

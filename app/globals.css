@@ -75,3 +75,37 @@
     @apply font-display;
   }
 }
+
+/* Present mode (reporting-blueprint.md §5): a full-screen, large-type,
+   no-navigation rendering of a report for a projector. Toggled by
+   components/reports/present-mode-toggle.tsx setting
+   `data-present-mode="true"` on <body> -- every rule here stays scoped
+   under that selector so normal (non-present) rendering is untouched. */
+body[data-present-mode='true'] {
+  /* Large-type per the blueprint's ask. This codebase's Tailwind text
+     utilities (text-sm, text-xs, etc.) are rem-based, so raising the root
+     font-size scales all of them proportionally -- no second mechanism
+     needed. */
+  font-size: 1.25rem;
+}
+
+/* Hide the app's left nav rail -- data-app-nav-rail is set on the wrapper
+   around <NavRail /> in app/(app)/layout.tsx. */
+body[data-present-mode='true'] [data-app-nav-rail] {
+  display: none;
+}
+
+/* Let the main content area go full-bleed. Tailwind's `p-3 sm:p-6` utility
+   classes on <main> outrank a plain `padding: 0` on specificity, so
+   `!important` is used deliberately here -- a narrowly-scoped presentation
+   override, not a general pattern to reach for. */
+body[data-present-mode='true'] [data-app-main] {
+  padding: 0 !important;
+}
+
+/* Escape hatch for any future page to hide a piece of in-page chrome while
+   presenting, keyed off a data attribute rather than a class to match the
+   attribute-selector style above. */
+body[data-present-mode='true'] [data-hide-in-present] {
+  display: none;
+}

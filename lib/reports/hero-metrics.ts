@@ -38,7 +38,7 @@ type OpenIssueAmountRow = {
   created_at: string
 }
 
-type EntryRow = {
+export type EntryRow = {
   id: number
   amount: number | null
   date: string | null
@@ -61,7 +61,7 @@ type BudgetApprovedRow = {
   approved_amount: number | null
 }
 
-type EventDatesRow = {
+export type EventDatesRow = {
   starts_on: string | null
   ends_on: string | null
 }
@@ -175,7 +175,7 @@ function bucketWeekly<T, R>(
  *    event has no dates at all, so an event with real dates always plots its
  *    full official span even before spend has started.
  */
-function computeSpendTrend(
+export function computeSpendTrend(
   entryRows: EntryRow[],
   eventDates: EventDatesRow | null,
   approvedBudgetTotal: number | null
@@ -221,6 +221,37 @@ function computeSpendTrend(
       target: hasTarget ? round2(perWeekTarget * (i + 1)) : null,
     }
   })
+}
+
+/**
+ * A-03 (reporting-blueprint.md §3, Family A) "at the current run rate, where
+ * does this land?" — linear extrapolation of `actualToDate` across the full
+ * event window, distinct from computeSpendTrend's target line above (which
+ * models an even pace against the *budget*, not a projection from *actual*
+ * spend). Exported so lib/reports/executive-brief.ts can call this at both
+ * the whole-event grain (Brief's A-03 chart annotation) and the per-department
+ * grain (E-01's "projected landing" column), rather than duplicating the
+ * date math per caller.
+ *
+ * Returns null — never a guessed number — when the event's start/end dates
+ * aren't both known, or when `referenceDate` falls at or before `starts_on`
+ * (an event that hasn't started yet has no run rate to extrapolate from).
+ * `fractionElapsed` is clamped to 1 once the event has ended, at which point
+ * `projectedTotal` is just `actualToDate` itself.
+ */
+export function computeProjectedLanding(
+  actualToDate: number,
+  eventDates: EventDatesRow | null,
+  referenceDate: Date = new Date()
+): { fractionElapsed: number; projectedTotal: number } | null {
+  if (!eventDates?.starts_on || !eventDates?.ends_on) return null
+  const start = new Date(eventDates.starts_on).getTime()
+  const end = new Date(eventDates.ends_on).getTime()
+  if (!(end > start)) return null
+  const now = referenceDate.getTime()
+  if (now <= start) return null
+  const fractionElapsed = Math.min(1, (now - start) / (end - start))
+  return { fractionElapsed, projectedTotal: actualToDate / fractionElapsed }
 }
 
 export async function loadHeroMetrics(eventId: number | null): Promise<HeroMetrics> {
