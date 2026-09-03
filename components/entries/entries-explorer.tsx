@@ -106,6 +106,10 @@ function sortsEqual(a: EntriesSort, b: EntriesSort): boolean {
   return a.column === b.column && a.direction === b.direction
 }
 
+function filtersEqual(a: EntriesFilters, b: EntriesFilters): boolean {
+  return (Object.keys(a) as (keyof EntriesFilters)[]).every((k) => a[k] === b[k])
+}
+
 /** True when `next` differs from `prev` only in the free-text vendor field —
  * the one input that should debounce (§4.7). */
 function onlyVendorChanged(prev: EntriesFilters, next: EntriesFilters): boolean {
@@ -258,6 +262,14 @@ export function EntriesExplorer({
     }
 
     const vendorOnly = sortsEqual(prev.sort, sort) && onlyVendorChanged(prev.filters, filters)
+    // The stale-rows-while-refetching dim treatment (§4.10) is only honest
+    // when the row *set* is still valid -- a pure sort change re-orders the
+    // same matches, so the old rows stay dimmed and visible. A filter change
+    // (vendor included) makes the currently-shown rows a different, no-longer-
+    // matching set; leaving them up (even dimmed) reads as "the table
+    // unfiltered itself" for a beat before the real results land. Clear them
+    // up front so a filter change goes to the empty-state skeleton instead.
+    const filtersChanged = !filtersEqual(prev.filters, filters)
 
     const writeUrl = () => {
       if (skipUrlWriteRef.current) {
@@ -273,12 +285,14 @@ export function EntriesExplorer({
     if (vendorOnly) {
       const t = setTimeout(() => {
         writeUrl()
+        if (filtersChanged) setPages([])
         void loadFirstPage(filters, sort, pageSize)
       }, 300)
       return () => clearTimeout(t)
     }
 
     writeUrl()
+    if (filtersChanged) setPages([])
     void loadFirstPage(filters, sort, pageSize)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filters, sort])
