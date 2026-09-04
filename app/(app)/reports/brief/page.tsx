@@ -1,8 +1,11 @@
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
 import { getSelectedEvent } from '@/lib/events/current'
+import { getCompareBasis } from '@/lib/reports/compare-basis'
 import { loadHeroMetrics } from '@/lib/reports/hero-metrics'
 import { loadExecutiveBrief, type DepartmentLeagueRow, type NeedsDecisionRow } from '@/lib/reports/executive-brief'
+import { loadWeeklyDigest } from '@/lib/reports/weekly-digest'
+import { loadRupeeProvenance } from '@/lib/reports/surfaces/rupee-provenance'
 import { KpiTile } from '@/components/reports/charts/kpi-tile'
 import { TrendChart } from '@/components/reports/charts/trend-chart'
 import { AttentionMapChart, type AttentionMapPoint } from '@/components/reports/charts/attention-map-chart'
@@ -12,7 +15,11 @@ import { DataTable, type DataTableColumn } from '@/components/reports/data-table
 import { SeverityBadge } from '@/components/reports/severity-badge'
 import { ExportCsvButton } from '@/components/reports/export-csv-button'
 import { PresentModeToggle } from '@/components/reports/present-mode-toggle'
+import { WeeklyDigestSection } from '@/components/reports/sections/weekly-digest'
+import { RupeeProvenanceSection } from '@/components/reports/sections/rupee-provenance'
+import { BoardPackList } from '@/components/reports/sections/board-pack-list'
 import { toCsv, type CsvColumn } from '@/lib/reports/csv'
+import { parsePositiveIntParam } from '@/lib/reports/search-params'
 import { formatINRCompact, formatPercent, humanizeCode } from '@/lib/reports/format'
 
 // Executive Brief -- reporting-blueprint.md §5 (Screen architecture) and §8
@@ -35,17 +42,30 @@ import { formatINRCompact, formatPercent, humanizeCode } from '@/lib/reports/for
 //      off-screen).
 export const dynamic = 'force-dynamic'
 
-export default async function ExecutiveBriefPage() {
+export default async function ExecutiveBriefPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ trace_entry_id?: string }>
+}) {
   const supabase = await createClient()
   const selectedEvent = await getSelectedEvent(supabase)
   const eventId = selectedEvent?.id ?? null
+  const compareBasis = await getCompareBasis()
+  const sp = await searchParams
+  const traceEntryId = parsePositiveIntParam(sp.trace_entry_id)
 
   // Sequential, not Promise.all: loadExecutiveBrief reuses loadHeroMetrics's
   // already-computed totalSpend/openAmountAtRisk (both loaders' own internal
   // queries stay fully parallel via their own Promise.all) rather than
   // re-querying `entries`/`v_open_issues` a second time for the same figures.
   const hero = await loadHeroMetrics(eventId)
-  const brief = await loadExecutiveBrief(eventId, hero.kpi.totalSpend, hero.kpi.openAmountAtRisk)
+  const [brief, weeklyDigest, provenance] = await Promise.all([
+    loadExecutiveBrief(eventId, hero.kpi.totalSpend, hero.kpi.openAmountAtRisk),
+    loadWeeklyDigest(eventId),
+    loadRupeeProvenance(compareBasis, traceEntryId),
+  ])
+
+  const digestErrorText = Object.values(weeklyDigest.errors).find((e): e is string => e != null) ?? null
 
   const spendTrendPoints = hero.spendTrend.map((p) => ({ label: p.weekLabel, actual: p.actual, target: p.target }))
 
@@ -159,6 +179,14 @@ export default async function ExecutiveBriefPage() {
         </ReportSection>
       )}
 
+      {/* Band 2b -- E-04 weekly digest: the ten things most worth attention
+          this week, ranked by rupees, each a plain sentence with an owner. */}
+      <WeeklyDigestSection
+        items={weeklyDigest.items}
+        hasError={digestErrorText != null}
+        errorText={digestErrorText}
+      />
+
       {/* Band 3 -- two charts */}
       <div className="grid gap-4 lg:grid-cols-2">
         <ReportSection
@@ -226,6 +254,20 @@ export default async function ExecutiveBriefPage() {
           )}
         </ReportSection>
       </div>
+
+      {/* Band 4b -- E-05 rupee provenance trace: pick any rupee and follow it
+          budget head -> allocation -> entry -> bill -> line item -> family ->
+          benchmark. Keyed on ?trace_entry_id= in the URL. */}
+      <RupeeProvenanceSection
+        candidates={provenance.candidates}
+        candidatesError={provenance.candidatesError}
+        chain={provenance.chain}
+        traceEntryId={provenance.traceEntryId}
+      />
+
+      {/* Band 4c -- the board pack: this Brief frozen to a workbook + PDF on a
+          weekly schedule (blueprint §5). */}
+      <BoardPackList />
 
       {/* Band 5 -- footer */}
       <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-3 text-xs text-muted-foreground" data-hide-in-present>

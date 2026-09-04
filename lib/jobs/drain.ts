@@ -45,6 +45,13 @@ async function dispatch(job: JobQueueRow): Promise<'handled' | 'skipped'> {
       await handler(job)
       return 'handled'
     }
+    case 'board_pack': {
+      const { default: handler } = (await import('@/lib/jobs/handlers/board-pack')) as {
+        default: JobHandler
+      }
+      await handler(job)
+      return 'handled'
+    }
     default:
       // No handler wired yet (generate_export, rasterize_retry) — left
       // running for sweepJobQueue() to reclaim once stale, same reasoning as

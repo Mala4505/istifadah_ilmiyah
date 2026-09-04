@@ -249,6 +249,249 @@ export type AmountAtRiskByStatusRow = {
   amount_at_risk: number
 }
 
+// ---------------------------------------------------------------------------
+// Phase Five views (reporting-blueprint.md §8 Phase Five: the rest of the
+// line-item family C-02/C-05..C-08, and the vendor family B-02..B-09). Row
+// shapes for the views added in 20260903000003..20260903000008. Each surface
+// loader (lib/reports/surfaces/{purchase-tree,rate-drift-discount,
+// quantity-zone-price,vendor-scorecard,vendor-dependency,related-party-gstin}.ts)
+// imports and re-exports its own subset from here, so existing imports of
+// these types from the loader files keep working unchanged.
+// ---------------------------------------------------------------------------
+
+/** C-02 -- one row per rate_reference observation with a resolvable
+ *  item_family_id (20260903000003_purchase_tree_view.sql). */
+export type PurchaseTreeRow = {
+  item_family_id: number
+  family_key: string
+  family_label: string
+  item_catalog_id: number | null
+  catalog_label: string | null
+  vendor_id: number | null
+  vendor_display_name: string | null
+  entry_id: number | null
+  invoice_number: string | null
+  net_rate: number
+  quantity: number
+  line_amount: number
+  observed_date: string | null
+  department_id: number | null
+  department_name: string | null
+  event_id: number | null
+}
+
+/** C-05 -- one row per (vendor, item family, event, ISO week). */
+export type RateDriftRow = {
+  vendor_id: number | null
+  vendor_display_name: string | null
+  item_family_id: number
+  family_key: string
+  family_label: string
+  event_id: number | null
+  week_start: string
+  observation_count: number
+  min_rate: number
+  median_rate: number
+  max_rate: number
+  series_week_count: number
+  series_observation_count: number
+  first_week_start: string
+  first_week_median: number
+  last_week_start: string
+  last_week_median: number
+  drift_pct: number | null
+}
+
+/** C-06 -- one row per (vendor, department, item family, event). */
+export type DiscountConsistencyRow = {
+  vendor_id: number | null
+  vendor_display_name: string | null
+  item_family_id: number
+  family_key: string
+  family_label: string
+  department_id: number | null
+  department_name: string | null
+  event_id: number | null
+  observation_count: number
+  avg_discount_pct: number
+  min_discount_pct: number
+  max_discount_pct: number
+  family_observation_count: number
+  family_discount_count: number
+}
+
+/** C-07 -- one row per (item_family, unit_normalized) tracked this event. */
+export type QuantityByUnitRow = {
+  item_family_id: number
+  family_key: string
+  family_label: string
+  unit_normalized: string | null
+  total_quantity: number
+  observation_count: number
+  vendor_count: number
+  entry_count: number
+}
+
+/** C-08 -- one row per (item_family, unit_normalized, zone), restricted by
+ *  the view to families billed in 2+ zones. */
+export type ZoneUnitEconomicsRow = {
+  item_family_id: number
+  family_key: string
+  family_label: string
+  unit_normalized: string | null
+  zone_id: number
+  zone_name: string
+  zone_number: number | null
+  median_rate: number | null
+  avg_rate: number | null
+  observation_count: number
+  family_median_rate: number | null
+  zone_count: number
+}
+
+/** B-06 -- v_rate_benchmark broken out one level further, to one row per
+ *  (item_family, unit_normalized, vendor). */
+export type VendorPriceByFamilyRow = {
+  item_family_id: number
+  family_key: string
+  family_label: string
+  unit_normalized: string | null
+  vendor_id: number
+  vendor_display_name: string | null
+  median_rate: number | null
+  observation_count: number
+  min_rate: number | null
+  max_rate: number | null
+  family_median_rate: number | null
+  vendor_count: number
+}
+
+/** B-02 -- one row per (vendor, event) from v_vendor_scorecard. */
+export type VendorScorecardRow = {
+  vendor_id: number
+  display_name: string
+  normalized_name: string
+  is_confirmed: boolean
+  entry_count: number
+  total_amount: number | null
+  first_entry_date: string | null
+  last_entry_date: string | null
+  entries_with_documents: number
+  document_coverage_pct: number | null
+  pct_of_total_spend: number | null
+  gstin: string | null
+  /** 'missing' (no GSTIN on file), 'flagged' (GSTIN on file but an open
+   *  vendor_gstin_invalid_checksum / vendor_gstin_is_own_org exception exists
+   *  on one of this vendor's entries), 'valid' (GSTIN on file, no such open
+   *  exception -- NOT independently confirmed with GSTN). */
+  gstin_status: 'missing' | 'flagged' | 'valid'
+  avg_price_ratio: number | null
+  priced_observation_count: number
+  avg_discount_pct: number | null
+  discount_observation_count: number
+  flag_history_count: number
+  open_flag_count: number
+  open_flag_amount_at_risk: number | null
+}
+
+/** B-09 -- one row per (vendor, event) from v_vendor_activity_span. */
+export type VendorActivitySpanRow = {
+  vendor_id: number
+  display_name: string
+  normalized_name: string
+  first_entry_date: string | null
+  last_entry_date: string | null
+  active_span_days: number | null
+  entry_count: number
+  distinct_active_days: number
+  max_gap_days: number
+  total_spend: number | null
+  max_single_amount: number | null
+  single_appearance: boolean
+  active_dates: string[]
+}
+
+/** B-03 -- one row per (department, event): that department's top vendor by
+ *  spend, and its share of the department's total spend. */
+export type DepartmentVendorDependencyRow = {
+  department_id: number
+  department_name: string
+  event_id: number
+  top_vendor_id: number
+  top_vendor_display_name: string
+  top_vendor_spend: number
+  department_total_spend: number
+  vendor_count: number
+  top_vendor_share_pct: number | null
+}
+
+/** B-04 -- one row per (vendor, event): how many distinct departments that
+ *  vendor billed. department_name is populated only when
+ *  distinct_department_count = 1. */
+export type VendorExclusivityRow = {
+  vendor_id: number
+  vendor_display_name: string
+  event_id: number
+  distinct_department_count: number
+  department_id: number | null
+  department_name: string | null
+  total_spend: number
+  entry_count: number
+}
+
+/** B-05 -- one row per (vendor, event): first/largest entry figures plus the
+ *  event's own earliest entry date. */
+export type VendorFirstBillRow = {
+  vendor_id: number
+  vendor_display_name: string
+  event_id: number
+  first_entry_date: string | null
+  first_entry_amount: number
+  max_entry_amount: number
+  total_spend: number
+  entry_count: number
+  event_first_entry_date: string | null
+  is_new_mid_event: boolean
+  opening_bill_is_largest: boolean
+}
+
+/** B-07 -- one row per (vendor pair, shared-identity reason). A pair sharing
+ *  both a GSTIN and a phone yields two rows, not one merged row. */
+export type VendorSharedIdentityEdgeRow = {
+  vendor_id_a: number
+  vendor_name_a: string
+  vendor_id_b: number
+  vendor_name_b: string
+  shared_on: 'gstin' | 'phone' | 'address'
+  shared_value: string
+}
+
+/** B-08 -- per (vendor, department, event): total tax charged, the slice
+ *  sitting on a bill with an open credit-blocking exception, and the
+ *  claimable remainder. */
+export type TaxCreditExposureRow = {
+  vendor_id: number | null
+  vendor_display_name: string | null
+  department_id: number | null
+  department_name: string | null
+  event_id: number | null
+  bill_count: number
+  total_tax_amount: number
+  at_risk_tax_amount: number
+  claimable_tax_amount: number
+}
+
+/** B-07 -- one connected component over the shared-identity edge graph,
+ *  built app-side by lib/reports/surfaces/related-party-gstin.ts's
+ *  buildVendorClusters (Union-Find; Postgres has no clean built-in for
+ *  transitive closure over an edge list). */
+export type VendorCluster = {
+  clusterId: number
+  vendors: { id: number; name: string; spend: number }[]
+  edges: { vendorIdA: number; vendorIdB: number; sharedOn: VendorSharedIdentityEdgeRow['shared_on']; sharedValue: string }[]
+  combinedSpend: number
+}
+
 /** Human labels for the instrument_type codes (C-09). Mirrors the
  *  document_extraction_instrument_type_*_check constraint list plus the two
  *  synthetic buckets. */

@@ -1,4 +1,5 @@
 import { differenceInCalendarDays } from 'date-fns'
+import type { SupabaseClient } from '@supabase/supabase-js'
 import { friendlyDataError } from '@/lib/friendly-error'
 import { createClient } from '@/lib/supabase/server'
 import { computeProjectedLanding, type EventDatesRow } from '@/lib/reports/hero-metrics'
@@ -141,13 +142,17 @@ function round2(n: number): number {
  * loadHeroMetrics (the page calls both loaders off the same eventId) rather
  * than re-querying `entries`/`v_open_issues` a second time here for figures
  * this module would otherwise duplicate.
+ *
+ * `client` is an optional pre-built Supabase client — see loadHeroMetrics's
+ * header for why the `board_pack` job passes a service-role client here.
  */
 export async function loadExecutiveBrief(
   eventId: number | null,
   totalSpend: number,
-  openAmountAtRisk: number
+  openAmountAtRisk: number,
+  client?: SupabaseClient
 ): Promise<ExecutiveBrief> {
-  const supabase = await createClient()
+  const supabase: SupabaseClient = client ?? (await createClient())
 
   const [budgetRes, docCoverageRes, riskRes, vendorRes, eventRes, issuesRes, overpaymentRes] = await Promise.all([
     supabase

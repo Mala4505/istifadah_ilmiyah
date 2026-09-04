@@ -1,4 +1,5 @@
 import { addWeeks, differenceInCalendarISOWeeks, format, startOfISOWeek, subWeeks } from 'date-fns'
+import type { SupabaseClient } from '@supabase/supabase-js'
 import { friendlyDataError } from '@/lib/friendly-error'
 import { createClient } from '@/lib/supabase/server'
 
@@ -254,8 +255,19 @@ export function computeProjectedLanding(
   return { fractionElapsed, projectedTotal: actualToDate / fractionElapsed }
 }
 
-export async function loadHeroMetrics(eventId: number | null): Promise<HeroMetrics> {
-  const supabase = await createClient()
+/**
+ * `client` is an optional pre-built Supabase client. Server Components leave it
+ * unset and get a cookie-scoped `createClient()` (RLS as the signed-in user).
+ * The `board_pack` job (lib/jobs/handlers/board-pack.ts) has no request context
+ * — `createClient()` reads `next/headers` cookies and would resolve to the
+ * anon role, so under RLS every `v_*` view would come back empty — so it passes
+ * a service-role client (createAdminClient) here instead.
+ */
+export async function loadHeroMetrics(
+  eventId: number | null,
+  client?: SupabaseClient
+): Promise<HeroMetrics> {
+  const supabase: SupabaseClient = client ?? (await createClient())
 
   const [entriesRes, issuesRes, hubStatusRes, budgetRes, sourceDocRes, eventRes] = await Promise.all([
     supabase.from('entries').select('id, amount, date').eq('event_id', eventId).eq('is_void', false).returns<EntryRow[]>(),

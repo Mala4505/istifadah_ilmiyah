@@ -90,6 +90,10 @@ export type EntriesFilters = {
   dateFrom: string
   dateTo: string
   vendor: string
+  /** Vendor filter by id rather than the free-text `vendor` name match —
+   *  set only by a deep link (e.g. a Reports drill-through to `?vendor_id=`);
+   *  the filter bar's Vendor box drives `vendor` instead and clears this. */
+  vendorId: string
   hasVariance: boolean
   hasDocument: boolean
 }
@@ -107,6 +111,7 @@ export const DEFAULT_FILTERS: EntriesFilters = {
   dateFrom: '',
   dateTo: '',
   vendor: '',
+  vendorId: '',
   hasVariance: false,
   hasDocument: false,
 }

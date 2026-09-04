@@ -37,25 +37,31 @@ function filtersToSearchParams(filters: EntriesFilters): URLSearchParams {
   if (filters.dateFrom) sp.set('from', filters.dateFrom)
   if (filters.dateTo) sp.set('to', filters.dateTo)
   if (filters.vendor) sp.set('vendor', filters.vendor)
+  if (filters.vendorId) sp.set('vid', filters.vendorId)
   if (filters.hasVariance) sp.set('var', '1')
   if (filters.hasDocument) sp.set('doc', '1')
   return sp
 }
 
 function searchParamsToFilters(sp: URLSearchParams): EntriesFilters {
+  // The canonical param is the short form (`dept`, `bh`, `zone`, `cc`, `vid`).
+  // The long `*_id` aliases are accepted too so the Reports drill-through links
+  // (`/entries?department_id=…`, `?vendor_id=…`, …) land filtered rather than on
+  // an unscoped list — the next filter change rewrites the URL to the short form.
   return {
     type: sp.get('tp') ?? '',
-    department: sp.get('dept') ?? '',
-    budgetHead: sp.get('bh') ?? '',
-    adminHead: sp.get('ahead') ?? '',
-    zone: sp.get('zone') ?? '',
-    costCenter: sp.get('cc') ?? '',
+    department: sp.get('dept') ?? sp.get('department_id') ?? '',
+    budgetHead: sp.get('bh') ?? sp.get('budget_head_id') ?? '',
+    adminHead: sp.get('ahead') ?? sp.get('admin_head_id') ?? '',
+    zone: sp.get('zone') ?? sp.get('zone_id') ?? '',
+    costCenter: sp.get('cc') ?? sp.get('cost_center_id') ?? '',
     status: sp.get('st') ?? '',
     hubStatus: sp.get('hs') ?? '',
     exportPending: sp.get('exp') === '1',
     dateFrom: sp.get('from') ?? '',
     dateTo: sp.get('to') ?? '',
     vendor: sp.get('vendor') ?? '',
+    vendorId: sp.get('vid') ?? sp.get('vendor_id') ?? '',
     hasVariance: sp.get('var') === '1',
     hasDocument: sp.get('doc') === '1',
   }

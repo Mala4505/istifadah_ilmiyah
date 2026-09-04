@@ -239,7 +239,7 @@ export function FilterBar({
           <Input
             placeholder="Search vendor…"
             value={filters.vendor}
-            onChange={(e) => onChange({ vendor: e.target.value })}
+            onChange={(e) => onChange({ vendor: e.target.value, vendorId: '' })}
           />
         </Field>
 
@@ -328,6 +328,7 @@ export function buildFilterSummary(filters: EntriesFilters, options: FilterOptio
   pushSelect('costCenter', filters.costCenter, options.costCenters, 'Cost center')
 
   if (filters.vendor) parts.push({ key: 'vendor', label: `Vendor: "${filters.vendor}"` })
+  if (filters.vendorId) parts.push({ key: 'vendorId', label: 'Vendor (from link)' })
 
   if (filters.dateFrom || filters.dateTo) {
     parts.push({ key: 'dateRange', label: formatDateRangeSummary(filters.dateFrom, filters.dateTo) })

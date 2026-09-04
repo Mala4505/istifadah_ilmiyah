@@ -29,6 +29,7 @@ export function applyEntriesFilters<T extends EntriesQueryBuilder>(query: T, fil
   if (filters.adminHead) q = q.eq('admin_head_id', filters.adminHead)
   if (filters.zone) q = q.eq('zone_id', filters.zone)
   if (filters.costCenter) q = q.eq('cost_center_id', filters.costCenter)
+  if (filters.vendorId) q = q.eq('vendor_id', filters.vendorId)
   if (filters.status) q = q.eq('status_id', filters.status)
   if (filters.hubStatus) q = q.eq('hub_status_id', filters.hubStatus)
   if (filters.dateFrom) q = q.gte('date', filters.dateFrom)

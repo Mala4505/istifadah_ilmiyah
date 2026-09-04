@@ -43,6 +43,7 @@ export type JobType =
   | 'generate_export'
   | 'rasterize_retry'
   | 'flags_run'
+  | 'board_pack'
 export type JobStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'dead'
 
 /** Mirrors `public.job_queue` (§3.11) column-for-column. */
