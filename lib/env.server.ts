@@ -90,23 +90,40 @@ const serverSchema = z.object({
   // Whether app/api/documents/ingest/route.ts runs extraction itself, inside
   // the upload request, before responding.
   //
-  // Default ON, because with no worker and no cron that inline drain is the
-  // ONLY thing that ever moves a job -- turning it off in that situation means
-  // nothing extracts, ever.
+  // Default OFF (changed 2026-09-05, performance-remediation-plan.md 3.5).
+  // Was ON by deliberate decision (import-review-ux-plan.md §15, 2026-08-21),
+  // made on the assumption that the route's declared `maxDuration = 60` was
+  // the real ceiling. It is not: on Vercel Hobby the platform hard-kills a
+  // function at 10s regardless of what the route declares, and a measured
+  // real bundle already exceeds that (ocr-execution-decision.md's 8-page
+  // sample: ~15s wall clock). Leaving this on, on Hobby, means the upload
+  // route is silently killed mid-extraction on any bundle past a couple of
+  // pages -- this file's own prior comment already said to turn it off "the
+  // moment... a cron hitting /api/jobs/tick" is running, and
+  // .github/workflows/cron-tick.yml has been running one since before this
+  // default was flipped.
   //
-  // Turn it OFF the moment a real worker is running (worker/index.ts, or a
-  // cron hitting /api/jobs/tick). Leaving it on then is actively harmful: the
-  // upload route claims its own job the instant it enqueues it, so it beats
-  // the worker's 2-second poll essentially every time, and the extraction runs
-  // right back inside the request budget the worker exists to escape. The
-  // upload then returns in seconds instead of sitting on a 60s platform
-  // timeout, and the worker -- which has no timeout at all -- picks the job up
-  // on its next poll.
+  // With this off, the upload route only enqueues the job and returns --
+  // extraction happens on the next /api/jobs/tick sweep (GitHub Actions,
+  // every 5 minutes) or a running worker (worker/index.ts). The inbox UI
+  // already polls /api/documents/status and renders 'uploaded'/'processing'
+  // until it flips to 'processed'/'failed' (components/documents/document-inbox.tsx),
+  // so this needed no UI change.
+  //
+  // Turn it back ON only for a deployment plan tier where maxDuration=60 is
+  // actually honored (Pro or above, or Fluid compute) AND you want the faster
+  // few-second turnaround over the up-to-5-minute cron cadence.
+  //
+  // IMPORTANT: this schema default only applies where the env var is unset.
+  // If INGEST_INLINE_EXTRACTION is explicitly set to "true" in Vercel's
+  // project settings (likely, per the 2026-08-21 decision above), this
+  // code-level default change has NO EFFECT on the live deployment until
+  // that dashboard value is changed to "false" and redeployed.
   INGEST_INLINE_EXTRACTION: z
     .string()
     .optional()
-    .default('true')
-    .transform((v) => v !== 'false'),
+    .default('false')
+    .transform((v) => v === 'true'),
 })
 
 function readServerEnv() {

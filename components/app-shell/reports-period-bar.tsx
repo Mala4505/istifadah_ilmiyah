@@ -19,7 +19,6 @@
  * queries), and `getCompareBasis()` is a cookie read with no DB dependency
  * -- run together with Promise.all rather than sequentially.
  */
-import { createClient } from '@/lib/supabase/server'
 import { getAllEvents, getSelectedEvent } from '@/lib/events/current'
 import { getCompareBasis, COMPARE_BASIS_LABELS, type CompareBasis } from '@/lib/reports/compare-basis'
 import { isAdminOrAbove, type StaffRole } from '@/lib/auth/roles'
@@ -31,10 +30,9 @@ const COMPARE_BASIS_OPTIONS: { value: CompareBasis; label: string }[] = (
 ).map((key) => ({ value: key, label: COMPARE_BASIS_LABELS[key] }))
 
 export async function ReportsPeriodBar({ role }: { role: StaffRole | null }) {
-  const supabase = await createClient()
   const [events, selectedEvent, compareBasis] = await Promise.all([
-    getAllEvents(supabase),
-    getSelectedEvent(supabase),
+    getAllEvents(),
+    getSelectedEvent(),
     getCompareBasis(),
   ])
 

@@ -16,7 +16,7 @@
  * vendors.ts documents for its own aggregates).
  */
 import { createClient } from '@/lib/supabase/server'
-import { getSelectedEvent } from '@/lib/events/current'
+import type { Event } from '@/lib/events/types'
 import { friendlyDataError } from '@/lib/friendly-error'
 import type { CompareBasis } from '@/lib/reports/compare-basis'
 import {
@@ -103,9 +103,15 @@ const VENDOR_EXCLUSIVITY_SELECT =
 const VENDOR_FIRST_BILL_SELECT =
   'vendor_id, vendor_display_name, event_id, first_entry_date, first_entry_amount, max_entry_amount, total_spend, entry_count, event_first_entry_date, is_new_mid_event, opening_bill_is_largest'
 
-export async function loadVendorDependency(compareBasis: CompareBasis): Promise<VendorDependencyData> {
+/**
+ * Perf remediation Phase 2.2 (docs/performance-remediation-plan.md):
+ * `selectedEvent` is resolved once by the caller (the page already
+ * called getSelectedEvent()) and passed in, rather than this loader
+ * re-resolving it itself -- same reasoning as loadHeroMetrics/
+ * loadExecutiveBrief taking `eventId` as a parameter.
+ */
+export async function loadVendorDependency(compareBasis: CompareBasis, selectedEvent: Event | null): Promise<VendorDependencyData> {
   const supabase = await createClient()
-  const selectedEvent = await getSelectedEvent(supabase)
   const eventId = selectedEvent?.id ?? null
 
   const [departmentDependencyRes, vendorExclusivityRes, vendorFirstBillRes] = await Promise.all([

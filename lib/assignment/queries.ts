@@ -58,7 +58,7 @@ export async function listAssignableStaff(supabase: SupabaseClient): Promise<Ass
 
   const docIds = Array.from(new Set((assigneeRows ?? []).map((r) => r.source_document_id as number)))
   if (docIds.length > 0) {
-    const selectedEventId = await getSelectedEventId(supabase)
+    const selectedEventId = await getSelectedEventId()
     let q = supabase
       .from('source_document')
       .select('id')

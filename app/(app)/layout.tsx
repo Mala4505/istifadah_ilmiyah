@@ -3,7 +3,7 @@ import { cookies } from 'next/headers'
 import { getCachedUser } from '@/lib/supabase/server'
 import { getCachedStaffProfile } from '@/lib/export/auth'
 import { NavRail, NAV_RAIL_COLLAPSED_COOKIE } from '@/components/app-shell/nav-rail'
-import { CommandPalette } from '@/components/app-shell/command-palette'
+import { CommandPalette } from '@/components/app-shell/command-palette-lazy'
 
 // Authenticated app shell wrapping every screen in MASTER-PLAN §5 except
 // /login. Redirects server-side if there is no session — no flash of

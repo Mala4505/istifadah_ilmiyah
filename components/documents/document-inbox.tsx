@@ -1,11 +1,12 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { Suspense, useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { AlertTriangle } from 'lucide-react'
 import { toastError } from '@/components/ui/error-toast'
 import { Button } from '@/components/ui/button'
+import { Skeleton } from '@/components/ui/skeleton'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { bulkAttachDocuments, deleteDocuments, getInboxMatchCandidates } from '@/lib/actions/documents'
 import { setDocumentAssignees } from '@/lib/actions/assignment'
@@ -15,7 +16,7 @@ import type { AssignableStaff } from '@/lib/assignment/queries'
 import { UploadDropzone } from './upload-dropzone'
 import { DocumentTable } from './document-table'
 import { AssigneePicker, assigneeFirstNames } from './assignee-picker'
-import type { InboxDocumentView } from './types'
+import type { DocumentExtractionSummary, InboxDocumentView } from './types'
 
 /**
  * While any document sits in 'uploaded' or 'processing', poll the narrow
@@ -28,6 +29,22 @@ const PENDING_STATUSES: ReadonlySet<InboxDocumentView['uploadStatus']> = new Set
 
 /** 4s -> 8s -> 15s: backs off after each tick that finds no change, resets whenever the polled set or a document's status changes (checklist 2.7). */
 const POLL_BACKOFF_MS = [4000, 8000, 15000] as const
+
+/**
+ * Performance remediation plan 4.2: a cheap fingerprint of the OCR'd fields
+ * `getInboxMatchCandidates` actually scores against. Used to tell "this bill
+ * was already ranked and nothing that would change its ranking has changed"
+ * apart from a plain id check -- a re-extract (document-card.tsx's "Re-run
+ * extraction") keeps the same `document_extraction.id` (extract.ts upserts
+ * onto the existing row) but can change every one of these fields, so an
+ * id-only "already ranked" set would silently keep serving a stale ranking
+ * after a re-extract. Deliberately narrow: `verifiedAt` is excluded because a
+ * Review-screen save that only corrects, say, a line item doesn't change
+ * these match-relevant header fields.
+ */
+function extractionFingerprint(bill: DocumentExtractionSummary): string {
+  return `${bill.vendorNameOcr ?? ''}|${bill.invoiceDateOcr ?? ''}|${bill.invoiceNumberOcr ?? ''}|${bill.totalAmountOcr ?? ''}`
+}
 
 interface StatusResponseDoc {
   id: number
@@ -108,6 +125,12 @@ export function DocumentInbox({
     })
   }, [initialDocuments])
 
+  // Kept across renders/effect-runs so ranking never re-fetches an
+  // extraction whose match-relevant fields haven't changed since it was last
+  // ranked (performance remediation plan 4.2) -- see extractionFingerprint's
+  // doc comment for why this is a fingerprint map, not a plain ranked-id set.
+  const rankedFingerprintByExtractionId = useRef<Map<number, string>>(new Map())
+
   // Checklist 2.9 (D6): ranking candidates against the full entries pool
   // used to run inline in app/(app)/documents/page.tsx's own render, on
   // every load. It's fetched here instead — once after mount, and again
@@ -117,11 +140,39 @@ export function DocumentInbox({
   // recomputes fresh against the CURRENT entries table rather than reading
   // anything persisted, so a document that arrived before its match was
   // imported still picks it up on the very next fetch, not never.
+  //
+  // Performance remediation plan 4.2: this used to re-rank literally every
+  // bill in the inbox on every `initialDocuments` change, including after a
+  // single attach/delete/assign (each of those calls router.refresh(), which
+  // produces a new `initialDocuments` reference even when most rows are
+  // unchanged). Now it asks `getInboxMatchCandidates` to rank only the
+  // extractions whose fingerprint (see above) isn't already recorded — a
+  // brand-new bill, or one whose OCR'd fields changed (a re-extract) — and
+  // caps the doc-id query to what's actually on screen (`docIds` below),
+  // matching app/(app)/documents/page.tsx's own DOCUMENT_QUERY_CAP rather
+  // than ignoring it.
   useEffect(() => {
     let cancelled = false
+    const docIds = initialDocuments.map((d) => d.id)
+    const extractionIdsNeedingRank = initialDocuments
+      .flatMap((doc) => doc.extraction)
+      .filter((bill) => rankedFingerprintByExtractionId.current.get(bill.id) !== extractionFingerprint(bill))
+      .map((bill) => bill.id)
+
+    if (docIds.length === 0 || extractionIdsNeedingRank.length === 0) return
+
     void (async () => {
-      const candidatesByExtractionId = await getInboxMatchCandidates()
+      const candidatesByExtractionId = await getInboxMatchCandidates(docIds, extractionIdsNeedingRank)
       if (cancelled) return
+
+      const rankedIds = new Set(extractionIdsNeedingRank)
+      for (const doc of initialDocuments) {
+        for (const bill of doc.extraction) {
+          if (rankedIds.has(bill.id)) {
+            rankedFingerprintByExtractionId.current.set(bill.id, extractionFingerprint(bill))
+          }
+        }
+      }
 
       setDocuments((current) =>
         current.map((doc) => ({
@@ -522,18 +573,26 @@ export function DocumentInbox({
       {documents.length === 0 ? (
         <EmptyState />
       ) : (
-        <DocumentTable
-          documents={documents}
-          canAct={canAct}
-          selected={selected}
-          onToggleSelected={toggleSelected}
-          onTogglePage={togglePage}
-          chosenByDocument={chosenByDocument}
-          onChooseEntry={chooseEntry}
-          onMutated={removeDocumentLocally}
-          adminHeadOptions={adminHeadOptions}
-          zoneOptions={zoneOptions}
-        />
+        // DocumentTable reads useSearchParams() (performance remediation
+        // plan 7.4's URL-synced filters/sort), which requires a Suspense
+        // ancestor — mirrors components/entries/entries-explorer.tsx's own
+        // Suspense wrapping for the same hook. The fallback rarely shows in
+        // practice on this fully dynamic route; sized to roughly match the
+        // table it's standing in for so it doesn't cause a layout jump.
+        <Suspense fallback={<Skeleton className="h-96 w-full" />}>
+          <DocumentTable
+            documents={documents}
+            canAct={canAct}
+            selected={selected}
+            onToggleSelected={toggleSelected}
+            onTogglePage={togglePage}
+            chosenByDocument={chosenByDocument}
+            onChooseEntry={chooseEntry}
+            onMutated={removeDocumentLocally}
+            adminHeadOptions={adminHeadOptions}
+            zoneOptions={zoneOptions}
+          />
+        </Suspense>
       )}
 
       <BulkEnrichmentDialog

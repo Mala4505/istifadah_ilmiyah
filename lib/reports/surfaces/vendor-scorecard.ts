@@ -18,7 +18,7 @@
  * lib/reports/surfaces/vendors.ts documents for its own aggregates).
  */
 import { createClient } from '@/lib/supabase/server'
-import { getSelectedEvent } from '@/lib/events/current'
+import type { Event } from '@/lib/events/types'
 import { friendlyDataError } from '@/lib/friendly-error'
 import type { CompareBasis } from '@/lib/reports/compare-basis'
 import { CONCENTRATION_MIN_TOTAL } from '@/lib/analytics/thresholds'
@@ -92,9 +92,15 @@ export type VendorScorecardSurfaceData = {
   }
 }
 
-export async function loadVendorScorecard(compareBasis: CompareBasis): Promise<VendorScorecardSurfaceData> {
+/**
+ * Perf remediation Phase 2.2 (docs/performance-remediation-plan.md):
+ * `selectedEvent` is resolved once by the caller (the page already
+ * called getSelectedEvent()) and passed in, rather than this loader
+ * re-resolving it itself -- same reasoning as loadHeroMetrics/
+ * loadExecutiveBrief taking `eventId` as a parameter.
+ */
+export async function loadVendorScorecard(compareBasis: CompareBasis, selectedEvent: Event | null): Promise<VendorScorecardSurfaceData> {
   const supabase = await createClient()
-  const selectedEvent = await getSelectedEvent(supabase)
   const eventId = selectedEvent?.id ?? null
 
   const [scorecardRes, activityRes] = await Promise.all([

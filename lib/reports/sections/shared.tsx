@@ -575,7 +575,7 @@ export async function resolvePreviousEvent(
   currentEventId: number | null
 ): Promise<{ id: number; name: string } | null> {
   if (compareBasis !== 'prior_event' || currentEventId === null) return null
-  const events = await getAllEvents(supabase) // most-recent Hijri year first
+  const events = await getAllEvents() // most-recent Hijri year first
   const idx = events.findIndex((e) => e.id === currentEventId)
   if (idx === -1) return null
   const previous = events[idx + 1] ?? null

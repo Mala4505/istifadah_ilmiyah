@@ -73,7 +73,7 @@ export async function setHubStatus({
 
   const supabase = await createClient()
 
-  const selectedEvent = await getSelectedEvent(supabase)
+  const selectedEvent = await getSelectedEvent()
   if (!isEventMutable(selectedEvent)) {
     return { success: false, updatedCount: 0, requestedCount, error: EVENT_READONLY_ERROR }
   }

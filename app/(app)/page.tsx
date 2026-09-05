@@ -62,7 +62,7 @@ async function loadDashboardData() {
   // multi-table coalesce. v_entry_status_counts's event_id column is added by
   // a parallel migration (20260822000011_analytics_event_scoping.sql) landing
   // alongside this change -- filtering here assumes it exists.
-  const selectedEventId = await getSelectedEventId(supabase)
+  const selectedEventId = await getSelectedEventId()
 
   const [reviewQueueRes, openIssuesRes, budgetRes, importsRes, unmatchedDocsRes, profileRes, statusCountsRes] =
     await Promise.all([

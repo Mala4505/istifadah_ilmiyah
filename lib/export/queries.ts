@@ -28,23 +28,40 @@ export interface PendingExportEntry {
   amount: number | null
 }
 
+export interface PendingExportQueueResult {
+  entries: PendingExportEntry[]
+  /** True count of everything pending, independent of `entries.length` — a
+   *  truncated display must not understate what `generateStatusExportBatch`
+   *  will actually pick up, since that generator re-queries uncapped. */
+  totalPendingCount: number
+  truncated: boolean
+}
+
 /**
- * Everything with `hub_status_exported_at is null and hub_status_id <> 1`
- * (§3.4's `entries_pending_export_idx`), read from `v_entry_enriched` for
- * display-ready department/status labels. Voided entries excluded — same
- * judgement call as the generator.
+ * Perf remediation 4.4 (docs/performance-remediation-plan.md): this was the
+ * one genuinely unbounded query on /export — neither the id lookup nor the
+ * `v_entry_enriched` read carried a `.limit()`/`.range()`. 1000 mirrors
+ * `ROW_CAP` (`lib/reports/sections/shared.tsx`) — the same "how many rows
+ * can an admin screen usefully render" judgment the reports surfaces already
+ * standardised on — rather than inventing a different number for this
+ * screen; it's also comfortably above every volume mentioned elsewhere in
+ * this file's own comments (14 entries at last note).
  *
- * Phase 6 Step 2 (docs/event-scoping-and-review-fixes-plan.md §1): scoped to
- * the selected event. `v_entry_enriched` itself is out of this stream's
- * ownership and doesn't expose `event_id` (Stream A/B territory) — rather
- * than touch it, the qualifying entry ids are resolved directly against
- * `entries.event_id` first, then that id set filters the existing
- * `v_entry_enriched` read. At this app's volumes (doc §0: 14 entries) a
- * two-step read costs nothing and keeps this stream's file ownership clean.
+ * Ordered oldest-changed-first (`hub_status_changed_at asc nulls first`, same
+ * order `generateStatusExportBatch` uses) so that IF the queue ever exceeds
+ * the cap, the entries shown are the ones that have been waiting longest —
+ * the ones an admin most needs to act on — rather than an arbitrary slice.
+ * The true total is fetched separately (uncapped `count: 'exact', head: true`
+ * on the same filter) and returned alongside `truncated`, so a caller can
+ * tell an admin "there are more than you can see" instead of silently
+ * showing a partial queue as if it were the whole one. Actually generating a
+ * batch is unaffected either way — `generateStatusExportBatch` runs its own
+ * uncapped query, independent of this read-only display path.
  */
-export async function getPendingExportQueue(): Promise<PendingExportEntry[]> {
+export async function getPendingExportQueue(): Promise<PendingExportQueueResult> {
+  const EXPORT_QUEUE_ROW_CAP = 1000
   const supabase = createAdminClient()
-  const eventId = await getSelectedEventId(supabase)
+  const eventId = await getSelectedEventId()
 
   let idQuery = supabase
     .from('entries')
@@ -55,12 +72,40 @@ export async function getPendingExportQueue(): Promise<PendingExportEntry[]> {
   if (eventId !== null) {
     idQuery = idQuery.eq('event_id', eventId)
   }
-  const { data: idRows, error: idError } = await idQuery
+  // Fetch one row past the cap so truncation can be detected without a
+  // separate round trip, matching the pattern app/(app)/documents/page.tsx
+  // already uses for its own DOCUMENT_QUERY_CAP.
+  idQuery = idQuery
+    .order('hub_status_changed_at', { ascending: true, nullsFirst: true })
+    .range(0, EXPORT_QUEUE_ROW_CAP)
+
+  let countQuery = supabase
+    .from('entries')
+    .select('id', { count: 'exact', head: true })
+    .is('hub_status_exported_at', null)
+    .neq('hub_status_id', 1)
+    .eq('is_void', false)
+  if (eventId !== null) {
+    countQuery = countQuery.eq('event_id', eventId)
+  }
+
+  const [{ data: idRows, error: idError }, { count: totalPendingCount, error: countError }] = await Promise.all([
+    idQuery,
+    countQuery,
+  ])
   if (idError) {
     throw new Error(`getPendingExportQueue: ${idError.message}`)
   }
-  const ids = (idRows ?? []).map((row) => row.id as number)
-  if (ids.length === 0) return []
+  if (countError) {
+    throw new Error(`getPendingExportQueue: ${countError.message}`)
+  }
+
+  const fetchedIds = (idRows ?? []).map((row) => row.id as number)
+  const truncated = fetchedIds.length > EXPORT_QUEUE_ROW_CAP
+  const ids = truncated ? fetchedIds.slice(0, EXPORT_QUEUE_ROW_CAP) : fetchedIds
+  if (ids.length === 0) {
+    return { entries: [], totalPendingCount: totalPendingCount ?? 0, truncated: false }
+  }
 
   const { data, error } = await supabase
     .from('v_entry_enriched')
@@ -73,7 +118,11 @@ export async function getPendingExportQueue(): Promise<PendingExportEntry[]> {
   if (error) {
     throw new Error(`getPendingExportQueue: ${error.message}`)
   }
-  return (data ?? []) as PendingExportEntry[]
+  return {
+    entries: (data ?? []) as PendingExportEntry[],
+    totalPendingCount: totalPendingCount ?? 0,
+    truncated,
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -104,7 +153,7 @@ export interface ExportBatchSummary {
  */
 export async function getExportBatchHistory(): Promise<ExportBatchSummary[]> {
   const supabase = createAdminClient()
-  const eventId = await getSelectedEventId(supabase)
+  const eventId = await getSelectedEventId()
 
   let query = supabase
     .from('status_export_batch')

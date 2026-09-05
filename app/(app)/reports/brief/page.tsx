@@ -1,7 +1,7 @@
 import Link from 'next/link'
-import { createClient } from '@/lib/supabase/server'
+import { Suspense } from 'react'
 import { getSelectedEvent } from '@/lib/events/current'
-import { getCompareBasis } from '@/lib/reports/compare-basis'
+import { getCompareBasis, type CompareBasis } from '@/lib/reports/compare-basis'
 import { loadHeroMetrics } from '@/lib/reports/hero-metrics'
 import { loadExecutiveBrief, type DepartmentLeagueRow, type NeedsDecisionRow } from '@/lib/reports/executive-brief'
 import { loadWeeklyDigest } from '@/lib/reports/weekly-digest'
@@ -18,6 +18,7 @@ import { PresentModeToggle } from '@/components/reports/present-mode-toggle'
 import { WeeklyDigestSection } from '@/components/reports/sections/weekly-digest'
 import { RupeeProvenanceSection } from '@/components/reports/sections/rupee-provenance'
 import { BoardPackList } from '@/components/reports/sections/board-pack-list'
+import { SectionSkeleton } from '@/components/reports/sections/surface-loading'
 import { toCsv, type CsvColumn } from '@/lib/reports/csv'
 import { parsePositiveIntParam } from '@/lib/reports/search-params'
 import { formatINRCompact, formatPercent, humanizeCode } from '@/lib/reports/format'
@@ -47,8 +48,7 @@ export default async function ExecutiveBriefPage({
 }: {
   searchParams: Promise<{ trace_entry_id?: string }>
 }) {
-  const supabase = await createClient()
-  const selectedEvent = await getSelectedEvent(supabase)
+  const selectedEvent = await getSelectedEvent()
   const eventId = selectedEvent?.id ?? null
   const compareBasis = await getCompareBasis()
   const sp = await searchParams
@@ -58,14 +58,17 @@ export default async function ExecutiveBriefPage({
   // already-computed totalSpend/openAmountAtRisk (both loaders' own internal
   // queries stay fully parallel via their own Promise.all) rather than
   // re-querying `entries`/`v_open_issues` a second time for the same figures.
+  // Both stay a plain top-level await (not Suspense-wrapped): together they
+  // feed every above-the-fold band on this page (KPI row, "what changed",
+  // attention map, spend pace, league table, needs-decision), so there is
+  // nothing to paint before they resolve anyway. Perf remediation Phase 6.1
+  // (docs/performance-remediation-plan.md) moves the two independent,
+  // further-down loaders -- weekly digest and rupee provenance -- into their
+  // own `<Suspense>` boundaries below so a slow one no longer holds up this
+  // page's primary content, which used to wait on all three together via one
+  // `Promise.all`.
   const hero = await loadHeroMetrics(eventId)
-  const [brief, weeklyDigest, provenance] = await Promise.all([
-    loadExecutiveBrief(eventId, hero.kpi.totalSpend, hero.kpi.openAmountAtRisk),
-    loadWeeklyDigest(eventId),
-    loadRupeeProvenance(compareBasis, traceEntryId),
-  ])
-
-  const digestErrorText = Object.values(weeklyDigest.errors).find((e): e is string => e != null) ?? null
+  const brief = await loadExecutiveBrief(eventId, hero.kpi.totalSpend, hero.kpi.openAmountAtRisk)
 
   const spendTrendPoints = hero.spendTrend.map((p) => ({ label: p.weekLabel, actual: p.actual, target: p.target }))
 
@@ -180,12 +183,13 @@ export default async function ExecutiveBriefPage({
       )}
 
       {/* Band 2b -- E-04 weekly digest: the ten things most worth attention
-          this week, ranked by rupees, each a plain sentence with an owner. */}
-      <WeeklyDigestSection
-        items={weeklyDigest.items}
-        hasError={digestErrorText != null}
-        errorText={digestErrorText}
-      />
+          this week, ranked by rupees, each a plain sentence with an owner.
+          Perf remediation Phase 6.1: its own Suspense boundary -- an
+          independent loader that no longer needs to resolve before the bands
+          above (which depend only on hero/brief, already awaited) can paint. */}
+      <Suspense fallback={<SectionSkeleton />}>
+        <WeeklyDigestGroup eventId={eventId} />
+      </Suspense>
 
       {/* Band 3 -- two charts */}
       <div className="grid gap-4 lg:grid-cols-2">
@@ -257,17 +261,20 @@ export default async function ExecutiveBriefPage({
 
       {/* Band 4b -- E-05 rupee provenance trace: pick any rupee and follow it
           budget head -> allocation -> entry -> bill -> line item -> family ->
-          benchmark. Keyed on ?trace_entry_id= in the URL. */}
-      <RupeeProvenanceSection
-        candidates={provenance.candidates}
-        candidatesError={provenance.candidatesError}
-        chain={provenance.chain}
-        traceEntryId={provenance.traceEntryId}
-      />
+          benchmark. Keyed on ?trace_entry_id= in the URL. Perf remediation
+          Phase 6.1: own Suspense boundary, same reasoning as the digest above. */}
+      <Suspense fallback={<SectionSkeleton />}>
+        <RupeeProvenanceGroup compareBasis={compareBasis} traceEntryId={traceEntryId} />
+      </Suspense>
 
       {/* Band 4c -- the board pack: this Brief frozen to a workbook + PDF on a
-          weekly schedule (blueprint §5). */}
-      <BoardPackList />
+          weekly schedule (blueprint §5). Perf remediation Phase 6.1: own
+          Suspense boundary -- BoardPackList resolves its own event/staff/rows
+          and previously rendered un-suspended, which meant its own queries
+          blocked this page's initial flush too. */}
+      <Suspense fallback={<SectionSkeleton />}>
+        <BoardPackList selectedEvent={selectedEvent} />
+      </Suspense>
 
       {/* Band 5 -- footer */}
       <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-3 text-xs text-muted-foreground" data-hide-in-present>
@@ -277,5 +284,23 @@ export default async function ExecutiveBriefPage({
         </Link>
       </div>
     </div>
+  )
+}
+
+async function WeeklyDigestGroup({ eventId }: { eventId: number | null }) {
+  const weeklyDigest = await loadWeeklyDigest(eventId)
+  const digestErrorText = Object.values(weeklyDigest.errors).find((e): e is string => e != null) ?? null
+  return <WeeklyDigestSection items={weeklyDigest.items} hasError={digestErrorText != null} errorText={digestErrorText} />
+}
+
+async function RupeeProvenanceGroup({ compareBasis, traceEntryId }: { compareBasis: CompareBasis; traceEntryId: number | null }) {
+  const provenance = await loadRupeeProvenance(compareBasis, traceEntryId)
+  return (
+    <RupeeProvenanceSection
+      candidates={provenance.candidates}
+      candidatesError={provenance.candidatesError}
+      chain={provenance.chain}
+      traceEntryId={provenance.traceEntryId}
+    />
   )
 }

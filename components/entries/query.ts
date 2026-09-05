@@ -1,5 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
-import type { EntriesFilters, EntriesSort, EntryEnriched } from './types'
+import { ALL_COLUMNS, type ColumnKey, type EntriesFilters, type EntriesSort, type EntryEnriched } from './types'
 
 // The exact builder type returned by `supabase.from('v_entry_enriched').select(...)`
 // (and still returned after `.order()`/`.limit()`, since both are typed to return
@@ -8,7 +8,7 @@ import type { EntriesFilters, EntriesSort, EntryEnriched } from './types'
 // chaining) intact for both callers — the paged fetch below and the CSV export's
 // batch loop, which both continue chaining (e.g. `.lt('id', cursor)`) on the
 // result of this function.
-type EntriesQueryBuilder = ReturnType<ReturnType<SupabaseClient['from']>['select']>
+export type EntriesQueryBuilder = ReturnType<ReturnType<SupabaseClient['from']>['select']>
 
 /**
  * Shared filter application over `v_entry_enriched` (MASTER-PLAN §10.2) —
@@ -65,7 +65,86 @@ export function applyEntriesFilters<T extends EntriesQueryBuilder>(query: T, fil
   return q
 }
 
-export const ENTRIES_SELECT = '*'
+// 7.2 (docs/performance-remediation-plan.md Phase 7): `v_entry_enriched` has
+// ~35 columns; the list/CSV column chooser only ever renders the subset
+// named in `ALL_COLUMNS`. Most `ColumnKey`s map 1:1 onto a same-named view
+// column, but `export_pending` is derived client-side (csv-export.ts's
+// `cellValue`) from two raw columns rather than being a column itself, so it
+// needs both named explicitly here despite exposing neither by that name.
+const COLUMN_KEY_SELECT_COLUMNS: Record<ColumnKey, readonly string[]> = {
+  type: ['type'],
+  ubbl_number: ['ubbl_number'],
+  main_number: ['main_number'],
+  department_name: ['department_name'],
+  budget_head_short_label: ['budget_head_short_label'],
+  admin_head_name: ['admin_head_name'],
+  zone_name: ['zone_name'],
+  cost_center_name: ['cost_center_name'],
+  vendor_display_name: ['vendor_display_name'],
+  invoice_number: ['invoice_number'],
+  date: ['date'],
+  amount: ['amount'],
+  status_label: ['status_label'],
+  hub_status_label: ['hub_status_label'],
+  export_pending: ['hub_status_exported_at', 'hub_status_code'],
+  document_count: ['document_count'],
+}
+
+// Single source of truth for "which raw `v_entry_enriched` columns can the
+// list/CSV path ever need" — derived from `ALL_COLUMNS` rather than
+// hand-typed, so a column added there becomes selectable with no second
+// edit. `id` is added unconditionally: it drives keyset pagination
+// (`fetchEntriesPage`/`exportEntriesToCsv`'s cursor) and row identity even
+// though it isn't itself a renderable column.
+export const ENTRIES_LIST_SELECT_COLUMNS: readonly string[] = Array.from(
+  new Set<string>(['id', ...ALL_COLUMNS.flatMap((c) => COLUMN_KEY_SELECT_COLUMNS[c.key])])
+)
+
+export const ENTRIES_SELECT = ENTRIES_LIST_SELECT_COLUMNS.join(', ')
+
+// 7.2's detail-load half: the entry detail screen
+// (app/(app)/entries/[id]/page.tsx) and its child components
+// (components/entries/detail/{import-fields-panel,reimbursement-detail-section,
+// advance-payment-detail-section}.tsx) render several fields the list/CSV
+// column chooser never surfaces -- e.g. `variance_reason`, the
+// `reimbursement_*`/`advance_invoice_amount` type-detail fields, and the raw
+// ids (`vendor_id`, `department_id`, ...) needed to cross-reference other
+// tables. Verified by reading every one of those files for every `entry.*`
+// access, rather than assumed. Built as the list select's columns plus
+// exactly this extra set -- not a third, independently hand-typed column
+// list -- so both selects stay derived from the one place a column is added
+// to `ALL_COLUMNS`. Columns confirmed unused anywhere on the detail screen,
+// and left out of ENTRY_DETAIL_EXTRA_COLUMNS below because nothing on this
+// screen needs them: `budget_head_id`, `status_id`, `status_code`,
+// `hub_status_id`, `hub_status_changed_at`, `hub_status_changed_by`,
+// `hub_status_note`, `import_batch_id`, `created_at`, `updated_at`. Four more
+// -- `admin_head_name`, `zone_name`, `cost_center_name`, `document_count` --
+// are equally unused here but still end up selected anyway, since they ride
+// in via the shared list-select base above; kept that way for the simplicity
+// of one base to extend rather than a second, near-duplicate minimal set.
+const ENTRY_DETAIL_EXTRA_COLUMNS = [
+  'department_id',
+  'budget_head_raw_label',
+  'vendor_id',
+  'vendor_raw',
+  'variance_reason',
+  'status_raw',
+  'admin_head_id',
+  'zone_id',
+  'cost_center_id',
+  'remark',
+  'settles_entry_id',
+  'is_void',
+  'source',
+  'reimbursement_sr_no',
+  'reimbursement_type',
+  'reimburse_to_raw',
+  'advance_invoice_amount',
+] as const
+
+export const ENTRY_DETAIL_SELECT = Array.from(
+  new Set<string>([...ENTRIES_LIST_SELECT_COLUMNS, ...ENTRY_DETAIL_EXTRA_COLUMNS])
+).join(', ')
 
 // ----------------------------------------------------------------------------
 // Pagination, made sort-aware (hub-refinements-plan.md §1/§2).
@@ -179,7 +258,16 @@ export async function fetchEntriesPage({
 
   // `count: 'exact'` returns the full filtered total in Content-Range
   // alongside the page slice — one request, not two (§3.1).
-  let query = supabase.from('v_entry_enriched').select(ENTRIES_SELECT, { count: 'exact' })
+  // supabase-js's select-string type inference only narrows to a real
+  // column-checked builder when the argument is a string *literal* type;
+  // ENTRIES_SELECT is built at runtime via `.join()` (deliberately, so it
+  // stays derived from ALL_COLUMNS rather than hand-typed per call site --
+  // see its own comment above), so TS sees a plain widened `string` and
+  // falls back to an unusable `GenericStringError` result type. Same
+  // `as unknown as EntriesQueryBuilder` escape fetchAllMatchingIds already
+  // uses below for an equivalent reason; the real shape comes from the
+  // explicit `as EntryEnriched[]` cast on `rows` a few lines down.
+  let query = supabase.from('v_entry_enriched').select(ENTRIES_SELECT, { count: 'exact' }) as unknown as EntriesQueryBuilder
   query = applyEntriesFilters(query, filters)
 
   if (plan.mode === 'keyset') {

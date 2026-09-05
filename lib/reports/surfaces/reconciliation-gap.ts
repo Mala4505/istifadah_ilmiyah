@@ -182,7 +182,7 @@ const sumBy = <T,>(rows: T[], pick: (r: T) => number | null | undefined): number
 
 export async function loadReconciliationGap(compareBasis: CompareBasis): Promise<ReconciliationGapSurfaceData> {
   const supabase = await createClient()
-  const selectedEvent = await getSelectedEvent(supabase)
+  const selectedEvent = await getSelectedEvent()
   const eventId = selectedEvent?.id ?? null
 
   const [reconRes, noBillRes, rollupRes, spendRes] = await Promise.all([

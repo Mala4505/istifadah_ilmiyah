@@ -30,7 +30,14 @@ export function SurfaceLoading({ headingWidth = 'w-40', sections = 3 }: { headin
   )
 }
 
-function SectionSkeleton() {
+/**
+ * Perf remediation Phase 6.1 (docs/performance-remediation-plan.md): also
+ * used directly as a per-section `<Suspense>` fallback now that each Reports
+ * route awaits its loaders individually instead of one page-wide
+ * `Promise.all` -- same card shape, so nothing jumps when the real section
+ * mounts in its place.
+ */
+export function SectionSkeleton() {
   return (
     <Card>
       <CardHeader className="flex flex-row items-start justify-between gap-4 space-y-0">

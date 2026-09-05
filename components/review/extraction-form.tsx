@@ -17,7 +17,7 @@
  */
 
 import type { Ref } from 'react'
-import { Fragment, forwardRef, useId, useState } from 'react'
+import { Fragment, forwardRef, memo, useId, useState } from 'react'
 import { ChevronRight } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -174,7 +174,12 @@ const LINE_ITEM_FIELD_LABEL: Record<string, string> = {
   line_item_amount: 'amount',
 }
 
-export const ExtractionForm = forwardRef(function ExtractionForm(
+// Perf 5.2: memo-wrapped so a keystroke in an unrelated sibling (PdfViewer,
+// TallyFooter, MatchStrip) doesn't force this form to re-render -- only
+// actually matters once review-workspace.tsx stabilises the props it passes
+// here (onHeaderChange/onLineItemChange via useCallback), since memo() is a
+// no-op against a fresh reference every render.
+export const ExtractionForm = memo(forwardRef(function ExtractionForm(
   {
     header,
     onHeaderChange,
@@ -762,7 +767,7 @@ export const ExtractionForm = forwardRef(function ExtractionForm(
       ) : null}
     </div>
   )
-})
+}))
 
 function Field({
   label,

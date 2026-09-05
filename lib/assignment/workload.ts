@@ -54,7 +54,7 @@ export async function getAssignmentWorkload(supabase: SupabaseClient): Promise<A
   const empty: AssignmentWorkload = { pool: { count: 0, oldestDays: null }, perStaff: [] }
 
   try {
-    const selectedEventId = await getSelectedEventId(supabase)
+    const selectedEventId = await getSelectedEventId()
 
     let docsQuery = supabase
       .from('source_document')

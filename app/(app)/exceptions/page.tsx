@@ -119,6 +119,9 @@ const QUEUE_SEVERITY_BUCKET_CAP = 1000
 const QUEUE_COUNT_CAP = 5000
 const SEVERITY_PRIORITY = ['high', 'medium', 'low'] as const
 
+/** Row shape the severity chips need: EventScopableRow's ids, plus severity. */
+type SeverityScopableRow = EventScopableRow & { severity: string }
+
 function parsePageSize(raw: string | undefined): number {
   const n = Number(raw)
   return (PAGE_SIZE_OPTIONS as readonly number[]).includes(n) ? n : QUEUE_DEFAULT_PAGE_SIZE
@@ -129,34 +132,96 @@ function parsePageNumber(raw: string | undefined): number {
   return Number.isInteger(n) && n >= 1 ? n : 1
 }
 
+function tallySeverityCounts(rows: { severity: string }[]): Record<string, number> {
+  const counts: Record<string, number> = { high: 0, medium: 0, low: 0 }
+  for (const r of rows) counts[r.severity] = (counts[r.severity] ?? 0) + 1
+  return counts
+}
+
 /**
- * High / Medium / Low counts among *open* exceptions (§3.7), event-scoped the
- * same way the queue is. Independent of the queue's status/type/severity
- * filters on purpose — the chips are a fixed reference the filter can be set
- * from, not a reflection of it. Minimal column set (ids + severity only).
+ * Fetches one `reconciliation_exception` bucket per requested severity,
+ * under the given status/type filters, ordered and capped exactly as the
+ * queue page has always fetched it (see loadQueueAndSeverityCounts's own
+ * doc comment for why the bucketing exists). Extracted so the same fetch
+ * can double as the source for the severity chips when it already covers
+ * what they need (4.3 below).
  */
-async function loadOpenSeverityCounts(): Promise<Record<string, number>> {
-  const supabase = await createClient()
+async function fetchExceptionBuckets(
+  supabase: SupabaseClient,
+  filters: { status: string; type: string; severities: readonly string[] }
+) {
+  function baseQuery() {
+    let q = supabase
+      .from('reconciliation_exception')
+      .select(
+        'id, entry_id, document_extraction_id, import_batch_id, source_document_id, exception_type, severity, amount_at_risk, description, status, resolution_note, resolved_at, created_at'
+      )
+    if (filters.status !== 'all') {
+      q = q.eq('status', filters.status)
+    }
+    if (filters.type !== 'all') {
+      q = q.eq('exception_type', filters.type)
+    }
+    return q
+  }
+
+  const bucketResults = await Promise.all(
+    filters.severities.map((severity) =>
+      baseQuery()
+        .eq('severity', severity)
+        .order('amount_at_risk', { ascending: false, nullsFirst: false })
+        .order('created_at', { ascending: false })
+        .order('id', { ascending: false })
+        .range(0, QUEUE_SEVERITY_BUCKET_CAP - 1)
+    )
+  )
+
+  const error = bucketResults.find((r) => r.error)?.error ?? null
+  const rows = bucketResults.flatMap((r) => r.data ?? []) as RawExceptionRow[]
+  // A bucket that came back exactly at the cap may be hiding more open rows
+  // of that severity than we fetched -- this set can then no longer stand in
+  // for "every open exception of every severity" (what the chips need).
+  const anyBucketAtCap = bucketResults.some((r) => (r.data?.length ?? 0) >= QUEUE_SEVERITY_BUCKET_CAP)
+  return { rows, anyBucketAtCap, error }
+}
+
+/**
+ * Dedicated severity-count fetch, shaped exactly as the original standalone
+ * `loadOpenSeverityCounts` query was: status=open, no type/severity filter,
+ * minimal columns, capped at QUEUE_COUNT_CAP. Used only as a fallback (see
+ * loadQueueAndSeverityCounts) when the queue's own fetch this request can't
+ * stand in for it and an event is selected, so real rows are needed to
+ * resolve event-scoping.
+ */
+async function fetchOpenSeverityCountRows(supabase: SupabaseClient): Promise<SeverityScopableRow[]> {
   const { data } = await supabase
     .from('reconciliation_exception')
     .select('id, severity, entry_id, document_extraction_id, import_batch_id, source_document_id')
     .eq('status', 'open')
     .range(0, QUEUE_COUNT_CAP - 1)
+  return (data ?? []) as SeverityScopableRow[]
+}
 
-  const rows = (data ?? []) as (EventScopableRow & { severity: string })[]
+/**
+ * When no event is selected, event-scoping is a no-op and the chips need no
+ * row payload at all -- three `head: true` counts (one per severity) answer
+ * them with zero rows transferred and no resolveEventIds call. This is the
+ * "prefer a grouped count/aggregate" half of item 4.3.
+ */
+async function fetchOpenSeverityCountsExact(supabase: SupabaseClient): Promise<Record<string, number>> {
+  const results = await Promise.all(
+    SEVERITY_PRIORITY.map((severity) =>
+      supabase
+        .from('reconciliation_exception')
+        .select('id', { count: 'exact', head: true })
+        .eq('status', 'open')
+        .eq('severity', severity)
+    )
+  )
   const counts: Record<string, number> = { high: 0, medium: 0, low: 0 }
-  if (rows.length === 0) return counts
-
-  const selectedEventId = await getSelectedEventId(supabase)
-  let scoped = rows
-  if (selectedEventId !== null) {
-    const eventIdByRow = await resolveEventIds(supabase, rows)
-    scoped = rows.filter((r) => {
-      const resolved = eventIdByRow.get(r.id)
-      return resolved === null || resolved === undefined || resolved === selectedEventId
-    })
-  }
-  for (const r of scoped) counts[r.severity] = (counts[r.severity] ?? 0) + 1
+  SEVERITY_PRIORITY.forEach((severity, i) => {
+    counts[severity] = results[i]?.count ?? 0
+  })
   return counts
 }
 
@@ -194,8 +259,29 @@ async function loadOpenSeverityCounts(): Promise<Record<string, number>> {
  * can only be resolved after the rows are fetched (see resolveEventIds
  * above), the "true total" for the header is the post-event-scoping row
  * count rather than a DB-side `count`.
+ *
+ * Perf remediation 4.3: this used to run its own `reconciliation_exception`
+ * fetch and its own `resolveEventIds` round-trip chain, fully independently
+ * of loadOpenSeverityCounts doing the exact same thing a few lines later in
+ * the page's own `Promise.all` — two full scans of the same table plus two
+ * separate 4-round-trip `resolveEventIds` chains, every load. Folded into
+ * one function so both views can share:
+ *  - The `reconciliation_exception` fetch itself, whenever the queue's own
+ *    filters already amount to "every open exception of every type and
+ *    severity" (status=open, type=all, severity=all) *and* no bucket hit its
+ *    cap -- in that case `fetchExceptionBuckets`'s result is a complete,
+ *    accurate population and the chips are tallied straight from it, with no
+ *    second query. This is the common case (open/all/all is the page's
+ *    default view).
+ *  - A single `resolveEventIds` call, even when the fetch itself can't be
+ *    shared (the queue is filtered narrower than that, or a bucket was
+ *    truncated) -- the ids from whichever row set(s) actually got fetched
+ *    are merged before the one resolveEventIds call, so the four-round-trip
+ *    chain inside it never runs twice in the same request.
+ * See fetchOpenSeverityCountsExact/fetchOpenSeverityCountRows above for the
+ * two cases where the chips still need their own fetch, and why.
  */
-async function loadQueueData(params: {
+async function loadQueueAndSeverityCounts(params: {
   status: string
   type: string
   severity: string
@@ -205,21 +291,7 @@ async function loadQueueData(params: {
   dir: ReturnType<typeof parseQueueSort>['direction']
 }) {
   const supabase = await createClient()
-
-  function baseQuery() {
-    let q = supabase
-      .from('reconciliation_exception')
-      .select(
-        'id, entry_id, document_extraction_id, import_batch_id, source_document_id, exception_type, severity, amount_at_risk, description, status, resolution_note, resolved_at, created_at'
-      )
-    if (params.status !== 'all') {
-      q = q.eq('status', params.status)
-    }
-    if (params.type !== 'all') {
-      q = q.eq('exception_type', params.type)
-    }
-    return q
-  }
+  const selectedEventId = await getSelectedEventId()
 
   // §3.4: a severity filter narrows the fetch to a single bucket.
   const severitiesToFetch =
@@ -227,30 +299,49 @@ async function loadQueueData(params: {
       ? SEVERITY_PRIORITY
       : SEVERITY_PRIORITY.filter((s) => s === params.severity)
 
-  const bucketResults = await Promise.all(
-    severitiesToFetch.map((severity) =>
-      baseQuery()
-        .eq('severity', severity)
-        .order('amount_at_risk', { ascending: false, nullsFirst: false })
-        .order('created_at', { ascending: false })
-        .order('id', { ascending: false })
-        .range(0, QUEUE_SEVERITY_BUCKET_CAP - 1)
-    )
-  )
+  const queueFetch = await fetchExceptionBuckets(supabase, {
+    status: params.status,
+    type: params.type,
+    severities: severitiesToFetch,
+  })
 
-  const bucketError = bucketResults.find((r) => r.error)?.error ?? null
-  const rawExceptions = bucketResults.flatMap((r) => r.data ?? []) as RawExceptionRow[]
+  // Only true when queueFetch.rows is guaranteed to already be "every open
+  // exception of every type and severity" -- the exact population the chips
+  // need, independent of whatever the queue itself is filtered to.
+  const queueCoversAllOpen =
+    params.status === 'open' && params.type === 'all' && params.severity === 'all' && !queueFetch.anyBucketAtCap
 
-  const selectedEventId = await getSelectedEventId(supabase)
+  // Fallback fetch for the chips -- only needed when an event is selected
+  // (event-scoping needs real rows to resolve against) and the queue's own
+  // fetch can't be reused as-is.
+  let countRowsFetch: SeverityScopableRow[] | null = null
+  if (selectedEventId !== null && !queueCoversAllOpen) {
+    countRowsFetch = await fetchOpenSeverityCountRows(supabase)
+  }
 
-  let exceptions: RawExceptionRow[] = rawExceptions
-  if (selectedEventId !== null && rawExceptions.length > 0) {
-    const eventIdByRow = await resolveEventIds(supabase, rawExceptions)
-    exceptions = rawExceptions.filter((r) => {
+  // One shared resolveEventIds call over the union of whatever row sets got
+  // fetched -- see the doc comment above.
+  let eventIdByRow = new Map<number, number | null>()
+  if (selectedEventId !== null) {
+    const rowsById = new Map<number, EventScopableRow>()
+    for (const r of queueFetch.rows) rowsById.set(r.id, r)
+    for (const r of countRowsFetch ?? []) rowsById.set(r.id, r)
+    const combinedRows = Array.from(rowsById.values())
+    if (combinedRows.length > 0) {
+      eventIdByRow = await resolveEventIds(supabase, combinedRows)
+    }
+  }
+
+  function scopeToEvent<T extends { id: number }>(rows: T[]): T[] {
+    if (selectedEventId === null) return rows
+    return rows.filter((r) => {
       const resolved = eventIdByRow.get(r.id)
       return resolved === null || resolved === undefined || resolved === selectedEventId
     })
   }
+
+  // --- Queue page ---
+  const exceptions = scopeToEvent(queueFetch.rows)
 
   // §3.2: the user-chosen sort is applied here, after event-scoping, over the
   // assembled list. Severity rank is the default; every branch is
@@ -263,13 +354,28 @@ async function loadQueueData(params: {
   const start = (page - 1) * params.size
   const pageRows = sorted.slice(start, start + params.size)
 
+  // --- Severity chips (§3.7) --- High/Medium/Low counts among *open*
+  // exceptions, event-scoped the same way the queue is, but deliberately
+  // independent of the queue's status/type/severity filters -- the chips are
+  // a fixed reference the filter can be set from, not a reflection of it.
+  let severityCounts: Record<string, number>
+  if (selectedEventId === null) {
+    severityCounts = queueCoversAllOpen
+      ? tallySeverityCounts(queueFetch.rows)
+      : await fetchOpenSeverityCountsExact(supabase)
+  } else {
+    const countSourceRows: SeverityScopableRow[] = queueCoversAllOpen ? queueFetch.rows : countRowsFetch ?? []
+    severityCounts = tallySeverityCounts(scopeToEvent(countSourceRows))
+  }
+
   return {
     exceptions: pageRows,
     totalCount,
     page,
     rangeStart: totalCount === 0 ? 0 : start + 1,
     rangeEnd: start + pageRows.length,
-    error: bucketError,
+    error: queueFetch.error,
+    severityCounts,
   }
 }
 
@@ -335,7 +441,7 @@ async function loadReconciliationReportData() {
   // of `entries` that isn't rewritten by this stream) -- so both are
   // event-scoped here by cross-referencing their `entry_id` against
   // `entries.event_id` in application code instead of in the query itself.
-  const selectedEventId = await getSelectedEventId(supabase)
+  const selectedEventId = await getSelectedEventId()
 
   const [varianceRes, deptRes, vendorRes, budgetHeadRes, exceptionRes, budgetVsActualRes, deptMembershipRes] =
     await Promise.all([
@@ -491,11 +597,10 @@ export default async function ExceptionsPage({
   const canResolve = isAdminOrAbove(staff.role)
 
   const [
-    { exceptions, totalCount: queueTotalCount, page: queuePage, rangeStart, rangeEnd, error: queueError },
-    severityCounts,
+    { exceptions, totalCount: queueTotalCount, page: queuePage, rangeStart, rangeEnd, error: queueError, severityCounts },
     reportData,
   ] = await Promise.all([
-    loadQueueData({
+    loadQueueAndSeverityCounts({
       status,
       type,
       severity,
@@ -504,7 +609,6 @@ export default async function ExceptionsPage({
       sort: queueSort.column,
       dir: queueSort.direction,
     }),
-    loadOpenSeverityCounts(),
     loadReconciliationReportData(),
   ])
 

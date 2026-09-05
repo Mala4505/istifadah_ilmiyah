@@ -1,5 +1,8 @@
+import { Suspense, cache } from 'react'
 import Link from 'next/link'
-import { getCompareBasis } from '@/lib/reports/compare-basis'
+import { getSelectedEvent } from '@/lib/events/current'
+import type { Event } from '@/lib/events/types'
+import { getCompareBasis, type CompareBasis } from '@/lib/reports/compare-basis'
 import { loadVendorsSurface } from '@/lib/reports/surfaces/vendors'
 import { loadPurchaseTree } from '@/lib/reports/surfaces/purchase-tree'
 import { loadRateDriftDiscount } from '@/lib/reports/surfaces/rate-drift-discount'
@@ -30,6 +33,7 @@ import { QuantityByUnitSection } from '@/components/reports/sections/quantity-by
 import { ZoneUnitEconomicsSection } from '@/components/reports/sections/zone-unit-economics'
 import { HsnGstAnomalySection } from '@/components/reports/sections/hsn-gst-anomaly'
 import { VendorRiskBoardSection } from '@/components/reports/sections/vendor-risk-board'
+import { SectionSkeleton } from '@/components/reports/sections/surface-loading'
 
 /**
  * Vendors & Purchases surface (reporting-blueprint.md §5 / §8 Phase Three).
@@ -49,40 +53,31 @@ import { VendorRiskBoardSection } from '@/components/reports/sections/vendor-ris
  * related-party-gstin}.ts) so a slow query on one report never blocks
  * another (§8 Phase Three's "one loader per surface" reasoning, applied here
  * one loader per *report cluster* since these were built independently).
+ *
+ * Perf remediation Phase 6.1 (docs/performance-remediation-plan.md): each
+ * loader below used to be one member of a single page-wide `Promise.all`,
+ * so the slowest of the nine gated every section, including ones that
+ * resolved instantly. Each is now awaited inside its own async Server
+ * Component behind its own `<Suspense>`. `loadQuantityZonePrice` feeds two
+ * non-adjacent groups of sections -- wrapped in `cache()` so both groups
+ * share one query instead of running it twice.
  */
 export const dynamic = 'force-dynamic'
 
+const getQuantityZonePrice = cache(loadQuantityZonePrice)
+
 export default async function VendorsSurfacePage() {
   const compareBasis = await getCompareBasis()
-  const [
-    data,
-    purchaseTree,
-    rateDriftDiscount,
-    quantityZonePrice,
-    vendorScorecard,
-    vendorDependency,
-    relatedPartyGstin,
-    hsnGstAnomaly,
-    dupRisk,
-  ] = await Promise.all([
-    loadVendorsSurface(compareBasis),
-    loadPurchaseTree(compareBasis),
-    loadRateDriftDiscount(compareBasis),
-    loadQuantityZonePrice(compareBasis),
-    loadVendorScorecard(compareBasis),
-    loadVendorDependency(compareBasis),
-    loadRelatedPartyGstin(compareBasis),
-    loadHsnGstAnomaly(compareBasis),
-    loadDuplicateVendorRisk(compareBasis),
-  ])
+  const selectedEvent = await getSelectedEvent()
+  const eventName = selectedEvent?.name ?? null
 
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-3">
           <h1 className="text-xl font-semibold tracking-tight">Vendors &amp; Purchases</h1>
-          {data.eventName && (
-            <span className="rounded-full border border-border px-2 py-0.5 text-xs text-muted-foreground">{data.eventName}</span>
+          {eventName && (
+            <span className="rounded-full border border-border px-2 py-0.5 text-xs text-muted-foreground">{eventName}</span>
           )}
         </div>
         <Link href="/reports" className="text-xs text-muted-foreground hover:text-foreground hover:underline">
@@ -95,6 +90,44 @@ export default async function VendorsSurfacePage() {
         comparison meaningful. Every vendor links through to the entries behind it; CSV export on every section.
       </p>
 
+      <Suspense fallback={<SectionSkeleton />}>
+        <VendorsSurfaceGroup compareBasis={compareBasis} selectedEvent={selectedEvent} />
+      </Suspense>
+      <Suspense fallback={<SectionSkeleton />}>
+        <PurchaseTreeGroup compareBasis={compareBasis} selectedEvent={selectedEvent} />
+      </Suspense>
+      <Suspense fallback={<SectionSkeleton />}>
+        <VendorScorecardGroup compareBasis={compareBasis} selectedEvent={selectedEvent} />
+      </Suspense>
+      <Suspense fallback={<SectionSkeleton />}>
+        <VendorDependencyGroup compareBasis={compareBasis} selectedEvent={selectedEvent} />
+      </Suspense>
+      <Suspense fallback={<SectionSkeleton />}>
+        <VendorPriceRankingGroup compareBasis={compareBasis} selectedEvent={selectedEvent} />
+      </Suspense>
+      <Suspense fallback={<SectionSkeleton />}>
+        <RelatedPartyGroup compareBasis={compareBasis} selectedEvent={selectedEvent} />
+      </Suspense>
+      <Suspense fallback={<SectionSkeleton />}>
+        <RateDriftDiscountGroup compareBasis={compareBasis} selectedEvent={selectedEvent} />
+      </Suspense>
+      <Suspense fallback={<SectionSkeleton />}>
+        <QuantityZoneGroup compareBasis={compareBasis} selectedEvent={selectedEvent} />
+      </Suspense>
+      <Suspense fallback={<SectionSkeleton />}>
+        <HsnGstAnomalyGroup compareBasis={compareBasis} />
+      </Suspense>
+      <Suspense fallback={<SectionSkeleton />}>
+        <VendorRiskBoardGroup compareBasis={compareBasis} />
+      </Suspense>
+    </div>
+  )
+}
+
+async function VendorsSurfaceGroup({ compareBasis, selectedEvent }: { compareBasis: CompareBasis; selectedEvent: Event | null }) {
+  const data = await loadVendorsSurface(compareBasis, selectedEvent)
+  return (
+    <>
       <VendorSpendSection
         rows={data.vendorSpend.rows}
         error={data.vendorSpend.error}
@@ -132,16 +165,26 @@ export default async function VendorsSurfacePage() {
         compareBasis={compareBasis}
         previousReliableCount={data.rateBenchmark.previousReliableCount}
       />
+    </>
+  )
+}
 
-      {/* §8 Phase Five -- C-02 flagship, then the rest of the line-item and
-          vendor families. Full width: each carries its own chart/table pair
-          and reads badly squeezed into the two-column grid above. */}
-      <PurchaseTreeSection
-        rows={purchaseTree.purchaseTree.rows}
-        error={purchaseTree.purchaseTree.error}
-        compareBasis={compareBasis}
-        previousTotal={purchaseTree.purchaseTree.previousTotal}
-      />
+async function PurchaseTreeGroup({ compareBasis, selectedEvent }: { compareBasis: CompareBasis; selectedEvent: Event | null }) {
+  const purchaseTree = await loadPurchaseTree(compareBasis, selectedEvent)
+  return (
+    <PurchaseTreeSection
+      rows={purchaseTree.purchaseTree.rows}
+      error={purchaseTree.purchaseTree.error}
+      compareBasis={compareBasis}
+      previousTotal={purchaseTree.purchaseTree.previousTotal}
+    />
+  )
+}
+
+async function VendorScorecardGroup({ compareBasis, selectedEvent }: { compareBasis: CompareBasis; selectedEvent: Event | null }) {
+  const vendorScorecard = await loadVendorScorecard(compareBasis, selectedEvent)
+  return (
+    <>
       <VendorScorecardSection
         rows={vendorScorecard.scorecard.rows}
         error={vendorScorecard.scorecard.error}
@@ -156,6 +199,14 @@ export default async function VendorsSurfacePage() {
         eventStartsOn={vendorScorecard.eventStartsOn}
         eventEndsOn={vendorScorecard.eventEndsOn}
       />
+    </>
+  )
+}
+
+async function VendorDependencyGroup({ compareBasis, selectedEvent }: { compareBasis: CompareBasis; selectedEvent: Event | null }) {
+  const vendorDependency = await loadVendorDependency(compareBasis, selectedEvent)
+  return (
+    <>
       <DepartmentDependencySection
         rows={vendorDependency.departmentDependency.rows}
         error={vendorDependency.departmentDependency.error}
@@ -174,12 +225,26 @@ export default async function VendorsSurfacePage() {
         compareBasis={compareBasis}
         previousFindingCount={vendorDependency.newVendorFirstBill.previousFindingCount}
       />
-      <VendorPriceRankingSection
-        rows={quantityZonePrice.vendorPriceByFamily.rows}
-        error={quantityZonePrice.vendorPriceByFamily.error}
-        compareBasis={compareBasis}
-        previousMultiVendorCount={quantityZonePrice.vendorPriceByFamily.previousMultiVendorCount}
-      />
+    </>
+  )
+}
+
+async function VendorPriceRankingGroup({ compareBasis, selectedEvent }: { compareBasis: CompareBasis; selectedEvent: Event | null }) {
+  const quantityZonePrice = await getQuantityZonePrice(compareBasis, selectedEvent)
+  return (
+    <VendorPriceRankingSection
+      rows={quantityZonePrice.vendorPriceByFamily.rows}
+      error={quantityZonePrice.vendorPriceByFamily.error}
+      compareBasis={compareBasis}
+      previousMultiVendorCount={quantityZonePrice.vendorPriceByFamily.previousMultiVendorCount}
+    />
+  )
+}
+
+async function RelatedPartyGroup({ compareBasis, selectedEvent }: { compareBasis: CompareBasis; selectedEvent: Event | null }) {
+  const relatedPartyGstin = await loadRelatedPartyGstin(compareBasis, selectedEvent)
+  return (
+    <>
       <RelatedPartyClustersSection
         edges={relatedPartyGstin.relatedPartyClusters.edges}
         clusters={relatedPartyGstin.relatedPartyClusters.clusters}
@@ -191,6 +256,14 @@ export default async function VendorsSurfacePage() {
         compareBasis={compareBasis}
         previousAtRiskTotal={relatedPartyGstin.taxCreditExposure.previousAtRiskTotal}
       />
+    </>
+  )
+}
+
+async function RateDriftDiscountGroup({ compareBasis, selectedEvent }: { compareBasis: CompareBasis; selectedEvent: Event | null }) {
+  const rateDriftDiscount = await loadRateDriftDiscount(compareBasis, selectedEvent)
+  return (
+    <>
       <RateDriftSection
         series={rateDriftDiscount.rateDrift.series}
         error={rateDriftDiscount.rateDrift.error}
@@ -204,6 +277,14 @@ export default async function VendorsSurfacePage() {
         previousInconsistentCount={rateDriftDiscount.discountConsistency.previousInconsistentCount}
         coverage={rateDriftDiscount.discountConsistency.coverage}
       />
+    </>
+  )
+}
+
+async function QuantityZoneGroup({ compareBasis, selectedEvent }: { compareBasis: CompareBasis; selectedEvent: Event | null }) {
+  const quantityZonePrice = await getQuantityZonePrice(compareBasis, selectedEvent)
+  return (
+    <>
       <QuantityByUnitSection
         rows={quantityZonePrice.quantityByUnit.rows}
         error={quantityZonePrice.quantityByUnit.error}
@@ -216,22 +297,34 @@ export default async function VendorsSurfacePage() {
         compareBasis={compareBasis}
         previousWideSpreadCount={quantityZonePrice.zoneUnitEconomics.previousWideSpreadCount}
       />
-      <HsnGstAnomalySection
-        rows={hsnGstAnomaly.rows}
-        error={hsnGstAnomaly.error}
-        hsnRateTableEmpty={hsnGstAnomaly.hsnRateTableEmpty}
-        coveragePct={hsnGstAnomaly.coveragePct}
-        previousCoveragePct={hsnGstAnomaly.previousCoveragePct}
-        anomalyCount={hsnGstAnomaly.anomalyCount}
-        billsWithBothRates={hsnGstAnomaly.billsWithBothRates}
-        compareBasis={compareBasis}
-      />
-      <VendorRiskBoardSection
-        rows={dupRisk.vendorRiskBoard.rows}
-        error={dupRisk.vendorRiskBoard.error}
-        compareBasis={compareBasis}
-        previousElevatedCount={dupRisk.vendorRiskBoard.previousElevatedCount}
-      />
-    </div>
+    </>
+  )
+}
+
+async function HsnGstAnomalyGroup({ compareBasis }: { compareBasis: CompareBasis }) {
+  const hsnGstAnomaly = await loadHsnGstAnomaly(compareBasis)
+  return (
+    <HsnGstAnomalySection
+      rows={hsnGstAnomaly.rows}
+      error={hsnGstAnomaly.error}
+      hsnRateTableEmpty={hsnGstAnomaly.hsnRateTableEmpty}
+      coveragePct={hsnGstAnomaly.coveragePct}
+      previousCoveragePct={hsnGstAnomaly.previousCoveragePct}
+      anomalyCount={hsnGstAnomaly.anomalyCount}
+      billsWithBothRates={hsnGstAnomaly.billsWithBothRates}
+      compareBasis={compareBasis}
+    />
+  )
+}
+
+async function VendorRiskBoardGroup({ compareBasis }: { compareBasis: CompareBasis }) {
+  const dupRisk = await loadDuplicateVendorRisk(compareBasis)
+  return (
+    <VendorRiskBoardSection
+      rows={dupRisk.vendorRiskBoard.rows}
+      error={dupRisk.vendorRiskBoard.error}
+      compareBasis={compareBasis}
+      previousElevatedCount={dupRisk.vendorRiskBoard.previousElevatedCount}
+    />
   )
 }

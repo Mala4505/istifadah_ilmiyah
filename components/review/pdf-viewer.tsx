@@ -16,7 +16,7 @@
  * section's "two pdf.js rules that keep the policy strict."
  */
 
-import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
+import { forwardRef, memo, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { ZoomIn, ZoomOut, RotateCw, ChevronLeft, ChevronRight, Eye, EyeOff, CheckCircle2, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -87,7 +87,14 @@ interface PdfDocumentProxy {
   destroy(): Promise<void>
 }
 
-export const PdfViewer = forwardRef<
+// 5.2: memo(forwardRef(...)) -- memo must wrap the forwardRef component (not
+// the other way around) for React to still recognise it as a forwardRef
+// component and forward the ref correctly, while also skipping re-render
+// when props are referentially unchanged. This alone has no effect until
+// the parent (review-workspace.tsx) passes stable prop references -- that
+// stabilisation is a separate, parallel change; this file only needs to be
+// memoized correctly and keep ref-forwarding intact.
+export const PdfViewer = memo(forwardRef<
   PdfViewerHandle,
   {
     sourceDocumentId: number
@@ -195,6 +202,19 @@ export const PdfViewer = forwardRef<
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const contentRef = useRef<HTMLDivElement | null>(null)
   const thumbCanvasRefs = useRef<Map<number, HTMLCanvasElement>>(new Map())
+  // 5.9: which thumbnail pages have already been rendered (or have a render
+  // in flight) -- the load-bearing duplicate-render guard pdf.js needs (a
+  // second render() on the same canvas before the first finishes throws).
+  // Kept separate from thumbCanvasRefs because that map tracks *elements*
+  // (for the "did this canvas genuinely (re)mount" check below), while this
+  // tracks *pages already rendered for the current document* so the
+  // IntersectionObserver callback never re-renders one twice.
+  const renderedThumbnailPagesRef = useRef<Set<number>>(new Set())
+  // 5.9: one IntersectionObserver for the whole thumbnail rail, created
+  // lazily (see getThumbnailObserver below) and disposed/recreated whenever
+  // the source document changes, so a long PDF's thumbnails render only as
+  // they scroll near the visible rail instead of all N at once on mount.
+  const thumbObserverRef = useRef<IntersectionObserver | null>(null)
   // The in-flight pdf.js render task on the main canvas, if any -- pdf.js
   // throws "Cannot use the same canvas during multiple render() operations"
   // if a second render() starts on the same canvas before the first
@@ -297,6 +317,16 @@ export const PdfViewer = forwardRef<
     // *previous* document would make pageTransitioning read false even
     // though the canvas hasn't rendered anything for this document.
     setPaintedPageNumber(null)
+    // 5.9: a new document's thumbnails need to render even if the rail's
+    // <canvas> elements at a given page number end up being the same DOM
+    // nodes as the previous document's (React can reuse them across this
+    // re-render since their keys -- page numbers -- don't change) -- clear
+    // both the "already rendered" set and the observer so every thumbnail
+    // is treated as freshly mounted again.
+    renderedThumbnailPagesRef.current = new Set()
+    thumbObserverRef.current?.disconnect()
+    thumbObserverRef.current = null
+    thumbCanvasRefs.current.clear()
 
     void (async () => {
       const urlResult = await getReviewDocumentUrl(sourceDocumentId)
@@ -342,6 +372,11 @@ export const PdfViewer = forwardRef<
       cancelled = true
       void docRef.current?.destroy()
       docRef.current = null
+      // 5.9: also released on final unmount, not just on doc change (the
+      // setup above already disconnects/recreates for that case) --
+      // otherwise the observer would keep watching detached canvases.
+      thumbObserverRef.current?.disconnect()
+      thumbObserverRef.current = null
     }
     // retryNonce is a dependency purely so the Retry button (rendered in the
     // error branch below) can force this effect to re-run without a full
@@ -437,7 +472,11 @@ export const PdfViewer = forwardRef<
     }
   }, [pageNumber, zoom, rotation, numPages, containerWidth])
 
-  // Lazily render a small thumbnail once its canvas mounts.
+  // Renders a small thumbnail for page `n` -- called once that page's canvas
+  // scrolls near/into view (see getThumbnailObserver below), not unconditionally
+  // on mount. Still guarded by the caller checking renderedThumbnailPagesRef
+  // first (5.9) -- this function itself doesn't re-check, matching the
+  // original "one call site, one guard" shape.
   async function renderThumbnail(n: number) {
     const doc = docRef.current
     const canvas = thumbCanvasRefs.current.get(n)
@@ -449,6 +488,48 @@ export const PdfViewer = forwardRef<
     const context = canvas.getContext('2d')
     if (!context) return
     await page.render({ canvasContext: context, viewport }).promise
+  }
+
+  // 5.9: lazily creates (or returns the existing) IntersectionObserver that
+  // drives thumbnail rendering. A long source PDF used to fire N concurrent
+  // page.render() calls the instant every canvas mounted, with no regard for
+  // which ones were actually visible -- this fires renderThumbnail(n) only
+  // once that thumbnail's own canvas crosses into (or near) the rail's
+  // visible area. rootMargin gives a page-or-two of pre-fetch so scrolling
+  // doesn't visibly outrun the render.
+  //
+  // Deliberately does not set `root` to the scrollable rail div: canvas ref
+  // callbacks can fire before the rail container's own ref is attached (React
+  // commits child refs before parent refs), so a rail ref captured at
+  // observer-construction time could still be null. The default root (the
+  // layout viewport) still correctly accounts for the rail's own overflow
+  // clipping per the IntersectionObserver spec -- ancestor clip rects are
+  // intersected regardless of which element is named as `root` -- so this is
+  // not a behavioural compromise, just a simpler implementation.
+  function getThumbnailObserver(): IntersectionObserver {
+    if (!thumbObserverRef.current) {
+      thumbObserverRef.current = new IntersectionObserver(
+        (entries) => {
+          for (const entry of entries) {
+            if (!entry.isIntersecting) continue
+            const target = entry.target as HTMLCanvasElement
+            const raw = target.dataset.pageNumber
+            const n = raw ? Number(raw) : NaN
+            if (!Number.isFinite(n) || renderedThumbnailPagesRef.current.has(n)) continue
+            // Mark-then-unobserve before the async render starts, not after
+            // it resolves -- this is the guard against firing a second
+            // page.render() on the same canvas (pdf.js forbids overlapping
+            // render() calls on one canvas), preserved from the original
+            // ref-callback-based implementation.
+            renderedThumbnailPagesRef.current.add(n)
+            thumbObserverRef.current?.unobserve(target)
+            void renderThumbnail(n)
+          }
+        },
+        { rootMargin: '400px 0px', threshold: 0.01 }
+      )
+    }
+    return thumbObserverRef.current
   }
 
   // Phase 4 §2.5: reviewer override of the model's per-page classification --
@@ -651,14 +732,31 @@ export const PdfViewer = forwardRef<
                       // React detaches/reattaches it (calling this callback again with
                       // the same `el`) on every re-render, not just on real mount --
                       // L1's ResizeObserver-driven re-renders (checklist 3.8) made that
-                      // frequent enough to stack up concurrent render() calls on the
-                      // same thumbnail canvas, which pdf.js forbids. Only (re-)render
+                      // frequent enough to fire this repeatedly. Only (re-)register
                       // when the element genuinely changed.
                       if (el && thumbCanvasRefs.current.get(n) !== el) {
                         thumbCanvasRefs.current.set(n, el)
-                        void renderThumbnail(n)
+                        // 5.9: observe instead of rendering immediately -- the
+                        // render itself only happens once the observer reports
+                        // this canvas has scrolled near/into view (see
+                        // getThumbnailObserver above), not the moment it mounts.
+                        getThumbnailObserver().observe(el)
+                      } else if (!el) {
+                        const prior = thumbCanvasRefs.current.get(n)
+                        if (prior) thumbObserverRef.current?.unobserve(prior)
+                        thumbCanvasRefs.current.delete(n)
+                        // 5.9: the pane-collapse toggle (unlike a document
+                        // change) unmounts and later remounts this rail's
+                        // canvases without touching renderedThumbnailPagesRef,
+                        // which otherwise only resets on a document change.
+                        // Left unguarded, the fresh blank canvas that comes
+                        // back on expand would be skipped by the observer as
+                        // "already rendered" and stay blank forever -- so
+                        // treat a detached canvas as unrendered again.
+                        renderedThumbnailPagesRef.current.delete(n)
                       }
                     }}
+                    data-page-number={n}
                     className="mx-auto max-w-full"
                   />
                   <div className="mt-0.5 text-center">
@@ -829,4 +927,4 @@ export const PdfViewer = forwardRef<
       </Dialog>
     </div>
   )
-})
+}))

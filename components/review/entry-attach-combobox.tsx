@@ -24,7 +24,7 @@
  * trigger's displayed value and the popover's starting list change.
  */
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Check, ChevronsUpDown, Search } from 'lucide-react'
 import { toast } from 'sonner'
 import { toastError } from '@/components/ui/error-toast'
@@ -77,6 +77,12 @@ export function EntryAttachCombobox({
   const [results, setResults] = useState<EntrySearchResult[]>([])
   const [pending, setPending] = useState(false)
   const [attaching, setAttaching] = useState<number | null>(null)
+  // 5.8: same monotonic-request-id race guard as vendor-autocomplete.tsx --
+  // a slow earlier search resolving after a newer one must not clobber the
+  // newer, correct results. Bumped on every effect run that could produce a
+  // result (including the "cleared back below 2 chars" branch, so a
+  // still-in-flight fetch from before the clear can't land afterwards).
+  const requestIdRef = useRef(0)
 
   useEffect(() => {
     if (!open) return
@@ -88,12 +94,15 @@ export function EntryAttachCombobox({
     if (!open) return
     const trimmed = query.trim()
     if (trimmed.length < 2) {
+      requestIdRef.current++
       setResults([])
       return
     }
     const handle = setTimeout(() => {
+      const requestId = ++requestIdRef.current
       setPending(true)
       void searchEntriesForAttach(query).then((r) => {
+        if (requestIdRef.current !== requestId) return
         setResults(r.ok ? r.results : [])
         setPending(false)
       })

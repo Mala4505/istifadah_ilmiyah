@@ -94,7 +94,7 @@ export async function saveVerification(input: SaveVerificationInput): Promise<Sa
   // itself is already filtered to the selected event
   // (app/(app)/review/page.tsx), so a document reachable here belongs to it
   // by construction.
-  const selectedEvent = await getSelectedEvent(supabase)
+  const selectedEvent = await getSelectedEvent()
   if (!isEventMutable(selectedEvent)) {
     return { ok: false, error: 'This event is closed to edits. Switch to the current event to verify documents.' }
   }
@@ -421,7 +421,7 @@ export async function attachExtractionToEntry(input: {
   // event-scoping-and-review-fixes-plan.md §1.6: same guard as
   // saveVerification above -- attaching a bill to an entry is a ledger
   // mutation, so it's blocked while a past (non-current) event is selected.
-  const selectedEvent = await getSelectedEvent(supabase)
+  const selectedEvent = await getSelectedEvent()
   if (!isEventMutable(selectedEvent)) {
     return { ok: false, error: 'This event is closed to edits. Switch to the current event to attach documents.' }
   }
@@ -935,10 +935,12 @@ export type ReExtractFieldResult =
  * unsaved edits to sibling fields survive this call. That guarantee is why
  * this action deliberately does NOT `revalidatePath`/expect a
  * `router.refresh()` the way every other write action here does: a refresh
- * would re-fetch ReviewDocumentDetail and, because `currentExtractionRunId`
- * is part of the workspace's React `key` (lib/review/types.ts's doc
- * comment), remount the whole form and discard those same unsaved edits --
- * exactly the outcome this feature exists to avoid. The caller
+ * would re-fetch ReviewDocumentDetail with a bumped `currentExtractionRunId`,
+ * which review-workspace.tsx's 5.7 reset-on-prop-change block (perf
+ * remediation, docs/performance-remediation-plan.md) treats the same as a
+ * fresh extraction and would reset every field back to its OCR baseline --
+ * discarding those same unsaved edits, exactly the outcome this feature
+ * exists to avoid. The caller
  * (review-workspace.tsx) must instead take `newValue` from the result and
  * patch its own local header state for that one field, the same way
  * `handleAddLineItem` appends to local `lineItems` state without a refresh.

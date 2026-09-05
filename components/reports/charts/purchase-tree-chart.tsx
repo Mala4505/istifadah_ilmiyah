@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import Link from 'next/link'
 import { ChevronRight } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -276,9 +276,10 @@ export function PurchaseTreeChart({ rows }: { rows: PurchaseTreeRow[] }) {
   const [expandedKeys, setExpandedKeys] = useState<Set<string>>(new Set())
   const [showTable, setShowTable] = useState(false)
 
+  const familyNodes = useMemo(() => buildFamilyNodes(rows), [rows])
+
   if (rows.length === 0) return null
 
-  const familyNodes = buildFamilyNodes(rows)
   const grandTotal = sumLineAmount(rows)
 
   function toggle(key: string) {

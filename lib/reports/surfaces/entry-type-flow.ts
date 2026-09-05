@@ -197,7 +197,7 @@ export type EntryTypeFlowSurfaceData = {
 
 export async function loadEntryTypeFlow(compareBasis: CompareBasis): Promise<EntryTypeFlowSurfaceData> {
   const supabase = await createClient()
-  const selectedEvent = await getSelectedEvent(supabase)
+  const selectedEvent = await getSelectedEvent()
   const eventId = selectedEvent?.id ?? null
 
   const [splitRes, advanceRes, reimbRes, reimbTypeRes] = await Promise.all([

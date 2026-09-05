@@ -76,7 +76,7 @@ export async function generateStatusExportBatch(
     //    verification, no export. Checked first, before the pending-queue
     //    read or any other work, so a blocked generation never gets far
     //    enough to build the .xlsx or touch the database.
-    const selectedEvent = await getSelectedEvent(supabase)
+    const selectedEvent = await getSelectedEvent()
     if (!isEventMutable(selectedEvent)) {
       return {
         ok: false,

@@ -149,7 +149,7 @@ export async function loadRupeeProvenance(
   traceEntryId: number | null
 ): Promise<RupeeProvenanceSurfaceData> {
   const supabase = await createClient()
-  const selectedEvent = await getSelectedEvent(supabase)
+  const selectedEvent = await getSelectedEvent()
   const eventId = selectedEvent?.id ?? null
 
   const candidatesRes = await supabase

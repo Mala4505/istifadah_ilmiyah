@@ -30,6 +30,7 @@ import { createClient, getCachedUser } from '@/lib/supabase/server'
 import { getSelectedEventId } from '@/lib/events/current'
 import { getStaffContext } from '@/lib/export/auth'
 import { isAdminOrAbove } from '@/lib/auth/roles'
+import { ENTRY_DETAIL_SELECT, type EntriesQueryBuilder } from '@/components/entries/query'
 import {
   getCachedAdminHeads,
   getCachedZones,
@@ -53,26 +54,39 @@ export default async function EntryDetailPage({
 
   const supabase = await createClient()
 
-  // Phase 6 Step 2 (docs/event-scoping-and-review-fixes-plan.md §1): the
-  // admin-head/zone dropdowns below are filtered through this event's
-  // membership tables, same as the entries list explorer.
-  const selectedEventId = await getSelectedEventId(supabase)
-
-  const user = await getCachedUser()
-
-  // §3.3 — resolving an exception/flag from this page's Issues card is
-  // gated the same way the /exceptions queue gates it (isAdminOrAbove);
-  // the actual enforcement is RLS (reconciliation_exception_update /
-  // flags_update, both private.is_reviewer_or_admin()), this only controls
-  // whether the resolve UI renders.
-  const staff = await getStaffContext()
+  // 7.1 (docs/performance-remediation-plan.md Phase 7): these four reads are
+  // mutually independent -- getSelectedEventId/getCachedUser/getStaffContext
+  // each resolve off the request's own cookies/session rather than off one
+  // another, and the entry query needs only `id`, not any of their results.
+  // Sequential awaits cost four round trips end-to-end on the most-visited
+  // detail screen; Promise.all makes it one hop.
+  const [selectedEventId, user, staff, entryResult] = await Promise.all([
+    // Phase 6 Step 2 (docs/event-scoping-and-review-fixes-plan.md §1): the
+    // admin-head/zone dropdowns below are filtered through this event's
+    // membership tables, same as the entries list explorer.
+    getSelectedEventId(),
+    getCachedUser(),
+    // §3.3 — resolving an exception/flag from this page's Issues card is
+    // gated the same way the /exceptions queue gates it (isAdminOrAbove);
+    // the actual enforcement is RLS (reconciliation_exception_update /
+    // flags_update, both private.is_reviewer_or_admin()), this only controls
+    // whether the resolve UI renders.
+    getStaffContext(),
+    // 7.2: ENTRY_DETAIL_SELECT (components/entries/query.ts) replaces `*` --
+    // the list-select column union plus the extra fields this screen and its
+    // child components actually read, see that constant's own comment for
+    // the verification and what was deliberately left out. Same
+    // `as unknown as EntriesQueryBuilder` escape query.ts's fetchEntriesPage
+    // uses, and for the same reason: it's a runtime-built string, not a
+    // literal, so supabase-js can't column-check it at the type level -- the
+    // real shape comes from the `as EntryEnriched` cast a few lines below, as
+    // it already did before this change.
+    (supabase.from('v_entry_enriched').select(ENTRY_DETAIL_SELECT) as unknown as EntriesQueryBuilder)
+      .eq('id', id)
+      .maybeSingle(),
+  ])
   const canResolveIssues = staff !== null && isAdminOrAbove(staff.role)
-
-  const { data: entryData, error: entryError } = await supabase
-    .from('v_entry_enriched')
-    .select('*')
-    .eq('id', id)
-    .maybeSingle()
+  const { data: entryData, error: entryError } = entryResult
 
   if (entryError) {
     return (
@@ -225,11 +239,12 @@ export default async function EntryDetailPage({
   // truth for a per-bill match. Two lookups, unioned: source_document rows
   // matched directly (the common, single-bill case) plus source_document
   // ids reached only through a per-bill document_extraction.entry_id match.
-  const { data: perBillMatches } = await supabase
-    .from('document_extraction')
-    .select('source_document_id')
-    .eq('entry_id', id)
-  const { data: directMatches } = await supabase.from('source_document').select('id').eq('entry_id', id)
+  // 7.1: these two have no dependency on one another -- Promise.all removes
+  // one more sequential hop.
+  const [{ data: perBillMatches }, { data: directMatches }] = await Promise.all([
+    supabase.from('document_extraction').select('source_document_id').eq('entry_id', id),
+    supabase.from('source_document').select('id').eq('entry_id', id),
+  ])
   const linkedSourceDocIds = Array.from(
     new Set([
       ...(perBillMatches ?? []).map((r) => r.source_document_id as number),

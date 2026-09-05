@@ -286,7 +286,7 @@ export type DuplicateVendorRiskData = {
 
 export async function loadDuplicateVendorRisk(compareBasis: CompareBasis): Promise<DuplicateVendorRiskData> {
   const supabase = await createClient()
-  const selectedEvent = await getSelectedEvent(supabase)
+  const selectedEvent = await getSelectedEvent()
   const eventId = selectedEvent?.id ?? null
 
   const [registerRes, scorecardRes] = await Promise.all([

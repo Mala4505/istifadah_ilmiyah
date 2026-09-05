@@ -16,7 +16,7 @@
  * could be re-derived from (same reasoning the former page.tsx documented).
  */
 import { createClient } from '@/lib/supabase/server'
-import { getSelectedEvent } from '@/lib/events/current'
+import type { Event } from '@/lib/events/types'
 import { friendlyDataError } from '@/lib/friendly-error'
 import type { CompareBasis } from '@/lib/reports/compare-basis'
 import {
@@ -48,9 +48,15 @@ const ZONE_SELECT = 'zone_id, zone_name, zone_number, department_id, entry_count
 const sumBy = <T extends Record<string, unknown>>(rows: T[] | null | undefined, key: keyof T) =>
   (rows ?? []).reduce((s, r) => s + ((r[key] as number | null) ?? 0), 0)
 
-export async function loadBudgetSurface(compareBasis: CompareBasis): Promise<BudgetSurfaceData> {
+/**
+ * Perf remediation Phase 2.2 (docs/performance-remediation-plan.md):
+ * `selectedEvent` is resolved once by the caller (the page already
+ * called getSelectedEvent()) and passed in, rather than this loader
+ * re-resolving it itself -- same reasoning as loadHeroMetrics/
+ * loadExecutiveBrief taking `eventId` as a parameter.
+ */
+export async function loadBudgetSurface(compareBasis: CompareBasis, selectedEvent: Event | null): Promise<BudgetSurfaceData> {
   const supabase = await createClient()
-  const selectedEvent = await getSelectedEvent(supabase)
   const eventId = selectedEvent?.id ?? null
 
   const [headRes, deptRes, subDeptRes, zoneRes] = await Promise.all([

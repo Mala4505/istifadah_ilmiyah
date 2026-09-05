@@ -1,6 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { ALL_COLUMNS, type ColumnKey, type EntriesFilters, type EntryEnriched } from './types'
-import { applyEntriesFilters } from './query'
+import { applyEntriesFilters, ENTRIES_SELECT, type EntriesQueryBuilder } from './query'
 import { formatDate } from './format'
 
 const EXPORT_BATCH_SIZE = 1000
@@ -35,11 +35,19 @@ function cellValue(row: EntryEnriched, key: ColumnKey): string {
  * entries for the whole event); re-fetches the full filtered set in batches
  * via keyset pagination rather than trusting whatever happens to be in
  * client-side state, so the export always matches the filters exactly.
+ *
+ * 7.8 (docs/performance-remediation-plan.md Phase 7): each batch is
+ * necessarily sequential (the next cursor depends on the last row fetched),
+ * so a large export can take several seconds with nothing on screen but a
+ * static "Exporting…" label. `onProgress`, when passed, is called with the
+ * running row count after every batch completes — the caller
+ * (entries-explorer.tsx) uses it to update that label in place.
  */
 export async function exportEntriesToCsv(
   supabase: SupabaseClient,
   filters: EntriesFilters,
   visibleColumns?: ReadonlySet<ColumnKey>,
+  onProgress?: (rowCount: number) => void,
 ): Promise<{ rowCount: number; truncated: boolean }> {
   // §4.10: the CSV mirrors the column chooser rather than always dumping
   // every column. Falls back to all columns when no set is passed (or an
@@ -54,9 +62,17 @@ export async function exportEntriesToCsv(
   const lines: string[] = [columns.map((c) => csvEscape(c.label)).join(',')]
 
   for (;;) {
-    let query = supabase
-      .from('v_entry_enriched')
-      .select('*')
+    // Same `as unknown as EntriesQueryBuilder` cast query.ts's
+    // fetchEntriesPage uses on this constant, and for the same reason:
+    // ENTRIES_SELECT is a runtime-built `string`, not a literal, so
+    // supabase-js's column-checked select typing can't parse it -- the real
+    // row shape comes from the explicit `as EntryEnriched[]` cast below, not
+    // from this call's inferred type.
+    let query = (
+      supabase
+        .from('v_entry_enriched')
+        .select(ENTRIES_SELECT) as unknown as EntriesQueryBuilder
+    )
       .order('id', { ascending: false })
       .limit(EXPORT_BATCH_SIZE)
     query = applyEntriesFilters(query, filters)
@@ -72,6 +88,7 @@ export async function exportEntriesToCsv(
     }
     rowCount += rows.length
     cursor = rows[rows.length - 1]!.id
+    onProgress?.(rowCount)
 
     if (rows.length < EXPORT_BATCH_SIZE) break
     if (rowCount >= MAX_EXPORT_ROWS) {

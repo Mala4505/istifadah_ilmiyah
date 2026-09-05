@@ -18,7 +18,7 @@
  * matchCandidates is passed through, so they share one render branch below.
  */
 
-import { useState } from 'react'
+import { memo, useState } from 'react'
 import { toast } from 'sonner'
 import { toastError } from '@/components/ui/error-toast'
 import { Button } from '@/components/ui/button'
@@ -27,7 +27,9 @@ import type { MatchCandidate } from '@/lib/review/types'
 import { formatINR } from '@/lib/reports/format'
 import { EntryAttachCombobox } from './entry-attach-combobox'
 
-export function MatchStrip({
+// Perf 5.2: memo-wrapped so re-rendering its parent (ReviewStatusLine) for
+// an unrelated prop change doesn't also re-render this combobox.
+function MatchStripImpl({
   documentExtractionId,
   sourceDocumentId,
   entryId,
@@ -113,3 +115,5 @@ export function MatchStrip({
     </div>
   )
 }
+
+export const MatchStrip = memo(MatchStripImpl)

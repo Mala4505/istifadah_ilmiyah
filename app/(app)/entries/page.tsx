@@ -55,7 +55,7 @@ async function loadEntriesPageData(): Promise<{
   hubStatusCounts: EntryStatusCount[]
 }> {
   const supabase = await createClient()
-  const selectedEventId = await getSelectedEventId(supabase)
+  const selectedEventId = await getSelectedEventId()
 
   // Membership ids fetched first (department_id/admin_head_id/zone_id
   // arrays), then used to filter the master-row queries below — mirrors the

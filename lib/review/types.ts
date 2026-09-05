@@ -187,9 +187,13 @@ export interface ReviewDocumentDetail {
   claimedAt: string | null
   claimedByIsMe: boolean
   currentUserId: string
-  /** Changes on every `R` re-extraction -- used as part of the React `key` in
-   * page.tsx so a re-run remounts the workspace with fresh form state instead
-   * of stale local state fighting new server props. */
+  /** Changes on every `R` re-extraction. Perf remediation 5.7
+   * (docs/performance-remediation-plan.md): no longer part of the React
+   * `key` in page.tsx (that's `sourceDocumentId` alone now, so a bill switch
+   * doesn't remount PdfViewer) -- review-workspace.tsx instead watches this
+   * changing, alongside `documentExtractionId`, in its own
+   * reset-on-prop-change block to give a re-run fresh form state without a
+   * full remount. */
   currentExtractionRunId: number | null
   extractionConfidence: number | null
   legibility: 'clear' | 'partial' | 'poor' | null

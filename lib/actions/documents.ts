@@ -412,7 +412,7 @@ export async function searchEntriesForAttach(
   const resultDepartmentIds = Array.from(
     new Set((data ?? []).map((e) => e.department_id as number | null).filter((id): id is number => id !== null))
   )
-  const selectedEventId = await getSelectedEventId(supabase)
+  const selectedEventId = await getSelectedEventId()
   const { data: eventDepartmentRows } =
     selectedEventId !== null && resultDepartmentIds.length > 0
       ? await supabase.from('event_department').select('department_id').eq('event_id', selectedEventId)
@@ -626,91 +626,69 @@ export async function getDocumentViewDetail(
  * time it's asked for — the same trade this screen has always made, just
  * no longer paid inside the page's own render.
  *
- * Mirrors the exact query/scoring shape `app/(app)/documents/page.tsx` used
- * to run inline: same matched-entry exclusion, same 5,000-row recency cap,
- * same `rankCandidates` call, per bill. Returns every current
- * unmatched/suggested bill's ranked candidates in one round trip rather
- * than taking a list of ids to score — the shared candidate-pool queries
- * (matched-entry exclusion, the 5,000-row entries fetch) cost the same
- * whether scoring one bill or all of them, so there's nothing to save by
- * asking for a subset.
+ * Performance remediation plan 4.1 + 4.2, both landed here together:
+ *
+ * 4.1 — candidate pre-filtering moved to the `match_candidate_entries` RPC
+ * (supabase/migrations/20260905000001_match_candidate_entries.sql), called
+ * once per bill being ranked. That RPC does the matched-entry exclusion
+ * itself (NOT EXISTS against `source_document`, replacing the separate
+ * `matchedRows` query this function used to run) and pre-filters by exact
+ * vendor_id, amount proximity, normalized invoice-number match, or vendor
+ * trigram similarity — index-backed, no `.limit(5000)` recency cap, so an
+ * old entry beyond that former window is reachable again. `rankCandidates`
+ * still does the exact same final scoring/top-N selection in JS on the
+ * (now small) result.
+ *
+ * 4.2 — two independent caps on top of 4.1's per-call cost:
+ *   - `docIds`: only the documents already on screen are queried (still
+ *     narrowed to unmatched/suggested here too, as defense in depth — the
+ *     caller already only shows those, but a stale id from a caller that
+ *     forgets the filter shouldn't rank a matched document's bills).
+ *   - `extractionIdsNeedingRank`: when given, only extractions whose ids
+ *     appear here get a `match_candidate_entries` call at all — the caller
+ *     (`document-inbox.tsx`) tracks which bills already carry a computed
+ *     `candidates` array and only asks for the rest, so a single
+ *     attach/delete/assign no longer re-ranks the whole visible backlog.
+ *     Omitted (or `undefined`) ranks every extraction found for `docIds`,
+ *     which is what a first mount with no prior candidates needs.
+ *   Freshness trade-off, explicit per the plan: an extraction that already
+ *   has candidates is never re-ranked by this path, even if the entries
+ *   table changed since — this screen no longer re-derives "is there a
+ *   newly-plausible match now" for a bill it already ranked once, in
+ *   exchange for not re-scoring the entire backlog after every mutation.
+ *   A reviewer can still always find a fresh match by using the manual
+ *   search (EntryAttachCombobox) or by revisiting after the next real
+ *   change to that specific bill (a re-extract clears verified_at and the
+ *   bill's local `candidates`, which is not the case addressed here).
  */
-export async function getInboxMatchCandidates(): Promise<Record<number, CandidateEntryView[]>> {
+export async function getInboxMatchCandidates(
+  docIds: number[],
+  extractionIdsNeedingRank?: number[]
+): Promise<Record<number, CandidateEntryView[]>> {
+  if (docIds.length === 0) return {}
   const supabase = await createClient()
 
   const { data: docsData } = await supabase
     .from('source_document')
     .select('id')
+    .in('id', docIds)
     .in('match_status', ['unmatched', 'suggested'])
-  const docIds = (docsData ?? []).map((d) => d.id as number)
-  if (docIds.length === 0) return {}
+  const validDocIds = (docsData ?? []).map((d) => d.id as number)
+  if (validDocIds.length === 0) return {}
 
   const { data: extractionsData } = await supabase
     .from('document_extraction')
     .select('id, vendor_name_ocr, invoice_date_ocr, total_amount_ocr, invoice_number_ocr, invoice_number_verified')
-    .in('source_document_id', docIds)
-  const extractions = extractionsData ?? []
+    .in('source_document_id', validDocIds)
+  const allExtractions = extractionsData ?? []
+  const extractions = extractionIdsNeedingRank
+    ? allExtractions.filter((e) => extractionIdsNeedingRank.includes(e.id as number))
+    : allExtractions
   if (extractions.length === 0) return {}
 
-  const { data: matchedRows } = await supabase
-    .from('source_document')
-    .select('entry_id')
-    .eq('match_status', 'matched')
-    .not('entry_id', 'is', null)
-  const matchedEntryIds = new Set((matchedRows ?? []).map((r) => r.entry_id as number))
-
-  const { data: entriesData } = await supabase
-    .from('entries')
-    .select(
-      'id, department_id, vendor_raw, vendor_id, amount, date, invoice_number, ubbl_number, main_number, admin_head_id, zone_id'
-    )
-    .eq('is_void', false)
-    .order('date', { ascending: false, nullsFirst: false })
-    .limit(5000)
-
-  const candidatePool: MatchableEntry[] = (entriesData ?? [])
-    .filter((e) => !matchedEntryIds.has(e.id))
-    .map((e) => ({
-      id: e.id,
-      vendorRaw: e.vendor_raw,
-      vendorId: e.vendor_id,
-      amount: e.amount,
-      date: e.date,
-      invoiceNumber: e.invoice_number,
-      departmentId: e.department_id,
-      ubblNumber: e.ubbl_number,
-      mainNumber: e.main_number,
-      adminHeadId: e.admin_head_id,
-      zoneId: e.zone_id,
-    }))
-
-  // Phase 6 Step 2 §1: department names shown alongside a candidate are
-  // scoped to the SELECTED event's event_department membership, not the
-  // full shared department table -- a department retired in a prior year
-  // (present on an old entry's department_id, but untouched by the current
-  // year's carry-forward) shouldn't be relabeled as if it were still active.
-  // A department with no membership row simply comes back with no name
-  // (departmentNameById.get returns undefined -> null below), which is
-  // cosmetic only -- it never affects which entries are actually candidates.
-  const selectedEventId = await getSelectedEventId(supabase)
-  const { data: eventDepartmentRows } =
-    selectedEventId !== null
-      ? await supabase.from('event_department').select('department_id').eq('event_id', selectedEventId)
-      : { data: [] as { department_id: number }[] }
-  const activeDepartmentIds = (eventDepartmentRows ?? []).map((r) => r.department_id as number)
-
-  const { data: departmentsData } =
-    activeDepartmentIds.length > 0
-      ? await supabase.from('department').select('id, name').in('id', activeDepartmentIds)
-      : { data: [] as { id: number; name: string }[] }
-  const departmentNameById = new Map((departmentsData ?? []).map((d) => [d.id as number, d.name as string]))
-
-  // Redesign plan §10: batch-resolve every extraction's normalized OCR
-  // vendor name against learned vendor_alias rows in one query, rather than
-  // one round trip per bill -- this function already scores every
-  // unmatched/suggested bill in the inbox in one call, so the same
-  // one-query-for-everything shape used for candidatePool/departmentsData
-  // above applies here too.
+  // Redesign plan §10: batch-resolve every extraction-being-ranked's
+  // normalized OCR vendor name against learned vendor_alias rows in one
+  // query, rather than one round trip per bill.
   const normalizedVendorNameByExtractionId = new Map<number, string>()
   for (const extraction of extractions) {
     const ocrVendorName = extraction.vendor_name_ocr as string | null
@@ -730,24 +708,101 @@ export async function getInboxMatchCandidates(): Promise<Record<number, Candidat
     }
   }
 
-  const result: Record<number, CandidateEntryView[]> = {}
-  for (const extraction of extractions) {
-    const normalizedVendorName = normalizedVendorNameByExtractionId.get(extraction.id as number)
-    const vendorAliasVendorId = normalizedVendorName
-      ? (aliasVendorIdByNormalizedName.get(normalizedVendorName) ?? null)
-      : null
+  // One match_candidate_entries call per bill (each bill's own OCR'd
+  // vendor/amount/invoice fields are a different pre-filter input), run
+  // together rather than sequentially -- with `extractionIdsNeedingRank`
+  // narrowing the set (4.2), this is usually 0 or 1 calls, not one per bill
+  // in the whole inbox.
+  const perBillResults = await Promise.all(
+    extractions.map(async (extraction) => {
+      const ocrVendorName = extraction.vendor_name_ocr as string | null
+      const normalizedVendorName = normalizedVendorNameByExtractionId.get(extraction.id as number)
+      const vendorAliasVendorId = normalizedVendorName
+        ? (aliasVendorIdByNormalizedName.get(normalizedVendorName) ?? null)
+        : null
+      const invoiceNumber =
+        (extraction.invoice_number_verified as string | null) ?? (extraction.invoice_number_ocr as string | null)
 
-    result[extraction.id as number] = rankCandidates(
-      {
-        vendorName: extraction.vendor_name_ocr as string | null,
-        totalAmount: extraction.total_amount_ocr as number | null,
-        invoiceDate: extraction.invoice_date_ocr as string | null,
-        invoiceNumber:
-          (extraction.invoice_number_verified as string | null) ?? (extraction.invoice_number_ocr as string | null),
-        vendorAliasVendorId,
-      },
-      candidatePool
-    ).map((c) => ({
+      const { data: candidateRows } = await supabase.rpc('match_candidate_entries', {
+        p_vendor_id: vendorAliasVendorId,
+        p_amount: extraction.total_amount_ocr as number | null,
+        p_invoice_number: invoiceNumber,
+        p_vendor_raw: ocrVendorName,
+      })
+
+      const candidatePool: MatchableEntry[] = (candidateRows ?? []).map(
+        (e: {
+          id: number
+          vendor_raw: string | null
+          vendor_id: number | null
+          amount: number | null
+          date: string | null
+          invoice_number: string | null
+          department_id: number | null
+          ubbl_number: string
+          main_number: string | null
+          admin_head_id: number | null
+          zone_id: number | null
+        }) => ({
+          id: e.id,
+          vendorRaw: e.vendor_raw,
+          vendorId: e.vendor_id,
+          amount: e.amount,
+          date: e.date,
+          invoiceNumber: e.invoice_number,
+          departmentId: e.department_id,
+          ubblNumber: e.ubbl_number,
+          mainNumber: e.main_number,
+          adminHeadId: e.admin_head_id,
+          zoneId: e.zone_id,
+        })
+      )
+
+      const ranked = rankCandidates(
+        {
+          vendorName: ocrVendorName,
+          totalAmount: extraction.total_amount_ocr as number | null,
+          invoiceDate: extraction.invoice_date_ocr as string | null,
+          invoiceNumber,
+          vendorAliasVendorId,
+        },
+        candidatePool
+      )
+
+      return { extractionId: extraction.id as number, ranked }
+    })
+  )
+
+  // Phase 6 Step 2 §1: department names shown alongside a candidate are
+  // scoped to the SELECTED event's event_department membership, not the
+  // full shared department table -- a department retired in a prior year
+  // (present on an old entry's department_id, but untouched by the current
+  // year's carry-forward) shouldn't be relabeled as if it were still active.
+  // A department with no membership row simply comes back with no name
+  // (departmentNameById.get returns undefined -> null below), which is
+  // cosmetic only -- it never affects which entries are actually candidates.
+  const selectedEventId = await getSelectedEventId()
+  const candidateDepartmentIds = Array.from(
+    new Set(
+      perBillResults.flatMap((r) => r.ranked.map((c) => c.departmentId)).filter((id): id is number => id !== null)
+    )
+  )
+  const { data: eventDepartmentRows } =
+    selectedEventId !== null && candidateDepartmentIds.length > 0
+      ? await supabase.from('event_department').select('department_id').eq('event_id', selectedEventId)
+      : { data: [] as { department_id: number }[] }
+  const activeDepartmentIds = new Set((eventDepartmentRows ?? []).map((r) => r.department_id as number))
+  const departmentIdsToResolve = candidateDepartmentIds.filter((id) => activeDepartmentIds.has(id))
+
+  const { data: departmentsData } =
+    departmentIdsToResolve.length > 0
+      ? await supabase.from('department').select('id, name').in('id', departmentIdsToResolve)
+      : { data: [] as { id: number; name: string }[] }
+  const departmentNameById = new Map((departmentsData ?? []).map((d) => [d.id as number, d.name as string]))
+
+  const result: Record<number, CandidateEntryView[]> = {}
+  for (const { extractionId, ranked } of perBillResults) {
+    result[extractionId] = ranked.map((c) => ({
       entryId: c.id,
       score: c.score,
       vendorRaw: c.vendorRaw,
@@ -755,7 +810,7 @@ export async function getInboxMatchCandidates(): Promise<Record<number, Candidat
       date: c.date,
       ubblNumber: c.ubblNumber,
       mainNumber: c.mainNumber,
-      departmentName: c.departmentId !== null ? departmentNameById.get(c.departmentId) ?? null : null,
+      departmentName: c.departmentId !== null ? (departmentNameById.get(c.departmentId) ?? null) : null,
       entryDepartmentId: c.departmentId,
       adminHeadId: c.adminHeadId ?? null,
       zoneId: c.zoneId ?? null,

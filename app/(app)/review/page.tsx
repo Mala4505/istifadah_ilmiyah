@@ -40,6 +40,18 @@ export const dynamic = 'force-dynamic'
 
 const QUEUE_ROW_CAP = 500
 
+/** Must match v_review_queue_all's WHERE clause exactly
+ *  (supabase/migrations/20260904000001_review_queue_perf_rewrite.sql, plan
+ *  item 1.3) -- Phase 1.4's direct count below needs to agree with that view
+ *  on what's reachable when scope is 'all', or the header total and the list
+ *  disagree. Calendar-year subtraction (not a fixed day count) to mirror
+ *  Postgres's `now() - interval '2 years'`. */
+function queueAllBoundIso(): string {
+  const bound = new Date()
+  bound.setUTCFullYear(bound.getUTCFullYear() - 2)
+  return bound.toISOString()
+}
+
 export default async function ReviewPage({
   searchParams,
 }: {
@@ -113,22 +125,37 @@ export default async function ReviewPage({
   // presents a clean slate rather than mixing years together. Filtered here
   // at the query site rather than inside the view itself -- see
   // 20260822000006_review_queue_event_scoping.sql's doc comment for why.
-  const selectedEventId = await getSelectedEventId(supabase)
+  const selectedEventId = await getSelectedEventId()
 
   let queueQuery = supabase
     .from(scope === 'all' ? 'v_review_queue_all' : 'v_review_queue')
     .select(
       'document_extraction_id, source_document_id, original_filename, extraction_confidence, max_open_severity_rank, open_issue_count, queue_amount, bill_index, page_number_start, page_number_end, bill_count'
     )
-  // Item 1.5: the capped query below can silently truncate the queue, so a
-  // second, uncapped count-only query runs alongside it on the same
-  // view/filters to surface the true pending total in the header.
+  // Item 1.5 (of the earlier perf-ux-audit-checklist.md pass): the capped
+  // query above can silently truncate the queue, so a second, uncapped
+  // count-only query runs alongside it to surface the true pending total in
+  // the header.
+  //
+  // Perf remediation Phase 1.4 (docs/performance-remediation-plan.md): this
+  // used to run `select('*', { count: 'exact', head: true })` against the
+  // same view as queueQuery above. Postgres can't prove a correlated lateral
+  // join is row-count-preserving, so that count silently re-ran the most
+  // expensive half of the list query just to answer "how many are pending".
+  // Counting document_extraction directly -- embedding source_document only
+  // for the event filter -- never touches reconciliation_exception at all,
+  // backed by document_extraction_unverified_idx for the 'pending' scope
+  // (both from 20260904000001_review_queue_perf_rewrite.sql).
   let queueCountQuery = supabase
-    .from(scope === 'all' ? 'v_review_queue_all' : 'v_review_queue')
-    .select('*', { count: 'exact', head: true })
+    .from('document_extraction')
+    .select('id, source_document!inner(event_id)', { count: 'exact', head: true })
+  queueCountQuery =
+    scope === 'all'
+      ? queueCountQuery.gt('created_at', queueAllBoundIso())
+      : queueCountQuery.is('verified_at', null)
   if (selectedEventId !== null) {
     queueQuery = queueQuery.eq('event_id', selectedEventId)
-    queueCountQuery = queueCountQuery.eq('event_id', selectedEventId)
+    queueCountQuery = queueCountQuery.eq('source_document.event_id', selectedEventId)
   }
   const [
     { data: queueRows, error: queueError },
@@ -286,7 +313,15 @@ export default async function ReviewPage({
           {...assigneeControlProps}
         />
         <ReviewWorkspace
-          key={`${detail.documentExtractionId}:${detail.currentExtractionRunId ?? 'none'}`}
+          // Perf remediation 5.7 (docs/performance-remediation-plan.md): keyed
+          // on sourceDocumentId, not documentExtractionId, so stepping
+          // between sibling bills of the same PDF no longer unmounts/
+          // remounts ReviewWorkspace (and PdfViewer inside it) -- see
+          // review-workspace.tsx's own "5.7" comment for how it resets its
+          // internal state on a documentExtractionId/currentExtractionRunId
+          // change now that a prop update, not a remount, is what carries a
+          // bill switch or a re-extract.
+          key={detail.sourceDocumentId}
           detail={detail}
           queue={queue.map((q) => ({ documentExtractionId: q.documentExtractionId, sourceDocumentId: q.sourceDocumentId }))}
           currentIndex={-1}
@@ -330,7 +365,15 @@ export default async function ReviewPage({
         {...assigneeControlProps}
       />
       <ReviewWorkspace
-        key={`${detail.documentExtractionId}:${detail.currentExtractionRunId ?? 'none'}`}
+        // Perf remediation 5.7 (docs/performance-remediation-plan.md): keyed
+        // on sourceDocumentId, not documentExtractionId, so stepping between
+        // sibling bills of the same PDF no longer unmounts/remounts
+        // ReviewWorkspace (and PdfViewer inside it) -- see
+        // review-workspace.tsx's own "5.7" comment for how it resets its
+        // internal state on a documentExtractionId/currentExtractionRunId
+        // change now that a prop update, not a remount, is what carries a
+        // bill switch or a re-extract.
+        key={detail.sourceDocumentId}
         detail={detail}
         queue={queue.map((q) => ({ documentExtractionId: q.documentExtractionId, sourceDocumentId: q.sourceDocumentId }))}
         currentIndex={currentIndex}
@@ -479,7 +522,7 @@ async function loadDocumentDetail(
       ? normalizeVendorName(extraction.vendor_name_ocr as string)
       : ''
 
-  const [runRes, entryRes, exceptionsRes, hubStatuses, matchedRowsRes, candidateEntriesRes, vendorAliasRes] =
+  const [runRes, entryRes, exceptionsRes, hubStatuses, vendorAliasRes] =
     await Promise.all([
     extraction.current_extraction_run_id
       ? supabase
@@ -512,27 +555,15 @@ async function loadDocumentDetail(
     // as before) and the entry's hub-status code lookup just past this
     // Promise.all -- one fetch instead of two.
     getCachedHubStatuses(supabase),
-    // Match-strip "suggested" state (§7): only meaningful when this bill has
-    // no ledger match yet -- same exclusion-pool pattern as
-    // app/(app)/documents/page.tsx's rankCandidates usage. Run alongside the
-    // rest of this batch rather than serialized after it.
-    entryId === null
-      ? supabase.from('source_document').select('entry_id').eq('match_status', 'matched').not('entry_id', 'is', null)
-      : Promise.resolve({ data: [] }),
-    entryId === null
-      ? supabase
-          .from('entries')
-          .select('id, department_id, vendor_raw, vendor_id, amount, date, invoice_number, ubbl_number, main_number')
-          .eq('is_void', false)
-          .order('date', { ascending: false, nullsFirst: false })
-          .limit(5000)
-      : Promise.resolve({ data: [] }),
     // Redesign plan §10: has this document's normalized OCR vendor name been
     // learned as an alias for some vendor before (via a prior attach's
     // learnVendorAliasesFromAttach, lib/actions/review.ts)? If so, the
     // candidate whose own vendor_id matches gets a confident (1.0) vendor
     // sub-score in lib/matching.ts instead of relying on bigram fuzzy
-    // similarity alone.
+    // similarity alone. Resolved here (alongside the rest of this batch)
+    // because performance remediation plan 4.1's match_candidate_entries RPC
+    // below needs its result as a parameter -- that RPC call is therefore
+    // sequential *after* this Promise.all rather than inside it.
     normalizedOcrVendorName
       ? supabase.from('vendor_alias').select('vendor_id').eq('raw_name', normalizedOcrVendorName).maybeSingle()
       : Promise.resolve({ data: null }),
@@ -643,25 +674,49 @@ async function loadDocumentDetail(
   }
 
   // Match-strip "suggested" state (§7): rank this bill's own OCR'd fields
-  // against the same excluded-if-already-matched candidate pool
-  // app/(app)/documents/page.tsx builds for the inbox. Reused, not
-  // reimplemented -- see lib/matching.ts's rankCandidates.
+  // against a small, index-pre-filtered candidate pool. Performance
+  // remediation plan 4.1: this used to be a 5,000-row `entries` fetch (an
+  // unbounded-in-practice `.limit(5000)` that silently made older entries
+  // unreachable once the ledger grew past it) filtered in JS against a
+  // separately-fetched matched-entry-id set. Both are now the
+  // match_candidate_entries RPC (supabase/migrations/
+  // 20260905000001_match_candidate_entries.sql) -- it does the matched-entry
+  // exclusion itself (NOT EXISTS against source_document) and pre-filters by
+  // vendor_id/amount-proximity/invoice-number/vendor-trigram before this
+  // still calls the exact same lib/matching.ts's rankCandidates on the
+  // result for final scoring/top-N, unchanged.
   let matchCandidates: MatchCandidate[] = []
   if (entryId === null) {
-    const matchedEntryIds = new Set((matchedRowsRes.data ?? []).map((r) => r.entry_id as number))
-    const candidatePool: MatchableEntry[] = (candidateEntriesRes.data ?? [])
-      .filter((e) => !matchedEntryIds.has(e.id as number))
-      .map((e) => ({
-        id: e.id as number,
-        vendorRaw: e.vendor_raw as string | null,
-        vendorId: e.vendor_id as number | null,
-        amount: e.amount as number | null,
-        date: e.date as string | null,
-        invoiceNumber: e.invoice_number as string | null,
-        departmentId: e.department_id as number | null,
-        ubblNumber: e.ubbl_number as string,
-        mainNumber: e.main_number as string | null,
-      }))
+    const { data: candidateRows } = await supabase.rpc('match_candidate_entries', {
+      p_vendor_id: (vendorAliasRes.data?.vendor_id as number | undefined) ?? null,
+      p_amount: extraction.total_amount_ocr as number | null,
+      p_invoice_number:
+        (extraction.invoice_number_verified as string | null) ?? (extraction.invoice_number_ocr as string | null),
+      p_vendor_raw: extraction.vendor_name_ocr as string | null,
+    })
+    const candidatePool: MatchableEntry[] = (candidateRows ?? []).map(
+      (e: {
+        id: number
+        vendor_raw: string | null
+        vendor_id: number | null
+        amount: number | null
+        date: string | null
+        invoice_number: string | null
+        department_id: number | null
+        ubbl_number: string
+        main_number: string | null
+      }) => ({
+        id: e.id,
+        vendorRaw: e.vendor_raw,
+        vendorId: e.vendor_id,
+        amount: e.amount,
+        date: e.date,
+        invoiceNumber: e.invoice_number,
+        departmentId: e.department_id,
+        ubblNumber: e.ubbl_number,
+        mainNumber: e.main_number,
+      })
+    )
 
     // Same event-scoped department-name resolution as
     // getInboxMatchCandidates (lib/actions/documents.ts) -- a candidate's

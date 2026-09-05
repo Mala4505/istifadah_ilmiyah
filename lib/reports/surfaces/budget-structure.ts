@@ -110,7 +110,7 @@ export async function loadBudgetStructure(
   void compareBasis
 
   const supabase = await createClient()
-  const selectedEvent = await getSelectedEvent(supabase)
+  const selectedEvent = await getSelectedEvent()
   const eventId = selectedEvent?.id ?? null
 
   const safeHeadId =

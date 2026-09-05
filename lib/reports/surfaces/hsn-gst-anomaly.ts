@@ -93,7 +93,7 @@ export type HsnGstAnomalySurfaceData = {
 
 export async function loadHsnGstAnomaly(compareBasis: CompareBasis): Promise<HsnGstAnomalySurfaceData> {
   const supabase = await createClient()
-  const selectedEvent = await getSelectedEvent(supabase)
+  const selectedEvent = await getSelectedEvent()
   const eventId = selectedEvent?.id ?? null
 
   const [rowsRes, rateCountRes] = await Promise.all([

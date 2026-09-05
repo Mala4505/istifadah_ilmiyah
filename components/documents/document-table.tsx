@@ -1,6 +1,7 @@
 'use client'
 
-import { Fragment, useEffect, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
+import { usePathname, useSearchParams } from 'next/navigation'
 import { CheckCircle2, ChevronDown, ChevronUp, Eye, PenLine, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -68,6 +69,101 @@ function matchesFilters(doc: InboxDocumentView, filters: DocumentFilters): boole
   return true
 }
 
+// ---- URL sync (performance remediation plan 7.4) ----
+//
+// Mirrors components/entries/entries-explorer.tsx's own filter+sort URL
+// sync: read from the URL on mount, write back on every change, resync when
+// the URL diverges (back/forward). The one deliberate difference is the
+// write mechanism. Entries' filtering runs server-side (fetchEntriesPage
+// calls Supabase directly from the client), so router.push there is real
+// work the URL change is requesting anyway. Here, filtering and sorting run
+// entirely over `documents`, a prop this component already has in memory —
+// nothing downstream needs a new query. Writing through next/navigation's
+// router would re-run app/(app)/documents/page.tsx's whole query pipeline
+// (docs, assignees, extractions, admin heads, zones) on every keystroke for
+// a view this component can already produce on its own, so these seven
+// params are written with the raw History API instead. `useSearchParams()`
+// still observes history.pushState/replaceState writes (and real
+// navigations, like 7.5's docsLimit change) — see Next's "Updating
+// searchParams" pattern — so the resync effect stays a faithful mirror of
+// entries-explorer.tsx's, and back/forward still works.
+const DOCUMENT_TABLE_PARAM_KEYS = ['q', 'status', 'review', 'from', 'to', 'sort', 'dir'] as const
+const STATUS_FILTER_VALUES: string[] = STATUS_OPTIONS.map((o) => o.value)
+const REVIEW_FILTER_VALUES: string[] = ['reviewed', 'unreviewed']
+const SORT_COLUMN_VALUES: string[] = ['filename', 'total', 'status', 'uploaded']
+
+function paramsToFilters(params: URLSearchParams): DocumentFilters {
+  const status = params.get('status')
+  const review = params.get('review')
+  return {
+    search: params.get('q') ?? '',
+    status: STATUS_FILTER_VALUES.includes(status ?? '') ? (status as StatusFilter) : '',
+    review: REVIEW_FILTER_VALUES.includes(review ?? '') ? (review as ReviewFilter) : '',
+    dateFrom: params.get('from') ?? '',
+    dateTo: params.get('to') ?? '',
+  }
+}
+
+function paramsToSort(params: URLSearchParams): DocumentSort {
+  const column = params.get('sort')
+  const direction = params.get('dir')
+  return {
+    column: SORT_COLUMN_VALUES.includes(column ?? '') ? (column as DocumentSortColumn) : DEFAULT_DOCUMENT_SORT.column,
+    direction: direction === 'asc' || direction === 'desc' ? direction : DEFAULT_DOCUMENT_SORT.direction,
+  }
+}
+
+/** Serializes just this table's own filter+sort state (the 7 keys above) —
+ * used both to write the URL and, restricted to those same keys on both
+ * sides, to detect a real divergence from it. Comparing full search strings
+ * would misfire on every unrelated change elsewhere on this page (scope,
+ * assignee, 7.5's docsLimit all share the same URL). */
+function serializeDocumentTableState(filters: DocumentFilters, sort: DocumentSort): string {
+  const sp = new URLSearchParams()
+  if (filters.search) sp.set('q', filters.search)
+  if (filters.status) sp.set('status', filters.status)
+  if (filters.review) sp.set('review', filters.review)
+  if (filters.dateFrom) sp.set('from', filters.dateFrom)
+  if (filters.dateTo) sp.set('to', filters.dateTo)
+  if (sort.column !== DEFAULT_DOCUMENT_SORT.column) sp.set('sort', sort.column)
+  if (sort.direction !== DEFAULT_DOCUMENT_SORT.direction) sp.set('dir', sort.direction)
+  return sp.toString()
+}
+
+/** Builds the full page URL for a filter/sort change: starts from the
+ * CURRENT search params (preserving scope/assignee/docsLimit, which this
+ * table doesn't own) and replaces only the seven keys it does. */
+function buildDocumentTableUrl(
+  pathname: string,
+  currentParams: URLSearchParams,
+  filters: DocumentFilters,
+  sort: DocumentSort
+): string {
+  const next = new URLSearchParams(currentParams.toString())
+  for (const key of DOCUMENT_TABLE_PARAM_KEYS) next.delete(key)
+  const ownParams = new URLSearchParams(serializeDocumentTableState(filters, sort))
+  for (const [key, value] of ownParams) next.set(key, value)
+  const qs = next.toString()
+  return qs ? `${pathname}?${qs}` : pathname
+}
+
+function sortsEqual(a: DocumentSort, b: DocumentSort): boolean {
+  return a.column === b.column && a.direction === b.direction
+}
+
+/** True when `next` differs from `prev` only in the free-text filename
+ * search — the one input that should debounce (matches entries-explorer.tsx's
+ * onlyVendorChanged). */
+function onlySearchChanged(prev: DocumentFilters, next: DocumentFilters): boolean {
+  if (prev.search === next.search) return false
+  return (
+    prev.status === next.status &&
+    prev.review === next.review &&
+    prev.dateFrom === next.dateFrom &&
+    prev.dateTo === next.dateTo
+  )
+}
+
 /**
  * Table view of the /documents inbox (MASTER-PLAN §11.2 Day 3 item 5): a
  * growing stack of full DocumentCards doesn't scale past a handful of
@@ -115,19 +211,71 @@ export function DocumentTable({
   adminHeadOptions: LookupOption[]
   zoneOptions: LookupOption[]
 }) {
+  const pathname = usePathname()
+  const searchParams = useSearchParams()
+
   const [pageIndex, setPageIndex] = useState(0)
   const [pageSize, setPageSize] = useState<number>(DEFAULT_PAGE_SIZE)
-  const [sort, setSort] = useState<DocumentSort>(DEFAULT_DOCUMENT_SORT)
   const [openDocumentId, setOpenDocumentId] = useState<number | null>(null)
   // Multi-bill documents (document_extraction is 1:many per source_document
   // since 20260817000002) expand in place to a per-bill list rather than
   // collapsing to whichever bill happened to sort last.
   const [expandedDocumentIds, setExpandedDocumentIds] = useState<Set<number>>(new Set())
+
   // Filter/search (pre-deploy-findings-and-plan.md §7.6: "fine at 2
-  // documents; a problem at 200"). Purely client-side over the already-
-  // fetched `documents` prop — no server round trip, matching this screen's
-  // small-list scale rather than entries-explorer.tsx's URL-synced approach.
-  const [filters, setFilters] = useState<DocumentFilters>(DEFAULT_FILTERS)
+  // documents; a problem at 200") and sort. Purely client-side over the
+  // already-fetched `documents` prop — no server round trip — but URL-synced
+  // (performance remediation plan 7.4) the same way entries-explorer.tsx
+  // syncs its own filters, so a filtered/sorted inbox view survives a
+  // reload/share and the back button steps through it. See the "URL sync"
+  // block above this component for why the write mechanism differs from
+  // entries' own.
+  const [filters, setFilters] = useState<DocumentFilters>(() => paramsToFilters(searchParams))
+  const [sort, setSort] = useState<DocumentSort>(() => paramsToSort(searchParams))
+
+  const isMountRef = useRef(true)
+  const skipUrlWriteRef = useRef(false)
+  const prevStateRef = useRef<{ filters: DocumentFilters; sort: DocumentSort }>({ filters, sort })
+
+  // Write local filter/sort state to the URL on every change.
+  useEffect(() => {
+    const prev = prevStateRef.current
+    prevStateRef.current = { filters, sort }
+
+    if (isMountRef.current) {
+      isMountRef.current = false
+      return
+    }
+    if (skipUrlWriteRef.current) {
+      // This change originated FROM the URL (the resync effect below, e.g. a
+      // back/forward navigation) — writing it again would be redundant and
+      // would fight the history entry that's driving it.
+      skipUrlWriteRef.current = false
+      return
+    }
+
+    const href = buildDocumentTableUrl(pathname, searchParams, filters, sort)
+    if (sortsEqual(prev.sort, sort) && onlySearchChanged(prev.filters, filters)) {
+      const t = setTimeout(() => window.history.replaceState(null, '', href), 300)
+      return () => clearTimeout(t)
+    }
+    window.history.pushState(null, '', href)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filters, sort])
+
+  // Resync local state when the URL diverges from it (back/forward, or a
+  // link landing here pre-filtered/sorted). Restricted to the seven params
+  // this table owns so a scope/assignee/docsLimit change elsewhere on this
+  // page — which also touches the URL — isn't mistaken for a filter change.
+  useEffect(() => {
+    const current = serializeDocumentTableState(filters, sort)
+    const incoming = serializeDocumentTableState(paramsToFilters(searchParams), paramsToSort(searchParams))
+    if (incoming === current) return
+    skipUrlWriteRef.current = true
+    setFilters(paramsToFilters(searchParams))
+    setSort(paramsToSort(searchParams))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams])
 
   function patchFilters(patch: Partial<DocumentFilters>) {
     setFilters((current) => ({ ...current, ...patch }))

@@ -17,7 +17,7 @@
  * week-old snapshot could be re-derived from.
  */
 import { createClient } from '@/lib/supabase/server'
-import { getSelectedEvent } from '@/lib/events/current'
+import type { Event } from '@/lib/events/types'
 import { friendlyDataError } from '@/lib/friendly-error'
 import type { CompareBasis } from '@/lib/reports/compare-basis'
 import { RATE_BENCHMARK_MIN_VENDORS } from '@/lib/analytics/thresholds'
@@ -105,9 +105,15 @@ export type QuantityZonePriceData = {
   vendorPriceByFamily: { rows: VendorPriceByFamilyRow[]; error: string | null; previousMultiVendorCount: number | null }
 }
 
-export async function loadQuantityZonePrice(compareBasis: CompareBasis): Promise<QuantityZonePriceData> {
+/**
+ * Perf remediation Phase 2.2 (docs/performance-remediation-plan.md):
+ * `selectedEvent` is resolved once by the caller (the page already
+ * called getSelectedEvent()) and passed in, rather than this loader
+ * re-resolving it itself -- same reasoning as loadHeroMetrics/
+ * loadExecutiveBrief taking `eventId` as a parameter.
+ */
+export async function loadQuantityZonePrice(compareBasis: CompareBasis, selectedEvent: Event | null): Promise<QuantityZonePriceData> {
   const supabase = await createClient()
-  const selectedEvent = await getSelectedEvent(supabase)
   const eventId = selectedEvent?.id ?? null
 
   const [quantityRes, zoneEconomicsRes, vendorPriceRes] = await Promise.all([

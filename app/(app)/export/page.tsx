@@ -17,7 +17,7 @@ export default async function ExportPage() {
     return <PermissionDeniedState reason={gate.reason} />
   }
 
-  let queue: Awaited<ReturnType<typeof getPendingExportQueue>> = []
+  let queue: Awaited<ReturnType<typeof getPendingExportQueue>> = { entries: [], totalPendingCount: 0, truncated: false }
   let batches: Awaited<ReturnType<typeof getExportBatchHistory>> = []
   let loadError: string | null = null
 
@@ -55,17 +55,20 @@ export default async function ExportPage() {
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <GenerateBatchForm pendingCount={queue.length} />
+              <GenerateBatchForm pendingCount={queue.totalPendingCount} />
             </CardContent>
           </Card>
 
           <Card>
             <CardHeader>
               <CardTitle>Pending queue</CardTitle>
-              <CardDescription>Hub status set, not yet pushed out ({queue.length}).</CardDescription>
+              <CardDescription>
+                Hub status set, not yet pushed out ({queue.totalPendingCount}).
+                {queue.truncated && ` Showing the ${queue.entries.length} that have been waiting longest.`}
+              </CardDescription>
             </CardHeader>
             <CardContent>
-              <PendingQueueTable entries={queue} />
+              <PendingQueueTable entries={queue.entries} />
             </CardContent>
           </Card>
 

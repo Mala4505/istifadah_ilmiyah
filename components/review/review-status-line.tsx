@@ -23,6 +23,7 @@
  * exactly one source of truth for each, same as before this file existed.
  */
 
+import { memo } from 'react'
 import { Check, ChevronsUpDown, Search } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Combobox } from '@/components/ui/combobox'
@@ -60,7 +61,11 @@ function Connector() {
   return <div aria-hidden="true" className="h-px min-w-3 flex-1 bg-border" />
 }
 
-export function ReviewStatusLine({
+// Perf 5.2: memo-wrapped -- this whole row is pure presentation lifted from
+// review-workspace.tsx's state, so it only needs to re-render when one of
+// its own props actually changes (all now stable references/primitives from
+// the caller).
+function ReviewStatusLineImpl({
   // Verify segment
   verifyStatus,
   vendorName,
@@ -278,3 +283,5 @@ export function ReviewStatusLine({
     </div>
   )
 }
+
+export const ReviewStatusLine = memo(ReviewStatusLineImpl)

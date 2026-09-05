@@ -38,7 +38,7 @@ export async function getRecentClassificationDefaults(
   // previous year's classification -- the whole point of "clean slate" per
   // event (§1.1). Falls back to unscoped only if no event can be resolved
   // at all, which should never happen once the Phase 6 backfill has run.
-  const selectedEventId = await getSelectedEventId(supabase)
+  const selectedEventId = await getSelectedEventId()
 
   let query = supabase
     .from('entries')

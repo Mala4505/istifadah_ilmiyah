@@ -30,9 +30,22 @@ export async function createClient() {
               cookieStore.set(name, value, options)
             }
           } catch {
-            // `setAll` was called from a Server Component, which cannot set
-            // cookies. Safe to ignore as long as middleware (or a Route
-            // Handler / Server Action) refreshes the session elsewhere.
+            // `cookieStore.set()` only throws when Next's request-store phase
+            // isn't 'action' -- i.e. we're in a Server Component (or
+            // layout/page render), which cannot set cookies. Safe to ignore
+            // there as long as middleware refreshes the session instead.
+            //
+            // Route Handlers and Server Actions run with phase 'action', so
+            // this write does NOT throw for them -- it actually lands, and
+            // Next's app-route module merges the resulting Set-Cookie headers
+            // onto whatever Response the handler returns (see
+            // `next/dist/server/route-modules/app-route/module.js`, "It's
+            // possible cookies were set in the handler, so we need to merge
+            // the modified cookies and the returned response here"). That's
+            // what makes this same client safe to reuse, unmodified, from
+            // `app/api/documents/status/route.ts` (perf remediation plan
+            // 7.6) to refresh a poll-only session that middleware's
+            // `/api/*`-excluded matcher never touches.
           }
         },
       },

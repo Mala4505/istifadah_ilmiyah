@@ -9,7 +9,7 @@
  * vendor table here).
  */
 
-import { forwardRef, useEffect, useState, type Ref } from 'react'
+import { forwardRef, useEffect, useRef, useState, type Ref } from 'react'
 import { Check, ChevronsUpDown } from 'lucide-react'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Input } from '@/components/ui/input'
@@ -67,6 +67,12 @@ export const VendorAutocomplete = forwardRef(function VendorAutocomplete(
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<VendorSearchResult[]>([])
   const [pending, setPending] = useState(false)
+  // 5.8: monotonic request id -- a debounced search that resolves after a
+  // newer one (e.g. a slow first keystroke's request outliving a fast
+  // second one) must not overwrite the newer, correct results. Bumped
+  // synchronously right before each fetch fires; a resolution only applies
+  // itself when its own id still matches the latest.
+  const requestIdRef = useRef(0)
 
   useEffect(() => {
     if (!open) return
@@ -76,8 +82,10 @@ export const VendorAutocomplete = forwardRef(function VendorAutocomplete(
   useEffect(() => {
     if (!open) return
     const handle = setTimeout(() => {
+      const requestId = ++requestIdRef.current
       setPending(true)
       void searchReviewVendors(query).then((r) => {
+        if (requestIdRef.current !== requestId) return
         setResults(r)
         setPending(false)
       })

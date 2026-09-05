@@ -146,6 +146,20 @@ export async function updateStaffProfile(input: {
     return { ok: false, error: 'Managing staff accounts is a superadmin-only action.' }
   }
 
+  // Self-lockout guard: the gate above already proves the acting user is an
+  // *active superadmin*, so if they're editing their own row, any move away
+  // from that (a role other than superadmin, or deactivating) is a potential
+  // lockout with no undo path if they're the last superadmin. The client
+  // (components/admin/users-table.tsx) asks for confirmation first, but that
+  // is only UX -- this is the authoritative check, since the action can be
+  // called directly bypassing the client guard entirely.
+  if (input.id === gate.staff.userId && (input.role !== 'superadmin' || !input.isActive)) {
+    return {
+      ok: false,
+      error: 'You cannot remove your own superadmin access or deactivate your own account. Ask another superadmin to make this change.',
+    }
+  }
+
   const supabase = await createClient()
 
   const { error } = await supabase
@@ -319,8 +333,7 @@ export async function updateSubDepartmentBudget(input: {
     return { ok: false, error: parsed.error.issues[0]!.message }
   }
 
-  const supabase = await createClient()
-  const selectedEvent = await getSelectedEvent(supabase)
+  const selectedEvent = await getSelectedEvent()
   if (!selectedEvent) {
     return { ok: false, error: 'No event is configured yet. Contact an admin.' }
   }

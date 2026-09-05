@@ -24,6 +24,28 @@ const nextConfig: NextConfig = {
   typescript: {
     ignoreBuildErrors: false,
   },
+  // Long-lived caching for static assets served straight out of `public/`
+  // that are content-addressed by filename change, not by URL (pdf.js's
+  // worker script, the bookmarklet). These are also excluded from the
+  // middleware matcher (middleware.ts) so the request never triggers CSP
+  // nonce construction or a Supabase auth.getUser() call — see
+  // docs/performance-remediation-plan.md item 3.2.
+  async headers() {
+    return [
+      {
+        source: '/pdf.worker.min.mjs',
+        headers: [
+          { key: 'Cache-Control', value: 'public, max-age=31536000, immutable' },
+        ],
+      },
+      {
+        source: '/bookmarklet/:path*',
+        headers: [
+          { key: 'Cache-Control', value: 'public, max-age=31536000, immutable' },
+        ],
+      },
+    ]
+  },
 }
 
 // withSentryConfig wires up source-map upload at build time (MASTER-PLAN §2,

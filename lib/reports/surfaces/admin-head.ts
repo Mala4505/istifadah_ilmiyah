@@ -132,7 +132,7 @@ export async function loadAdminHeadAccountability(
   compareBasis: CompareBasis
 ): Promise<AdminHeadAccountabilitySurfaceData> {
   const supabase = await createClient()
-  const selectedEvent = await getSelectedEvent(supabase)
+  const selectedEvent = await getSelectedEvent()
   const eventId = selectedEvent?.id ?? null
 
   const [spendRes, deptBudgetRes, deptRiskRes] = await Promise.all([

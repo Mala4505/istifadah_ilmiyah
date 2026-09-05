@@ -77,7 +77,7 @@ const SELECT = 'department_id, department_name, event_id, actual_amount'
 
 export async function loadEventComparison(): Promise<EventComparisonSurfaceData> {
   const supabase = await createClient()
-  const events = await getAllEvents(supabase) // newest Hijri year first
+  const events = await getAllEvents() // newest Hijri year first
 
   if (events.length < 2) {
     return { ...EMPTY, currentEventName: events[0]?.name ?? null }

@@ -321,8 +321,8 @@ export default async function SettingsPage() {
   // department/admin-head/zone master-data tables, and the Events tab's
   // option lists, are filtered through this event's membership tables.
   const [events, selectedEvent, maxUploadPages] = await Promise.all([
-    getAllEvents(supabase),
-    getSelectedEvent(supabase),
+    getAllEvents(),
+    getSelectedEvent(),
     getMaxUploadPages(supabase),
   ])
   const selectedEventId = selectedEvent?.id ?? null

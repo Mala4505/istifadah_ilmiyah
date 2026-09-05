@@ -142,8 +142,6 @@ function todayLocalDateString(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
-const HEADER_AMOUNT_FIELDS: (keyof HeaderFormState)[] = ['subtotal', 'taxAmount', 'totalAmount']
-
 // Phase 4 (§2.6): maps an uncertain field's wire name (detail.uncertainFields'
 // `field`, matching UNCERTAIN_FIELD_NAMES in lib/extraction-schema.ts) to (a)
 // which HeaderFormState key reExtractField's result should patch and (b) the
@@ -259,10 +257,154 @@ export function ReviewWorkspace({
   const formContainerRef = useRef<HTMLDivElement>(null)
   const pdfViewerRef = useRef<PdfViewerHandle>(null)
 
-  const [header, setHeader] = useState<HeaderFormState>(() => buildHeaderState(detail))
+  // Hub cert 2.4 (moved up from its old spot near the bottom of this
+  // component so the 5.7 bill-switch reset block below can reach it --
+  // useRef(false) has no dependency on anything declared later, so this move
+  // is behaviour-neutral). See the initial-focus effect near the return
+  // statement for what actually reads/sets this.
+  const didInitialFocusRef = useRef(false)
+
+  // 5.4: one-way dirty latch (declared here, ahead of the state slices below,
+  // so onHeaderChange/onLineItemChange can close over it without a temporal-
+  // dead-zone concern). Flipped true the first time any header field or line
+  // item actually changes; replaces a JSON.stringify comparison that used to
+  // run over the whole header plus every line item, twice, on every
+  // keystroke. Never needs to go back to false before this component's next
+  // full remount (a genuinely different document or a fresh extraction run).
+  const hasEditedRef = useRef(false)
+
+  // 5.1 (perf remediation, Phase 5): twelve independent state slices instead
+  // of one HeaderFormState object -- typing into one field used to replace
+  // the whole object's identity every keystroke, which is what forced every
+  // memo below that keyed on `header` (editedFields, validationErrors,
+  // dirty) to recompute regardless of which field actually changed.
+  // `header` itself is still assembled just below (useMemo) purely so
+  // ExtractionForm/buildSavePayload -- which genuinely need the full set --
+  // don't have to change shape, but nothing here uses that assembled object
+  // as a hook dependency; each memo now depends on only the field(s) it
+  // actually reads.
+  const initialHeaderRef = useRef<HeaderFormState | null>(null)
+  if (initialHeaderRef.current === null) initialHeaderRef.current = buildHeaderState(detail)
+  const initialHeader = initialHeaderRef.current
+
+  const [vendorName, setVendorName] = useState(initialHeader.vendorName)
+  const [vendorGstin, setVendorGstin] = useState(initialHeader.vendorGstin)
+  const [vendorPhone, setVendorPhone] = useState(initialHeader.vendorPhone)
+  const [vendorEmail, setVendorEmail] = useState(initialHeader.vendorEmail)
+  const [vendorAddress, setVendorAddress] = useState(initialHeader.vendorAddress)
+  const [buyerGstin, setBuyerGstin] = useState(initialHeader.buyerGstin)
+  const [buyerName, setBuyerName] = useState(initialHeader.buyerName)
+  const [invoiceNumber, setInvoiceNumber] = useState(initialHeader.invoiceNumber)
+  const [invoiceDate, setInvoiceDate] = useState(initialHeader.invoiceDate)
+  const [subtotal, setSubtotal] = useState(initialHeader.subtotal)
+  const [taxAmount, setTaxAmount] = useState(initialHeader.taxAmount)
+  const [totalAmount, setTotalAmount] = useState(initialHeader.totalAmount)
+  const [notes, setNotes] = useState(initialHeader.notes)
+
+  // Assembled once per render from the slices above -- a plain useMemo, not
+  // another useState, so there is exactly one source of truth per field
+  // (the slice) and this can never drift from it. Still gets a new identity
+  // on every keystroke (unavoidable: SOME field's value just changed and
+  // ExtractionForm needs to see it) -- that's fine, since nothing here reads
+  // `header` itself as a memo dependency any more (see editedFields/
+  // validationErrors/invoiceDateWarning below).
+  const header: HeaderFormState = useMemo(
+    () => ({
+      vendorName,
+      vendorGstin,
+      vendorPhone,
+      vendorEmail,
+      vendorAddress,
+      buyerGstin,
+      buyerName,
+      invoiceNumber,
+      invoiceDate,
+      subtotal,
+      taxAmount,
+      totalAmount,
+      notes,
+    }),
+    [
+      vendorName,
+      vendorGstin,
+      vendorPhone,
+      vendorEmail,
+      vendorAddress,
+      buyerGstin,
+      buyerName,
+      invoiceNumber,
+      invoiceDate,
+      subtotal,
+      taxAmount,
+      totalAmount,
+      notes,
+    ]
+  )
+
+  // 5.2: the single callback ExtractionForm calls on every keystroke. Field
+  // setters from useState are referentially stable for the lifetime of this
+  // component (React guarantees it), so this can be a `[]`-deps useCallback
+  // -- one stable function identity for the whole mount, letting memo(
+  // ExtractionForm) actually compare it as unchanged.
+  const onHeaderChange = useCallback((field: keyof HeaderFormState, value: string) => {
+    hasEditedRef.current = true
+    switch (field) {
+      case 'vendorName':
+        setVendorName(value)
+        break
+      case 'vendorGstin':
+        setVendorGstin(value)
+        break
+      case 'vendorPhone':
+        setVendorPhone(value)
+        break
+      case 'vendorEmail':
+        setVendorEmail(value)
+        break
+      case 'vendorAddress':
+        setVendorAddress(value)
+        break
+      case 'buyerGstin':
+        setBuyerGstin(value)
+        break
+      case 'buyerName':
+        setBuyerName(value)
+        break
+      case 'invoiceNumber':
+        setInvoiceNumber(value)
+        break
+      case 'invoiceDate':
+        setInvoiceDate(value)
+        break
+      case 'subtotal':
+        setSubtotal(value)
+        break
+      case 'taxAmount':
+        setTaxAmount(value)
+        break
+      case 'totalAmount':
+        setTotalAmount(value)
+        break
+      case 'notes':
+        setNotes(value)
+        break
+    }
+  }, [])
+
   const [lineItems, setLineItems] = useState<LineItemFormState[]>(() => buildLineItemState(detail))
   const [vendorId, setVendorId] = useState<number | null>(detail.entryVendorId)
   const [vendorAutocompleteOpen, setVendorAutocompleteOpen] = useState(false)
+
+  // 5.2: same stability requirement as onHeaderChange above -- ExtractionForm
+  // (and its per-row inputs) are memoized, so this needs one identity for
+  // the whole mount rather than a fresh closure every render.
+  const onLineItemChange = useCallback(
+    (id: number, field: keyof Omit<LineItemFormState, 'id'>, value: string) => {
+      hasEditedRef.current = true
+      setLineItems((items) => items.map((li) => (li.id === id ? { ...li, [field]: value } : li)))
+    },
+    []
+  )
 
   // Redesign plan §2: PdfViewer owns pageNumber/numPages internally and only
   // exposed an imperative nextPage/prevPage/goToPage handle before this --
@@ -299,19 +441,72 @@ export function ReviewWorkspace({
     focusUncertainField(next)
   }
 
-  // Dirty tracking (D3/plan §2, checklist 1.5): the workspace remounts fresh
-  // per document + extraction run (keyed in review/page.tsx), so capturing
-  // the initial snapshot once at mount -- before any edits -- gives a stable
-  // baseline to diff live state against for the rest of this document's
-  // lifetime.
-  const initialHeaderRef = useRef<HeaderFormState>(header)
-  const initialLineItemsRef = useRef<LineItemFormState[]>(lineItems)
-  const dirty = useMemo(
-    () =>
-      JSON.stringify(header) !== JSON.stringify(initialHeaderRef.current) ||
-      JSON.stringify(lineItems) !== JSON.stringify(initialLineItemsRef.current),
-    [header, lineItems]
-  )
+  // Dirty tracking (D3/plan §2, checklist 1.5): 5.4 replaced the old
+  // JSON.stringify-against-initial-snapshot comparison with the one-way
+  // hasEditedRef latch declared above -- see its own comment for why a ref
+  // is enough (every place that flips it also calls a setState in the same
+  // handler, so the next render always observes it correctly).
+  const dirty = hasEditedRef.current
+
+  // 5.7: review/page.tsx now keys ReviewWorkspace on sourceDocumentId (not
+  // documentExtractionId), so PdfViewer survives stepping between sibling
+  // bills of the same PDF instead of unmounting/refetching/reparsing on
+  // every J/K press -- but that also means THIS component no longer
+  // remounts on a bill switch. Everything above that used to reset itself
+  // for free via a fresh mount (header/line-item state, the dirty latch, the
+  // uncertain-field stepper, vendorId, initial focus) has to reset itself
+  // explicitly here instead. This is the "adjust state when a prop changes"
+  // pattern (react.dev) -- calling setState conditionally during render --
+  // rather than an effect, specifically to avoid a one-frame flash of the
+  // previous bill's data between the prop update and an effect running
+  // after paint. The claim effects further below stay keyed on
+  // sourceDocumentId on purpose; that's what stops them firing on this same
+  // bill switch.
+  //
+  // Keyed on documentExtractionId OR currentExtractionRunId, not just the
+  // former: a bill switch changes documentExtractionId, but a whole-document
+  // re-extract (handleReExtract below, via router.refresh()) keeps the same
+  // documentExtractionId (extract.ts upserts onto the existing row) and only
+  // bumps currentExtractionRunId. Before 5.7, that refresh's fresh detail
+  // still remounted this component because currentExtractionRunId was part
+  // of the React key page.tsx passed down -- now that the key is
+  // sourceDocumentId-only, this reset has to watch both fields itself or a
+  // full re-extract would silently leave stale header/line-item state on
+  // screen. (handleReExtractField, the single-field re-extract, deliberately
+  // never calls router.refresh() -- see its own comment -- so it never
+  // reaches this branch.)
+  const [resetKey, setResetKey] = useState({
+    documentExtractionId: detail.documentExtractionId,
+    currentExtractionRunId: detail.currentExtractionRunId,
+  })
+  if (
+    detail.documentExtractionId !== resetKey.documentExtractionId ||
+    detail.currentExtractionRunId !== resetKey.currentExtractionRunId
+  ) {
+    setResetKey({
+      documentExtractionId: detail.documentExtractionId,
+      currentExtractionRunId: detail.currentExtractionRunId,
+    })
+    const freshHeader = buildHeaderState(detail)
+    setVendorName(freshHeader.vendorName)
+    setVendorGstin(freshHeader.vendorGstin)
+    setVendorPhone(freshHeader.vendorPhone)
+    setVendorEmail(freshHeader.vendorEmail)
+    setVendorAddress(freshHeader.vendorAddress)
+    setBuyerGstin(freshHeader.buyerGstin)
+    setBuyerName(freshHeader.buyerName)
+    setInvoiceNumber(freshHeader.invoiceNumber)
+    setInvoiceDate(freshHeader.invoiceDate)
+    setSubtotal(freshHeader.subtotal)
+    setTaxAmount(freshHeader.taxAmount)
+    setTotalAmount(freshHeader.totalAmount)
+    setNotes(freshHeader.notes)
+    setLineItems(buildLineItemState(detail))
+    setVendorId(detail.entryVendorId)
+    setUncertainStepIndex(null)
+    hasEditedRef.current = false
+    didInitialFocusRef.current = false
+  }
 
   // L3 (plan §11, checklist 3.3): "edited from OCR" is a different question
   // from `dirty` above -- dirty compares against this mount's initial
@@ -320,14 +515,33 @@ export function ReviewWorkspace({
   // `.ocr` baseline, so a field corrected in an earlier pass and left
   // untouched now still reads as edited. Feeds ExtractionForm's blue ring
   // and drives L2's per-row auto-expand.
-  const editedFields = useMemo<EditedFieldSets>(() => {
+  // 5.3: baseline line items keyed by id, replacing the O(n²)
+  // `detail.lineItems.find(d => d.id === li.id)` that used to run inside the
+  // loop below. Only depends on detail.lineItems (server data, fixed for
+  // this mount/bill), never on live `lineItems`, so it's built once per bill
+  // rather than rebuilt every keystroke.
+  const baselineLineItemById = useMemo(
+    () => new Map(detail.lineItems.map((d) => [d.id, d] as const)),
+    [detail.lineItems]
+  )
+
+  // 5.3: split in two so a keystroke in a header field only recomputes the
+  // (cheap, 12-key) header half, and editing a line item only recomputes the
+  // (O(n), baseline-map-backed) line-items half -- the original combined
+  // memo depended on `[header, lineItems, detail]` together, so ANY keystroke
+  // anywhere re-ran both loops.
+  const editedHeaderFields = useMemo<Set<keyof HeaderFormState>>(() => {
     const headerSet = new Set<keyof HeaderFormState>()
     for (const key of Object.keys(header) as (keyof HeaderFormState)[]) {
       if (header[key].trim() !== numToStr(detail.header[key].ocr).trim()) headerSet.add(key)
     }
+    return headerSet
+  }, [header, detail.header])
+
+  const editedLineItemFields = useMemo<Map<number, Set<string>>>(() => {
     const lineItemsMap = new Map<number, Set<string>>()
     for (const li of lineItems) {
-      const baseline = detail.lineItems.find((d) => d.id === li.id)
+      const baseline = baselineLineItemById.get(li.id)
       if (!baseline) continue
       const editedKeys = new Set<string>()
       const checks: [string, string, string | number | null][] = [
@@ -347,8 +561,13 @@ export function ReviewWorkspace({
       }
       if (editedKeys.size > 0) lineItemsMap.set(li.lineOrder, editedKeys)
     }
-    return { header: headerSet, lineItems: lineItemsMap }
-  }, [header, lineItems, detail])
+    return lineItemsMap
+  }, [lineItems, baselineLineItemById])
+
+  const editedFields = useMemo<EditedFieldSets>(
+    () => ({ header: editedHeaderFields, lineItems: editedLineItemFields }),
+    [editedHeaderFields, editedLineItemFields]
+  )
 
   // 5.15 (checklist Phase 5, plan §13): every amount-shaped field that
   // buildSavePayload below runs through parseNum, checked with
@@ -357,11 +576,20 @@ export function ReviewWorkspace({
   // apart. Shaped exactly like editedFields above -- header Set + line-items
   // Map keyed by lineOrder -- so ExtractionForm can reuse the same lookup
   // pattern for the red ring.
-  const validationErrors = useMemo<ValidationErrorSets>(() => {
+  //
+  // 5.1/5.3: split the same way as editedFields above -- the header half
+  // depends only on the three amount fields it actually checks, not the
+  // whole assembled `header` object, so typing in e.g. vendorName or notes
+  // no longer triggers this at all.
+  const validationHeaderErrors = useMemo<Set<keyof HeaderFormState>>(() => {
     const headerSet = new Set<keyof HeaderFormState>()
-    for (const key of HEADER_AMOUNT_FIELDS) {
-      if (isUnparseableAmount(header[key])) headerSet.add(key)
-    }
+    if (isUnparseableAmount(subtotal)) headerSet.add('subtotal')
+    if (isUnparseableAmount(taxAmount)) headerSet.add('taxAmount')
+    if (isUnparseableAmount(totalAmount)) headerSet.add('totalAmount')
+    return headerSet
+  }, [subtotal, taxAmount, totalAmount])
+
+  const validationLineItemErrors = useMemo<Map<number, Set<string>>>(() => {
     const lineItemsMap = new Map<number, Set<string>>()
     for (const li of lineItems) {
       const errorKeys = new Set<string>()
@@ -370,8 +598,13 @@ export function ReviewWorkspace({
       if (isUnparseableAmount(li.amount)) errorKeys.add('amount')
       if (errorKeys.size > 0) lineItemsMap.set(li.lineOrder, errorKeys)
     }
-    return { header: headerSet, lineItems: lineItemsMap }
-  }, [header, lineItems])
+    return lineItemsMap
+  }, [lineItems])
+
+  const validationErrors = useMemo<ValidationErrorSets>(
+    () => ({ header: validationHeaderErrors, lineItems: validationLineItemErrors }),
+    [validationHeaderErrors, validationLineItemErrors]
+  )
 
   // Phase 4 (§2.6): the subset of detail.uncertainFields that (a) are header
   // fields (lineOrder === null -- a line item's uncertain entry has a
@@ -395,10 +628,10 @@ export function ReviewWorkspace({
   // codebase has no event-start/event-end config anywhere to check against;
   // build that check only once such a config exists.
   const invoiceDateWarning = useMemo(() => {
-    const raw = header.invoiceDate.trim()
+    const raw = invoiceDate.trim()
     if (!raw) return null
     return raw > todayLocalDateString() ? 'This invoice date is in the future.' : null
-  }, [header.invoiceDate])
+  }, [invoiceDate])
 
   // Pending action awaiting confirmation because it would discard unsaved
   // edits (re-extract, or navigating away). Reused for both so there is one
@@ -498,6 +731,33 @@ export function ReviewWorkspace({
       setSplitPercent(PANE_MODE_DEFAULT_SPLIT[next])
     }
   }
+
+  // 5.2: stable identity required so memo(ExtractionForm) can skip
+  // re-rendering on every keystroke -- a functional setPaneMode update means
+  // this never needs `paneMode` itself as a dependency.
+  const onJumpToPage = useCallback((pageNumber: number) => {
+    pdfViewerRef.current?.goToPage(pageNumber)
+    // Checklist 3.10: a collapsed spine can't actually show the page being
+    // jumped to -- expand so the reviewer can see it.
+    setPaneMode((current) => {
+      if (current !== 'collapsed') return current
+      setSplitPercent(PANE_MODE_DEFAULT_SPLIT.split)
+      return 'split'
+    })
+  }, [])
+
+  // 5.2: stable identity so memo(PdfViewer) doesn't see a new array (and
+  // re-render) on every keystroke -- only recompute when the sibling-bill
+  // list itself actually changes.
+  const billPageRanges = useMemo(
+    () =>
+      detail.siblingBills.map((b) => ({
+        documentExtractionId: b.documentExtractionId,
+        pageNumberStart: b.pageNumberStart,
+        pageNumberEnd: b.pageNumberEnd,
+      })),
+    [detail.siblingBills]
+  )
 
   function handleDividerPointerDown(e: ReactPointerEvent<HTMLDivElement>) {
     e.preventDefault()
@@ -653,13 +913,21 @@ export function ReviewWorkspace({
     return unverified.reduce((min, b) => (b.billIndex < min.billIndex ? b : min)).documentExtractionId
   }, [detail.siblingBills, detail.documentExtractionId])
 
-  function goToDocument(id: number | null, page?: number | null) {
-    if (id === null) {
-      toast.info('No more documents in that direction.')
-      return
-    }
-    router.push(`/review?id=${id}${page ? `&page=${page}` : ''}`)
-  }
+  // 5.2: stable identity -- this is passed down (via handleRequestBillSwitch
+  // below) as PdfViewer's onRequestBillSwitch prop, and PdfViewer is now
+  // memoized (5.2, pdf-viewer.tsx). `router` is stable across renders (Next's
+  // App Router guarantee), so `[router]` is enough to keep this from ever
+  // changing identity mid-mount.
+  const goToDocument = useCallback(
+    (id: number | null, page?: number | null) => {
+      if (id === null) {
+        toast.info('No more documents in that direction.')
+        return
+      }
+      router.push(`/review?id=${id}${page ? `&page=${page}` : ''}`)
+    },
+    [router]
+  )
 
   // Guarded entry point for Prev/Next/PgUp/PgDn (checklist 1.8): today
   // `goToDocument` discards unsaved edits the instant the target component
@@ -667,17 +935,26 @@ export function ReviewWorkspace({
   // dirty form always confirms first. `page` carries a specific target page
   // through the confirm dialog too -- used by handleRequestBillSwitch below
   // when a reviewer clicks a sibling bill's page in the thumbnail rail.
-  function requestGoToDocument(id: number | null, page?: number | null) {
-    if (id === null) {
-      toast.info('No more documents in that direction.')
-      return
-    }
-    if (dirty) {
-      setConfirmAction({ kind: 'navigate', targetId: id, targetPage: page ?? null })
-      return
-    }
-    goToDocument(id, page)
-  }
+  //
+  // 5.2/5.5: reads hasEditedRef.current directly rather than closing over
+  // the render-scoped `dirty` const, so this function's own identity can
+  // stay stable ([]-ish deps below) without ever going stale -- a stale
+  // `dirty` captured at definition time would silently stop confirming once
+  // the form became dirty after this closure was created.
+  const requestGoToDocument = useCallback(
+    (id: number | null, page?: number | null) => {
+      if (id === null) {
+        toast.info('No more documents in that direction.')
+        return
+      }
+      if (hasEditedRef.current) {
+        setConfirmAction({ kind: 'navigate', targetId: id, targetPage: page ?? null })
+        return
+      }
+      goToDocument(id, page)
+    },
+    [goToDocument]
+  )
 
   // PdfViewer's thumbnail rail shows every page of the shared source PDF,
   // including sibling bills' own pages -- clicking one that isn't in this
@@ -685,9 +962,15 @@ export function ReviewWorkspace({
   // included) to whichever bill actually owns that page, landing on it
   // directly, rather than just scrolling the canvas to a page whose data
   // isn't the one on screen.
-  function handleRequestBillSwitch(targetDocumentExtractionId: number, pageNumber: number) {
-    requestGoToDocument(targetDocumentExtractionId, pageNumber)
-  }
+  //
+  // 5.2: stable identity -- passed to PdfViewer (now memoized) as
+  // onRequestBillSwitch.
+  const handleRequestBillSwitch = useCallback(
+    (targetDocumentExtractionId: number, pageNumber: number) => {
+      requestGoToDocument(targetDocumentExtractionId, pageNumber)
+    },
+    [requestGoToDocument]
+  )
 
   // Guarded entry point for re-extract (checklist 1.6): always confirms
   // first, not just when there are unsaved edits to lose -- forcing a new
@@ -871,12 +1154,14 @@ export function ReviewWorkspace({
   // Phase 4 (§2.6): re-extract ONE flagged header field. Deliberately does
   // NOT call router.refresh() -- reExtractField's own doc comment
   // (lib/actions/review.ts) spells out why: a refresh would re-fetch
-  // ReviewDocumentDetail and, because currentExtractionRunId is part of this
-  // workspace's React key, remount the whole form and discard any unsaved
-  // edits to every OTHER field -- exactly the bug this feature exists to
-  // avoid. Instead this patches only that one key of local `header` state,
-  // leaving everything else (including that same field's own dirty/edited
-  // status relative to the ORIGINAL ocr baseline) untouched.
+  // ReviewDocumentDetail with a bumped currentExtractionRunId, which (per
+  // 5.7's reset-on-prop-change block above) would reset every header/
+  // line-item field back to its fresh-extraction baseline and discard any
+  // unsaved edits to every OTHER field -- exactly the bug this feature
+  // exists to avoid. Instead this patches only that one key of local
+  // `header` state, leaving everything else (including that same field's
+  // own dirty/edited status relative to the ORIGINAL ocr baseline)
+  // untouched.
   async function handleReExtractField(wireField: string) {
     if (!isReExtractableHeaderField(wireField)) return
     const headerKey = UNCERTAIN_FIELD_TO_HEADER_KEY[wireField]
@@ -888,7 +1173,9 @@ export function ReviewWorkspace({
         toastError(result.error, { context: 'review-workspace' })
         return
       }
-      setHeader((h) => ({ ...h, [headerKey]: numToStr(result.newValue) }))
+      // 5.1: header is now per-field state, so this reuses onHeaderChange's
+      // own field->setter switch instead of a spread over a single object.
+      onHeaderChange(headerKey, numToStr(result.newValue))
       toast.success(`Re-extracted ${(UNCERTAIN_FIELD_LABEL[wireField] ?? wireField).toLowerCase()}.`)
     } finally {
       setReExtractingField(null)
@@ -909,6 +1196,10 @@ export function ReviewWorkspace({
       toastError(result.error, { context: 'review-workspace' })
       return
     }
+    // 5.4: adding a row is an edit like any other -- the old stringify-based
+    // dirty check would have caught this via lineItems diverging from its
+    // initial snapshot; the ref latch needs the same flip made explicit.
+    hasEditedRef.current = true
     setLineItems((items) => [
       ...items,
       {
@@ -982,8 +1273,13 @@ export function ReviewWorkspace({
   // element explicitly opted in via data-shortcut-safe): an allowlist,
   // replacing the old denylist that let a click landing on a button or
   // label leave shortcuts armed.
-  useEffect(() => {
-    function handleKeyDown(e: KeyboardEvent) {
+  // 5.5: the actual handler logic lives in a ref, reassigned fresh on every
+  // render (see the registration effect below) rather than closed over by a
+  // listener that gets torn down and rebuilt every render. This keeps
+  // header/lineItems/claimState/etc. always current inside the handler
+  // without ever touching the DOM listener itself after the first mount.
+  const handleKeyDownRef = useRef<(e: KeyboardEvent) => void>(() => {})
+  handleKeyDownRef.current = function handleKeyDown(e: KeyboardEvent) {
       if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
         e.preventDefault()
         handleSave()
@@ -1093,15 +1389,22 @@ export function ReviewWorkspace({
         const target = formContainerRef.current?.querySelector<HTMLElement>(`[data-line-jump-index="${lineIndex}"]`)
         target?.focus()
       }
-    }
+  }
 
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-    // No dependency array: re-registers every render so the closure always
-    // sees current state/handlers (header, lineItems, claimState, etc.) --
-    // cheap at this component's render frequency and simpler than threading
-    // everything through refs just to satisfy exhaustive-deps.
-  })
+  // 5.5: register the DOM listener exactly once. Previously this effect ran
+  // with no dependency array, so at this component's keystroke-driven render
+  // rate it performed an addEventListener/removeEventListener pair on
+  // `window` per character typed anywhere in the form. The listener below
+  // never changes identity -- it just forwards to whatever
+  // handleKeyDownRef.current currently points at (reassigned above on every
+  // render), so the logic is always fresh without the DOM churn.
+  useEffect(() => {
+    function listener(e: KeyboardEvent) {
+      handleKeyDownRef.current(e)
+    }
+    window.addEventListener('keydown', listener)
+    return () => window.removeEventListener('keydown', listener)
+  }, [])
 
   // Tab-close/refresh guard (checklist 1.7): most browsers ignore the
   // custom string and show their own generic warning, but setting
@@ -1116,8 +1419,15 @@ export function ReviewWorkspace({
     return () => window.removeEventListener('beforeunload', handleBeforeUnload)
   }, [dirty])
 
-  const lineItemSum = lineItems.length > 0 ? lineItems.reduce((sum, li) => sum + (parseNum(li.amount) ?? 0), 0) : null
-  const documentTotal = parseNum(header.totalAmount)
+  // 5.6: memoized, matching editedFields/validationErrors just above -- this
+  // re-parses every line item's amount string, and was previously
+  // recomputed on every render (including a render triggered by an
+  // unrelated header keystroke) with no memoization at all.
+  const lineItemSum = useMemo(
+    () => (lineItems.length > 0 ? lineItems.reduce((sum, li) => sum + (parseNum(li.amount) ?? 0), 0) : null),
+    [lineItems]
+  )
+  const documentTotal = parseNum(totalAmount)
 
   // Redesign point 2: confidence/model/legibility/edited-count/bill-position
   // used to be five-plus separately-colored pills competing for attention.
@@ -1160,15 +1470,21 @@ export function ReviewWorkspace({
   const connectStatus: StageStatus = stage2Done ? 'done' : 'current'
   const classifyStatus: StageStatus = !stage2Done ? 'blocked' : stage3Done ? 'done' : 'current'
 
-  // Hub cert 2.4: land focus inside the form on every queue advance. The
-  // workspace is keyed per document + extraction run in review/page.tsx, so
-  // a mount here IS a queue advance -- without this every bill starts with a
-  // reach for the mouse, the single biggest tax on a throughput screen.
-  // Priority: first flagged (uncertain) field, else the first line-item jump
-  // target, else the first input. Gated on !formDisabled so focus doesn't
-  // land on an input the claim check is about to disable; the ref keeps it a
-  // one-shot even though formDisabled can flip more than once.
-  const didInitialFocusRef = useRef(false)
+  // Hub cert 2.4: land focus inside the form on every queue advance
+  // (didInitialFocusRef itself is declared near the top of this component --
+  // see 5.7's comment there for why it moved). The workspace used to remount
+  // per document + extraction run in review/page.tsx, so a mount there WAS a
+  // queue advance; 5.7 changed the key to sourceDocumentId, so a bill switch
+  // no longer remounts this component -- detail.documentExtractionId is now
+  // in this effect's own dependency array (in addition to the bill-switch
+  // reset block resetting the ref to false) so a switch to a sibling bill
+  // still re-runs this even when detail.uncertainFields.length happens to
+  // coincidentally match the previous bill's. Without this every bill starts
+  // with a reach for the mouse, the single biggest tax on a throughput
+  // screen. Priority: first flagged (uncertain) field, else the first
+  // line-item jump target, else the first input. Gated on !formDisabled so
+  // focus doesn't land on an input the claim check is about to disable; the
+  // ref keeps it a one-shot even though formDisabled can flip more than once.
   useEffect(() => {
     if (didInitialFocusRef.current || formDisabled) return
     didInitialFocusRef.current = true
@@ -1189,7 +1505,7 @@ export function ReviewWorkspace({
         'input:not([disabled]), textarea:not([disabled]), [role="combobox"]:not([disabled])'
       )
       ?.focus()
-  }, [formDisabled, detail.uncertainFields.length])
+  }, [formDisabled, detail.uncertainFields.length, detail.documentExtractionId])
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2">
@@ -1424,11 +1740,7 @@ export function ReviewWorkspace({
             uncertainFields={detail.uncertainFields}
             collapsed={paneMode === 'collapsed'}
             onPageInfoChange={handlePdfPageInfoChange}
-            billPageRanges={detail.siblingBills.map((b) => ({
-              documentExtractionId: b.documentExtractionId,
-              pageNumberStart: b.pageNumberStart,
-              pageNumberEnd: b.pageNumberEnd,
-            }))}
+            billPageRanges={billPageRanges}
             onRequestBillSwitch={handleRequestBillSwitch}
           />
         </div>
@@ -1455,11 +1767,9 @@ export function ReviewWorkspace({
             ref={formContainerRef}
             keymap={keymap}
             header={header}
-            onHeaderChange={(field, value) => setHeader((h) => ({ ...h, [field]: value }))}
+            onHeaderChange={onHeaderChange}
             lineItems={lineItems}
-            onLineItemChange={(id, field, value) =>
-              setLineItems((items) => items.map((li) => (li.id === id ? { ...li, [field]: value } : li)))
-            }
+            onLineItemChange={onLineItemChange}
             disabled={formDisabled}
             onFieldEnter={handleFieldEnter}
             vendorId={vendorId}
@@ -1478,15 +1788,7 @@ export function ReviewWorkspace({
             pageNumberEnd={detail.pageNumberEnd}
             currentPdfPage={pdfPageInfo.pageNumber}
             gstCharged={detail.gstCharged}
-            onJumpToPage={(pageNumber) => {
-              pdfViewerRef.current?.goToPage(pageNumber)
-              // Checklist 3.10: a collapsed spine can't actually show the
-              // page being jumped to -- expand so the reviewer can see it.
-              if (paneMode === 'collapsed') {
-                setPaneMode('split')
-                setSplitPercent(PANE_MODE_DEFAULT_SPLIT.split)
-              }
-            }}
+            onJumpToPage={onJumpToPage}
           />
         </div>
       </div>

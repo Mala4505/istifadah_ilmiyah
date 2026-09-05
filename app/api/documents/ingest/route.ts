@@ -92,7 +92,7 @@ async function handlePOST(request: NextRequest) {
   // former spot further down) so this same client serves both this check
   // and every write later in the route.
   const admin = createAdminClient()
-  const selectedEvent = await getSelectedEvent(admin)
+  const selectedEvent = await getSelectedEvent()
   if (!isEventMutable(selectedEvent)) {
     return NextResponse.json(
       { error: 'This event is closed to new uploads. Switch to the current event before uploading.' },

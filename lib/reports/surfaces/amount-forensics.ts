@@ -217,7 +217,7 @@ const ROUND_NUMBER_SELECT =
 
 export async function loadAmountForensics(compareBasis: CompareBasis): Promise<AmountForensicsSurfaceData> {
   const supabase = await createClient()
-  const selectedEvent = await getSelectedEvent(supabase)
+  const selectedEvent = await getSelectedEvent()
   const eventId = selectedEvent?.id ?? null
 
   const [benfordRes, roundRes] = await Promise.all([

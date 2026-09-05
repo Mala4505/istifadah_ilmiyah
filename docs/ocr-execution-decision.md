@@ -2,6 +2,8 @@
 
 **Status:** Tradeoffs only. Nothing built, nothing decided. Written 2026-08-22 at the user's request.
 
+**2026-09-05 note:** the deployment tier was confirmed as Vercel Hobby (performance-remediation-plan.md 3.5), which changes §1's math — the platform kills any function at 10s regardless of its declared `maxDuration`, so the "15s wall clock" 8-page sample below was already being truncated by the platform, not just approaching a 60s ceiling. `INGEST_INLINE_EXTRACTION` now defaults to `false` (see `import-review-ux-plan.md` §15's supersession note and `lib/env.server.ts`) rather than the `true` this doc's §0.1 describes as current.
+
 Companion to [`event-scoping-and-review-fixes-plan.md`](./event-scoping-and-review-fixes-plan.md). This doc exists because the punch-list plan sequenced "move extraction to the background worker" as high priority, and investigating *which* worker turned up a wrong assumption worth correcting before any work starts.
 
 ---

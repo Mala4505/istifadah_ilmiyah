@@ -1,3 +1,4 @@
+import { Suspense } from 'react'
 import { Card, CardContent } from '@/components/ui/card'
 import { FriendlyError } from '@/components/ui/friendly-error'
 import { createClient } from '@/lib/supabase/server'
@@ -5,6 +6,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { getStaffContext } from '@/lib/export/auth'
 import { DocumentInbox } from '@/components/documents/document-inbox'
 import { AssignmentScope, type DocumentScope } from '@/components/documents/assignment-scope'
+import { LoadMoreDocuments } from '@/components/documents/load-more-documents'
 import type { DocumentExtractionSummary, InboxDocumentView } from '@/components/documents/types'
 import type { LookupOption } from '@/components/entries/types'
 import { isAdminOrAbove, isSuperadmin } from '@/lib/auth/roles'
@@ -16,16 +18,33 @@ import { getCachedAdminHeads, getCachedZones, getCachedCostCenters } from '@/lib
 const STALLED_QUEUE_THRESHOLD_MS = 10 * 60 * 1000
 
 /**
- * Hard cap on the inbox query (hub certification §3, Wave 1 item 1.3): the
- * `source_document` fetch below had no `.limit()`/`.range()`, so a busy
- * event's full unmatched/suggested backlog — and the two queries that fan
- * out over its id list (document_extraction, ocr_extraction_run) — grew
- * without bound. This is currently masked by the match_status filter, but
- * nothing puts a floor under that number. Capped to the 200 most-recently
- * uploaded; the dependent queries below derive their id lists from this
- * same capped `docs` array, so they stay bounded by construction.
+ * Default/increment size for the inbox query (hub certification §3, Wave 1
+ * item 1.3): the `source_document` fetch below had no `.limit()`/`.range()`,
+ * so a busy event's full unmatched/suggested backlog — and the two queries
+ * that fan out over its id list (document_extraction, ocr_extraction_run) —
+ * grew without bound. This is currently masked by the match_status filter,
+ * but nothing puts a floor under that number. Capped to the 200 most-
+ * recently uploaded by default; the dependent queries below derive their id
+ * lists from the same capped `docs` array, so they stay bounded by
+ * construction.
+ *
+ * Performance remediation plan 7.5: this is no longer a hard ceiling. A
+ * reviewer whose bill is older than the default window can widen it via the
+ * `docsLimit` URL param (in multiples of this constant — see the "Load more"
+ * control in PageShell below), so an old unmatched document is reachable
+ * without waiting for the newer backlog to clear first.
  */
 const DOCUMENT_QUERY_CAP = 200
+
+/**
+ * Safety ceiling on `docsLimit` (7.5): "Load more" only ever asks for one
+ * more increment at a time, but the param is user-editable in the URL bar.
+ * 10x the default is generous headroom for a genuinely large backlog while
+ * still bounding the two id-list fan-out queries against a crafted/absurd
+ * value — same "cheap insurance, not a fix for present pain" judgment as
+ * the Phase 1.5 indexes.
+ */
+const DOCUMENT_QUERY_MAX = DOCUMENT_QUERY_CAP * 10
 
 /**
  * /documents — the document inbox (MASTER-PLAN §5 row 6, §11.2 Day 3):
@@ -50,7 +69,9 @@ export default async function DocumentsPage({
 }: {
   // Scope is a plain URL param (like /review's queue scope), read here and
   // used to filter the RLS-scoped list in-page — see the scope block below.
-  searchParams: Promise<{ scope?: string; assignee?: string }>
+  // `docsLimit` (7.5) is read up front too, ahead of the docs query itself —
+  // see the block right after selectedEventId is resolved.
+  searchParams: Promise<{ scope?: string; assignee?: string; docsLimit?: string }>
 }) {
   const staff = await getStaffContext()
 
@@ -87,7 +108,25 @@ export default async function DocumentsPage({
   // selected (cookie, defaulting to the current event) -- a reviewer parked
   // on a past event must not see the current event's unmatched documents
   // mixed into a supposedly read-only, past-event view, and vice versa.
-  const selectedEventId = await getSelectedEventId(supabase)
+  const selectedEventId = await getSelectedEventId()
+
+  // Read once, up front — `docsLimit` gates the docs query immediately
+  // below; `scope`/`assignee` are still read further down, closer to where
+  // they're used, unchanged from before.
+  const sp = await searchParams
+
+  // 7.5: `docsLimit` widens the fetch beyond the default DOCUMENT_QUERY_CAP
+  // when the reviewer clicks "Load more" (a real navigation — see
+  // components/documents/load-more-documents.tsx). Rounded up to the
+  // nearest increment and clamped to DOCUMENT_QUERY_MAX so a malformed or
+  // hand-edited value in the URL bar still lands on a value this page would
+  // itself ever produce.
+  const docsLimit = (() => {
+    const raw = Number(sp.docsLimit)
+    if (!Number.isFinite(raw) || raw <= 0) return DOCUMENT_QUERY_CAP
+    const rounded = Math.ceil(raw / DOCUMENT_QUERY_CAP) * DOCUMENT_QUERY_CAP
+    return Math.min(Math.max(rounded, DOCUMENT_QUERY_CAP), DOCUMENT_QUERY_MAX)
+  })()
 
   let docsQuery = supabase
     .from('source_document')
@@ -96,11 +135,11 @@ export default async function DocumentsPage({
   if (selectedEventId !== null) {
     docsQuery = docsQuery.eq('event_id', selectedEventId)
   }
-  // Fetch one row past the cap so truncation can be detected and surfaced
+  // Fetch one row past the limit so truncation can be detected and surfaced
   // without a separate `{ count: 'exact' }` round trip.
   const { data: docsData, error: docsError } = await docsQuery
     .order('uploaded_at', { ascending: false })
-    .range(0, DOCUMENT_QUERY_CAP)
+    .range(0, docsLimit)
 
   if (docsError) {
     return (
@@ -116,8 +155,8 @@ export default async function DocumentsPage({
   }
 
   const docsFetched = docsData ?? []
-  const docsTruncated = docsFetched.length > DOCUMENT_QUERY_CAP
-  const docs = docsTruncated ? docsFetched.slice(0, DOCUMENT_QUERY_CAP) : docsFetched
+  const docsTruncated = docsFetched.length > docsLimit
+  const docs = docsTruncated ? docsFetched.slice(0, docsLimit) : docsFetched
   const docIds = docs.map((d) => d.id)
 
   // Assignment ("dividing the document inbox", 2026-08-29). RLS on
@@ -220,11 +259,34 @@ export default async function DocumentsPage({
   // membership, on top of the pre-existing is_active flag -- a head/zone
   // retired from THIS event's carry-forward shouldn't appear even if its
   // own is_active flag (a separate, master-level concept) is still true.
-  const [adminHeadLookupData, zoneLookupData, costCenterLookupData] = await Promise.all([
+  // job_queue's RLS restricts select to admins only (job_queue_select_admin),
+  // but the inbox itself is visible to every active staff member — so this
+  // one query goes through the admin (service-role) client, same as
+  // app/api/documents/ingest/route.ts's own job_queue writes, rather than
+  // the session-bound client used everywhere else on this page. Just the
+  // oldest queued row's timestamp, nothing else: cheap enough to run on
+  // every page load (checklist 2.15, D8).
+  //
+  // Performance remediation plan 7.3: this used to run as its own await
+  // after both of this page's Promise.all batches — it has no dependency on
+  // anything computed above (not even selectedEventId), so it belongs in
+  // whichever batch it's closest to rather than paying for a third
+  // sequential round trip.
+  const admin = createAdminClient()
+  const [adminHeadLookupData, zoneLookupData, costCenterLookupData, oldestQueuedJobResult] = await Promise.all([
     getCachedAdminHeads(supabase, staff.userId),
     getCachedZones(supabase, staff.userId),
     getCachedCostCenters(supabase),
+    admin
+      .from('job_queue')
+      .select('created_at')
+      .eq('status', 'queued')
+      .eq('job_type', 'extract_document')
+      .order('created_at', { ascending: true })
+      .limit(1)
+      .maybeSingle(),
   ])
+  const oldestQueuedJob = oldestQueuedJobResult.data
   const adminHeadOptions: LookupOption[] = adminHeadLookupData
     .filter((h) => h.is_active && activeAdminHeadIds.includes(h.id))
     .sort((a, b) => a.head_number - b.head_number)
@@ -284,7 +346,6 @@ export default async function DocumentsPage({
   // which slice of the visible set the header shows, mirroring /review's
   // URL-param scope. Counts are over the full visible set so the segmented
   // control's hints stay honest regardless of the active tab.
-  const sp = await searchParams
   const assigneeParam =
     isSA && typeof sp.assignee === 'string' && sp.assignee.trim() !== '' ? sp.assignee.trim() : null
   const scope: DocumentScope = (() => {
@@ -331,23 +392,6 @@ export default async function DocumentsPage({
           ? 'Your inbox'
           : 'All documents'
 
-  // job_queue's RLS restricts select to admins only (job_queue_select_admin),
-  // but the inbox itself is visible to every active staff member — so this
-  // one query goes through the admin (service-role) client, same as
-  // app/api/documents/ingest/route.ts's own job_queue writes, rather than
-  // the session-bound client used everywhere else on this page. Just the
-  // oldest queued row's timestamp, nothing else: cheap enough to run on
-  // every page load (checklist 2.15, D8).
-  const admin = createAdminClient()
-  const { data: oldestQueuedJob } = await admin
-    .from('job_queue')
-    .select('created_at')
-    .eq('status', 'queued')
-    .eq('job_type', 'extract_document')
-    .order('created_at', { ascending: true })
-    .limit(1)
-    .maybeSingle()
-
   const queueStalled = Boolean(
     oldestQueuedJob && Date.now() - new Date(oldestQueuedJob.created_at).getTime() > STALLED_QUEUE_THRESHOLD_MS
   )
@@ -357,6 +401,7 @@ export default async function DocumentsPage({
       label={canAct ? headerLabel : undefined}
       count={visibleDocuments.length}
       truncated={docsTruncated}
+      docsLimit={docsLimit}
       scopeControl={
         canAct ? (
           <AssignmentScope
@@ -388,6 +433,7 @@ function PageShell({
   label,
   count,
   truncated,
+  docsLimit,
   scopeControl,
 }: {
   children: React.ReactNode
@@ -395,6 +441,8 @@ function PageShell({
   label?: string
   count?: number
   truncated?: boolean
+  /** The effective fetch limit this render used (7.5) — DOCUMENT_QUERY_CAP unless widened via `?docsLimit=`. */
+  docsLimit?: number
   scopeControl?: React.ReactNode
 }) {
   return (
@@ -405,7 +453,30 @@ function PageShell({
           <span className="text-sm text-muted-foreground">
             {label ? `${label} — ` : ''}
             {count} {label ? (count === 1 ? 'document' : 'documents') : `unmatched ${count === 1 ? 'document' : 'documents'}`}
-            {truncated && ` — showing the latest ${DOCUMENT_QUERY_CAP}`}
+            {truncated && docsLimit !== undefined && (
+              <>
+                {` — showing the latest ${docsLimit}`}
+                {docsLimit < DOCUMENT_QUERY_MAX ? (
+                  <>
+                    {' · '}
+                    {/* 7.5: the only way to reach a document past this window
+                        — see load-more-documents.tsx's own header comment for
+                        why this is a real navigation (widening `docsLimit`)
+                        rather than a client-side trick. Suspense is required
+                        here because the component reads useSearchParams();
+                        the fallback is `null` since this is a small text
+                        link, not content worth reserving layout space for. */}
+                    <Suspense fallback={null}>
+                      <LoadMoreDocuments currentLimit={docsLimit} increment={DOCUMENT_QUERY_CAP} />
+                    </Suspense>
+                  </>
+                ) : (
+                  // At the safety ceiling — "Load more" would just reload the
+                  // same docsLimit. Say so rather than offering a dead button.
+                  ' (showing as many as this screen supports)'
+                )}
+              </>
+            )}
           </span>
         )}
         {scopeControl && <div className="ml-auto">{scopeControl}</div>}

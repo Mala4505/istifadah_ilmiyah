@@ -28,7 +28,7 @@ import { getSelectedEventId } from '@/lib/events/current'
  * the active_event_id cookie resolves identically either way.
  */
 export async function getPendingExportCount(supabase: SupabaseClient): Promise<number> {
-  const eventId = await getSelectedEventId(supabase)
+  const eventId = await getSelectedEventId()
 
   let query = supabase
     .from('entries')

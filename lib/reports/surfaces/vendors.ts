@@ -24,7 +24,7 @@
  * incomplete without hiding the spend rows it still has.
  */
 import { createClient } from '@/lib/supabase/server'
-import { getSelectedEvent } from '@/lib/events/current'
+import type { Event } from '@/lib/events/types'
 import { friendlyDataError } from '@/lib/friendly-error'
 import type { CompareBasis } from '@/lib/reports/compare-basis'
 import { RATE_BENCHMARK_MIN_OBSERVATIONS, RATE_BENCHMARK_MIN_VENDORS } from '@/lib/analytics/thresholds'
@@ -96,9 +96,15 @@ const RATE_OBS_SELECT =
   'rate_reference_id, item_family_id, family_key, family_label, unit_normalized, vendor_id, vendor_display_name, net_rate, quantity, observed_date, entry_id, department_id, department_name, median_rate, observation_count, vendor_count, overpayment_amount'
 const INSTRUMENT_MIX_SELECT = 'department_id, department_name, instrument_type, entry_count, total_amount'
 
-export async function loadVendorsSurface(compareBasis: CompareBasis): Promise<VendorsSurfaceData> {
+/**
+ * Perf remediation Phase 2.2 (docs/performance-remediation-plan.md):
+ * `selectedEvent` is resolved once by the caller (the page already
+ * called getSelectedEvent()) and passed in, rather than this loader
+ * re-resolving it itself -- same reasoning as loadHeroMetrics/
+ * loadExecutiveBrief taking `eventId` as a parameter.
+ */
+export async function loadVendorsSurface(compareBasis: CompareBasis, selectedEvent: Event | null): Promise<VendorsSurfaceData> {
   const supabase = await createClient()
-  const selectedEvent = await getSelectedEvent(supabase)
   const eventId = selectedEvent?.id ?? null
 
   const [spendRes, concentrationRes, familyRes, benchmarkRes, overpaymentRes, instrumentMixRes] = await Promise.all([

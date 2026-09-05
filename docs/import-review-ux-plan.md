@@ -301,7 +301,9 @@ Sequenced so each stage ships independently, earliest stages removing the most c
 
 ## 15. Decided — `INGEST_INLINE_EXTRACTION` stays on
 
-**Decision (2026-08-21): keep inline extraction. Do not run a worker. D5 is fixed inside the inline model.** This closes the question left open by `review-inbox-redesign-plan.md`'s Item 3 diagnosis.
+**Superseded 2026-09-05 (performance-remediation-plan.md 3.5).** This decision assumed the upload route's real ceiling was its declared `maxDuration = 60`. On the confirmed deployment tier, Vercel Hobby, the platform hard-kills a function at 10s regardless of that declaration — a real 8-page bundle already measures ~15s wall clock (§1 below). The GitHub Actions cron this section argued was "best-effort every ~5–10 minutes" already exists and already runs (`.github/workflows/cron-tick.yml`), so the choice today is not "instant but sometimes silently truncated" vs. "slow" — inline is *already* the slow, failing path on this tier. `INGEST_INLINE_EXTRACTION` now defaults to `false` (`lib/env.server.ts`); the live Vercel deployment's env var still needs updating separately. Re-flip to `true` only after confirming the deployment tier actually honors `maxDuration=60` (Pro+ or Fluid compute). The rest of this section is kept for the multi-location-staff reasoning, which is still valid — it just doesn't outweigh the platform's hard cap.
+
+**Original decision (2026-08-21): keep inline extraction. Do not run a worker. D5 is fixed inside the inline model.** This closes the question left open by `review-inbox-redesign-plan.md`'s Item 3 diagnosis.
 
 **Why.** The Hub is used by staff in multiple locations who upload and review in the same sitting, at unpredictable times. That rules out both worker options:
 

@@ -159,7 +159,7 @@ export async function createManualEntry(input: CreateManualEntryInput): Promise<
   } = await supabase.auth.getUser()
   if (!user) return { ok: false, error: 'You need to sign in to add an entry.' }
 
-  const selectedEvent = await getSelectedEvent(supabase)
+  const selectedEvent = await getSelectedEvent()
   if (!selectedEvent || !isEventMutable(selectedEvent)) {
     return { ok: false, error: EVENT_READONLY_ERROR }
   }
@@ -299,7 +299,7 @@ export async function replaceProvisionalUbblNumber(input: {
 
   const supabase = await createClient()
 
-  const selectedEvent = await getSelectedEvent(supabase)
+  const selectedEvent = await getSelectedEvent()
   if (!isEventMutable(selectedEvent)) {
     return { ok: false, error: EVENT_READONLY_ERROR }
   }

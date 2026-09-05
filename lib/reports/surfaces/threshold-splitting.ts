@@ -172,7 +172,7 @@ const FLAG_SELECT =
 
 export async function loadThresholdSplitting(): Promise<ThresholdSplittingSurfaceData> {
   const supabase = await createClient()
-  const selectedEvent = await getSelectedEvent(supabase)
+  const selectedEvent = await getSelectedEvent()
   const eventId = selectedEvent?.id ?? null
 
   const splittingQuery =

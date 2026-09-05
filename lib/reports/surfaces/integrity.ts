@@ -26,7 +26,7 @@
  * Phase 0 §0.2 bug. Same for the prior-event versions of those two queries.
  */
 import { createClient } from '@/lib/supabase/server'
-import { getSelectedEvent } from '@/lib/events/current'
+import type { Event } from '@/lib/events/types'
 import { friendlyDataError } from '@/lib/friendly-error'
 import type { CompareBasis } from '@/lib/reports/compare-basis'
 import {
@@ -100,12 +100,24 @@ const AT_RISK_STATUS_SELECT = 'source_table, status, issue_count, amount_at_risk
 const sumBy = <T extends Record<string, unknown>>(rows: T[] | null | undefined, key: keyof T) =>
   (rows ?? []).reduce((s, r) => s + ((r[key] as number | null) ?? 0), 0)
 
-export async function loadIntegritySurface(compareBasis: CompareBasis): Promise<IntegritySurfaceData> {
+/**
+ * Perf remediation Phase 2.4 (docs/performance-remediation-plan.md):
+ * `totalSpend` is passed in already computed by loadHeroMetrics -- this
+ * module's own comment at the old query site said as much ("mirrors
+ * lib/reports/hero-metrics.ts's totalSpend") but still re-ran the same
+ * `entries` fetch and JS reduce a second time, concurrently with hero's own,
+ * on every /reports load. Same fix already applied to loadExecutiveBrief
+ * (lib/reports/executive-brief.ts).
+ */
+export async function loadIntegritySurface(
+  compareBasis: CompareBasis,
+  totalSpend: number,
+  selectedEvent: Event | null
+): Promise<IntegritySurfaceData> {
   const supabase = await createClient()
-  const selectedEvent = await getSelectedEvent(supabase)
   const eventId = selectedEvent?.id ?? null
 
-  const [ageingRes, issuesRes, complianceRes, heatmapRes, atRiskRes, spendRes] = await Promise.all([
+  const [ageingRes, issuesRes, complianceRes, heatmapRes, atRiskRes] = await Promise.all([
     supabase
       .from('v_hub_status_ageing')
       .select(AGEING_SELECT)
@@ -155,14 +167,6 @@ export async function loadIntegritySurface(compareBasis: CompareBasis): Promise<
           .or(`event_id.eq.${eventId},event_id.is.null`)
           .limit(ROW_CAP)
           .returns<AmountAtRiskByStatusRow[]>(),
-    // D-02 top stage: the event's total non-void spend (mirrors
-    // lib/reports/hero-metrics.ts's totalSpend).
-    supabase
-      .from('entries')
-      .select('amount')
-      .eq('event_id', eventId)
-      .eq('is_void', false)
-      .returns<{ amount: number | null }[]>(),
   ])
 
   const ageingRows = ageingRes.data ?? []
@@ -170,7 +174,6 @@ export async function loadIntegritySurface(compareBasis: CompareBasis): Promise<
   const complianceRows = complianceRes.data ?? []
   const heatmapRows = heatmapRes.data ?? []
   const atRiskRows = atRiskRes.data ?? []
-  const totalSpend = round2Local((spendRes.data ?? []).reduce((s, r) => s + (r.amount ?? 0), 0))
 
   const ageingBuckets = {
     '0-2': ageingRows.filter((r) => r.age_bucket === '0-2').length,
@@ -319,9 +322,7 @@ export async function loadIntegritySurface(compareBasis: CompareBasis): Promise<
     amountAtRiskWaterfall: {
       rows: atRiskRows,
       totalSpend,
-      error:
-        friendlyDataError(atRiskRes.error, 'reports:integrity:atRiskByStatus') ??
-        friendlyDataError(spendRes.error, 'reports:integrity:totalSpend'),
+      error: friendlyDataError(atRiskRes.error, 'reports:integrity:atRiskByStatus'),
     },
   }
 }

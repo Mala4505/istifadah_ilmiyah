@@ -111,7 +111,7 @@ export type SpendCurveOpenAgeingData = {
 
 export async function loadSpendCurveOpenAgeing(compareBasis: CompareBasis): Promise<SpendCurveOpenAgeingData> {
   const supabase = await createClient()
-  const selectedEvent = await getSelectedEvent(supabase)
+  const selectedEvent = await getSelectedEvent()
   const eventId = selectedEvent?.id ?? null
 
   const [curveRes, ageingRes] = await Promise.all([

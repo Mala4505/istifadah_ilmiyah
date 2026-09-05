@@ -140,8 +140,8 @@ export function FilterBar({
       {chipRow}
 
       <FilterSection label="Status">
-        <Field label="Type">
-          <SelectNative value={filters.type} onChange={(e) => onChange({ type: e.target.value })}>
+        <Field label="Type" htmlFor="filter-type">
+          <SelectNative id="filter-type" value={filters.type} onChange={(e) => onChange({ type: e.target.value })}>
             <option value="">Any type</option>
             {options.entryTypes.map((t) => (
               <option key={t.id} value={t.id}>
@@ -151,8 +151,8 @@ export function FilterBar({
           </SelectNative>
         </Field>
 
-        <Field label="Status">
-          <SelectNative value={filters.status} onChange={(e) => onChange({ status: e.target.value })}>
+        <Field label="Status" htmlFor="filter-status">
+          <SelectNative id="filter-status" value={filters.status} onChange={(e) => onChange({ status: e.target.value })}>
             <option value="">Any status</option>
             {options.statuses.map((s) => (
               <option key={s.id} value={s.id}>
@@ -162,8 +162,8 @@ export function FilterBar({
           </SelectNative>
         </Field>
 
-        <Field label="Hub status">
-          <SelectNative value={filters.hubStatus} onChange={(e) => onChange({ hubStatus: e.target.value })}>
+        <Field label="Hub status" htmlFor="filter-hub-status">
+          <SelectNative id="filter-hub-status" value={filters.hubStatus} onChange={(e) => onChange({ hubStatus: e.target.value })}>
             <option value="">Any Hub status</option>
             {options.hubStatuses.map((s) => (
               <option key={s.id} value={s.id}>
@@ -175,8 +175,9 @@ export function FilterBar({
       </FilterSection>
 
       <FilterSection label="Classification">
-        <Field label="Department">
+        <Field label="Department" htmlFor="filter-department">
           <SelectNative
+            id="filter-department"
             value={filters.department}
             onChange={(e) => onChange({ department: e.target.value, adminHead: '', zone: '' })}
           >
@@ -189,8 +190,8 @@ export function FilterBar({
           </SelectNative>
         </Field>
 
-        <Field label="Budget head">
-          <SelectNative value={filters.budgetHead} onChange={(e) => onChange({ budgetHead: e.target.value })}>
+        <Field label="Budget head" htmlFor="filter-budget-head">
+          <SelectNative id="filter-budget-head" value={filters.budgetHead} onChange={(e) => onChange({ budgetHead: e.target.value })}>
             <option value="">All budget heads</option>
             {options.budgetHeads.map((b) => (
               <option key={b.id} value={b.id}>
@@ -200,8 +201,8 @@ export function FilterBar({
           </SelectNative>
         </Field>
 
-        <Field label="Admin head">
-          <SelectNative value={filters.adminHead} onChange={(e) => onChange({ adminHead: e.target.value })}>
+        <Field label="Admin head" htmlFor="filter-admin-head">
+          <SelectNative id="filter-admin-head" value={filters.adminHead} onChange={(e) => onChange({ adminHead: e.target.value })}>
             <option value="">All admin heads</option>
             {adminHeadOptions.map((h) => (
               <option key={h.id} value={h.id}>
@@ -211,8 +212,8 @@ export function FilterBar({
           </SelectNative>
         </Field>
 
-        <Field label="Zone">
-          <SelectNative value={filters.zone} onChange={(e) => onChange({ zone: e.target.value })}>
+        <Field label="Zone" htmlFor="filter-zone">
+          <SelectNative id="filter-zone" value={filters.zone} onChange={(e) => onChange({ zone: e.target.value })}>
             <option value="">All zones</option>
             {zoneOptions.map((z) => (
               <option key={z.id} value={z.id}>
@@ -222,8 +223,8 @@ export function FilterBar({
           </SelectNative>
         </Field>
 
-        <Field label="Cost center">
-          <SelectNative value={filters.costCenter} onChange={(e) => onChange({ costCenter: e.target.value })}>
+        <Field label="Cost center" htmlFor="filter-cost-center">
+          <SelectNative id="filter-cost-center" value={filters.costCenter} onChange={(e) => onChange({ costCenter: e.target.value })}>
             <option value="">All cost centers</option>
             {options.costCenters.map((c) => (
               <option key={c.id} value={c.id}>
@@ -235,20 +236,31 @@ export function FilterBar({
       </FilterSection>
 
       <FilterSection label="Search">
-        <Field label="Vendor">
+        <Field label="Vendor" htmlFor="filter-vendor">
           <Input
+            id="filter-vendor"
             placeholder="Search vendor…"
             value={filters.vendor}
             onChange={(e) => onChange({ vendor: e.target.value, vendorId: '' })}
           />
         </Field>
 
-        <Field label="Date from">
-          <Input type="date" value={filters.dateFrom} onChange={(e) => onChange({ dateFrom: e.target.value })} />
+        <Field label="Date from" htmlFor="filter-date-from">
+          <Input
+            id="filter-date-from"
+            type="date"
+            value={filters.dateFrom}
+            onChange={(e) => onChange({ dateFrom: e.target.value })}
+          />
         </Field>
 
-        <Field label="Date to">
-          <Input type="date" value={filters.dateTo} onChange={(e) => onChange({ dateTo: e.target.value })} />
+        <Field label="Date to" htmlFor="filter-date-to">
+          <Input
+            id="filter-date-to"
+            type="date"
+            value={filters.dateTo}
+            onChange={(e) => onChange({ dateTo: e.target.value })}
+          />
         </Field>
       </FilterSection>
 
@@ -393,10 +405,20 @@ function FilterSection({
   )
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({
+  label,
+  htmlFor,
+  children,
+}: {
+  label: string
+  htmlFor: string
+  children: React.ReactNode
+}) {
   return (
     <div className="flex flex-col gap-1">
-      <Label className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{label}</Label>
+      <Label htmlFor={htmlFor} className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+        {label}
+      </Label>
       {children}
     </div>
   )

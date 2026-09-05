@@ -193,6 +193,9 @@ export function EntriesExplorer({
   const [bulkDialogOpen, setBulkDialogOpen] = useState(false)
   const [bulkEnrichDialogOpen, setBulkEnrichDialogOpen] = useState(false)
   const [exporting, setExporting] = useState(false)
+  // 7.8: running row count for the export button's label, fed by
+  // exportEntriesToCsv's onProgress callback after each sequential batch.
+  const [exportProgress, setExportProgress] = useState(0)
 
   const requestIdRef = useRef(0)
   const isMountRef = useRef(true)
@@ -421,8 +424,9 @@ export function EntriesExplorer({
 
   async function handleExport() {
     setExporting(true)
+    setExportProgress(0)
     try {
-      const { rowCount, truncated } = await exportEntriesToCsv(supabase, filters, visibleColumns)
+      const { rowCount, truncated } = await exportEntriesToCsv(supabase, filters, visibleColumns, setExportProgress)
       if (rowCount === 0) {
         toast.warning('No matching entries to export.')
       } else if (truncated) {
@@ -476,7 +480,11 @@ export function EntriesExplorer({
           <ColumnChooser visible={visibleColumns} onToggle={toggleColumn} />
           <Button variant="outline" size="sm" className="gap-1.5" onClick={handleExport} disabled={exporting}>
             <Download className="h-3.5 w-3.5" />
-            {exporting ? 'Exporting…' : 'Export CSV'}
+            {exporting
+              ? exportProgress > 0
+                ? `Exporting… ${exportProgress.toLocaleString('en-IN')} rows`
+                : 'Exporting…'
+              : 'Export CSV'}
           </Button>
         </div>
       </div>

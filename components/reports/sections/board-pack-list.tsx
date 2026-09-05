@@ -1,5 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
-import { getSelectedEvent } from '@/lib/events/current'
+import type { Event } from '@/lib/events/types'
 import { getStaffContext } from '@/lib/export/auth'
 import { isAdminOrAbove } from '@/lib/auth/roles'
 import { friendlyDataError } from '@/lib/friendly-error'
@@ -36,9 +36,14 @@ type BoardPackListItem = {
   hasPdf: boolean
 }
 
-export async function BoardPackList() {
+/**
+ * Perf remediation Phase 2.2 (docs/performance-remediation-plan.md):
+ * `selectedEvent` is resolved once by the parent page and passed in here,
+ * rather than this component re-resolving it itself.
+ */
+export async function BoardPackList({ selectedEvent }: { selectedEvent: Event | null }) {
   const supabase = await createClient()
-  const [selectedEvent, staff] = await Promise.all([getSelectedEvent(supabase), getStaffContext()])
+  const staff = await getStaffContext()
   const eventId = selectedEvent?.id ?? null
   const canGenerate = isAdminOrAbove(staff?.role)
 

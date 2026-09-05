@@ -15,6 +15,7 @@
  * addition to the caption text, never a replacement for it.
  */
 
+import { memo } from 'react'
 import { CheckCircle2, AlertTriangle, Info } from 'lucide-react'
 import { tallyWithinTolerance } from '@/lib/normalize'
 import { formatINR } from '@/lib/reports/format'
@@ -25,7 +26,10 @@ const TOLERANCE_TOOLTIP =
   'flat ₹1 and 0.05% of the larger amount. In practice that caps at a flat ₹1 for any realistic invoice ' +
   '(above ~₹2,000); below that, the 0.05% bound is the tighter (stricter) one.'
 
-export function TallyFooter({
+// Perf 5.2: memo-wrapped -- pure presentation over three numbers the caller
+// already memoizes (lineItemSum via 5.6), so re-renders should track those
+// values changing, not every keystroke on an unrelated header field.
+function TallyFooterImpl({
   lineItemSum,
   documentTotal,
   entryAmount,
@@ -90,6 +94,8 @@ export function TallyFooter({
     </TooltipProvider>
   )
 }
+
+export const TallyFooter = memo(TallyFooterImpl)
 
 function InfoTooltip({ text }: { text: string }) {
   return (

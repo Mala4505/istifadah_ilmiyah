@@ -19,13 +19,19 @@
 import { revalidatePath } from 'next/cache'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { getStaffContext, requireAdminOrAbove } from '@/lib/export/auth'
+import type { JobStatus } from '@/lib/jobs/queue'
 
 const BUCKET = 'board-packs'
 const SIGNED_URL_TTL_SECONDS = 300
 
 export type BoardPackActionResult =
   | { ok: true; url: string }
+  | { ok: true; jobId: number }
   | { ok: true }
+  | { ok: false; error: string }
+
+export type BoardPackJobStatusResult =
+  | { ok: true; status: JobStatus }
   | { ok: false; error: string }
 
 /** A time-limited download URL for one pack's workbook or PDF. Staff-only
@@ -84,13 +90,38 @@ export async function enqueueBoardPack(): Promise<BoardPackActionResult> {
     return { ok: false, error: 'A board pack is already queued and will run shortly.' }
   }
 
-  const { error } = await admin.from('job_queue').insert({
-    job_type: 'board_pack',
-    payload: { generatedBy: gate.staff.userId },
-    run_after: new Date().toISOString(),
-  })
-  if (error) return { ok: false, error: 'Could not queue the board pack. Try again.' }
+  const { data: inserted, error } = await admin
+    .from('job_queue')
+    .insert({
+      job_type: 'board_pack',
+      payload: { generatedBy: gate.staff.userId },
+      run_after: new Date().toISOString(),
+    })
+    .select('id')
+    .single()
+  if (error || !inserted) return { ok: false, error: 'Could not queue the board pack. Try again.' }
 
   revalidatePath('/reports/brief')
-  return { ok: true }
+  return { ok: true, jobId: inserted.id as number }
+}
+
+/**
+ * Perf remediation Phase 7.9: lets BoardPackGenerateButton poll a single
+ * job_queue row after enqueueing it, so it can router.refresh() the instant
+ * the drain tick actually runs the job rather than leaving the new pack to
+ * turn up only on a manual reload. Staff-gated like getBoardPackDownloadUrl
+ * above rather than admin-gated -- this only reads queue metadata, and by the
+ * time it's called the caller has already cleared the admin-only enqueue
+ * gate once for this job.
+ */
+export async function getBoardPackJobStatus(jobId: number): Promise<BoardPackJobStatusResult> {
+  const staff = await getStaffContext()
+  if (!staff) return { ok: false, error: 'You must be signed in.' }
+  if (!staff.isActive) return { ok: false, error: 'Your account is pending activation.' }
+
+  const admin = createAdminClient()
+  const { data, error } = await admin.from('job_queue').select('status').eq('id', jobId).maybeSingle()
+  if (error || !data) return { ok: false, error: 'That job could not be found.' }
+
+  return { ok: true, status: data.status as JobStatus }
 }

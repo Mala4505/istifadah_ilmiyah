@@ -50,7 +50,7 @@ export async function saveEntryEnrichment(
 
   const supabase = await createClient()
 
-  const selectedEvent = await getSelectedEvent(supabase)
+  const selectedEvent = await getSelectedEvent()
   if (!isEventMutable(selectedEvent)) {
     return { success: false, error: EVENT_READONLY_ERROR }
   }
@@ -112,7 +112,7 @@ export async function setEntryClassification(
 
   const supabase = await createClient()
 
-  const selectedEvent = await getSelectedEvent(supabase)
+  const selectedEvent = await getSelectedEvent()
   if (!isEventMutable(selectedEvent)) {
     return { success: false, error: EVENT_READONLY_ERROR }
   }
@@ -208,7 +208,7 @@ export async function bulkSaveEntryEnrichment(
 
   const supabase = await createClient()
 
-  const selectedEvent = await getSelectedEvent(supabase)
+  const selectedEvent = await getSelectedEvent()
   if (!isEventMutable(selectedEvent)) {
     return { success: false, updatedCount: 0, requestedCount, error: EVENT_READONLY_ERROR }
   }
@@ -272,7 +272,7 @@ export async function setSettlesEntry(
 
   const supabase = await createClient()
 
-  const selectedEvent = await getSelectedEvent(supabase)
+  const selectedEvent = await getSelectedEvent()
   if (!isEventMutable(selectedEvent)) {
     return { success: false, error: EVENT_READONLY_ERROR }
   }

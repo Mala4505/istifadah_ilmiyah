@@ -19,7 +19,7 @@
  * vendors) edge set.
  */
 import { createClient } from '@/lib/supabase/server'
-import { getSelectedEvent } from '@/lib/events/current'
+import type { Event } from '@/lib/events/types'
 import { friendlyDataError } from '@/lib/friendly-error'
 import type { CompareBasis } from '@/lib/reports/compare-basis'
 import {
@@ -130,13 +130,42 @@ export type RelatedPartyGstinData = {
   }
 }
 
-export async function loadRelatedPartyGstin(compareBasis: CompareBasis): Promise<RelatedPartyGstinData> {
+/**
+ * Perf remediation Phase 2.2 (docs/performance-remediation-plan.md):
+ * `selectedEvent` is resolved once by the caller (the page already
+ * called getSelectedEvent()) and passed in, rather than this loader
+ * re-resolving it itself -- same reasoning as loadHeroMetrics/
+ * loadExecutiveBrief taking `eventId` as a parameter.
+ */
+export async function loadRelatedPartyGstin(compareBasis: CompareBasis, selectedEvent: Event | null): Promise<RelatedPartyGstinData> {
   const supabase = await createClient()
-  const selectedEvent = await getSelectedEvent(supabase)
   const eventId = selectedEvent?.id ?? null
 
   const [edgesRes, taxRes] = await Promise.all([
-    supabase.from('v_vendor_shared_identity_edges').select(EDGE_SELECT).returns<VendorSharedIdentityEdgeRow[]>(),
+    // Perf remediation 4.4: the only view query in this directory that ran
+    // with no cap at all -- deliberately not event-scoped (see header
+    // comment), so it grows with the whole vendor corpus rather than the
+    // active event. ROW_CAP matches every other surface's cap for
+    // consistency, not because 1000 edges has special meaning here.
+    //
+    // Judgment call: ordering by shared_on/shared_value has no bearing on
+    // which edges matter most, because "which edges matter" is a property of
+    // the connected components buildVendorClusters() derives AFTER all edges
+    // are in hand -- no per-row column can be sorted on to guarantee a cap
+    // doesn't cut the one edge bridging two dense subgraphs, which would
+    // silently present one real cluster as two smaller ones. Ordering by
+    // (vendor_id_a, vendor_id_b) at least makes the cap deterministic across
+    // requests rather than picking an arbitrary 1000 out of an unordered set.
+    // At today's volumes (view header: "tens of vendors, not thousands") this
+    // is far from biting; flagged here so a future re-audit at 10x the vendor
+    // count knows the cap is a size bound, not a correctness guarantee.
+    supabase
+      .from('v_vendor_shared_identity_edges')
+      .select(EDGE_SELECT)
+      .order('vendor_id_a', { ascending: true })
+      .order('vendor_id_b', { ascending: true })
+      .limit(ROW_CAP)
+      .returns<VendorSharedIdentityEdgeRow[]>(),
     supabase
       .from('v_tax_credit_exposure')
       .select(TAX_EXPOSURE_SELECT)

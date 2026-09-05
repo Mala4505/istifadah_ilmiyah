@@ -161,7 +161,7 @@ async function handleGET(request: NextRequest) {
   // backfill has run) -- short-circuit to an empty result rather than pass
   // null into .eq(), matching app/(app)/documents/page.tsx and
   // app/(app)/entries/[id]/page.tsx's convention for that edge case.
-  const selectedEventId = await getSelectedEventId(supabase)
+  const selectedEventId = await getSelectedEventId()
 
   const batchIdParam = request.nextUrl.searchParams.get('batchId')
 

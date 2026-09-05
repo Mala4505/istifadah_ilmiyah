@@ -1,5 +1,8 @@
+import { Suspense, cache } from 'react'
 import Link from 'next/link'
-import { getCompareBasis } from '@/lib/reports/compare-basis'
+import { getSelectedEvent } from '@/lib/events/current'
+import type { Event } from '@/lib/events/types'
+import { getCompareBasis, type CompareBasis } from '@/lib/reports/compare-basis'
 import { loadBudgetSurface } from '@/lib/reports/surfaces/budget'
 import { loadBudgetStructure } from '@/lib/reports/surfaces/budget-structure'
 import { loadAdminHeadAccountability } from '@/lib/reports/surfaces/admin-head'
@@ -19,6 +22,7 @@ import { OutstandingAdvanceAgeingSection } from '@/components/reports/sections/o
 import { ReimbursementProfileSection } from '@/components/reports/sections/reimbursement-profile'
 import { SpendCurveSection } from '@/components/reports/sections/spend-curve'
 import { EventComparisonSection } from '@/components/reports/sections/event-comparison'
+import { SectionSkeleton } from '@/components/reports/sections/surface-loading'
 import { parsePositiveIntParam } from '@/lib/reports/search-params'
 
 /**
@@ -37,8 +41,20 @@ import { parsePositiveIntParam } from '@/lib/reports/search-params'
  * cost map), A-06 (zone x category matrix), A-07 (category mix), A-08
  * (entry-type split), A-09 (advance ageing), A-10 (reimbursement profile),
  * A-11 (spend curve & peak weeks), A-12 (event-over-event).
+ *
+ * Perf remediation Phase 6.1 (docs/performance-remediation-plan.md): each
+ * loader below used to be one member of a single page-wide `Promise.all`,
+ * so the slowest of the six gated every section, including ones that
+ * resolved instantly. Each is now awaited inside its own async Server
+ * Component behind its own `<Suspense>`. `loadBudgetSurface` and
+ * `loadBudgetStructure` each feed two non-adjacent groups of sections --
+ * wrapped in `cache()` so each group pair shares one query instead of
+ * running it twice.
  */
 export const dynamic = 'force-dynamic'
+
+const getBudgetSurface = cache(loadBudgetSurface)
+const getBudgetStructure = cache(loadBudgetStructure)
 
 export default async function BudgetSurfacePage({
   searchParams,
@@ -46,25 +62,18 @@ export default async function BudgetSurfacePage({
   searchParams: Promise<{ revision_head_id?: string }>
 }) {
   const compareBasis = await getCompareBasis()
+  const selectedEvent = await getSelectedEvent()
+  const eventName = selectedEvent?.name ?? null
   const sp = await searchParams
   const revisionHeadId = parsePositiveIntParam(sp.revision_head_id)
-
-  const [data, structure, adminHead, entryTypeFlow, spendCurve, eventComparison] = await Promise.all([
-    loadBudgetSurface(compareBasis),
-    loadBudgetStructure(compareBasis, revisionHeadId),
-    loadAdminHeadAccountability(compareBasis),
-    loadEntryTypeFlow(compareBasis),
-    loadSpendCurveOpenAgeing(compareBasis),
-    loadEventComparison(),
-  ])
 
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-3">
           <h1 className="text-xl font-semibold tracking-tight">Budget &amp; Spend</h1>
-          {data.eventName && (
-            <span className="rounded-full border border-border px-2 py-0.5 text-xs text-muted-foreground">{data.eventName}</span>
+          {eventName && (
+            <span className="rounded-full border border-border px-2 py-0.5 text-xs text-muted-foreground">{eventName}</span>
           )}
         </div>
         <Link href="/reports" className="text-xs text-muted-foreground hover:text-foreground hover:underline">
@@ -78,6 +87,38 @@ export default async function BudgetSurfacePage({
         through to the entries behind it.
       </p>
 
+      <Suspense fallback={<SectionSkeleton />}>
+        <BudgetByHeadGroup compareBasis={compareBasis} selectedEvent={selectedEvent} />
+      </Suspense>
+      <Suspense fallback={<SectionSkeleton />}>
+        <RevisionHistoryGroup compareBasis={compareBasis} revisionHeadId={revisionHeadId} />
+      </Suspense>
+      <Suspense fallback={<SectionSkeleton />}>
+        <AdminHeadGroup compareBasis={compareBasis} />
+      </Suspense>
+      <Suspense fallback={<SectionSkeleton />}>
+        <ZoneSpendGroup compareBasis={compareBasis} selectedEvent={selectedEvent} />
+      </Suspense>
+      <Suspense fallback={<SectionSkeleton />}>
+        <ZoneCategoryGroup compareBasis={compareBasis} revisionHeadId={revisionHeadId} />
+      </Suspense>
+      <Suspense fallback={<SectionSkeleton />}>
+        <EntryTypeFlowGroup compareBasis={compareBasis} />
+      </Suspense>
+      <Suspense fallback={<SectionSkeleton />}>
+        <SpendCurveGroup compareBasis={compareBasis} />
+      </Suspense>
+      <Suspense fallback={<SectionSkeleton />}>
+        <EventComparisonGroup />
+      </Suspense>
+    </div>
+  )
+}
+
+async function BudgetByHeadGroup({ compareBasis, selectedEvent }: { compareBasis: CompareBasis; selectedEvent: Event | null }) {
+  const data = await getBudgetSurface(compareBasis, selectedEvent)
+  return (
+    <>
       <BudgetByHeadSection
         rows={data.byHead.rows}
         deptRows={data.byDepartment.rows}
@@ -98,25 +139,59 @@ export default async function BudgetSurfacePage({
         compareBasis={compareBasis}
         previousActualTotal={data.bySubDepartment.previousActualTotal}
       />
-      <BudgetRevisionHistorySection
-        rows={structure.revisionHistory.rows}
-        error={structure.revisionHistory.error}
-        selectedHeadId={structure.revisionHeadId}
-      />
-      <AdminHeadAccountabilitySection
-        rows={adminHead.accountability.rows}
-        error={adminHead.accountability.error}
-        compareBasis={compareBasis}
-        previousSpendTotal={adminHead.accountability.previousSpendTotal}
-      />
-      <ZoneSpendSection
-        rows={data.byZone.rows}
-        error={data.byZone.error}
-        compareBasis={compareBasis}
-        previousTotal={data.byZone.previousTotal}
-      />
+    </>
+  )
+}
+
+async function RevisionHistoryGroup({ compareBasis, revisionHeadId }: { compareBasis: CompareBasis; revisionHeadId: number | null }) {
+  const structure = await getBudgetStructure(compareBasis, revisionHeadId)
+  return (
+    <BudgetRevisionHistorySection
+      rows={structure.revisionHistory.rows}
+      error={structure.revisionHistory.error}
+      selectedHeadId={structure.revisionHeadId}
+    />
+  )
+}
+
+async function AdminHeadGroup({ compareBasis }: { compareBasis: CompareBasis }) {
+  const adminHead = await loadAdminHeadAccountability(compareBasis)
+  return (
+    <AdminHeadAccountabilitySection
+      rows={adminHead.accountability.rows}
+      error={adminHead.accountability.error}
+      compareBasis={compareBasis}
+      previousSpendTotal={adminHead.accountability.previousSpendTotal}
+    />
+  )
+}
+
+async function ZoneSpendGroup({ compareBasis, selectedEvent }: { compareBasis: CompareBasis; selectedEvent: Event | null }) {
+  const data = await getBudgetSurface(compareBasis, selectedEvent)
+  return (
+    <ZoneSpendSection
+      rows={data.byZone.rows}
+      error={data.byZone.error}
+      compareBasis={compareBasis}
+      previousTotal={data.byZone.previousTotal}
+    />
+  )
+}
+
+async function ZoneCategoryGroup({ compareBasis, revisionHeadId }: { compareBasis: CompareBasis; revisionHeadId: number | null }) {
+  const structure = await getBudgetStructure(compareBasis, revisionHeadId)
+  return (
+    <>
       <ZoneCategoryMatrixSection rows={structure.zoneCategoryMatrix.rows} error={structure.zoneCategoryMatrix.error} />
       <BudgetCategoryMixSection rows={structure.budgetCategoryMix.rows} error={structure.budgetCategoryMix.error} />
+    </>
+  )
+}
+
+async function EntryTypeFlowGroup({ compareBasis }: { compareBasis: CompareBasis }) {
+  const entryTypeFlow = await loadEntryTypeFlow(compareBasis)
+  return (
+    <>
       <EntryTypeSplitSection
         rows={entryTypeFlow.entryTypeSplit.rows}
         error={entryTypeFlow.entryTypeSplit.error}
@@ -139,27 +214,39 @@ export default async function BudgetSurfacePage({
         previousTotalReimbursed={entryTypeFlow.reimbursementProfile.previousTotalReimbursed}
         previousReimburseeCount={entryTypeFlow.reimbursementProfile.previousReimburseeCount}
       />
-      <SpendCurveSection
-        rows={spendCurve.spendCurve.rows}
-        error={spendCurve.spendCurve.error}
-        compareBasis={compareBasis}
-        totalSpend={spendCurve.spendCurve.totalSpend}
-        eventWeekCount={spendCurve.spendCurve.eventWeekCount}
-        peakWeekStart={spendCurve.spendCurve.peakWeekStart}
-        peakWeekAmount={spendCurve.spendCurve.peakWeekAmount}
-        meanWeeklyAmount={spendCurve.spendCurve.meanWeeklyAmount}
-        peakMultipleOfMean={spendCurve.spendCurve.peakMultipleOfMean}
-        previousPeakWeekAmount={spendCurve.spendCurve.previousPeakWeekAmount}
-      />
-      <EventComparisonSection
-        hasComparison={eventComparison.hasComparison}
-        currentEventName={eventComparison.currentEventName}
-        baseEventName={eventComparison.baseEventName}
-        rows={eventComparison.rows}
-        error={eventComparison.error}
-        currentTotal={eventComparison.currentTotal}
-        baseTotal={eventComparison.baseTotal}
-      />
-    </div>
+    </>
+  )
+}
+
+async function SpendCurveGroup({ compareBasis }: { compareBasis: CompareBasis }) {
+  const spendCurve = await loadSpendCurveOpenAgeing(compareBasis)
+  return (
+    <SpendCurveSection
+      rows={spendCurve.spendCurve.rows}
+      error={spendCurve.spendCurve.error}
+      compareBasis={compareBasis}
+      totalSpend={spendCurve.spendCurve.totalSpend}
+      eventWeekCount={spendCurve.spendCurve.eventWeekCount}
+      peakWeekStart={spendCurve.spendCurve.peakWeekStart}
+      peakWeekAmount={spendCurve.spendCurve.peakWeekAmount}
+      meanWeeklyAmount={spendCurve.spendCurve.meanWeeklyAmount}
+      peakMultipleOfMean={spendCurve.spendCurve.peakMultipleOfMean}
+      previousPeakWeekAmount={spendCurve.spendCurve.previousPeakWeekAmount}
+    />
+  )
+}
+
+async function EventComparisonGroup() {
+  const eventComparison = await loadEventComparison()
+  return (
+    <EventComparisonSection
+      hasComparison={eventComparison.hasComparison}
+      currentEventName={eventComparison.currentEventName}
+      baseEventName={eventComparison.baseEventName}
+      rows={eventComparison.rows}
+      error={eventComparison.error}
+      currentTotal={eventComparison.currentTotal}
+      baseTotal={eventComparison.baseTotal}
+    />
   )
 }

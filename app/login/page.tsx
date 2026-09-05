@@ -54,10 +54,8 @@ export default function LoginPage() {
                 type="text"
                 inputMode="numeric"
                 autoComplete="username"
-                pattern="[0-9]{8}"
                 maxLength={8}
                 placeholder="Enter ITS Number"
-                required
                 value={itsNumber}
                 onChange={(event) => setItsNumber(event.target.value.replace(/[^0-9]/g, '').slice(0, 8))}
               />
@@ -70,7 +68,6 @@ export default function LoginPage() {
                 type="password"
                 placeholder='Enter Password'
                 autoComplete="current-password"
-                required
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
               />
