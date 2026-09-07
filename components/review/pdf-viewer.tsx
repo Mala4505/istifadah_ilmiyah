@@ -75,18 +75,31 @@ export interface PdfViewerHandle {
 // drags the pane divider. `p-3` on the content wrapper below is 12px/side.
 const CONTENT_PADDING_PX = 24
 
-// Runaway-zoom fix: the render effect measures the NON-scrolling pane column
-// (paneMeasureRef), not the overflow:auto scroll area, and always subtracts a
-// scrollbar's width on top of the padding -- whether or not a vertical
-// scrollbar is currently showing. Measuring the scroll area directly made the
-// fit-width base scale depend on a number the render itself changes: a zoomed
-// page taller than the pane shows the scrollbar, which narrows the measured
-// width, which re-renders the page smaller, which hides the scrollbar, which
-// widens the width... the page pulsing / "zooming on its own." A fixed
-// allowance against a container the canvas can't resize breaks that loop
-// outright. 17px comfortably covers a classic Windows/Linux scrollbar (15-16px)
-// with a pixel or two to spare so the page never quite reaches the edge.
+// Runaway-zoom fix (v3). The fit-width base scale is measured off the
+// component's OUTERMOST element (outerRef) — the one flex column with
+// `overflow-hidden` + `min-w-0` whose width is set purely by the review
+// workspace's split-pane divider (`width: <splitPercent>%` on an ancestor,
+// see review-workspace.tsx). Nothing this component renders inside it — a
+// wide canvas, a toggling scrollbar, the skip-status bar's text — can feed
+// back into that width, because `overflow-hidden` + `min-w-0` stop content
+// from inflating the box. Every earlier version measured an element further
+// in (the scroll area, then the non-scrolling pane column): those pick up a
+// max-content floor from their own descendants, so as layout settled during
+// load the measured width flapped between two values, each survived the
+// settle debounce, and the page pulsed / "zoomed on its own."
+//
+// The measurement therefore has to account for the fixed chrome that sits
+// between the outer box and the page canvas itself: the thumbnail rail
+// (RAIL_WIDTH_PX, shown only for a multi-page PDF that isn't collapsed), the
+// scroll area's own padding (CONTENT_PADDING_PX), and a scrollbar allowance
+// (SCROLLBAR_ALLOWANCE_PX) so a fit-width page never triggers the vertical
+// scrollbar it was measured without. 17px comfortably covers a classic
+// Windows/Linux scrollbar (15-16px) with a pixel or two to spare.
 const SCROLLBAR_ALLOWANCE_PX = 17
+
+// `w-20` (80px) + the rail's own `border-r` (1px). Subtracted from the outer
+// width when the rail is on screen (numPages > 1 && !collapsed).
+const RAIL_WIDTH_PX = 81
 
 // Minimal shape of what this component actually calls, so it doesn't need to
 // import pdfjs-dist's full type surface (imported dynamically below anyway).
@@ -213,12 +226,27 @@ export const PdfViewer = memo(forwardRef<
 
   const docRef = useRef<PdfDocumentProxy | null>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
-  // The pane column that holds the scroll area -- it has no overflow of its
-  // own, so its width is pure flex layout (pane divider position minus the
-  // thumbnail rail) and the canvas can never resize it. This is what the
-  // fit-width measurement observes; see SCROLLBAR_ALLOWANCE_PX.
-  const paneMeasureRef = useRef<HTMLDivElement | null>(null)
+  // The component's outermost box. `overflow-hidden` + `min-w-0` (see the JSX)
+  // mean its width is driven solely by the split-pane divider on an ancestor,
+  // never by anything rendered inside -- which is exactly what makes it safe
+  // to derive the fit-width scale from. See SCROLLBAR_ALLOWANCE_PX / RAIL_WIDTH_PX.
+  const outerRef = useRef<HTMLDivElement | null>(null)
   const thumbCanvasRefs = useRef<Map<number, HTMLCanvasElement>>(new Map())
+  // One STABLE ref callback per page number. A fresh inline `ref={(el) => ...}`
+  // is a new function identity every render, so React detaches (calls it with
+  // null) and re-attaches (calls it with the node) on *every* commit, not just
+  // real mount/unmount -- with the old inline callback here that meant every
+  // re-render un-registered every visible thumbnail and the IntersectionObserver
+  // immediately re-fired renderThumbnail() for it, stacking overlapping
+  // page.render() calls on one canvas (pdf.js throws "Cannot use the same
+  // canvas during multiple render() operations") until Sentry rate-limited the
+  // error flood. A per-page memoised callback has a stable identity, so React
+  // only invokes it on a genuine mount/unmount.
+  const thumbRefCallbacksRef = useRef<Map<number, (el: HTMLCanvasElement | null) => void>>(new Map())
+  // Pages whose thumbnail page.render() is currently in flight -- a belt-and-
+  // braces guard so renderThumbnail() can never start a second overlapping
+  // render on the same canvas even if a caller slips through.
+  const thumbRenderInFlightRef = useRef<Set<number>>(new Set())
   // 5.9: which thumbnail pages have already been rendered (or have a render
   // in flight) -- the load-bearing duplicate-render guard pdf.js needs (a
   // second render() on the same canvas before the first finishes throws).
@@ -334,13 +362,14 @@ export const PdfViewer = memo(forwardRef<
     // *previous* document would make pageTransitioning read false even
     // though the canvas hasn't rendered anything for this document.
     setPaintedPageNumber(null)
-    // 5.9: a new document's thumbnails need to render even if the rail's
-    // <canvas> elements at a given page number end up being the same DOM
-    // nodes as the previous document's (React can reuse them across this
-    // re-render since their keys -- page numbers -- don't change) -- clear
-    // both the "already rendered" set and the observer so every thumbnail
-    // is treated as freshly mounted again.
+    // Reset all thumbnail bookkeeping. On a true document switch PdfViewer is
+    // remounted (review/page.tsx keys it on sourceDocumentId) so the stable
+    // per-page ref callbacks (thumbRefCallbacksRef) fire fresh and re-observe
+    // every canvas; on a Retry the rail isn't mounted at all (numPages is 0
+    // during the error state that Retry is reached from), so there is nothing
+    // to re-observe here either.
     renderedThumbnailPagesRef.current = new Set()
+    thumbRenderInFlightRef.current = new Set()
     thumbObserverRef.current?.disconnect()
     thumbObserverRef.current = null
     thumbCanvasRefs.current.clear()
@@ -400,25 +429,22 @@ export const PdfViewer = memo(forwardRef<
     // remount -- its value is never read.
   }, [sourceDocumentId, retryNonce])
 
-  // Measure the pane column's width and re-measure on resize. It stays
+  // Measure the outermost box's width and re-measure on resize. It stays
   // mounted at every pane mode/width (never conditionally rendered, so
-  // pdf.js's document never tears down -- checklist 3.7); its width changes
-  // only as the review workspace's divider moves or the pane mode cycles.
-  // Deliberately NOT the overflow:auto scroll area -- see SCROLLBAR_ALLOWANCE_PX:
-  // measuring that created a scrollbar-toggle feedback loop that read as the
-  // page zooming by itself.
+  // pdf.js's document never tears down -- checklist 3.7); with `overflow-hidden`
+  // + `min-w-0` its width tracks only the review workspace's divider, never
+  // anything rendered inside it -- see the SCROLLBAR_ALLOWANCE_PX comment for
+  // why measuring anything further in kept re-creating the runaway zoom.
   //
-  // The measurement is committed to state only once it has held steady for
-  // SETTLE_MS. This is the load-bearing guard against the runaway zoom: any
-  // feedback loop between "render the page" and "measure the pane" -- whatever
-  // its mechanism -- oscillates faster than this, so a flapping width never
-  // reaches `containerWidth`, the render effect never re-fires from it, and the
-  // page can't pulse. A real divider drag settles well within SETTLE_MS of the
-  // user letting go, so re-fitting after a drag still feels immediate.
+  // A short settle debounce is kept as a cheap backstop against a genuine
+  // divider drag firing dozens of intermediate widths, and against any
+  // residual feedback from an ancestor: a value has to hold steady for
+  // SETTLE_MS before it reaches `containerWidth`. A real drag settles well
+  // within that of the user letting go, so re-fitting still feels immediate.
   useEffect(() => {
-    const el = paneMeasureRef.current
+    const el = outerRef.current
     if (!el) return
-    const SETTLE_MS = 150
+    const SETTLE_MS = 120
     let timer: ReturnType<typeof setTimeout> | null = null
     const observer = new ResizeObserver((entries) => {
       const raw = entries[0]?.contentRect.width
@@ -453,11 +479,16 @@ export const PdfViewer = memo(forwardRef<
       const page = await doc.getPage(pageNumber)
       if (cancelled) return
       const naturalViewport = page.getViewport({ scale: 1, rotation })
-      // containerWidth is the non-scrolling pane column; subtract the scroll
-      // area's own padding AND a fixed scrollbar allowance so a fit-width page
+      // containerWidth is the outermost box; subtract the fixed chrome between
+      // it and the page canvas -- the thumbnail rail when it's on screen, the
+      // scroll area's padding, and a scrollbar allowance so a fit-width page
       // (zoom 1) never itself triggers the vertical scrollbar it was measured
-      // without -- the toggle that used to feed back into this measurement.
-      const availableWidth = Math.max(containerWidth - CONTENT_PADDING_PX - SCROLLBAR_ALLOWANCE_PX, 40)
+      // without (the toggle that used to feed back into this measurement).
+      const railWidth = numPages > 1 && !collapsed ? RAIL_WIDTH_PX : 0
+      const availableWidth = Math.max(
+        containerWidth - railWidth - CONTENT_PADDING_PX - SCROLLBAR_ALLOWANCE_PX,
+        40
+      )
       const fitWidthScale = availableWidth / naturalViewport.width
       const viewport = page.getViewport({ scale: fitWidthScale * zoom, rotation })
       const context = canvas.getContext('2d')
@@ -482,8 +513,14 @@ export const PdfViewer = memo(forwardRef<
       // resizes, not after the paint finishes. Setting it afterwards left a
       // 10-50ms window where the canvas was bigger than its wrapper and spilled
       // into the scroll area -- flashing scrollbars on every single render,
-      // which is what the fit-width measurement used to feed back on.
-      setCanvasSize({ width: viewport.width, height: viewport.height })
+      // which is what the fit-width measurement used to feed back on. Bail when
+      // the size is unchanged so a re-fired render (same page, same scale)
+      // doesn't churn a re-render for nothing.
+      setCanvasSize((prev) =>
+        prev.width === viewport.width && prev.height === viewport.height
+          ? prev
+          : { width: viewport.width, height: viewport.height }
+      )
       const task = page.render({ canvasContext: context, viewport })
       renderTaskRef.current = task
       try {
@@ -510,24 +547,60 @@ export const PdfViewer = memo(forwardRef<
       cancelled = true
       renderTaskRef.current?.cancel()
     }
-  }, [pageNumber, zoom, rotation, numPages, containerWidth])
+  }, [pageNumber, zoom, rotation, numPages, collapsed, containerWidth])
 
   // Renders a small thumbnail for page `n` -- called once that page's canvas
   // scrolls near/into view (see getThumbnailObserver below), not unconditionally
-  // on mount. Still guarded by the caller checking renderedThumbnailPagesRef
-  // first (5.9) -- this function itself doesn't re-check, matching the
-  // original "one call site, one guard" shape.
+  // on mount. Guarded by the caller checking renderedThumbnailPagesRef (5.9)
+  // AND, here, by thumbRenderInFlightRef so an overlapping call on the same
+  // canvas is impossible even if a caller slips through -- pdf.js throws on
+  // that, and an unhandled throw here is what flooded Sentry into a 429.
+  // Any render failure is swallowed (logged, not thrown): a thumbnail that
+  // fails to paint is a cosmetic problem, never worth an error report storm.
   async function renderThumbnail(n: number) {
     const doc = docRef.current
     const canvas = thumbCanvasRefs.current.get(n)
-    if (!doc || !canvas) return
-    const page = await doc.getPage(n)
-    const viewport = page.getViewport({ scale: 0.15 })
-    canvas.width = viewport.width
-    canvas.height = viewport.height
-    const context = canvas.getContext('2d')
-    if (!context) return
-    await page.render({ canvasContext: context, viewport }).promise
+    if (!doc || !canvas || thumbRenderInFlightRef.current.has(n)) return
+    thumbRenderInFlightRef.current.add(n)
+    try {
+      const page = await doc.getPage(n)
+      const viewport = page.getViewport({ scale: 0.15 })
+      canvas.width = viewport.width
+      canvas.height = viewport.height
+      const context = canvas.getContext('2d')
+      if (!context) return
+      await page.render({ canvasContext: context, viewport }).promise
+    } catch (err) {
+      if (err instanceof Error && err.name === 'RenderingCancelledException') return
+      logRawError('pdf-viewer:thumbnail', err instanceof Error ? err.message : String(err))
+    } finally {
+      thumbRenderInFlightRef.current.delete(n)
+    }
+  }
+
+  // Stable per-page ref callback for a thumbnail <canvas> (see
+  // thumbRefCallbacksRef's comment for why identity stability matters here).
+  // Registers the element and starts observing it on mount; on a genuine
+  // unmount (pane collapse, page-count shrink) it unobserves and clears the
+  // page's "already rendered" mark so it repaints when it remounts.
+  function getThumbRefCallback(n: number): (el: HTMLCanvasElement | null) => void {
+    let cb = thumbRefCallbacksRef.current.get(n)
+    if (!cb) {
+      cb = (el: HTMLCanvasElement | null) => {
+        if (el) {
+          if (thumbCanvasRefs.current.get(n) === el) return
+          thumbCanvasRefs.current.set(n, el)
+          getThumbnailObserver().observe(el)
+        } else {
+          const prior = thumbCanvasRefs.current.get(n)
+          if (prior) thumbObserverRef.current?.unobserve(prior)
+          thumbCanvasRefs.current.delete(n)
+          renderedThumbnailPagesRef.current.delete(n)
+        }
+      }
+      thumbRefCallbacksRef.current.set(n, cb)
+    }
+    return cb
   }
 
   // 5.9: lazily creates (or returns the existing) IntersectionObserver that
@@ -638,18 +711,21 @@ export const PdfViewer = memo(forwardRef<
       : 'Included in extraction'
 
   // L1 (checklist 3.7): one JSX tree for both toolbar states, not two
-  // early-returned branches -- the measured pane column (paneMeasureRef,
-  // observed by the ResizeObserver above) and the <canvas> itself (canvasRef,
-  // painted by the render effect above) have to stay the *same* DOM nodes
-  // across a Collapsed toggle. Two separate branches would give each mode its
-  // own copy of both elements: React would unmount/remount them on every
-  // toggle, orphaning the ResizeObserver (its effect only runs once, on the
-  // node it saw at mount) and leaving the fresh canvas unpainted until some other
+  // early-returned branches -- the measured outer box (outerRef, observed by
+  // the ResizeObserver above) and the <canvas> itself (canvasRef, painted by
+  // the render effect above) have to stay the *same* DOM nodes across a
+  // Collapsed toggle. Two separate branches would give each mode its own copy
+  // of both elements: React would unmount/remount them on every toggle,
+  // orphaning the ResizeObserver (its effect only runs once, on the node it
+  // saw at mount) and leaving the fresh canvas unpainted until some other
   // dependency happened to change. Only the toolbar and thumbnail rail --
   // genuinely different content, not the same element resized -- switch on
   // `collapsed`.
   return (
-    <div className="flex h-full min-w-0 flex-col overflow-hidden rounded-md border border-border bg-muted/30">
+    <div
+      ref={outerRef}
+      className="flex h-full min-w-0 flex-col overflow-hidden rounded-md border border-border bg-muted/30"
+    >
       {collapsed ? (
         <div className="flex flex-col items-center gap-1.5 border-b border-border bg-background px-1 py-2">
           <Button
@@ -723,7 +799,7 @@ export const PdfViewer = memo(forwardRef<
         </div>
       )}
 
-      <div className="flex min-h-0 flex-1">
+      <div className="flex min-h-0 min-w-0 flex-1">
         {numPages > 1 && !collapsed ? (
           <div className="flex w-20 flex-shrink-0 flex-col gap-2 overflow-y-auto border-r border-border bg-background p-2">
             {Array.from({ length: numPages }, (_, i) => i + 1).map((n) => {
@@ -767,35 +843,7 @@ export const PdfViewer = memo(forwardRef<
                     />
                   ) : null}
                   <canvas
-                    ref={(el) => {
-                      // This inline arrow function is a new reference every render, so
-                      // React detaches/reattaches it (calling this callback again with
-                      // the same `el`) on every re-render, not just on real mount --
-                      // L1's ResizeObserver-driven re-renders (checklist 3.8) made that
-                      // frequent enough to fire this repeatedly. Only (re-)register
-                      // when the element genuinely changed.
-                      if (el && thumbCanvasRefs.current.get(n) !== el) {
-                        thumbCanvasRefs.current.set(n, el)
-                        // 5.9: observe instead of rendering immediately -- the
-                        // render itself only happens once the observer reports
-                        // this canvas has scrolled near/into view (see
-                        // getThumbnailObserver above), not the moment it mounts.
-                        getThumbnailObserver().observe(el)
-                      } else if (!el) {
-                        const prior = thumbCanvasRefs.current.get(n)
-                        if (prior) thumbObserverRef.current?.unobserve(prior)
-                        thumbCanvasRefs.current.delete(n)
-                        // 5.9: the pane-collapse toggle (unlike a document
-                        // change) unmounts and later remounts this rail's
-                        // canvases without touching renderedThumbnailPagesRef,
-                        // which otherwise only resets on a document change.
-                        // Left unguarded, the fresh blank canvas that comes
-                        // back on expand would be skipped by the observer as
-                        // "already rendered" and stay blank forever -- so
-                        // treat a detached canvas as unrendered again.
-                        renderedThumbnailPagesRef.current.delete(n)
-                      }
-                    }}
+                    ref={getThumbRefCallback(n)}
                     data-page-number={n}
                     className="mx-auto max-w-full"
                   />
@@ -813,11 +861,14 @@ export const PdfViewer = memo(forwardRef<
           </div>
         ) : null}
 
-        <div ref={paneMeasureRef} className="flex min-h-0 flex-1 flex-col">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           {/* Redesign (review pane rail): skip/unskip moved out of the
               thumbnail rail and into this compact bar -- one icon-only
               button, gated behind the confirmation Dialog below, instead of
-              the old pair of ~16px overlay icons that fired immediately. */}
+              the old pair of ~16px overlay icons that fired immediately.
+              min-w-0 + a truncating status span so this bar's text can never
+              set a max-content floor wider than the pane (which is what used
+              to inflate the fit-width measurement). */}
           {!collapsed && numPages > 0 ? (
             <div
               className={`flex items-center gap-2 border-b px-3 py-1.5 ${
@@ -828,7 +879,7 @@ export const PdfViewer = memo(forwardRef<
             >
               <span className="flex-shrink-0 text-xs font-medium text-foreground">Page {pageNumber}</span>
               <span
-                className={`truncate text-xs ${
+                className={`min-w-0 flex-1 truncate text-xs ${
                   currentSkipped
                     ? 'font-semibold text-amber-900 dark:text-amber-200'
                     : 'text-muted-foreground'
