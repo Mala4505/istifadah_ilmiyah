@@ -208,7 +208,21 @@ function buildSystemPrompt(communityGstin: string | null, communityName: string 
     'are printed or positioned on the page, including in a footer/signature block below the line-item ' +
     'table — are header information, never a line item of their own: never create a line-item row whose ' +
     'description is an email address, a phone number, or similar contact text, even if it visually sits ' +
-    'in the same area as the line items. Never ' +
+    'in the same area as the line items. ' +
+    'When you transcribe a line-item table, transcribe exactly the rows that are printed — one output row ' +
+    'per printed row, in the same order, with the SAME COUNT. Do not split one printed row into two, do ' +
+    'not merge two printed rows into one, and never invent an extra row to make the totals work: if your ' +
+    'line items do not add up to the printed subtotal, that is a signal you have MIS-READ a row, not a ' +
+    'signal to add or pad one. Read each row across as a single unit — its description, quantity, rate, ' +
+    'discount and amount all come from that one physical row; never carry a value up or down from an ' +
+    'adjacent row to fill a cell you cannot read (leave it null/empty and flag it instead). On a faint, ' +
+    'skewed, carbon-copy, or densely packed table this row-alignment is the easiest thing to get wrong, ' +
+    'so slow down and check that each amount you record is that row\'s own. If a row\'s quantity times ' +
+    'rate (after any printed discount) does not match the amount printed on that row, transcribe all of ' +
+    'them exactly as printed anyway — do not "correct" one to fit the others — and flag that row\'s ' +
+    'amount in the uncertain fields. Reflect genuine table illegibility honestly in the legibility and ' +
+    'confidence fields rather than reporting a clean, confident read of a table you had to strain to make ' +
+    'out. Never ' +
     'fabricate a value — for anything illegible or genuinely absent use an empty string in a text field ' +
     'and null in a numeric field, and reflect uncertainty via the confidence fields rather than guessing. ' +
     'Every field value must be plain text transcribed from the document — never emit tag-like syntax ' +

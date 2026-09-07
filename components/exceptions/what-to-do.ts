@@ -85,6 +85,11 @@ export function getExceptionAction(row: ExceptionActionRow): ExceptionAction {
   switch (row.exception_type) {
     case 'line_item_tally_mismatch':
       return { whatToDo: 'Re-check the line items against the bill total.', destination: reviewBillLink(row) }
+    case 'line_item_row_math_mismatch':
+      return {
+        whatToDo: 'The named rows’ quantity × rate doesn’t match their amount — check those rows against the document.',
+        destination: reviewBillLink(row),
+      }
     case 'ocr_total_vs_amount':
       return { whatToDo: 'Confirm which figure is right — the bill or the ledger.', destination: reviewBillLink(row) }
     case 'audit_row_unmatched':

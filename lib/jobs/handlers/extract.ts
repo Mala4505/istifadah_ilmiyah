@@ -35,10 +35,12 @@ import {
 } from '@/lib/extraction'
 import {
   buildTaxBreakdown,
+  lineItemRowMathMismatches,
   remapExtractionPageNumbers,
   remapExtractionToActualPage,
   sanitizeExtractionResponse,
   type ExtractionPage,
+  type LineItemRowMathMismatch,
 } from '@/lib/extraction-schema'
 import { EXTRACTION_MAX_TOKENS, MODELS, submitExtractionBatch, type ModelId } from '@/lib/claude-client'
 import { serverEnv } from '@/lib/env.server'
@@ -632,7 +634,12 @@ export async function persistExtractionPipelineResult(
       })
       .eq('document_extraction_id', documentExtractionId)
       .eq('status', 'open')
-      .in('exception_type', ['line_item_tally_mismatch', 'ocr_total_vs_amount', 'other'])
+      .in('exception_type', [
+        'line_item_tally_mismatch',
+        'line_item_row_math_mismatch',
+        'ocr_total_vs_amount',
+        'other',
+      ])
 
     // ---- §8 point 5: tally checks, immediately on write, scoped to this bill.
     const billExceptions = await runTallyChecks(admin, {
@@ -646,6 +653,7 @@ export async function persistExtractionPipelineResult(
       subtotal: bill.subtotal,
       taxAmount: bill.tax_amount,
       lineTotal: lineItemTotal(bill),
+      rowMathMismatches: lineItemRowMathMismatches(bill),
       legibility: extraction.legibility,
       containsNonLatinScript: extraction.contains_non_latin_script,
     })
@@ -1359,14 +1367,19 @@ interface TallyCheckInput {
   subtotal: number | null
   taxAmount: number | null
   lineTotal: number | null
+  /** Rows whose own quantity x rate (+/- discount) does not reconcile with
+   *  their amount — from `lineItemRowMathMismatches` (lib/extraction-schema.ts). */
+  rowMathMismatches: LineItemRowMathMismatch[]
   legibility: 'clear' | 'partial' | 'poor'
   containsNonLatinScript: boolean
 }
 
 /**
- * §8 point 5 / §9.4. Three checks, each writing a `reconciliation_exception`
- * row rather than throwing — a mismatch is a thing a human resolves, not a
- * pipeline failure.
+ * §8 point 5 / §9.4. Checks 1 / 1b (line-item sum vs subtotal, subtotal + tax
+ * vs total), 1c (each row's own quantity x rate vs its amount), 2 (document
+ * total vs matched entry amount) and 3 (legibility / non-Latin script) — each
+ * writing a `reconciliation_exception` row rather than throwing, because a
+ * mismatch is a thing a human resolves, not a pipeline failure.
  */
 async function runTallyChecks(admin: AdminClient, input: TallyCheckInput): Promise<string[]> {
   const raised: string[] = []
@@ -1414,6 +1427,35 @@ async function runTallyChecks(admin: AdminClient, input: TallyCheckInput): Promi
         dedup_key: `subtotal_plus_tax_vs_total:${input.documentExtractionId}:${input.currentRunId}`,
       })
     }
+  }
+
+  // 1c. Per-row arithmetic: each line's own quantity x rate (+/- a printed %
+  // discount) vs its amount. Checks 1 and 1b look at the line-item SUM, which
+  // only moves when a row is added, dropped, or its amount is wrong — a row
+  // read with its columns crossed over from a neighbouring line (description
+  // from one physical row, numbers from another) stays internally consistent
+  // and slips past both. This names the exact rows for a reviewer instead.
+  // Low severity: extractionLineItemSchema allows `amount` to be the printed
+  // line total "when that differs from the arithmetic", so a hit is advisory.
+  if (input.rowMathMismatches.length > 0) {
+    raised.push('line_item_row_math_mismatch')
+    const rowText = input.rowMathMismatches
+      .map((m) => {
+        const label = m.description ? `"${m.description}"` : `row ${m.lineOrder}`
+        const disc = m.discountText ? `, discount ${m.discountText}` : ''
+        return `${label}: ${m.quantity} x ${m.rate.toFixed(2)} = ${m.gross.toFixed(2)}${disc} but amount reads ${m.amount.toFixed(2)}`
+      })
+      .join('; ')
+    exceptions.push({
+      document_extraction_id: input.documentExtractionId,
+      exception_type: 'line_item_row_math_mismatch',
+      severity: 'low',
+      description:
+        `${input.rowMathMismatches.length} line item(s) do not reconcile with their own quantity x rate: ` +
+        `${rowText}. Check these row(s) against the document — a mis-read digit, or columns read from the ` +
+        'wrong line on a dense/faint table.',
+      dedup_key: `line_item_row_math_mismatch:${input.documentExtractionId}:${input.currentRunId}`,
+    })
   }
 
   // 2. total_amount_ocr vs entries.amount, when the document is matched

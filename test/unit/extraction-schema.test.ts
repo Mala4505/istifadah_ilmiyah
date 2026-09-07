@@ -5,6 +5,7 @@ import {
   extractionResponseSchema,
   extractionToolInputSchema,
   INSTRUMENT_TYPES,
+  lineItemRowMathMismatches,
   remapExtractionToActualPage,
   sanitizeExtractionResponse,
   type ExtractionBill,
@@ -653,5 +654,73 @@ describe('remapExtractionToActualPage — per-page extraction page-number correc
     remapExtractionToActualPage(extraction, 4)
     expect(extraction.pages[0]!.page_number).toBe(1)
     expect(extraction.bills[0]!.page_number_start).toBe(1)
+  })
+})
+
+describe('lineItemRowMathMismatches', () => {
+  /** One wire-shaped line item; `overrides` set the fields under test. */
+  function lineItem(overrides: Record<string, unknown> = {}) {
+    return {
+      page_number: 1,
+      line_order: 0,
+      description: 'WIDGET',
+      hsn_sac_code: '',
+      quantity: 2,
+      quantity_raw_text: '',
+      unit: 'Pcs',
+      rate: 100,
+      discount: '',
+      amount: 200,
+      ...overrides,
+    }
+  }
+
+  function billWith(items: Record<string, unknown>[]): ExtractionBill {
+    return extractionResponseSchema.parse(baseInput({}, { line_items: items })).bills[0]!
+  }
+
+  it('accepts a row where quantity × rate equals amount', () => {
+    expect(lineItemRowMathMismatches(billWith([lineItem()]))).toEqual([])
+  })
+
+  it('accepts a row where a bare-number discount is read as a percentage', () => {
+    // 10 × 32.50 = 325, less 50% = 162.50
+    const bill = billWith([lineItem({ quantity: 10, rate: 32.5, discount: '50', amount: 162.5 })])
+    expect(lineItemRowMathMismatches(bill)).toEqual([])
+  })
+
+  it('flags a row whose amount is off by more than the tolerance', () => {
+    // 2 × 248 less 30% = 347.20, not 348.80
+    const bill = billWith([
+      lineItem({ description: 'ASTRAL SOLUTION 237ML', quantity: 2, rate: 248, discount: '30', amount: 348.8 }),
+    ])
+    const hits = lineItemRowMathMismatches(bill)
+    expect(hits).toHaveLength(1)
+    expect(hits[0]).toMatchObject({ lineOrder: 0, description: 'ASTRAL SOLUTION 237ML', amount: 348.8, gross: 496 })
+  })
+
+  it('skips rows missing quantity, rate, or amount', () => {
+    const bill = billWith([
+      lineItem({ quantity: null, amount: 999 }),
+      lineItem({ rate: null, amount: 999 }),
+      lineItem({ amount: null }),
+    ])
+    expect(lineItemRowMathMismatches(bill)).toEqual([])
+  })
+
+  it('ignores a non-numeric discount note rather than treating it as a mismatch', () => {
+    // discount text is unusable → checked against gross (200) only, which matches
+    const bill = billWith([lineItem({ discount: 'Trade discount as agreed', amount: 200 })])
+    expect(lineItemRowMathMismatches(bill)).toEqual([])
+  })
+
+  it('tolerates paise-level rounding (within max(₹1, 0.2%))', () => {
+    const bill = billWith([lineItem({ quantity: 3, rate: 33.33, amount: 100 })]) // 99.99 vs 100
+    expect(lineItemRowMathMismatches(bill)).toEqual([])
+  })
+
+  it('uses line_order, not array index, to name the row', () => {
+    const bill = billWith([lineItem({ line_order: 7, quantity: 1, rate: 10, amount: 999 })])
+    expect(lineItemRowMathMismatches(bill)[0]!.lineOrder).toBe(7)
   })
 })

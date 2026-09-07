@@ -791,6 +791,88 @@ export function buildTaxBreakdown(bill: ExtractionBill): TaxBreakdown | null {
   }
 }
 
+/** One line item whose printed `amount` does not reconcile with its own
+ *  `quantity` / `rate` / `discount` — see `lineItemRowMathMismatches`. */
+export interface LineItemRowMathMismatch {
+  /** `line_order` (stable across re-sorts), falling back to array index. */
+  lineOrder: number
+  description: string
+  quantity: number
+  rate: number
+  /** The amount the model actually transcribed for this row. */
+  amount: number
+  /** `quantity * rate`, before any discount. */
+  gross: number
+  /** The row's raw `discount` text, echoed for the reviewer ('' when absent). */
+  discountText: string
+}
+
+/**
+ * Reads a `discount` field as a percentage. These vendors print the discount
+ * as a bare number in that column ("50", "30", "55") meaning "% off"; the
+ * schema keeps it as free text (see `extractionLineItemSchema`'s doc comment)
+ * so anything that isn't a plain 0–100 number — a real note, a rupee amount,
+ * blank — returns null and the row is checked against its un-discounted
+ * `quantity * rate` only.
+ */
+function discountPercent(raw: string | null): number | null {
+  if (raw === null) return null
+  const cleaned = raw.replace(/[%\s,]/g, '')
+  if (!/^\d+(\.\d+)?$/.test(cleaned)) return null
+  const n = Number(cleaned)
+  return n > 0 && n < 100 ? n : null
+}
+
+/**
+ * Per-row arithmetic sanity check: for every line item that carries a
+ * quantity, a rate AND an amount, does `amount` reconcile with
+ * `quantity * rate` (optionally reduced by a percentage `discount` the row
+ * prints)? A row where it does not is either a mis-read digit or — the failure
+ * mode on dense, faint, or carbon-copy tables — a row whose columns were read
+ * from different physical lines (description from one, numbers from another,
+ * or an extra row spliced in). Both are things a reviewer should eyeball
+ * against the page, and naming the exact rows is far more actionable than the
+ * document-level "the line items don't sum to the subtotal" the aggregate
+ * `line_item_tally_mismatch` check raises.
+ *
+ * Deliberately conservative — this backstops the aggregate check, it does not
+ * replace it:
+ *   - only rows with quantity, rate and amount all present are checked;
+ *   - a non-numeric `discount` is treated as "no usable discount signal", not
+ *     a mismatch;
+ *   - the tolerance is `max(₹1, 0.2% of gross)` — loose enough that ordinary
+ *     paise-rounding does not trip it, tight enough to catch a single wrong
+ *     digit;
+ *   - `extractionLineItemSchema` explicitly allows `amount` to be "the line
+ *     total as printed when that differs from the arithmetic", so a hit here
+ *     is advisory (low severity), never blocking.
+ */
+export function lineItemRowMathMismatches(bill: ExtractionBill): LineItemRowMathMismatch[] {
+  const out: LineItemRowMathMismatch[] = []
+  bill.line_items.forEach((item, index) => {
+    const { quantity, rate, amount } = item
+    if (quantity === null || rate === null || amount === null) return
+
+    const gross = quantity * rate
+    const pct = discountPercent(item.discount)
+    const candidates = pct === null ? [gross] : [gross, gross * (1 - pct / 100)]
+    const tolerance = Math.max(1, Math.abs(gross) * 0.002)
+
+    if (candidates.some((c) => Math.abs(c - amount) <= tolerance)) return
+
+    out.push({
+      lineOrder: item.line_order ?? index,
+      description: item.description ?? '',
+      quantity,
+      rate,
+      amount,
+      gross,
+      discountText: item.discount ?? '',
+    })
+  })
+  return out
+}
+
 /**
  * Code-level backstop for leaked tool-call syntax in OCR text fields
  * (hub-refinements-plan.md §3b). Real example observed in production: a
