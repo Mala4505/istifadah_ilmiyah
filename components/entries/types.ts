@@ -96,6 +96,10 @@ export type EntriesFilters = {
   vendorId: string
   hasVariance: boolean
   hasDocument: boolean
+  /** Entries with no linked document yet (`document_count = 0`) — the
+   *  complement of `hasDocument`, surfaced as its own toggle + the
+   *  "Entries awaiting a bill" KPI tile's deep link (`abill=1`). */
+  awaitingDocument: boolean
 }
 
 export const DEFAULT_FILTERS: EntriesFilters = {
@@ -114,6 +118,7 @@ export const DEFAULT_FILTERS: EntriesFilters = {
   vendorId: '',
   hasVariance: false,
   hasDocument: false,
+  awaitingDocument: false,
 }
 
 export const PAGE_SIZE = 50

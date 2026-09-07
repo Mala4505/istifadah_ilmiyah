@@ -61,6 +61,13 @@ export function applyEntriesFilters<T extends EntriesQueryBuilder>(query: T, fil
   if (filters.hasDocument) {
     q = q.gt('document_count', 0)
   }
+  // Complement of hasDocument — entries still waiting on a bill. The two are
+  // mutually exclusive; filter-bar.tsx clears one when the other is set, so
+  // the `document_count = 0 AND document_count > 0` empty result is unreachable
+  // from the UI, but a hand-edited URL with both params just returns nothing.
+  if (filters.awaitingDocument) {
+    q = q.eq('document_count', 0)
+  }
 
   return q
 }

@@ -13,6 +13,7 @@ import {
   getCachedEntryTypes,
 } from '@/lib/cache/reference-data'
 import { EntriesExplorer } from '@/components/entries/entries-explorer'
+import { getEntryBillKpis, type EntryBillKpis } from '@/lib/documents/entry-bill-kpis'
 import { Skeleton } from '@/components/ui/skeleton'
 import type { FilterOptions } from '@/components/entries/types'
 import type { EntryStatusCount } from '@/components/entries/status-count-chips'
@@ -53,6 +54,7 @@ async function loadEntriesPageData(): Promise<{
   typeCounts: EntryStatusCount[]
   statusCounts: EntryStatusCount[]
   hubStatusCounts: EntryStatusCount[]
+  billKpis: EntryBillKpis
 }> {
   const supabase = await createClient()
   const selectedEventId = await getSelectedEventId()
@@ -93,7 +95,7 @@ async function loadEntriesPageData(): Promise<{
   const zoneMemberIds = (zoneMembership.data ?? []).map((r) => r.zone_id)
   const userId = user?.id ?? null
 
-  const [departmentRows, bhRows, adminHeadRows, zoneRows, costCenterRows, statusRows, hubRows, typeRows, statusCountsRes] = await Promise.all([
+  const [departmentRows, bhRows, adminHeadRows, zoneRows, costCenterRows, statusRows, hubRows, typeRows, statusCountsRes, billKpis] = await Promise.all([
     getCachedDepartments(supabase),
     getCachedBudgetHeads(supabase, userId),
     getCachedAdminHeads(supabase, userId),
@@ -111,6 +113,10 @@ async function loadEntriesPageData(): Promise<{
       .select('dimension, status_id, status_code, status_label, sort_order, entry_count')
       .eq('event_id', selectedEventId)
       .returns<EntryStatusCountRow[]>(),
+    // "Waiting on a bill" header KPIs (operator request, 2026-09-07) — the
+    // entry-side mirror of the /documents review-progress bar. Event-scoped
+    // and RLS-scoped exactly like the list below (same v_entry_enriched).
+    getEntryBillKpis(supabase, { selectedEventId }),
   ])
 
   // The cached fetchers return the FULL table (active + inactive, every
@@ -179,11 +185,12 @@ async function loadEntriesPageData(): Promise<{
     typeCounts: toStatusCounts('type', 'status_code'),
     statusCounts: toStatusCounts('status'),
     hubStatusCounts: toStatusCounts('hub_status'),
+    billKpis,
   }
 }
 
 export default async function EntriesPage() {
-  const { options, role, ownDepartmentIds, typeCounts, statusCounts, hubStatusCounts } = await loadEntriesPageData()
+  const { options, role, ownDepartmentIds, typeCounts, statusCounts, hubStatusCounts, billKpis } = await loadEntriesPageData()
 
   return (
     <Suspense fallback={<EntriesPageSkeleton />}>
@@ -194,6 +201,7 @@ export default async function EntriesPage() {
         typeCounts={typeCounts}
         statusCounts={statusCounts}
         hubStatusCounts={hubStatusCounts}
+        billKpis={billKpis}
       />
     </Suspense>
   )
@@ -205,6 +213,12 @@ function EntriesPageSkeleton() {
       <div className="flex items-center justify-between">
         <Skeleton className="h-7 w-24" />
         <Skeleton className="h-8 w-40" />
+      </div>
+      {/* Bill-coverage KPI row (three tiles) — matches EntryBillKpiBar. */}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <Skeleton className="h-[104px] w-full" />
+        <Skeleton className="h-[104px] w-full" />
+        <Skeleton className="h-[104px] w-full" />
       </div>
       {/* §4.5: the filter bar is collapsed by default (~40px) — don't paint a
           tall block that collapses on hydration and shoves the table up. */}

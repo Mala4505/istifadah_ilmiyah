@@ -20,7 +20,7 @@ export type FilterChipKey = keyof EntriesFilters | 'dateRange'
 export type FilterChip = { label: string; key: FilterChipKey }
 
 /**
- * How many of the 13 filters differ from their default. Exported so
+ * How many of the filters differ from their default. Exported so
  * entries-explorer.tsx can thread the same count into the empty state (§4.4)
  * without re-deriving it.
  */
@@ -40,13 +40,13 @@ export function clearFilterChip(key: FilterChipKey): Partial<EntriesFilters> {
  * the actual filter state and syncs it to the URL, so a filtered view is
  * copy-pasteable.
  *
- * All 13 filters stay — the plan's decision (§1) was explicit that every
+ * Every filter stays — the plan's decision (§1) was explicit that every
  * group gets used regularly, so this is a reorganization into four labelled
  * sections, not a removal:
  *   - Status: Type, Status, Hub status
  *   - Classification: Department, Budget head, Admin head, Zone, Cost center
  *   - Search: Vendor, Date from, Date to
- *   - Flags: Export-pending, Missing Main #, Has document
+ *   - Flags: Export-pending, Missing Main #, Has document, Awaiting bill
  *
  * Collapsed by default (finding 7.2): the full panel used to take ~450px
  * before the first table row, so entries — the most-used screen — opens
@@ -280,7 +280,14 @@ export function FilterBar({
           <ToggleField
             label="Has document"
             checked={filters.hasDocument}
-            onCheckedChange={(v) => onChange({ hasDocument: v })}
+            // Mutually exclusive with "Awaiting bill" — turning one on clears
+            // the other so the query can't ask for both at once (query.ts).
+            onCheckedChange={(v) => onChange({ hasDocument: v, awaitingDocument: v ? false : filters.awaitingDocument })}
+          />
+          <ToggleField
+            label="Awaiting bill"
+            checked={filters.awaitingDocument}
+            onCheckedChange={(v) => onChange({ awaitingDocument: v, hasDocument: v ? false : filters.hasDocument })}
           />
         </div>
       </div>
@@ -349,6 +356,7 @@ export function buildFilterSummary(filters: EntriesFilters, options: FilterOptio
   if (filters.exportPending) parts.push({ key: 'exportPending', label: 'Export-pending' })
   if (filters.hasVariance) parts.push({ key: 'hasVariance', label: 'Missing Main #' })
   if (filters.hasDocument) parts.push({ key: 'hasDocument', label: 'Has document' })
+  if (filters.awaitingDocument) parts.push({ key: 'awaitingDocument', label: 'Awaiting bill' })
 
   return parts
 }

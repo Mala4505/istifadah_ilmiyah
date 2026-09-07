@@ -14,6 +14,8 @@ import { FilterBar, countActiveFilters } from './filter-bar'
 import { ColumnChooser } from './column-chooser'
 import { EntriesTable } from './entries-table'
 import { StatusCountChips, type EntryStatusCount } from './status-count-chips'
+import { EntryBillKpiBar } from './entry-bill-kpi-bar'
+import type { EntryBillKpis } from '@/lib/documents/entry-bill-kpis'
 import { BulkStatusDialog } from './bulk-status-dialog'
 import { BulkEnrichmentDialog } from './bulk-enrichment-dialog'
 import { exportEntriesToCsv } from './csv-export'
@@ -40,6 +42,7 @@ function filtersToSearchParams(filters: EntriesFilters): URLSearchParams {
   if (filters.vendorId) sp.set('vid', filters.vendorId)
   if (filters.hasVariance) sp.set('var', '1')
   if (filters.hasDocument) sp.set('doc', '1')
+  if (filters.awaitingDocument) sp.set('abill', '1')
   return sp
 }
 
@@ -64,6 +67,7 @@ function searchParamsToFilters(sp: URLSearchParams): EntriesFilters {
     vendorId: sp.get('vid') ?? sp.get('vendor_id') ?? '',
     hasVariance: sp.get('var') === '1',
     hasDocument: sp.get('doc') === '1',
+    awaitingDocument: sp.get('abill') === '1',
   }
 }
 
@@ -157,6 +161,7 @@ export function EntriesExplorer({
   typeCounts,
   statusCounts,
   hubStatusCounts,
+  billKpis,
 }: {
   initialOptions: FilterOptions
   initialRole: StaffRole | null
@@ -164,6 +169,7 @@ export function EntriesExplorer({
   typeCounts: EntryStatusCount[]
   statusCounts: EntryStatusCount[]
   hubStatusCounts: EntryStatusCount[]
+  billKpis: EntryBillKpis
 }) {
   const supabase = useMemo(() => createClient(), [])
   const router = useRouter()
@@ -512,6 +518,8 @@ export function EntriesExplorer({
         </Card>
       ) : (
         <>
+          <EntryBillKpiBar kpis={billKpis} />
+
           <FilterBar filters={filters} options={options} onChange={handleFilterChange} />
 
           <StatusCountChips
