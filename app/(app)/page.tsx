@@ -183,7 +183,7 @@ export default async function DashboardPage() {
           hint={
             data.reviewQueueDepth === 0
               ? 'Nothing waiting on review yet'
-              : 'Unverified extractions waiting'
+              : 'Bills still to verify, connect or classify'
           }
           href="/review"
           icon={ScanLine}

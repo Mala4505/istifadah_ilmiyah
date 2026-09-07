@@ -37,10 +37,22 @@ export interface CandidateEntryView {
 export interface DocumentExtractionSummary {
   id: number
   billIndex: number
+  /** Raw OCR values -- kept distinct from the display values below because
+   *  `extractionFingerprint` (document-inbox.tsx) must re-rank match
+   *  candidates off what the model actually read, not off a reviewer's later
+   *  correction. */
   vendorNameOcr: string | null
   invoiceDateOcr: string | null
   invoiceNumberOcr: string | null
   totalAmountOcr: number | null
+  /** What to *show* on the inbox: the reviewer-verified value when the Review
+   *  screen has saved one (`*_verified`), otherwise the OCR value. Everything
+   *  user-facing (card, table, PDF total, sort) reads these so a correction
+   *  made in Review is reflected here without a re-extract. */
+  vendorName: string | null
+  invoiceDate: string | null
+  invoiceNumber: string | null
+  totalAmount: number | null
   /**
    * `document_extraction.verified_at` — set by the Review screen on every
    * save (`/review?id=<bill_id>`, reachable pre-attach from this bill's own
@@ -49,6 +61,17 @@ export interface DocumentExtractionSummary {
    * bill can be reviewed before its document is ever attached to an entry.
    */
   verifiedAt: string | null
+  /**
+   * Review stages 2 and 3 for this bill (2026-09-07). `connectDone`: the bill
+   * (or its document) is attached to a ledger entry, or the document is
+   * marked 'no entry expected'. `classifyDone`: that entry has an admin head,
+   * zone, and sub-department set (trivially true when there's no entry to
+   * classify). "Reviewed" on the inbox means `verifiedAt` set AND both of
+   * these -- stage 1 alone used to be enough, which let a bill read as done
+   * while it was still missing its ledger link and classification.
+   */
+  connectDone: boolean
+  classifyDone: boolean
   candidates: CandidateEntryView[]
 }
 

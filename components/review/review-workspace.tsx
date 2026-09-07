@@ -1096,6 +1096,14 @@ export function ReviewWorkspace({
         return
       }
 
+      // "Create + link a vendor when none is linked" (2026-09-07): the save
+      // resolved/created a vendor from the corrected name -- reflect the link
+      // in the form immediately so "Linked vendor" stops saying "Not linked".
+      if (result.resolvedVendor) {
+        setVendorId(result.resolvedVendor.id)
+        setLinkedVendorName(result.resolvedVendor.displayName)
+      }
+
       // Stage 3 rides the same save (§8, "all three stages commit on the
       // same Ctrl/Cmd+Enter") -- non-blocking per the plan, so a failure
       // here surfaces a toast but does not undo the verification save or
@@ -1115,11 +1123,23 @@ export function ReviewWorkspace({
         }
       }
 
-      toast.success(
+      // "Done" is all three stages (confirmed with the user 2026-09-07). A
+      // stage-1-only save is a real, valid checkpoint, but the reviewer should
+      // leave knowing what's still open rather than assuming "Saved" means
+      // finished -- the inbox now shows the same "verified but unfinished"
+      // state for exactly this case.
+      const savedNote =
         result.rateReferenceRowsInserted > 0
           ? `Saved -- ${result.rateReferenceRowsInserted} rate reference row(s) recorded.`
           : 'Saved.'
-      )
+      const pending: string[] = []
+      if (!stage2Done) pending.push('connect it to a ledger entry')
+      if (stage2Done && !stage3Done) pending.push('set admin head / zone / sub-department')
+      if (pending.length > 0) {
+        toast.warning(savedNote, { description: `Still to do: ${pending.join('; ')}.` })
+      } else {
+        toast.success(savedNote)
+      }
       // 2.3: prefer the next unverified bill in THIS document over whatever
       // the severity-ordered global queue would send us to next -- the
       // queue's own nextId (used by the manual "Next bill" nav button
@@ -1129,7 +1149,7 @@ export function ReviewWorkspace({
       if (nextSiblingId !== null) {
         router.push(`/review?id=${nextSiblingId}`)
       } else {
-        toast.success('Document complete -- every bill in this PDF has been reviewed.')
+        toast.success('Every bill in this PDF has been verified. Check the inbox for any that still need connecting or classifying.')
         router.push('/review')
       }
     })
@@ -1471,12 +1491,16 @@ export function ReviewWorkspace({
   const formDisabled = claimState === 'blocked' || claimState === 'checking'
 
   // Three-stage review flow (§8) -- legibility only, never gates Save.
-  // Stage 2 (Connect) gates stage 3 (Classify) becoming reachable; stage 1
-  // (Verify) has no hard gate of its own, it just reads as "done" once
-  // there's a match to move past.
+  // Stage 2 (Connect) gates stage 3 (Classify) becoming reachable. Stage 1
+  // (Verify) reads "done" once the extraction has been saved at least once
+  // (detail.verifiedAt) -- the queue now keeps a bill around after that until
+  // Connect + Classify are also done (20260907000002), so a re-opened bill
+  // needs Verify to show green while Connect/Classify still show as the work
+  // that's left.
+  const stage1Done = detail.verifiedAt !== null
   const stage2Done = detail.entryId !== null
   const stage3Done = stage2Done && adminHeadId !== NONE && zoneId !== NONE && subDepartmentId !== NONE
-  const verifyStatus: StageStatus = stage2Done ? 'done' : 'current'
+  const verifyStatus: StageStatus = stage1Done ? 'done' : 'current'
   const connectStatus: StageStatus = stage2Done ? 'done' : 'current'
   const classifyStatus: StageStatus = !stage2Done ? 'blocked' : stage3Done ? 'done' : 'current'
 

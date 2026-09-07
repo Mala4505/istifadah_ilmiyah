@@ -1,12 +1,17 @@
 'use client'
 
 /**
- * Unverified/All toggle for the /review queue (review-page-layout-redesign-plan.md
+ * "Needs work"/All toggle for the /review queue (review-page-layout-redesign-plan.md
  * §1). Persists via setReviewQueueScope's httpOnly cookie, then router.refresh()
  * so app/(app)/review/page.tsx re-reads the cookie and swaps
  * v_review_queue/v_review_queue_all server-side -- same
  * action-then-refresh shape as components/review/hub-status-dialog.tsx and
  * components/exceptions/resolve-exception-dialog.tsx.
+ *
+ * The default ('pending') view is v_review_queue, which since 20260907000002
+ * is "not finished" rather than strictly "not verified" -- it keeps a bill
+ * until its extraction is verified AND it's connected to a ledger entry AND
+ * that entry is classified.
  */
 
 import { useTransition } from 'react'
@@ -35,7 +40,7 @@ export function QueueScopeToggle({ current }: { current: 'pending' | 'all' }) {
     <div className="inline-flex items-center rounded-md border border-border p-0.5 text-xs">
       {(
         [
-          ['pending', 'Unverified'],
+          ['pending', 'Needs work'],
           ['all', 'All'],
         ] as const
       ).map(([scope, label]) => (

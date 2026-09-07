@@ -70,8 +70,93 @@ export interface SaveVerificationInput {
 export type SimpleActionResult = { ok: true } | { ok: false; error: string }
 
 export type SaveVerificationResult =
-  | { ok: true; lineItemsUpdated: number; rateReferenceRowsInserted: number }
+  | {
+      ok: true
+      lineItemsUpdated: number
+      rateReferenceRowsInserted: number
+      /** Set when this save created or resolved a vendor from the verified
+       *  name because the bill had none linked ("create + link a vendor when
+       *  none is linked", 2026-09-07) -- the form uses it to show the link
+       *  without a reload. Null when a vendor was already linked or the name
+       *  was blank. */
+      resolvedVendor: { id: number; displayName: string } | null
+    }
   | { ok: false; error: string; conflict?: true }
+
+/**
+ * "Create + link a vendor when none is linked" (confirmed with the user
+ * 2026-09-07). When a bill is saved with a verified vendor name but no
+ * resolved `vendor_id`, apply the schema's documented resolution rule
+ * (20260808000008_vendor_and_alias.sql): normalize the name, match it against
+ * an existing `vendor.normalized_name` or `vendor_alias.raw_name`, and when
+ * nothing matches create a new unconfirmed `vendor` plus its own `manual`
+ * alias. Returns the resolved row so this save's `rate_reference` rows get
+ * attributed and the Review form can show the link.
+ *
+ * Admin (service-role) client: `vendor` has no INSERT policy for
+ * `authenticated` and `vendor_alias` has no write policy at all
+ * (20260808000026_rls_policies.sql) -- same reason learnVendorAliasesFromAttach
+ * reaches for it. Best-effort: any failure is logged and returns null rather
+ * than failing the whole save.
+ */
+async function resolveOrCreateVendorForVerifiedName(
+  rawName: string
+): Promise<{ id: number; displayName: string } | null> {
+  const normalized = normalizeVendorName(rawName)
+  if (!normalized) return null
+  const displayName = rawName.trim()
+  try {
+    const admin = createAdminClient()
+
+    const [{ data: byName }, { data: byAlias }] = await Promise.all([
+      admin.from('vendor').select('id, display_name').eq('normalized_name', normalized).maybeSingle(),
+      admin.from('vendor_alias').select('vendor_id').eq('raw_name', normalized).maybeSingle(),
+    ])
+    if (byName?.id != null) {
+      return { id: byName.id as number, displayName: (byName.display_name as string) ?? displayName }
+    }
+    if (byAlias?.vendor_id != null) {
+      const { data: aliased } = await admin
+        .from('vendor')
+        .select('display_name')
+        .eq('id', byAlias.vendor_id as number)
+        .maybeSingle()
+      return { id: byAlias.vendor_id as number, displayName: (aliased?.display_name as string) ?? displayName }
+    }
+
+    const { data: created, error: createError } = await admin
+      .from('vendor')
+      .insert({ display_name: displayName, normalized_name: normalized, is_confirmed: false })
+      .select('id')
+      .single()
+    if (createError || !created) {
+      // A concurrent save for the same new name may have inserted it between
+      // the lookup above and here -- re-read on the unique normalized_name
+      // before giving up.
+      const { data: raced } = await admin
+        .from('vendor')
+        .select('id, display_name')
+        .eq('normalized_name', normalized)
+        .maybeSingle()
+      if (raced?.id != null) {
+        return { id: raced.id as number, displayName: (raced.display_name as string) ?? displayName }
+      }
+      if (createError) logRawError('review.resolveOrCreateVendorForVerifiedName', createError.message)
+      return null
+    }
+
+    await admin
+      .from('vendor_alias')
+      .upsert(
+        { vendor_id: created.id as number, raw_name: normalized, source: 'manual' },
+        { onConflict: 'raw_name', ignoreDuplicates: true }
+      )
+    return { id: created.id as number, displayName }
+  } catch (err) {
+    logRawError('review.resolveOrCreateVendorForVerifiedName', err instanceof Error ? err.message : String(err))
+    return null
+  }
+}
 
 /**
  * Save (`Enter` per field, `Cmd/Ctrl-Enter` for the whole document). Calls
@@ -99,12 +184,25 @@ export async function saveVerification(input: SaveVerificationInput): Promise<Sa
     return { ok: false, error: 'This event is closed to edits. Switch to the current event to verify documents.' }
   }
 
+  // "Create + link a vendor when none is linked" (2026-09-07): a corrected
+  // vendor name on an otherwise-unlinked bill should land in the vendor master
+  // -- so future bills from the same vendor resolve automatically and this
+  // save's rate_reference rows get attributed. Resolves against an existing
+  // vendor first; only creates when nothing matches. Best-effort: a null here
+  // just means the save proceeds unattributed, exactly as before.
+  let resolvedVendor: { id: number; displayName: string } | null = null
+  const verifiedVendorName = input.header.vendor_name?.trim() ?? ''
+  if (input.vendorId === null && verifiedVendorName !== '') {
+    resolvedVendor = await resolveOrCreateVendorForVerifiedName(verifiedVendorName)
+  }
+  const effectiveVendorId = input.vendorId ?? resolvedVendor?.id ?? null
+
   const { data, error } = await supabase
     .rpc('verify_document_extraction', {
       p_document_extraction_id: input.documentExtractionId,
       p_header: input.header,
       p_line_items: input.lineItems,
-      p_vendor_id: input.vendorId,
+      p_vendor_id: effectiveVendorId,
       p_expected_extraction_run_id: input.expectedExtractionRunId,
     })
     .single()
@@ -157,11 +255,17 @@ export async function saveVerification(input: SaveVerificationInput): Promise<Sa
   }
 
   revalidatePath('/review')
+  // The document inbox renders each bill's verified vendor/amount/invoice
+  // values and its "Reviewed" badge straight off this row -- without this it
+  // keeps serving the pre-save cached RSC payload until something else
+  // revalidates /documents.
+  revalidatePath('/documents')
 
   return {
     ok: true,
     lineItemsUpdated: result?.line_items_updated ?? 0,
     rateReferenceRowsInserted: result?.rate_reference_rows_inserted ?? 0,
+    resolvedVendor,
   }
 }
 
@@ -442,6 +546,9 @@ export async function attachExtractionToEntry(input: {
   }
 
   revalidatePath('/review')
+  // The inbox's match state / "Connect" column reads this bill's entry_id --
+  // revalidate so an attach done from the Review screen is reflected there.
+  revalidatePath('/documents')
 
   // Best-effort learning step -- awaited so it actually runs before this
   // server action returns, but never allowed to turn a successful attach
@@ -571,6 +678,8 @@ export async function saveEntryClassification(input: {
   }
 
   revalidatePath('/review')
+  revalidatePath('/entries')
+  revalidatePath(`/entries/${input.entryId}`)
   return { ok: true }
 }
 

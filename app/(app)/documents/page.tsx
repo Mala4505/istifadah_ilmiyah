@@ -130,7 +130,7 @@ export default async function DocumentsPage({
 
   let docsQuery = supabase
     .from('source_document')
-    .select('id, original_filename, upload_status, match_status, uploaded_at, page_count')
+    .select('id, original_filename, upload_status, match_status, uploaded_at, page_count, entry_id')
     .in('match_status', ['unmatched', 'suggested'])
   if (selectedEventId !== null) {
     docsQuery = docsQuery.eq('event_id', selectedEventId)
@@ -185,7 +185,12 @@ export default async function DocumentsPage({
     invoice_date_ocr: string | null
     invoice_number_ocr: string | null
     total_amount_ocr: number | null
+    vendor_name_verified: string | null
+    invoice_date_verified: string | null
+    invoice_number_verified: string | null
+    total_amount_verified: number | null
     verified_at: string | null
+    entry_id: number | null
   }
 
   const { data: extractionsData } =
@@ -193,7 +198,7 @@ export default async function DocumentsPage({
       ? await supabase
           .from('document_extraction')
           .select(
-            'id, source_document_id, bill_index, vendor_name_ocr, invoice_date_ocr, invoice_number_ocr, total_amount_ocr, verified_at'
+            'id, source_document_id, bill_index, vendor_name_ocr, invoice_date_ocr, invoice_number_ocr, total_amount_ocr, vendor_name_verified, invoice_date_verified, invoice_number_verified, total_amount_verified, verified_at, entry_id'
           )
           .in('source_document_id', docIds)
           .order('bill_index', { ascending: true })
@@ -208,6 +213,35 @@ export default async function DocumentsPage({
       extractionsByDocId.set(extraction.source_document_id, [extraction])
     }
   }
+
+  // Review completion (2026-09-07): "Reviewed" on the inbox now means all
+  // three Review stages are done, not just stage 1 (verify). Stage 2
+  // (connect) is this bill's own entry_id, or the document's when the bill
+  // has none, or the document being marked 'no entry expected'. Stage 3
+  // (classify) reads the connected entry's admin_head/zone/sub_department --
+  // one bounded `.in()` over just the entry ids actually referenced here.
+  const matchStatusByDocId = new Map<number, string>(docs.map((d) => [d.id, d.match_status as string]))
+  const docEntryIdByDocId = new Map<number, number | null>(docs.map((d) => [d.id, (d.entry_id as number | null) ?? null]))
+  const connectedEntryIds = Array.from(
+    new Set(
+      [
+        ...(extractionsData ?? []).map((e) => e.entry_id as number | null),
+        ...docs.map((d) => (d.entry_id as number | null) ?? null),
+      ].filter((id): id is number => id !== null)
+    )
+  )
+  const { data: connectedEntriesData } =
+    connectedEntryIds.length > 0
+      ? await supabase
+          .from('entries')
+          .select('id, admin_head_id, zone_id, sub_department_id')
+          .in('id', connectedEntryIds)
+      : { data: [] as { id: number; admin_head_id: number | null; zone_id: number | null; sub_department_id: number | null }[] }
+  const classifiedEntryIds = new Set(
+    (connectedEntriesData ?? [])
+      .filter((e) => e.admin_head_id !== null && e.zone_id !== null && e.sub_department_id !== null)
+      .map((e) => e.id as number)
+  )
 
   // Failure reasons are fetched separately, only for documents currently
   // sitting in 'failed' — most documents never fail, so this is a small,
@@ -318,16 +352,35 @@ export default async function DocumentsPage({
     // `DocumentInbox` fetches real rankings client-side, off this render
     // path, via `getInboxMatchCandidates` (lib/actions/documents.ts) right
     // after mount.
-    const bills: DocumentExtractionSummary[] = extractions.map((extraction) => ({
-      id: extraction.id,
-      billIndex: extraction.bill_index,
-      vendorNameOcr: extraction.vendor_name_ocr,
-      invoiceDateOcr: extraction.invoice_date_ocr,
-      invoiceNumberOcr: extraction.invoice_number_ocr,
-      totalAmountOcr: extraction.total_amount_ocr,
-      verifiedAt: extraction.verified_at,
-      candidates: [],
-    }))
+    const docMatchStatus = matchStatusByDocId.get(doc.id) ?? doc.match_status
+    const noEntryExpected = docMatchStatus === 'no_entry_expected'
+
+    const bills: DocumentExtractionSummary[] = extractions.map((extraction) => {
+      const effectiveEntryId = (extraction.entry_id as number | null) ?? docEntryIdByDocId.get(doc.id) ?? null
+      const connectDone = noEntryExpected || effectiveEntryId !== null
+      // Nothing to classify when there's no entry -- treat as satisfied so a
+      // 'no entry expected' bill can still read as fully done once verified.
+      const classifyDone = effectiveEntryId === null ? connectDone : classifiedEntryIds.has(effectiveEntryId)
+      return {
+        id: extraction.id,
+        billIndex: extraction.bill_index,
+        vendorNameOcr: extraction.vendor_name_ocr,
+        invoiceDateOcr: extraction.invoice_date_ocr,
+        invoiceNumberOcr: extraction.invoice_number_ocr,
+        totalAmountOcr: extraction.total_amount_ocr,
+        // Show the reviewer-verified value once Review has saved one; fall back
+        // to OCR otherwise. `?? ` (not `||`) so a deliberately-cleared field
+        // (verified to empty/0) isn't silently replaced by the OCR guess.
+        vendorName: extraction.vendor_name_verified ?? extraction.vendor_name_ocr,
+        invoiceDate: extraction.invoice_date_verified ?? extraction.invoice_date_ocr,
+        invoiceNumber: extraction.invoice_number_verified ?? extraction.invoice_number_ocr,
+        totalAmount: extraction.total_amount_verified ?? extraction.total_amount_ocr,
+        verifiedAt: extraction.verified_at,
+        connectDone,
+        classifyDone,
+        candidates: [],
+      }
+    })
 
     return {
       id: doc.id,

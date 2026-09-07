@@ -36,15 +36,15 @@ const STATUS_RANK: Record<InboxDocumentView['uploadStatus'], number> = {
 }
 
 /**
- * Total OCR'd value of a document: the sum of the readable bill totals, or
- * null when no bill has a readable total. Mirrors document-table.tsx's
- * "exclude, don't zero-fill a missing read" convention so the sort key and
- * the displayed total agree.
+ * Total value of a document: the sum of the readable bill totals (verified
+ * value where Review has saved one, OCR otherwise), or null when no bill has
+ * a readable total. Mirrors document-table.tsx's "exclude, don't zero-fill a
+ * missing read" convention so the sort key and the displayed total agree.
  */
 export function documentTotal(doc: InboxDocumentView): number | null {
-  const withTotal = doc.extraction.filter((b) => b.totalAmountOcr !== null)
+  const withTotal = doc.extraction.filter((b) => b.totalAmount !== null)
   if (withTotal.length === 0) return null
-  return withTotal.reduce((sum, b) => sum + (b.totalAmountOcr ?? 0), 0)
+  return withTotal.reduce((sum, b) => sum + (b.totalAmount ?? 0), 0)
 }
 
 function toTime(value: string): number {

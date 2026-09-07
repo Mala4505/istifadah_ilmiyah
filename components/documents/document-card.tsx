@@ -40,7 +40,7 @@ import { extractionFailureGuidance } from '@/lib/friendly-error'
 import type { LookupOption } from '@/components/entries/types'
 import { formatDate, formatDateTime, formatElapsed, formatMoney, formatScore } from './format'
 import { AssigneeChip } from './assignee-chip'
-import type { CandidateEntryView, InboxDocumentView } from './types'
+import type { CandidateEntryView, DocumentExtractionSummary, InboxDocumentView } from './types'
 
 /** Sentinel for "no selection" in the zone/admin-head Selects below — same convention as components/entries/detail/enrichment-form.tsx's NONE. */
 const NONE = '__none__'
@@ -101,22 +101,74 @@ function StageIcon({ state, className }: { state: StageState; className: string 
   return <Circle className={`${className} text-muted-foreground/40`} aria-hidden="true" />
 }
 
+type BillLike = Pick<DocumentExtractionSummary, 'verifiedAt' | 'connectDone' | 'classifyDone'>
+
+export type BillReviewStatus = 'unverified' | 'incomplete' | 'done'
+
 /**
- * "N of M bills reviewed" (plan §3.1 / "done when a partly-reviewed PDF is
- * visually distinguishable from an untouched one and from a finished one").
- * `document_extraction.verified_at` is written by the Review screen on every
- * save, reachable pre-attach via this card's own "Correct the extracted
- * fields in Review" link — so a non-null value here on a still-unmatched
- * document is expected, not an anomaly. Renders nothing until extraction has
- * produced at least one bill; `stagesFor`'s "Extracted" stage already covers
- * the zero-bill case.
+ * A bill's overall Review status across all three stages (2026-09-07).
+ * `verified_at` alone used to count as done, which let a bill read "Reviewed"
+ * on the inbox while it was still missing its ledger link (Connect) and
+ * classification (Classify) — so a save now reports `incomplete` until all
+ * three are finished.
+ */
+export function billReviewStatus(bill: BillLike): BillReviewStatus {
+  if (bill.verifiedAt === null) return 'unverified'
+  if (!bill.connectDone || !bill.classifyDone) return 'incomplete'
+  return 'done'
+}
+
+/** "Connect", "Classify", or both — what a verified-but-incomplete bill still needs. */
+export function billRemainingLabel(bill: BillLike): string {
+  const missing: string[] = []
+  if (!bill.connectDone) missing.push('Connect')
+  if (!bill.classifyDone) missing.push('Classify')
+  return missing.join(' + ')
+}
+
+/**
+ * Small per-bill status chip: nothing when the bill hasn't been verified yet,
+ * an amber "needs Connect / Classify" hint when it's verified but a later
+ * stage is outstanding, and a green "Reviewed" only once every stage is done.
+ */
+export function BillReviewChip({ bill, size = 'default' }: { bill: BillLike; size?: 'default' | 'sm' }) {
+  const status = billReviewStatus(bill)
+  if (status === 'unverified') return null
+  const textSize = size === 'sm' ? 'text-[10px]' : 'text-xs'
+  if (status === 'done') {
+    return (
+      <span className={`inline-flex items-center gap-1 font-medium text-emerald-700 ${textSize}`}>
+        <CheckCircle2 className="h-3 w-3" aria-hidden="true" />
+        Reviewed
+      </span>
+    )
+  }
+  return (
+    <span
+      className={`inline-flex items-center gap-1 font-medium text-amber-700 dark:text-amber-500 ${textSize}`}
+      title="The extracted fields are verified, but this bill still needs the remaining Review steps."
+    >
+      <AlertTriangle className="h-3 w-3" aria-hidden="true" />
+      Verified · needs {billRemainingLabel(bill)}
+    </span>
+  )
+}
+
+/**
+ * Document-level roll-up of {@link BillReviewChip} (plan §3.1 / "a
+ * partly-reviewed PDF is visually distinguishable from an untouched one and
+ * from a finished one"). "All N reviewed" is green only when every bill has
+ * cleared all three stages; a bill that's verified but not connected/
+ * classified counts as still outstanding, not done. Renders nothing until
+ * extraction has produced at least one bill.
  */
 export function ReviewProgressBadge({ bills, size = 'default' }: { bills: InboxDocumentView['extraction']; size?: 'default' | 'sm' }) {
   if (bills.length === 0) return null
-  const reviewedCount = bills.filter((b) => b.verifiedAt !== null).length
-  const allReviewed = reviewedCount === bills.length
+  const doneCount = bills.filter((b) => billReviewStatus(b) === 'done').length
+  const incompleteCount = bills.filter((b) => billReviewStatus(b) === 'incomplete').length
   const textSize = size === 'sm' ? 'text-[10px]' : 'text-xs'
-  if (allReviewed) {
+
+  if (doneCount === bills.length) {
     return (
       <Badge variant="outline" className={`gap-1 border-emerald-600/30 bg-emerald-600/10 text-emerald-700 ${textSize}`}>
         <CheckCircle2 className="h-3 w-3" aria-hidden="true" />
@@ -125,8 +177,9 @@ export function ReviewProgressBadge({ bills, size = 'default' }: { bills: InboxD
     )
   }
   return (
-    <span className={`${textSize} text-muted-foreground`}>
-      {reviewedCount} of {bills.length} bill{bills.length === 1 ? '' : 's'} reviewed
+    <span className={`${textSize} ${incompleteCount > 0 ? 'text-amber-700 dark:text-amber-500' : 'text-muted-foreground'}`}>
+      {doneCount} of {bills.length} bill{bills.length === 1 ? '' : 's'} reviewed
+      {incompleteCount > 0 ? ` · ${incompleteCount} verified but unfinished` : ''}
     </span>
   )
 }
@@ -560,8 +613,8 @@ export function DocumentCard({
                 // total, say so when partial" convention as
                 // components/entries/detail/linked-documents.tsx's
                 // sumOfTotals.
-                const billsWithTotal = document.extraction.filter((b) => b.totalAmountOcr !== null)
-                const billsTotal = billsWithTotal.reduce((sum, b) => sum + (b.totalAmountOcr ?? 0), 0)
+                const billsWithTotal = document.extraction.filter((b) => b.totalAmount !== null)
+                const billsTotal = billsWithTotal.reduce((sum, b) => sum + (b.totalAmount ?? 0), 0)
                 return (
                   <div className="flex items-center justify-between gap-3 rounded-md border border-border bg-muted/30 px-3 py-2 text-xs">
                     <span className="text-muted-foreground">{document.extraction.length} bills in this PDF</span>
@@ -592,20 +645,15 @@ export function DocumentCard({
                   {document.extraction.length > 1 && (
                     <p className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
                       Bill {index + 1} of {document.extraction.length}
-                      {bill.verifiedAt !== null && (
-                        <span className="inline-flex items-center gap-1 text-[10px] font-medium text-emerald-700">
-                          <CheckCircle2 className="h-3 w-3" aria-hidden="true" />
-                          Reviewed
-                        </span>
-                      )}
+                      <BillReviewChip bill={bill} size="sm" />
                     </p>
                   )}
 
                   <div className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
-                    <Field label="Vendor" value={bill.vendorNameOcr ?? '—'} />
-                    <Field label="Invoice date" value={formatDate(bill.invoiceDateOcr)} />
-                    <Field label="Invoice #" value={bill.invoiceNumberOcr ?? '—'} />
-                    <Field label="Total" value={formatMoney(bill.totalAmountOcr)} />
+                    <Field label="Vendor" value={bill.vendorName ?? '—'} />
+                    <Field label="Invoice date" value={formatDate(bill.invoiceDate)} />
+                    <Field label="Invoice #" value={bill.invoiceNumber ?? '—'} />
+                    <Field label="Total" value={formatMoney(bill.totalAmount)} />
                   </div>
 
                   <div className="flex flex-col gap-2">

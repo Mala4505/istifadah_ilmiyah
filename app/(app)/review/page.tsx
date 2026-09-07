@@ -100,12 +100,13 @@ export default async function ReviewPage({
 
   // Unverified/All toggle (review-page-layout-redesign-plan.md §1): the
   // position counter and Prev/Next used to silently span the whole document
-  // set via v_review_queue -- which is actually already unverified-only
-  // (`where de.verified_at is null`, 20260817000004). Default to that
-  // pending-only view; the cookie (not a `?scope=` param, see
-  // setReviewQueueScope's doc comment) lets a reviewer opt into
-  // v_review_queue_all, the superset view with verified_at added, without
-  // review-workspace.tsx's Prev/Next needing to carry a scope param through.
+  // set. `v_review_queue` is the "still needs work" view -- unverified bills,
+  // plus (since 20260907000002) bills whose extraction is verified but which
+  // aren't yet connected to a ledger entry and classified. Default to it; the
+  // cookie (not a `?scope=` param, see setReviewQueueScope's doc comment) lets
+  // a reviewer opt into v_review_queue_all, the superset view with verified_at
+  // added, without review-workspace.tsx's Prev/Next needing to carry a scope
+  // param through.
   const cookieStore = await cookies()
   const scope = cookieStore.get('review_queue_scope')?.value === 'all' ? 'all' : 'pending'
 
@@ -137,25 +138,31 @@ export default async function ReviewPage({
   // count-only query runs alongside it to surface the true pending total in
   // the header.
   //
-  // Perf remediation Phase 1.4 (docs/performance-remediation-plan.md): this
-  // used to run `select('*', { count: 'exact', head: true })` against the
-  // same view as queueQuery above. Postgres can't prove a correlated lateral
-  // join is row-count-preserving, so that count silently re-ran the most
-  // expensive half of the list query just to answer "how many are pending".
-  // Counting document_extraction directly -- embedding source_document only
-  // for the event filter -- never touches reconciliation_exception at all,
-  // backed by document_extraction_unverified_idx for the 'pending' scope
-  // (both from 20260904000001_review_queue_perf_rewrite.sql).
-  let queueCountQuery = supabase
-    .from('document_extraction')
-    .select('id, source_document!inner(event_id)', { count: 'exact', head: true })
-  queueCountQuery =
+  // 'all' scope: count document_extraction directly against the same rolling
+  // created_at bound v_review_queue_all uses -- its only filter, so this never
+  // needs the view or reconciliation_exception (perf remediation Phase 1.4,
+  // docs/performance-remediation-plan.md).
+  //
+  // 'pending' scope: the predicate is no longer a plain `verified_at is null`
+  // (20260907000002 keeps verified-but-unfinished bills in the queue), so the
+  // count must come from v_review_queue itself to stay in step with the list.
+  // The view is set-based now -- no correlated lateral (20260904000001) -- and
+  // app/(app)/page.tsx already head-counts it exactly this way.
+  const queueCountBase =
     scope === 'all'
-      ? queueCountQuery.gt('created_at', queueAllBoundIso())
-      : queueCountQuery.is('verified_at', null)
+      ? supabase
+          .from('document_extraction')
+          .select('id, source_document!inner(event_id)', { count: 'exact', head: true })
+          .gt('created_at', queueAllBoundIso())
+      : supabase.from('v_review_queue').select('document_extraction_id', { count: 'exact', head: true })
+  const queueCountQuery =
+    selectedEventId === null
+      ? queueCountBase
+      : scope === 'all'
+        ? queueCountBase.eq('source_document.event_id', selectedEventId)
+        : queueCountBase.eq('event_id', selectedEventId)
   if (selectedEventId !== null) {
     queueQuery = queueQuery.eq('event_id', selectedEventId)
-    queueCountQuery = queueCountQuery.eq('source_document.event_id', selectedEventId)
   }
   const [
     { data: queueRows, error: queueError },

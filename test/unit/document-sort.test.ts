@@ -23,7 +23,13 @@ function bill(overrides: Partial<DocumentExtractionSummary> = {}): DocumentExtra
     invoiceDateOcr: null,
     invoiceNumberOcr: null,
     totalAmountOcr: null,
+    vendorName: null,
+    invoiceDate: null,
+    invoiceNumber: null,
+    totalAmount: null,
     verifiedAt: null,
+    connectDone: false,
+    classifyDone: false,
     candidates: [],
     ...overrides,
   }
@@ -47,14 +53,20 @@ function doc(overrides: Partial<InboxDocumentView> = {}): InboxDocumentView {
 const ids = (docs: InboxDocumentView[]) => docs.map((d) => d.id)
 
 describe('documentTotal', () => {
-  it('sums only the bills with a readable OCR total', () => {
-    expect(documentTotal(doc({ extraction: [bill({ totalAmountOcr: 100 }), bill({ totalAmountOcr: 250 })] }))).toBe(350)
-    expect(documentTotal(doc({ extraction: [bill({ totalAmountOcr: 100 }), bill({ totalAmountOcr: null })] }))).toBe(100)
+  it('sums only the bills with a readable total', () => {
+    expect(documentTotal(doc({ extraction: [bill({ totalAmount: 100 }), bill({ totalAmount: 250 })] }))).toBe(350)
+    expect(documentTotal(doc({ extraction: [bill({ totalAmount: 100 }), bill({ totalAmount: null })] }))).toBe(100)
+  })
+
+  it('prefers the verified total over the raw OCR one', () => {
+    expect(
+      documentTotal(doc({ extraction: [bill({ totalAmountOcr: 100, totalAmount: 120 })] }))
+    ).toBe(120)
   })
 
   it('is null when no bill has a readable total', () => {
     expect(documentTotal(doc({ extraction: [] }))).toBeNull()
-    expect(documentTotal(doc({ extraction: [bill({ totalAmountOcr: null })] }))).toBeNull()
+    expect(documentTotal(doc({ extraction: [bill({ totalAmount: null })] }))).toBeNull()
   })
 })
 
@@ -110,8 +122,8 @@ describe('sortDocuments — status', () => {
 })
 
 describe('sortDocuments — total', () => {
-  const small = doc({ id: 1, extraction: [bill({ totalAmountOcr: 100 })] })
-  const big = doc({ id: 2, extraction: [bill({ totalAmountOcr: 900 })] })
+  const small = doc({ id: 1, extraction: [bill({ totalAmount: 100 })] })
+  const big = doc({ id: 2, extraction: [bill({ totalAmount: 900 })] })
   const noTotal = doc({ id: 3, extraction: [] })
 
   it('descending is biggest first, with no-total documents last', () => {

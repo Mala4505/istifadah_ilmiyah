@@ -2,7 +2,7 @@
 
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { usePathname, useSearchParams } from 'next/navigation'
-import { CheckCircle2, ChevronDown, ChevronUp, Eye, PenLine, X } from 'lucide-react'
+import { ChevronDown, ChevronUp, Eye, PenLine, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Dialog, DialogContent, DialogFooter, DialogTitle } from '@/components/ui/dialog'
@@ -12,7 +12,7 @@ import { SelectNative } from '@/components/ui/select-native'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { PaginationBar, PAGE_SIZE_OPTIONS } from '@/components/ui/pagination-bar'
 import { SortableTableHead, nextSort } from '@/components/ui/sortable-table-head'
-import { DocumentCard, DocumentStageTracker, ReviewProgressBadge } from './document-card'
+import { BillReviewChip, DocumentCard, DocumentStageTracker, ReviewProgressBadge, billReviewStatus } from './document-card'
 import { AssigneeChip } from './assignee-chip'
 import {
   sortDocuments,
@@ -55,7 +55,9 @@ function matchesFilters(doc: InboxDocumentView, filters: DocumentFilters): boole
   if (filters.status && doc.uploadStatus !== filters.status) return false
   if (filters.review) {
     if (doc.extraction.length === 0) return false
-    const allReviewed = doc.extraction.every((b) => b.verifiedAt !== null)
+    // "Fully reviewed" now means every bill has cleared all three Review
+    // stages, not just stage 1 (verify) -- matches the inbox badge.
+    const allReviewed = doc.extraction.every((b) => billReviewStatus(b) === 'done')
     if (filters.review === 'reviewed' && !allReviewed) return false
     if (filters.review === 'unreviewed' && allReviewed) return false
   }
@@ -496,8 +498,8 @@ export function DocumentTable({
                           // fill, a missing read" convention as
                           // components/entries/detail/linked-documents.tsx's
                           // sumOfTotals), and says so when the sum is partial.
-                          const billsWithTotal = bills.filter((b) => b.totalAmountOcr !== null)
-                          const billsTotal = billsWithTotal.reduce((sum, b) => sum + (b.totalAmountOcr ?? 0), 0)
+                          const billsWithTotal = bills.filter((b) => b.totalAmount !== null)
+                          const billsTotal = billsWithTotal.reduce((sum, b) => sum + (b.totalAmount ?? 0), 0)
                           return (
                             <div className="flex flex-col gap-0.5">
                               <button
@@ -525,11 +527,11 @@ export function DocumentTable({
                           const bill = bills[0]!
                           return (
                             <div className="flex flex-col text-xs">
-                              <span className="truncate font-medium" title={bill.vendorNameOcr ?? '—'}>
-                                {bill.vendorNameOcr ?? '—'}
+                              <span className="truncate font-medium" title={bill.vendorName ?? '—'}>
+                                {bill.vendorName ?? '—'}
                               </span>
                               <span className="text-muted-foreground">
-                                {bill.invoiceNumberOcr ?? '—'} &middot; {formatMoney(bill.totalAmountOcr)}
+                                {bill.invoiceNumber ?? '—'} &middot; {formatMoney(bill.totalAmount)}
                               </span>
                             </div>
                           )
@@ -565,15 +567,10 @@ export function DocumentTable({
                               className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border border-border bg-background px-3 py-1.5 text-xs"
                             >
                               <span className="font-semibold text-muted-foreground">Bill {index + 1}</span>
-                              <span className="font-medium">{bill.vendorNameOcr ?? '(no vendor)'}</span>
-                              <span className="text-muted-foreground">{bill.invoiceNumberOcr ?? '—'}</span>
-                              <span className="text-muted-foreground">{formatMoney(bill.totalAmountOcr)}</span>
-                              {bill.verifiedAt !== null && (
-                                <span className="inline-flex items-center gap-1 text-[10px] font-medium text-emerald-700">
-                                  <CheckCircle2 className="h-3 w-3" aria-hidden="true" />
-                                  Reviewed
-                                </span>
-                              )}
+                              <span className="font-medium">{bill.vendorName ?? '(no vendor)'}</span>
+                              <span className="text-muted-foreground">{bill.invoiceNumber ?? '—'}</span>
+                              <span className="text-muted-foreground">{formatMoney(bill.totalAmount)}</span>
+                              <BillReviewChip bill={bill} size="sm" />
                               <a
                                 href={`/review?id=${bill.id}`}
                                 target="_blank"
