@@ -251,7 +251,19 @@ function buildSystemPrompt(communityGstin: string | null, communityName: string 
     'doubt through the confidence fields, rather than leaving vendor_gstin empty. A GSTIN you are only ' +
     'partly sure of is something a reviewer can correct one character at a time against the document; a ' +
     'blank field is not. Leave vendor_gstin empty only when the seller\'s block genuinely shows no GSTIN ' +
-    'at all.'
+    'at all. ' +
+    'The recipient side is held to the same standard as the seller side, and is missed far too often on ' +
+    'clean computer-generated invoices. Almost every printed/typed tax invoice names the party it is ' +
+    'billed to in a labelled section — "Bill To", "Billed To", "Buyer", "Consignee", "Buyer (Bill to)", ' +
+    '"Party", "M/s", "Details of Receiver", "Customer" — usually with that party\'s own GSTIN printed on ' +
+    'or just under the name line. Read that party\'s name into buyer_name, and whenever a GSTIN appears ' +
+    'anywhere in that recipient section transcribe it into buyer_gstin exactly as printed, character for ' +
+    'character, with the same care and the same use of the confidence fields you apply to vendor_gstin. ' +
+    'Do this on EVERY invoice that carries such a section, not only when a full postal address is printed ' +
+    'for the recipient — a recipient name beside a "GSTIN:"/"GSTIN No." line is enough, and the section ' +
+    'is often a single line or a small box rather than a full address block. buyer_gstin and buyer_name ' +
+    'are distinct from place_of_supply and from the seller\'s own details: never copy the seller\'s GSTIN ' +
+    'or name into them, and leave them empty only when the page truly shows no billed-to party anywhere.'
 
   let prompt = base
 

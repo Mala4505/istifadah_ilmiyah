@@ -397,7 +397,18 @@ export const PdfViewer = memo(forwardRef<
       const width = entries[0]?.contentRect.width
       if (width === undefined) return
       if (frame !== null) cancelAnimationFrame(frame)
-      frame = requestAnimationFrame(() => setContainerWidth(width))
+      // Runaway-zoom fix: round and drop sub-pixel changes. A zoomed page
+      // that's taller than the pane toggles the vertical scrollbar, and with
+      // a classic (space-taking) scrollbar that toggle changes contentRect
+      // width by the scrollbar's ~15px -> re-render -> the page just fits ->
+      // scrollbar hides -> width back up -> re-render bigger -> scrollbar
+      // reappears, a loop the user sees as the page pulsing in and out. The
+      // `scrollbar-gutter: stable` on the wrapper below is the real fix (the
+      // gutter is always reserved, so the toggle no longer moves the width);
+      // this guard is the backstop for any residual jitter.
+      frame = requestAnimationFrame(() =>
+        setContainerWidth((prev) => (Math.abs(prev - width) < 1 ? prev : Math.round(width)))
+      )
     })
     observer.observe(el)
     return () => {
@@ -811,7 +822,7 @@ export const PdfViewer = memo(forwardRef<
             </div>
           ) : null}
 
-          <div ref={contentRef} className="flex-1 overflow-auto p-3">
+          <div ref={contentRef} className="flex-1 overflow-auto p-3" style={{ scrollbarGutter: 'stable' }}>
             {loading ? (
               // Roughly an A4 page's aspect ratio (1:1.414) -- the canvas below
               // renders at whatever the actual page size turns out to be, but
