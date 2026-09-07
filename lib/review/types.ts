@@ -99,11 +99,14 @@ export interface PageStatus {
    *  scoped re-OCR, §2.6) resets it back to. */
   skipSource: 'model' | 'manual'
   /** True once every bill whose page_number_start..page_number_end range
-   *  covers this page has verified_at set -- i.e. this page's own review
-   *  work (whichever document_extraction(s) it belongs to) is done.
-   *  Computed in page.tsx from the sibling-bills query, not stored on
-   *  document_page itself (a page has no single verified state of its own;
-   *  it inherits one from whichever bill(s) span it). */
+   *  covers this page has cleared ALL THREE Review stages (Verify + Connect
+   *  + Classify) -- the same predicate v_review_queue uses to drop a bill
+   *  from the queue (20260907000002), not just verified_at. The rail shows
+   *  such a page green ("Done"); a page covered by a bill that is
+   *  started-but-unfinished is shown amber instead. Computed in page.tsx
+   *  from the sibling-bills + their-entries queries, not stored on
+   *  document_page itself (a page has no single state of its own; it
+   *  inherits one from whichever bill(s) span it). */
   verified: boolean
 }
 

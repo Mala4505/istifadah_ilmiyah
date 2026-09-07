@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useState, useTransition } from 'react'
+import { Check, Pencil, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { toastError } from '@/components/ui/error-toast'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
@@ -9,7 +10,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { mergeVendor, setVendorConfirmed, unmergeVendor } from '@/lib/actions/admin'
+import { mergeVendor, renameVendor, setVendorConfirmed, unmergeVendor } from '@/lib/actions/admin'
 
 export type VendorRow = {
   id: number
@@ -33,6 +34,9 @@ export function VendorMergePanel({ vendors }: { vendors: VendorRow[] }) {
   const [vendorList, setVendorList] = useState(vendors)
   const [query, setQuery] = useState('')
   const [mergeSource, setMergeSource] = useState<VendorRow | null>(null)
+  const [editingId, setEditingId] = useState<number | null>(null)
+  const [draftName, setDraftName] = useState('')
+  const [isRenaming, startRename] = useTransition()
 
   useEffect(() => {
     setVendorList(vendors)
@@ -70,6 +74,36 @@ export function VendorMergePanel({ vendors }: { vendors: VendorRow[] }) {
         toastError(result.error, { context: 'vendor-merge-panel' })
       }
     })()
+  }
+
+  function startEditing(vendor: VendorRow) {
+    setEditingId(vendor.id)
+    setDraftName(vendor.displayName)
+  }
+
+  function cancelEditing() {
+    setEditingId(null)
+    setDraftName('')
+  }
+
+  function handleRename(vendor: VendorRow) {
+    const next = draftName.trim()
+    if (!next || next === vendor.displayName) {
+      cancelEditing()
+      return
+    }
+    startRename(async () => {
+      const result = await renameVendor({ vendorId: vendor.id, displayName: next })
+      if (result.ok) {
+        setVendorList((current) =>
+          current.map((v) => (v.id === vendor.id ? { ...v, displayName: next } : v)),
+        )
+        toast.success(`Renamed to "${next}".`)
+        cancelEditing()
+      } else {
+        toastError(result.error, { context: 'vendor-merge-panel' })
+      }
+    })
   }
 
   function handleUnmerge(vendor: VendorRow) {
@@ -114,7 +148,57 @@ export function VendorMergePanel({ vendors }: { vendors: VendorRow[] }) {
               const mergedCount = childCountByRootId.get(vendor.id) ?? 0
               return (
                 <TableRow key={vendor.id}>
-                  <TableCell>{vendor.displayName}</TableCell>
+                  <TableCell>
+                    {editingId === vendor.id ? (
+                      <div className="flex items-center gap-1">
+                        <Input
+                          value={draftName}
+                          onChange={(event) => setDraftName(event.target.value)}
+                          onKeyDown={(event) => {
+                            if (event.key === 'Enter') handleRename(vendor)
+                            if (event.key === 'Escape') cancelEditing()
+                          }}
+                          disabled={isRenaming}
+                          autoFocus
+                          className="h-8 max-w-[16rem]"
+                          aria-label={`New name for ${vendor.displayName}`}
+                        />
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8"
+                          onClick={() => handleRename(vendor)}
+                          disabled={isRenaming}
+                          aria-label="Save name"
+                        >
+                          <Check className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8"
+                          onClick={cancelEditing}
+                          disabled={isRenaming}
+                          aria-label="Cancel rename"
+                        >
+                          <X className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    ) : (
+                      <div className="group flex items-center gap-1.5">
+                        <span>{vendor.displayName}</span>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
+                          onClick={() => startEditing(vendor)}
+                          aria-label={`Rename ${vendor.displayName}`}
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                    )}
+                  </TableCell>
                   <TableCell>{vendor.gstin ?? '—'}</TableCell>
                   <TableCell>
                     <Checkbox

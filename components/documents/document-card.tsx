@@ -167,20 +167,46 @@ export function ReviewProgressBadge({ bills, size = 'default' }: { bills: InboxD
   const doneCount = bills.filter((b) => billReviewStatus(b) === 'done').length
   const incompleteCount = bills.filter((b) => billReviewStatus(b) === 'incomplete').length
   const textSize = size === 'sm' ? 'text-[10px]' : 'text-xs'
+  const allDone = doneCount === bills.length
 
-  if (doneCount === bills.length) {
-    return (
-      <Badge variant="outline" className={`gap-1 border-emerald-600/30 bg-emerald-600/10 text-emerald-700 ${textSize}`}>
-        <CheckCircle2 className="h-3 w-3" aria-hidden="true" />
-        All {bills.length} bill{bills.length === 1 ? '' : 's'} reviewed
-      </Badge>
-    )
-  }
   return (
-    <span className={`${textSize} ${incompleteCount > 0 ? 'text-amber-700 dark:text-amber-500' : 'text-muted-foreground'}`}>
-      {doneCount} of {bills.length} bill{bills.length === 1 ? '' : 's'} reviewed
-      {incompleteCount > 0 ? ` · ${incompleteCount} verified but unfinished` : ''}
-    </span>
+    <div className={`flex flex-col gap-1 ${size === 'sm' ? 'w-32' : 'w-full'}`}>
+      {/* Per-PDF progress bar (2026-09-07 request: "progress of the bills done
+          per pdf"). Same slim-bar idiom as components/documents/workload-board.tsx.
+          Amber whenever a bill is verified-but-unfinished so a stalled PDF is
+          visually distinct from one that's simply still in progress. */}
+      <div
+        className="h-1.5 overflow-hidden rounded-full bg-muted"
+        role="progressbar"
+        aria-valuenow={doneCount}
+        aria-valuemin={0}
+        aria-valuemax={bills.length}
+        aria-label={`${doneCount} of ${bills.length} bills reviewed`}
+      >
+        <div
+          className={`h-full rounded-full ${
+            allDone ? 'bg-emerald-600' : incompleteCount > 0 ? 'bg-amber-500' : 'bg-primary'
+          }`}
+          style={{ width: `${Math.max((doneCount / bills.length) * 100, doneCount > 0 ? 6 : 0)}%` }}
+        />
+      </div>
+      {allDone ? (
+        <Badge
+          variant="outline"
+          className={`gap-1 self-start border-emerald-600/30 bg-emerald-600/10 text-emerald-700 ${textSize}`}
+        >
+          <CheckCircle2 className="h-3 w-3" aria-hidden="true" />
+          All {bills.length} bill{bills.length === 1 ? '' : 's'} reviewed
+        </Badge>
+      ) : (
+        <span
+          className={`${textSize} ${incompleteCount > 0 ? 'text-amber-700 dark:text-amber-500' : 'text-muted-foreground'}`}
+        >
+          {doneCount} of {bills.length} bill{bills.length === 1 ? '' : 's'} reviewed
+          {incompleteCount > 0 ? ` · ${incompleteCount} verified but unfinished` : ''}
+        </span>
+      )}
+    </div>
   )
 }
 

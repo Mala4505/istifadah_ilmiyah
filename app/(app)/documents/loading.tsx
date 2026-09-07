@@ -23,6 +23,20 @@ export default function DocumentsLoading() {
         <Skeleton className="h-4 w-36" />
       </div>
 
+      {/* Review-progress KPI row — three tiles + a progress bar. */}
+      <div className="flex flex-col gap-3">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <div key={i} className="flex flex-col gap-2 rounded-lg border border-border bg-card p-4">
+              <Skeleton className="h-4 w-28" />
+              <Skeleton className="h-7 w-16" />
+              <Skeleton className="h-3 w-40" />
+            </div>
+          ))}
+        </div>
+        <Skeleton className="h-2 w-full rounded-full" />
+      </div>
+
       <div className="flex flex-row items-center justify-center gap-2 rounded-lg border-2 border-dashed border-border px-3 py-2.5">
         <Skeleton className="h-4 w-4 rounded-full" />
         <Skeleton className="h-4 w-52" />

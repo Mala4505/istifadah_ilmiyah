@@ -805,7 +805,12 @@ export const PdfViewer = memo(forwardRef<
             {Array.from({ length: numPages }, (_, i) => i + 1).map((n) => {
               const status = pageStatusByNumber.get(n)
               const skipped = status?.isFinancialDocument === false
+              // `verified` here means all three Review stages are done for
+              // every bill covering this page (lib/review/types.ts) -- green.
               const done = !skipped && status?.verified === true
+              // Anything else that isn't skipped still has work outstanding
+              // (Verify, Connect and/or Classify) -- amber.
+              const needsWork = !skipped && !done
               const skipLabel = status?.skipReason ? formatSkipReason(status.skipReason) : null
               // Phase 4 (§2.5): 'manual' once a reviewer has overridden this
               // page's classification via setPageSkipOverride -- distinguishes
@@ -815,7 +820,9 @@ export const PdfViewer = memo(forwardRef<
               // Redesign (review pane rail): thumbnails are pure navigation now
               // -- the skip/unskip control lives in the action bar above the
               // page canvas (below), gated behind a confirmation dialog. Only
-              // the visual state (pending/skipped/done) is shown here.
+              // the visual state is shown here: grey "Skipped", green check
+              // when every covering bill is fully done, amber dot while any
+              // Review stage is still outstanding.
               return (
                 <button
                   key={n}
@@ -825,8 +832,8 @@ export const PdfViewer = memo(forwardRef<
                     skipped
                       ? `Skipped${skipLabel ? `: ${skipLabel}` : ''}${manualOverride ? ' (set by a reviewer)' : ''} -- not extracted as a bill`
                       : done
-                        ? 'Done -- bill saved and cleared'
-                        : undefined
+                        ? 'Done -- Verify, Connect and Classify all complete'
+                        : 'Needs work -- Verify, Connect and/or Classify still outstanding'
                   }
                   className={`relative w-full rounded border p-1 text-[10px] transition-colors ${
                     n === pageNumber ? 'border-primary bg-primary/10' : 'border-border hover:bg-accent'
@@ -839,6 +846,11 @@ export const PdfViewer = memo(forwardRef<
                   ) : done ? (
                     <CheckCircle2
                       className="absolute right-0.5 top-0.5 h-3.5 w-3.5 rounded-full bg-background text-emerald-600"
+                      aria-hidden="true"
+                    />
+                  ) : needsWork ? (
+                    <span
+                      className="absolute right-0.5 top-0.5 h-2.5 w-2.5 rounded-full border border-background bg-amber-500"
                       aria-hidden="true"
                     />
                   ) : null}

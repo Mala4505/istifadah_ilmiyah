@@ -24,12 +24,15 @@
  */
 
 import { memo } from 'react'
-import { Check, ChevronsUpDown, Search } from 'lucide-react'
+import { Check } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Combobox } from '@/components/ui/combobox'
 import { formatBinding, type Keymap } from '@/lib/shortcuts/config'
+import { formatDateTime } from '@/lib/reports/format'
+import type { VendorSearchResult } from '@/lib/actions/review'
 import type { MatchCandidate, UncertainField } from '@/lib/review/types'
 import { MatchStrip } from './match-strip'
+import { VendorAutocomplete } from './vendor-autocomplete'
 
 // Matches review-workspace.tsx's own NONE sentinel exactly (both are plain
 // string literals compared by value, not by shared identity) -- see that
@@ -68,9 +71,13 @@ function Connector() {
 function ReviewStatusLineImpl({
   // Verify segment
   verifyStatus,
+  verifiedAt,
   vendorName,
   vendorId,
-  onOpenVendorPicker,
+  linkedVendorName,
+  vendorAutocompleteOpen,
+  onVendorAutocompleteOpenChange,
+  onVendorSelect,
   keymap,
   uncertainFields,
   uncertainStepIndex,
@@ -100,9 +107,13 @@ function ReviewStatusLineImpl({
   subDepartmentOptions,
 }: {
   verifyStatus: StageStatus
+  verifiedAt: string | null
   vendorName: string
   vendorId: number | null
-  onOpenVendorPicker: () => void
+  linkedVendorName: string | null
+  vendorAutocompleteOpen: boolean
+  onVendorAutocompleteOpenChange: (open: boolean) => void
+  onVendorSelect: (vendor: VendorSearchResult) => void
   keymap: Keymap
   uncertainFields: UncertainField[]
   uncertainStepIndex: number | null
@@ -136,23 +147,30 @@ function ReviewStatusLineImpl({
       {/* Verify */}
       <div className="flex shrink-0 items-center gap-2">
         <StepCircle index={1} status={verifyStatus} />
-        <span className="text-xs font-medium text-muted-foreground">Verify</span>
-        <Button
-          type="button"
-          variant="outline"
-          onClick={onOpenVendorPicker}
-          disabled={formDisabled}
-          title={`Change vendor (${formatBinding(keymap.openVendorAutocomplete)})`}
-          className="h-8 w-44 justify-between gap-1.5 px-2 text-xs font-normal"
+        <span
+          className="text-xs font-medium text-muted-foreground"
+          title={verifiedAt ? `Verified ${formatDateTime(verifiedAt)}` : undefined}
         >
-          <span className="flex min-w-0 items-center gap-1.5">
-            <Search className="h-3.5 w-3.5 shrink-0 opacity-50" aria-hidden="true" />
-            <span className={`truncate ${vendorId === null ? 'text-amber-700 dark:text-amber-400' : ''}`}>
-              {vendorName || 'Vendor not set'}
-            </span>
-          </span>
-          <ChevronsUpDown className="ml-1 h-3.5 w-3.5 shrink-0 opacity-50" aria-hidden="true" />
-        </Button>
+          Verify
+        </span>
+        {/* The one linked-vendor control (plan §2.4). Was previously mirrored
+            as a "Linked vendor" row in the extraction form's right pane --
+            same popover state, same select handler -- which read as a
+            duplicate of this step (user, 2026-09-07: "remove the right view
+            one, step 1 is fine"). `searchSeed={vendorName}` still prefills
+            the search with the OCR/edited vendor_name transcription. */}
+        <div className="w-44 shrink-0" title={`Link vendor (${formatBinding(keymap.openVendorAutocomplete)})`}>
+          <VendorAutocomplete
+            value={linkedVendorName ?? ''}
+            searchSeed={vendorName}
+            selectedVendorId={vendorId}
+            open={vendorAutocompleteOpen}
+            onOpenChange={onVendorAutocompleteOpenChange}
+            onSelect={onVendorSelect}
+            disabled={formDisabled}
+            fieldIndex={0}
+          />
+        </div>
         {uncertainFields.length > 0 ? (
           <span className="flex shrink-0 items-center gap-0.5 text-xs text-orange-700 dark:text-orange-400">
             <Button

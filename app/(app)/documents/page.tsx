@@ -5,6 +5,8 @@ import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { getStaffContext } from '@/lib/export/auth'
 import { DocumentInbox } from '@/components/documents/document-inbox'
+import { BillKpiBar } from '@/components/documents/bill-kpi-bar'
+import { getBillKpis } from '@/lib/documents/bill-kpis'
 import { AssignmentScope, type DocumentScope } from '@/components/documents/assignment-scope'
 import { LoadMoreDocuments } from '@/components/documents/load-more-documents'
 import type { DocumentExtractionSummary, InboxDocumentView } from '@/components/documents/types'
@@ -166,7 +168,23 @@ export default async function DocumentsPage({
   // per-row chip. `assignableStaff` is only needed for the assign controls,
   // which are admin-or-above only.
   const assigneesByDoc = await getDocumentAssignees(supabase, docIds)
-  const assignableStaff: AssignableStaff[] = canAct ? await listAssignableStaff(supabase) : []
+
+  // Header review-progress KPIs (2026-09-07 request). A regular admin's tiles
+  // are scoped to just the documents assigned to them (their `source_document_
+  // assignee` rows -- confirmed 2026-09-07: "only documents assigned to
+  // them"); a superadmin sees the whole selected event; anyone else (dept)
+  // sees whatever RLS lets them. `null` scope = "RLS is the whole gate".
+  // Parallel with assignableStaff -- neither depends on the other.
+  const [assignableStaff, kpiScopeSourceDocIds] = await Promise.all([
+    canAct ? listAssignableStaff(supabase) : Promise.resolve([] as AssignableStaff[]),
+    canAct && !isSA
+      ? supabase
+          .from('source_document_assignee')
+          .select('source_document_id')
+          .eq('staff_id', staff.userId)
+          .then(({ data }) => (data ?? []).map((r) => r.source_document_id as number))
+      : Promise.resolve(null as number[] | null),
+  ])
 
   // document_extraction is fetched separately (rather than embedded in the
   // select above) so this file never has to guess whether PostgREST returns
@@ -307,19 +325,21 @@ export default async function DocumentsPage({
   // whichever batch it's closest to rather than paying for a third
   // sequential round trip.
   const admin = createAdminClient()
-  const [adminHeadLookupData, zoneLookupData, costCenterLookupData, oldestQueuedJobResult] = await Promise.all([
-    getCachedAdminHeads(supabase, staff.userId),
-    getCachedZones(supabase, staff.userId),
-    getCachedCostCenters(supabase),
-    admin
-      .from('job_queue')
-      .select('created_at')
-      .eq('status', 'queued')
-      .eq('job_type', 'extract_document')
-      .order('created_at', { ascending: true })
-      .limit(1)
-      .maybeSingle(),
-  ])
+  const [adminHeadLookupData, zoneLookupData, costCenterLookupData, oldestQueuedJobResult, billKpis] =
+    await Promise.all([
+      getCachedAdminHeads(supabase, staff.userId),
+      getCachedZones(supabase, staff.userId),
+      getCachedCostCenters(supabase),
+      admin
+        .from('job_queue')
+        .select('created_at')
+        .eq('status', 'queued')
+        .eq('job_type', 'extract_document')
+        .order('created_at', { ascending: true })
+        .limit(1)
+        .maybeSingle(),
+      getBillKpis(supabase, { selectedEventId, scopeSourceDocIds: kpiScopeSourceDocIds }),
+    ])
   const oldestQueuedJob = oldestQueuedJobResult.data
   const adminHeadOptions: LookupOption[] = adminHeadLookupData
     .filter((h) => h.is_active && activeAdminHeadIds.includes(h.id))
@@ -464,6 +484,7 @@ export default async function DocumentsPage({
         ) : null
       }
     >
+      <BillKpiBar kpis={billKpis} scope={isSA ? 'all' : canAct ? 'mine' : 'open'} />
       <DocumentInbox
         initialDocuments={visibleDocuments}
         canAct={canAct}

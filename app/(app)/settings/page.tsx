@@ -601,6 +601,8 @@ export default async function SettingsPage() {
                 <CardHeader>
                   <CardTitle>Vendors</CardTitle>
                   <CardDescription>
+                    Hover a vendor to rename it — this updates both the label and the identity key future
+                    imports and bills match on, so the old spelling is kept as an alias and still resolves.
                     Vendor identity merges affect payment routing, so they are always a human decision
                     here — never an automatic fuzzy match. Merging folds one vendor&apos;s history under
                     another; unmerging restores it as independent at any time.

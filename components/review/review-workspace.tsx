@@ -28,13 +28,13 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { exceptionTypeLabel, severityBadgeVariant } from '@/components/exceptions/labels'
-import { formatDateTime } from '@/lib/reports/format'
 import { normalizeUnit, normalizeVendorName } from '@/lib/normalize'
 import {
   addLineItem,
   claimReviewDocument,
   confirmVendorAlias,
   reExtractField,
+  refreshMatchCandidates,
   releaseReviewDocument,
   saveEntryClassification,
   saveVerification,
@@ -42,7 +42,7 @@ import {
   type SaveVerificationInput,
   type VendorSearchResult,
 } from '@/lib/actions/review'
-import { type ReviewDocumentDetail } from '@/lib/review/types'
+import { type MatchCandidate, type ReviewDocumentDetail } from '@/lib/review/types'
 import { type Keymap, formatBinding, isSafeShortcutTarget, matchLineDigit, matchesBinding } from '@/lib/shortcuts/config'
 import type { PdfViewerHandle } from './pdf-viewer'
 import {
@@ -131,6 +131,26 @@ function isUnparseableAmount(raw: string): boolean {
   const t = raw.trim()
   if (!t) return false
   return parseNum(t) === null
+}
+
+// A (2026-09-07): the four Verify-step values the Connect step's match
+// suggestions are tallied from. Serialised to compare "what's on screen now"
+// against "what the server already ranked on this load" so a re-match only
+// fires once one of them actually changes.
+function matchInputsKey(
+  vendorId: number | null,
+  vendorName: string,
+  totalAmount: string,
+  invoiceDate: string,
+  invoiceNumber: string,
+): string {
+  return JSON.stringify([
+    vendorId,
+    vendorName.trim(),
+    totalAmount.trim(),
+    invoiceDate.trim(),
+    invoiceNumber.trim(),
+  ])
 }
 
 // 5.16: local calendar date (not UTC) so "today" matches whatever the
@@ -402,6 +422,25 @@ export function ReviewWorkspace({
   const [linkedVendorName, setLinkedVendorName] = useState<string | null>(detail.linkedVendorName)
   const [vendorAutocompleteOpen, setVendorAutocompleteOpen] = useState(false)
 
+  // A (2026-09-07): re-tally the Connect step's suggestions live from the
+  // Verify-step vendor + the bill's total / date / invoice number. The page
+  // load ranks them once (detail.matchCandidates); this recomputes whenever
+  // the reviewer changes one of those inputs, so a corrected vendor or total
+  // immediately re-ranks the ledger instead of waiting for a reload. `null`
+  // means "no live result yet -- use the server's list"; only ever set while
+  // the bill is still unmatched.
+  const [liveMatchCandidates, setLiveMatchCandidates] = useState<MatchCandidate[] | null>(null)
+  const matchRequestRef = useRef(0)
+  const serverMatchInputsRef = useRef(
+    matchInputsKey(
+      detail.entryVendorId,
+      initialHeader.vendorName,
+      initialHeader.totalAmount,
+      initialHeader.invoiceDate,
+      initialHeader.invoiceNumber,
+    ),
+  )
+
   // 5.2: same stability requirement as onHeaderChange above -- ExtractionForm
   // (and its per-row inputs) are memoized, so this needs one identity for
   // the whole mount rather than a fresh closure every render.
@@ -514,7 +553,52 @@ export function ReviewWorkspace({
     setUncertainStepIndex(null)
     hasEditedRef.current = false
     didInitialFocusRef.current = false
+    // A: drop the previous bill's live match list and re-baseline against
+    // this bill's server-ranked inputs, so re-matching only re-fires once
+    // the reviewer changes something on the new bill.
+    setLiveMatchCandidates(null)
+    matchRequestRef.current++
+    serverMatchInputsRef.current = matchInputsKey(
+      detail.entryVendorId,
+      freshHeader.vendorName,
+      freshHeader.totalAmount,
+      freshHeader.invoiceDate,
+      freshHeader.invoiceNumber,
+    )
   }
+
+  // A (2026-09-07): debounced live re-match. Only fires once the current
+  // vendor / total / date / invoice number diverges from what the server
+  // already ranked on this load (serverMatchInputsRef) -- a freshly opened,
+  // untouched bill costs no extra round trip -- and never while the bill is
+  // already attached. Reverting an edit back to the server's values clears
+  // the live list, so the server's own suggestions show again.
+  useEffect(() => {
+    if (detail.entryId !== null) {
+      setLiveMatchCandidates(null)
+      return
+    }
+    const currentKey = matchInputsKey(vendorId, vendorName, totalAmount, invoiceDate, invoiceNumber)
+    if (currentKey === serverMatchInputsRef.current) {
+      setLiveMatchCandidates(null)
+      return
+    }
+    const requestId = ++matchRequestRef.current
+    const handle = setTimeout(() => {
+      void refreshMatchCandidates({
+        documentExtractionId: detail.documentExtractionId,
+        vendorId,
+        vendorName: vendorName.trim() || null,
+        totalAmount: parseNum(totalAmount),
+        invoiceDate: invoiceDate.trim() || null,
+        invoiceNumber: invoiceNumber.trim() || null,
+      }).then((res) => {
+        if (matchRequestRef.current !== requestId) return
+        if (res.ok) setLiveMatchCandidates(res.candidates)
+      })
+    }, 600)
+    return () => clearTimeout(handle)
+  }, [vendorId, vendorName, totalAmount, invoiceDate, invoiceNumber, detail.entryId, detail.documentExtractionId])
 
   // L3 (plan §11, checklist 3.3): "edited from OCR" is a different question
   // from `dirty` above -- dirty compares against this mount's initial
@@ -1680,14 +1764,12 @@ export function ReviewWorkspace({
           </Badge>
         ))}
 
-        {/* Hub cert 2.6: detail.verifiedAt is loaded but was never shown, so
-            in the "All" queue scope a verified bill looked identical to a
-            pending one. */}
-        {detail.verifiedAt ? (
-          <Badge variant="success" title={`Verified ${formatDateTime(detail.verifiedAt)}`}>
-            Verified {formatDateTime(detail.verifiedAt)}
-          </Badge>
-        ) : null}
+        {/* The verified state now reads solely off step 1 ("Verify") in the
+            status line below -- its circle goes green with a check once the
+            bill is verified. A separate "Verified {timestamp}" badge here
+            duplicated that signal on the same screen (user, 2026-09-07:
+            "keep as step 1 and remove the line from the right side"). The
+            exact timestamp is still surfaced on hover over the Verify step. */}
 
         {toolbarInfoText ? <span className="ml-auto text-xs text-muted-foreground">{toolbarInfoText}</span> : null}
       </div>
@@ -1700,9 +1782,13 @@ export function ReviewWorkspace({
       <ReviewStatusLine
         keymap={keymap}
         verifyStatus={verifyStatus}
+        verifiedAt={detail.verifiedAt}
         vendorName={header.vendorName}
         vendorId={vendorId}
-        onOpenVendorPicker={() => setVendorAutocompleteOpen(true)}
+        linkedVendorName={linkedVendorName}
+        vendorAutocompleteOpen={vendorAutocompleteOpen}
+        onVendorAutocompleteOpenChange={setVendorAutocompleteOpen}
+        onVendorSelect={handleVendorSelect}
         uncertainFields={detail.uncertainFields}
         uncertainStepIndex={uncertainStepIndex}
         onStepUncertainField={stepUncertainField}
@@ -1714,7 +1800,7 @@ export function ReviewWorkspace({
         entryUbblNumber={detail.entryUbblNumber}
         entryDepartmentName={detail.entryDepartmentName}
         entryAmount={detail.entryAmount}
-        matchCandidates={detail.matchCandidates}
+        matchCandidates={liveMatchCandidates ?? detail.matchCandidates}
         onMatchChanged={() => router.refresh()}
         classifyStatus={classifyStatus}
         stage2Done={stage2Done}
@@ -1806,11 +1892,6 @@ export function ReviewWorkspace({
             onLineItemChange={onLineItemChange}
             disabled={formDisabled}
             onFieldEnter={handleFieldEnter}
-            vendorId={vendorId}
-            linkedVendorName={linkedVendorName}
-            vendorAutocompleteOpen={vendorAutocompleteOpen}
-            onVendorAutocompleteOpenChange={setVendorAutocompleteOpen}
-            onVendorSelect={handleVendorSelect}
             uncertainFields={detail.uncertainFields}
             editedFields={editedFields}
             validationErrors={validationErrors}

@@ -4,8 +4,9 @@ import { revalidatePath, revalidateTag } from 'next/cache'
 import { z } from 'zod'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { requireSuperadmin } from '@/lib/export/auth'
+import { requireAdminOrAbove, requireSuperadmin } from '@/lib/export/auth'
 import { itsNumberSchema, itsNumberToLoginEmail } from '@/lib/auth/its'
+import { normalizeVendorName } from '@/lib/normalize'
 import { logRawError } from '@/lib/friendly-error'
 import { getSelectedEvent, isEventMutable } from '@/lib/events/current'
 import { REFERENCE_DATA_TAGS } from '@/lib/cache/reference-data'
@@ -271,7 +272,7 @@ export async function mergeVendor(input: {
 
   if (error) return { ok: false, error: logRawError('admin.mergeVendor', error.message) }
 
-  revalidatePath('/admin')
+  revalidatePath('/settings')
   return { ok: true }
 }
 
@@ -286,7 +287,109 @@ export async function unmergeVendor(input: { vendorId: number }): Promise<Action
 
   if (error) return { ok: false, error: logRawError('admin.unmergeVendor', error.message) }
 
-  revalidatePath('/admin')
+  revalidatePath('/settings')
+  return { ok: true }
+}
+
+const renameVendorSchema = z.object({
+  vendorId: z.number().int().positive(),
+  displayName: z.string().trim().min(1, 'Vendor name is required.').max(200, 'Vendor name is too long.'),
+})
+
+/**
+ * Renames a vendor from Settings -> Vendors (user decision 2026-09-07:
+ * "label + identity key"). Updates both `display_name` (the label shown
+ * everywhere) AND `normalized_name` (the unique identity key the
+ * import/OCR resolution rule matches on -- 20260808000008_vendor_and_alias.sql),
+ * regenerating the latter from the new name via `normalizeVendorName` so the
+ * rename actually "takes": a later import or bill spelled the new way now
+ * resolves to this vendor instead of creating a fresh one.
+ *
+ * Two guards on the identity key:
+ *  - the new name must still normalize to something non-empty;
+ *  - if another vendor already owns that normalized key, this is a merge
+ *    situation, not a rename -- refuse and point the admin at "Merge into...".
+ *
+ * The OLD normalized key is recorded as a `manual` `vendor_alias` for this
+ * same vendor (best-effort, service-role client -- `vendor_alias` has no
+ * write policy for `authenticated`, same reason as review.ts's alias
+ * learning) so bills/entries imported under the previous spelling still
+ * resolve here. Admin-level gate to match the `vendor_update_admin` RLS
+ * floor (20260808000026_rls_policies.sql).
+ */
+export async function renameVendor(input: {
+  vendorId: number
+  displayName: string
+}): Promise<ActionResult> {
+  const gate = await requireAdminOrAbove()
+  if (!gate.ok) {
+    return { ok: false, error: 'Renaming a vendor is an admin-only action.' }
+  }
+
+  const parsed = renameVendorSchema.safeParse(input)
+  if (!parsed.success) {
+    return { ok: false, error: parsed.error.issues[0]!.message }
+  }
+  const { vendorId, displayName } = parsed.data
+
+  const normalized = normalizeVendorName(displayName)
+  if (!normalized) {
+    return { ok: false, error: 'That name has no letters or digits to identify the vendor by.' }
+  }
+
+  const supabase = await createClient()
+
+  const { data: current, error: currentError } = await supabase
+    .from('vendor')
+    .select('id, display_name, normalized_name')
+    .eq('id', vendorId)
+    .single()
+
+  if (currentError || !current) {
+    return { ok: false, error: 'That vendor no longer exists.' }
+  }
+
+  if (current.display_name === displayName && current.normalized_name === normalized) {
+    return { ok: true }
+  }
+
+  if (normalized !== current.normalized_name) {
+    const { data: clash } = await supabase
+      .from('vendor')
+      .select('id, display_name')
+      .eq('normalized_name', normalized)
+      .neq('id', vendorId)
+      .maybeSingle()
+    if (clash) {
+      return {
+        ok: false,
+        error: `"${clash.display_name}" already uses that name. Use "Merge into..." to combine the two instead of renaming.`,
+      }
+    }
+  }
+
+  const { error: updateError } = await supabase
+    .from('vendor')
+    .update({ display_name: displayName, normalized_name: normalized })
+    .eq('id', vendorId)
+
+  if (updateError) {
+    return { ok: false, error: logRawError('admin.renameVendor', updateError.message) }
+  }
+
+  // Keep the old spelling resolvable. Best-effort: a failure here does not
+  // undo a rename that already succeeded.
+  if (current.normalized_name && current.normalized_name !== normalized) {
+    const { error: aliasError } = await createAdminClient()
+      .from('vendor_alias')
+      .upsert(
+        { vendor_id: vendorId, raw_name: current.normalized_name, source: 'manual' },
+        { onConflict: 'raw_name', ignoreDuplicates: true },
+      )
+    if (aliasError) logRawError('admin.renameVendor:alias', aliasError.message)
+  }
+
+  revalidatePath('/settings')
   return { ok: true }
 }
 
@@ -398,6 +501,6 @@ export async function setVendorConfirmed(input: {
 
   if (error) return { ok: false, error: logRawError('admin.setVendorConfirmed', error.message) }
 
-  revalidatePath('/admin')
+  revalidatePath('/settings')
   return { ok: true }
 }

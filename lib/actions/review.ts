@@ -21,6 +21,8 @@ import { getStaffContext } from '@/lib/export/auth'
 import { isAdminOrAbove } from '@/lib/auth/roles'
 import { reExtractFieldScoped, reExtractPageScoped } from '@/lib/jobs/handlers/rescope-extract'
 import { getSelectedEvent, isEventMutable } from '@/lib/events/current'
+import { computeMatchCandidates } from '@/lib/review/match-candidates'
+import type { MatchCandidate } from '@/lib/review/types'
 
 const CLAIM_STALE_AFTER_MS = 15 * 60 * 1000 // §7: "Claims expire after 15 minutes of inactivity"
 
@@ -770,6 +772,61 @@ export interface VendorSearchResult {
   id: number
   displayName: string
   gstin: string | null
+}
+
+/**
+ * Live re-tally of the Connect step's suggestions (2026-09-07). The page
+ * load computes these once from the bill's OCR'd fields; this recomputes
+ * them from the *current* Verify-step vendor + total + date whenever the
+ * reviewer changes any of those, so a fixed vendor name or corrected total
+ * immediately re-ranks the ledger instead of waiting for a full reload.
+ * Runs the identical `computeMatchCandidates` pipeline the page load uses.
+ *
+ * Session-scoped `createClient` (RLS-enforced): the caller can only ever
+ * rank against entries their own role may see. Returns an empty list once
+ * the bill is attached — there is nothing left to suggest.
+ */
+export async function refreshMatchCandidates(input: {
+  documentExtractionId: number
+  vendorId: number | null
+  vendorName: string | null
+  totalAmount: number | null
+  invoiceDate: string | null
+  invoiceNumber: string | null
+}): Promise<{ ok: true; candidates: MatchCandidate[] } | { ok: false; error: string }> {
+  const supabase = await createClient()
+
+  const { data: extraction, error } = await supabase
+    .from('document_extraction')
+    .select('id, entry_id')
+    .eq('id', input.documentExtractionId)
+    .maybeSingle()
+
+  if (error) return { ok: false, error: logRawError('review.refreshMatchCandidates', error.message) }
+  if (!extraction) return { ok: false, error: 'That bill no longer exists.' }
+  if ((extraction.entry_id as number | null) !== null) return { ok: true, candidates: [] }
+
+  const selectedEventId = (await getSelectedEvent())?.id ?? null
+
+  try {
+    const candidates = await computeMatchCandidates(
+      supabase,
+      {
+        vendorId: input.vendorId,
+        vendorName: input.vendorName,
+        totalAmount: input.totalAmount,
+        invoiceDate: input.invoiceDate,
+        invoiceNumber: input.invoiceNumber,
+      },
+      selectedEventId,
+    )
+    return { ok: true, candidates }
+  } catch (err) {
+    return {
+      ok: false,
+      error: logRawError('review.refreshMatchCandidates', err instanceof Error ? err.message : String(err)),
+    }
+  }
 }
 
 /**

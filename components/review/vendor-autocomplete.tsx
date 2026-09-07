@@ -36,6 +36,7 @@ export const VendorAutocomplete = forwardRef(function VendorAutocomplete(
     open,
     onOpenChange,
     fieldIndex,
+    disabled = false,
     uncertain = false,
     uncertainIndex,
     onCurrentPage = true,
@@ -54,6 +55,9 @@ export const VendorAutocomplete = forwardRef(function VendorAutocomplete(
     open: boolean
     onOpenChange: (open: boolean) => void
     fieldIndex: number
+    /** Claim/past-event lock: greys the trigger and stops the popover opening,
+     *  matching the rest of the form under `formDisabled`. */
+    disabled?: boolean
     /** True when vendor_name was flagged in uncertain_fields_ocr -- draws
      *  the orange ring on the trigger button. */
     uncertain?: boolean
@@ -74,6 +78,14 @@ export const VendorAutocomplete = forwardRef(function VendorAutocomplete(
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<VendorSearchResult[]>([])
   const [pending, setPending] = useState(false)
+
+  // "Create + link a vendor when none is linked" (2026-09-07): nothing is
+  // linked yet, but there's a vendor name to work from -- saveVerification
+  // (lib/actions/review.ts) will create + link a new unconfirmed vendor from
+  // that name on save. Surface that here so "Not linked" + "No vendors found"
+  // doesn't read as a dead end; no row is created until the reviewer saves.
+  const pendingVendorName = (searchSeed ?? value ?? '').trim()
+  const willCreateOnSave = selectedVendorId === null && !value && pendingVendorName !== ''
   // 5.8: monotonic request id -- a debounced search that resolves after a
   // newer one (e.g. a slow first keystroke's request outliving a fast
   // second one) must not overwrite the newer, correct results. Bumped
@@ -101,35 +113,47 @@ export const VendorAutocomplete = forwardRef(function VendorAutocomplete(
   }, [query, open])
 
   return (
-    <Popover open={open} onOpenChange={onOpenChange}>
+    <Popover open={open && !disabled} onOpenChange={(next) => onOpenChange(disabled ? false : next)}>
       <PopoverTrigger asChild>
         <Button
           ref={ref}
           type="button"
           variant="outline"
           role="combobox"
+          disabled={disabled}
           data-field-index={fieldIndex}
           data-uncertain-index={uncertainIndex}
           aria-expanded={open}
           className={cn(
             'w-full justify-between font-normal',
-            uncertain && (onCurrentPage ? UNCERTAIN_RING_CLASS : UNCERTAIN_OFF_PAGE_CLASS)
+            uncertain && (onCurrentPage ? UNCERTAIN_RING_CLASS : UNCERTAIN_OFF_PAGE_CLASS),
+            willCreateOnSave && !uncertain && 'border-dashed border-amber-400 dark:border-amber-600'
           )}
           title={
             uncertain
               ? onCurrentPage
                 ? 'Model was uncertain about this value — click to jump to the source page'
                 : 'Model was uncertain about this value, on another page — click to jump there'
-              : undefined
+              : willCreateOnSave
+                ? `"${pendingVendorName}" isn't in the system yet — saving will create it as a new vendor and link it automatically. Open to link an existing vendor instead.`
+                : undefined
           }
           onFocus={onFocus}
-          onClick={() => onOpenChange(true)}
+          onClick={() => !disabled && onOpenChange(true)}
         >
-          <span className="truncate">{value || 'Not linked'}</span>
+          <span className={cn('truncate', willCreateOnSave && 'text-amber-700 dark:text-amber-500')}>
+            {value || (willCreateOnSave ? `New: ${pendingVendorName}` : 'Not linked')}
+          </span>
           <ChevronsUpDown className="h-4 w-4 shrink-0 opacity-50" />
         </Button>
       </PopoverTrigger>
       <PopoverContent className="w-80 p-2" align="start">
+        {willCreateOnSave && (
+          <p className="mb-2 rounded bg-amber-50 px-2 py-1.5 text-[11px] leading-snug text-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
+            Not in the system yet. Link an existing vendor below, or just save — &ldquo;{pendingVendorName}&rdquo;
+            will be created as a new vendor and linked automatically.
+          </p>
+        )}
         <Input
           autoFocus
           placeholder="Search vendors by name or GSTIN…"

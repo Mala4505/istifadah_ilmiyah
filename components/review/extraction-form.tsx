@@ -25,8 +25,6 @@ import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import { formatBinding, type Keymap } from '@/lib/shortcuts/config'
 import type { UncertainField } from '@/lib/review/types'
-import type { VendorSearchResult } from '@/lib/actions/review'
-import { VendorAutocomplete } from './vendor-autocomplete'
 
 export interface HeaderFormState {
   vendorName: string
@@ -187,11 +185,6 @@ export const ExtractionForm = memo(forwardRef(function ExtractionForm(
     onLineItemChange,
     disabled,
     onFieldEnter,
-    vendorId,
-    linkedVendorName,
-    vendorAutocompleteOpen,
-    onVendorAutocompleteOpenChange,
-    onVendorSelect,
     uncertainFields = [],
     editedFields = EMPTY_EDITED_FIELDS,
     validationErrors = EMPTY_VALIDATION_ERRORS,
@@ -213,14 +206,6 @@ export const ExtractionForm = memo(forwardRef(function ExtractionForm(
     onLineItemChange: (id: number, field: keyof Omit<LineItemFormState, 'id'>, value: string) => void
     disabled: boolean
     onFieldEnter: (target: HTMLElement) => void
-    vendorId: number | null
-    /** The linked vendor's own display name (null when nothing is linked) --
-     *  labels the "Linked vendor" picker's trigger. The vendor_name
-     *  transcription is edited in its own field now (split vendor UI). */
-    linkedVendorName: string | null
-    vendorAutocompleteOpen: boolean
-    onVendorAutocompleteOpenChange: (open: boolean) => void
-    onVendorSelect: (vendor: VendorSearchResult) => void
     /** Fields the model doubted (document_extraction.uncertain_fields_ocr) — drives
      *  the orange ring and the "jump to page" affordance. */
     uncertainFields?: UncertainField[]
@@ -428,30 +413,15 @@ export const ExtractionForm = memo(forwardRef(function ExtractionForm(
             field like every other transcribed value -- when OCR misreads it,
             the reviewer just fixes the text (it flows to vendor_name_verified
             via buildSavePayload). Linking a vendor *entity* is the separate
-            control below and never touches this text (plan §2.4). */}
+            control in the Verify step of the status line above -- deliberately
+            not mirrored here, since one linked-vendor picker is enough
+            (plan §2.4; user, 2026-09-07). */}
         <div className="col-span-2">
           <Field label="Vendor name" disabled={disabled} onKeyDown={handleEnter}
             value={header.vendorName} onChange={(v) => onHeaderChange('vendorName', v)}
             uncertain={headerUncertainty('vendorName')} uncertainIndex={uncertainIndexOf(headerUncertainty('vendorName'))}
             uncertainOnCurrentPage={isOnCurrentPage(headerUncertainty('vendorName'))}
             edited={headerEdited('vendorName')} onJumpToPage={onJumpToPage} pageLabel={headerPageLabel(headerUncertainty('vendorName'))} />
-        </div>
-        <div className="col-span-2 flex flex-col gap-1.5">
-          <Label>
-            Linked vendor
-            <span className="ml-1 text-xs font-normal text-muted-foreground">
-              · for rate benchmarking; optional, and separate from the name above
-            </span>
-          </Label>
-          <VendorAutocomplete
-            value={linkedVendorName ?? ''}
-            searchSeed={header.vendorName}
-            selectedVendorId={vendorId}
-            open={vendorAutocompleteOpen}
-            onOpenChange={onVendorAutocompleteOpenChange}
-            onSelect={onVendorSelect}
-            fieldIndex={0}
-          />
         </div>
         <Field label="GSTIN" disabled={disabled} onKeyDown={handleEnter}
           value={header.vendorGstin} onChange={(v) => onHeaderChange('vendorGstin', v)}

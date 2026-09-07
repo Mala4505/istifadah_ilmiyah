@@ -19,8 +19,7 @@ import type {
 } from '@/lib/review/types'
 import { friendlyErrorMessage } from '@/lib/friendly-error'
 import { isAdminOrAbove, isSuperadmin } from '@/lib/auth/roles'
-import { rankCandidates, type MatchableEntry } from '@/lib/matching'
-import { normalizeVendorName } from '@/lib/normalize'
+import { computeMatchCandidates } from '@/lib/review/match-candidates'
 import { loadStaffKeymapPreferences } from '@/lib/shortcuts/load'
 import { formatBinding } from '@/lib/shortcuts/config'
 import { getSelectedEventId } from '@/lib/events/current'
@@ -520,16 +519,7 @@ async function loadDocumentDetail(
   // fallback here, not the primary read (plan.md D1).
   const entryId = (extraction.entry_id as number | null) ?? (sourceDoc.entry_id as number | null)
 
-  // Redesign plan §10: normalize once here (only needed for the "suggested
-  // match" path below, entryId === null) so the vendor_alias lookup can ride
-  // in the same parallel batch as everything else, rather than serializing
-  // an extra round trip after it.
-  const normalizedOcrVendorName =
-    entryId === null && extraction.vendor_name_ocr
-      ? normalizeVendorName(extraction.vendor_name_ocr as string)
-      : ''
-
-  const [runRes, entryRes, exceptionsRes, hubStatuses, vendorAliasRes] =
+  const [runRes, entryRes, exceptionsRes, hubStatuses, siblingEntryClassRes] =
     await Promise.all([
     extraction.current_extraction_run_id
       ? supabase
@@ -562,18 +552,24 @@ async function loadDocumentDetail(
     // as before) and the entry's hub-status code lookup just past this
     // Promise.all -- one fetch instead of two.
     getCachedHubStatuses(supabase),
-    // Redesign plan §10: has this document's normalized OCR vendor name been
-    // learned as an alias for some vendor before (via a prior attach's
-    // learnVendorAliasesFromAttach, lib/actions/review.ts)? If so, the
-    // candidate whose own vendor_id matches gets a confident (1.0) vendor
-    // sub-score in lib/matching.ts instead of relying on bigram fuzzy
-    // similarity alone. Resolved here (alongside the rest of this batch)
-    // because performance remediation plan 4.1's match_candidate_entries RPC
-    // below needs its result as a parameter -- that RPC call is therefore
-    // sequential *after* this Promise.all rather than inside it.
-    normalizedOcrVendorName
-      ? supabase.from('vendor_alias').select('vendor_id').eq('raw_name', normalizedOcrVendorName).maybeSingle()
-      : Promise.resolve({ data: null }),
+    // Page-rail "done" indicator: a page is only fully done once every bill
+    // covering it has cleared all three Review stages, the same predicate
+    // v_review_queue uses to keep/drop a bill (20260907000002) -- not just
+    // stage 1 (verified_at). siblingBillsRes already carries each bill's
+    // verified_at + entry_id; this pulls the Classify fields for those
+    // entries so `billFinished` below can check Connect + Classify too.
+    (() => {
+      const ids = [
+        ...new Set(
+          (siblingBillsRes.data ?? [])
+            .map((b) => b.entry_id as number | null)
+            .filter((x): x is number => x !== null)
+        ),
+      ]
+      return ids.length > 0
+        ? supabase.from('entries').select('id, admin_head_id, zone_id, sub_department_id').in('id', ids)
+        : Promise.resolve({ data: [] })
+    })(),
   ])
 
   const run = runRes.data as { extraction_confidence: number | null; legibility: 'clear' | 'partial' | 'poor' | null; model: string | null } | null
@@ -694,97 +690,30 @@ async function loadDocumentDetail(
     }))
   }
 
-  // Match-strip "suggested" state (§7): rank this bill's own OCR'd fields
-  // against a small, index-pre-filtered candidate pool. Performance
-  // remediation plan 4.1: this used to be a 5,000-row `entries` fetch (an
-  // unbounded-in-practice `.limit(5000)` that silently made older entries
-  // unreachable once the ledger grew past it) filtered in JS against a
-  // separately-fetched matched-entry-id set. Both are now the
-  // match_candidate_entries RPC (supabase/migrations/
-  // 20260905000001_match_candidate_entries.sql) -- it does the matched-entry
-  // exclusion itself (NOT EXISTS against source_document) and pre-filters by
-  // vendor_id/amount-proximity/invoice-number/vendor-trigram before this
-  // still calls the exact same lib/matching.ts's rankCandidates on the
-  // result for final scoring/top-N, unchanged.
+  // Match-strip "suggested" state (§7): tally this bill's vendor / total /
+  // date / invoice number against the ledger and rank the hits. Shared with
+  // the live re-match server action (lib/actions/review.ts's
+  // refreshMatchCandidates) via computeMatchCandidates so the page load and
+  // an in-session vendor/total/date edit run the identical pipeline
+  // (pre-filter RPC + lib/matching.ts's rankCandidates). Uses verified
+  // values over OCR where a reviewer has already corrected a field.
   let matchCandidates: MatchCandidate[] = []
   if (entryId === null) {
-    const { data: candidateRows } = await supabase.rpc('match_candidate_entries', {
-      p_vendor_id: (vendorAliasRes.data?.vendor_id as number | undefined) ?? null,
-      p_amount: extraction.total_amount_ocr as number | null,
-      p_invoice_number:
-        (extraction.invoice_number_verified as string | null) ?? (extraction.invoice_number_ocr as string | null),
-      p_vendor_raw: extraction.vendor_name_ocr as string | null,
-    })
-    const candidatePool: MatchableEntry[] = (candidateRows ?? []).map(
-      (e: {
-        id: number
-        vendor_raw: string | null
-        vendor_id: number | null
-        amount: number | null
-        date: string | null
-        invoice_number: string | null
-        department_id: number | null
-        ubbl_number: string
-        main_number: string | null
-      }) => ({
-        id: e.id,
-        vendorRaw: e.vendor_raw,
-        vendorId: e.vendor_id,
-        amount: e.amount,
-        date: e.date,
-        invoiceNumber: e.invoice_number,
-        departmentId: e.department_id,
-        ubblNumber: e.ubbl_number,
-        mainNumber: e.main_number,
-      })
-    )
-
-    // Same event-scoped department-name resolution as
-    // getInboxMatchCandidates (lib/actions/documents.ts) -- a candidate's
-    // department name is cosmetic (helps a reviewer tell apart otherwise
-    // similar-looking candidates while picking one), so it's scoped to the
-    // selected event's event_department membership rather than the full
-    // shared department table; a department with no membership row simply
-    // comes back with no name.
-    const candidateDepartmentIds = Array.from(
-      new Set(candidatePool.map((c) => c.departmentId).filter((id): id is number => id !== null))
-    )
-    const { data: eventDepartmentRows } =
-      selectedEventId !== null && candidateDepartmentIds.length > 0
-        ? await supabase.from('event_department').select('department_id').eq('event_id', selectedEventId)
-        : { data: [] as { department_id: number }[] }
-    const activeDepartmentIds = new Set((eventDepartmentRows ?? []).map((r) => r.department_id as number))
-    const departmentIdsToResolve = candidateDepartmentIds.filter((id) => activeDepartmentIds.has(id))
-    // Perf audit Phase 2: cached departments list, filtered down to the ids
-    // that matter here, instead of a live `.in('id', ...)` query.
-    const departmentsForCandidates =
-      departmentIdsToResolve.length > 0 ? await getCachedDepartments(supabase) : []
-    const departmentNameById = new Map(
-      departmentsForCandidates
-        .filter((d) => departmentIdsToResolve.includes(d.id))
-        .map((d) => [d.id, d.name])
-    )
-
-    matchCandidates = rankCandidates(
+    matchCandidates = await computeMatchCandidates(
+      supabase,
       {
-        vendorName: extraction.vendor_name_ocr as string | null,
-        totalAmount: extraction.total_amount_ocr as number | null,
-        invoiceDate: extraction.invoice_date_ocr as string | null,
+        vendorId: null,
+        vendorName:
+          (extraction.vendor_name_verified as string | null) ?? (extraction.vendor_name_ocr as string | null),
+        totalAmount:
+          (extraction.total_amount_verified as number | null) ?? (extraction.total_amount_ocr as number | null),
+        invoiceDate:
+          (extraction.invoice_date_verified as string | null) ?? (extraction.invoice_date_ocr as string | null),
         invoiceNumber:
           (extraction.invoice_number_verified as string | null) ?? (extraction.invoice_number_ocr as string | null),
-        vendorAliasVendorId: (vendorAliasRes.data?.vendor_id as number | undefined) ?? null,
       },
-      candidatePool
-    ).map((c) => ({
-      entryId: c.id,
-      score: c.score,
-      vendorRaw: c.vendorRaw,
-      amount: c.amount,
-      date: c.date,
-      ubblNumber: c.ubblNumber,
-      mainNumber: c.mainNumber,
-      departmentName: c.departmentId !== null ? (departmentNameById.get(c.departmentId) ?? null) : null,
-    }))
+      selectedEventId,
+    )
   }
 
   const siblingBills: SiblingBill[] = (siblingBillsRes.data ?? [])
@@ -815,21 +744,45 @@ async function loadDocumentDetail(
     amount: { ocr: li.amount_ocr as number | null, verified: li.amount_verified as number | null },
   }))
 
-  // Redesign plan (review page rail): a page is "done" once every bill whose
-  // page range covers it has verified_at set. Most pages fall in exactly one
-  // bill's range; a page is only left unverified if ANY covering bill isn't
-  // (every() vacuously true -- and therefore not verified -- for a page no
-  // bill's range covers at all, which matches "nothing to show as done here").
-  const billRanges = (siblingBillsRes.data ?? []).map((b) => ({
-    start: b.page_number_start as number | null,
-    end: b.page_number_end as number | null,
-    verified: (b.verified_at as string | null) !== null,
-  }))
+  // Which of this document's sibling bills' entries have the Classify stage
+  // done (admin head + zone + sub-department all set). Keyed by entry id.
+  const classifiedEntryIds = new Set(
+    (
+      (siblingEntryClassRes.data ?? []) as {
+        id: number
+        admin_head_id: number | null
+        zone_id: number | null
+        sub_department_id: number | null
+      }[]
+    )
+      .filter((e) => e.admin_head_id !== null && e.zone_id !== null && e.sub_department_id !== null)
+      .map((e) => e.id)
+  )
+
+  // Redesign plan (review page rail): a page is fully "done" (green in the
+  // rail) once EVERY bill whose page range covers it has cleared all three
+  // Review stages -- the exact predicate v_review_queue uses to drop a bill
+  // (20260907000002): verified_at set, AND (the document expects no entry, OR
+  // the bill's entry is connected and Classified). A page covered by a bill
+  // that is started-but-unfinished shows amber in the rail instead
+  // (pdf-viewer.tsx); a page no bill's range covers shows neither -- every()
+  // is vacuously true so `covering.length > 0` is the real gate.
+  const noEntryExpected = (sourceDoc.match_status as string | null) === 'no_entry_expected'
+  const billRanges = (siblingBillsRes.data ?? []).map((b) => {
+    const bEntryId = b.entry_id as number | null
+    return {
+      start: b.page_number_start as number | null,
+      end: b.page_number_end as number | null,
+      finished:
+        (b.verified_at as string | null) !== null &&
+        (noEntryExpected || (bEntryId !== null && classifiedEntryIds.has(bEntryId))),
+    }
+  })
   function isPageVerified(pageNumber: number): boolean {
     const covering = billRanges.filter(
       (r) => r.start !== null && r.end !== null && r.start <= pageNumber && pageNumber <= r.end
     )
-    return covering.length > 0 && covering.every((r) => r.verified)
+    return covering.length > 0 && covering.every((r) => r.finished)
   }
 
   const pages: PageStatus[] = (pagesRes.data ?? []).map((p) => ({
