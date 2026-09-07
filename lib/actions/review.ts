@@ -254,6 +254,27 @@ export async function saveVerification(input: SaveVerificationInput): Promise<Sa
       .in('exception_type', ['vendor_gstin_invalid_checksum', 'vendor_gstin_is_own_org'])
   }
 
+  // Same idea for the buyer/recipient GSTIN (2026-09-07): the extract handler
+  // keeps a checksum-failing buyer_gstin as-read and flags
+  // buyer_gstin_invalid_checksum. Once the reviewer has fixed the character
+  // and the verified value passes its checksum, close it here -- no own-org
+  // exclusion this time, since the buyer GSTIN is *supposed* to be the
+  // community's own.
+  const verifiedBuyerGstin = input.header.buyer_gstin?.trim() ?? ''
+  if (verifiedBuyerGstin !== '' && validateGstin(verifiedBuyerGstin).valid) {
+    await supabase
+      .from('reconciliation_exception')
+      .update({
+        status: 'resolved',
+        resolution_note: 'Buyer GSTIN corrected and verified on review.',
+        resolved_by: user.id,
+        resolved_at: new Date().toISOString(),
+      })
+      .eq('document_extraction_id', input.documentExtractionId)
+      .eq('status', 'open')
+      .eq('exception_type', 'buyer_gstin_invalid_checksum')
+  }
+
   revalidatePath('/review')
   // The document inbox renders each bill's verified vendor/amount/invoice
   // values and its "Reviewed" badge straight off this row -- without this it

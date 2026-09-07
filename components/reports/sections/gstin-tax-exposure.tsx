@@ -14,8 +14,9 @@ import type { TaxCreditExposureRow } from '@/lib/reports/surfaces/related-party-
 // reporting-blueprint.md B-08 (flagship) — GSTIN validity & tax exposure.
 // "Tax charged, against the share of it where the vendor GSTIN passes
 // checksum and our own GSTIN appears on the bill. The gap is credit that may
-// not be claimable." "At risk" = an open vendor_gstin_invalid_checksum or
-// gst_recipient_compliance_missing exception on that bill (v_tax_credit_exposure's
+// not be claimable." "At risk" = an open vendor_gstin_invalid_checksum,
+// buyer_gstin_invalid_checksum, or gst_recipient_compliance_missing exception
+// on that bill (v_tax_credit_exposure's
 // header has the full derivation) — resolving the exception (e.g. a reviewer
 // corrects the GSTIN) moves its tax back to claimable on the next load.
 

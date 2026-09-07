@@ -120,6 +120,11 @@ export function getExceptionAction(row: ExceptionActionRow): ExceptionAction {
         whatToDo: 'OCR read our own GSTIN as the vendor’s — correct it.',
         destination: reviewBillLink(row),
       }
+    case 'buyer_gstin_invalid_checksum':
+      return {
+        whatToDo: 'The buyer/recipient GSTIN failed its checksum — likely one mis-read character. Fix it against the bill and save.',
+        destination: reviewBillLink(row),
+      }
     case 'id_namespace_collision':
       return {
         whatToDo: 'Two source systems reused an identifier.',

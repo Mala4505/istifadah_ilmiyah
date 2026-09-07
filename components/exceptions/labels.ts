@@ -23,6 +23,7 @@ export const EXCEPTION_TYPE_LABELS: Record<string, string> = {
   page_count_mismatch: 'Page count mismatch',
   // GSTIN checksum guard + per-page extraction failure isolation
   vendor_gstin_invalid_checksum: 'Vendor GSTIN failed checksum',
+  buyer_gstin_invalid_checksum: 'Buyer GSTIN failed checksum',
   page_extraction_failed: 'Page extraction failed',
   // GST recipient-compliance check
   gst_recipient_compliance_missing: 'GST recipient details missing',

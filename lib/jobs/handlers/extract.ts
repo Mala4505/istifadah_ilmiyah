@@ -334,19 +334,24 @@ export async function persistExtractionPipelineResult(
       !isOwnOrgGstin && bill.vendor_gstin !== null ? validateGstin(bill.vendor_gstin) : null
     const isInvalidGstinChecksum = gstinChecksum !== null && !gstinChecksum.valid
 
-    // Buyer-GSTIN checksum guard (redesign plan §12): same backstop as
-    // vendor_gstin above — a failed checksum means the GSTIN is
-    // definitionally wrong, so it is never written as-is. Unlike
-    // vendor_gstin, there is no own-org exclusion here: buyer_gstin is
-    // SUPPOSED to equal COMMUNITY_GSTIN, so isOwnOrgGstin (which exists to
-    // catch the recipient's GSTIN leaking into the *vendor* field) does not
-    // apply. A checksum failure is not raised as its own exception — it
-    // simply flows into the combined gst_recipient_compliance_missing
-    // exception below as "buyer GSTIN missing," since a checksum-failed
-    // value can't be trusted either way.
+    // Buyer-GSTIN checksum guard (redesign plan §12). Aligned 2026-09-07 with
+    // the vendor_gstin rule above (feedback_vendor_gstin_keep_misread): a
+    // failed checksum is almost always ONE mis-read character, and blanking
+    // the field forces the reviewer to retype all 15 from the page — the very
+    // thing that made "the AI doesn't pick up the buyer GSTIN" a complaint on
+    // clean typed invoices where the GSTIN is plainly printed. So the raw
+    // value is now written through as-read; a low-severity
+    // `buyer_gstin_invalid_checksum` exception (further down) tells the
+    // reviewer to fix the character. The value passed to the compliance check
+    // is still nulled on a checksum failure — a not-yet-trustworthy GSTIN
+    // shouldn't clear the ITC/identity rule — but the `buyer_gstin` line item
+    // it would add is suppressed there, since the dedicated checksum exception
+    // already owns that signal (mirrors how vendor_gstin_invalid_checksum
+    // replaces a generic "missing" on the seller side).
     const buyerGstinChecksum = bill.buyer_gstin !== null ? validateGstin(bill.buyer_gstin) : null
     const isInvalidBuyerGstinChecksum = buyerGstinChecksum !== null && !buyerGstinChecksum.valid
-    const buyerGstinOcr = isInvalidBuyerGstinChecksum ? null : bill.buyer_gstin
+    const buyerGstinOcr = bill.buyer_gstin
+    const buyerGstinForCompliance = isInvalidBuyerGstinChecksum ? null : bill.buyer_gstin
 
     const upsertPayload: Record<string, unknown> = {
       source_document_id: sourceDocumentId,
@@ -449,6 +454,23 @@ export async function persistExtractionPipelineResult(
       )
     }
 
+    if (isInvalidBuyerGstinChecksum) {
+      await admin.from('reconciliation_exception').upsert(
+        {
+          document_extraction_id: documentExtractionId,
+          exception_type: 'buyer_gstin_invalid_checksum',
+          severity: 'low',
+          description:
+            `Extracted buyer_gstin "${buyerGstinChecksum!.gstin}" fails its own checksum ` +
+            `(${buyerGstinChecksum!.message}) — usually a single character mis-read by OCR. The value has ` +
+            'been kept as read so you can correct the wrong character(s) against the document on review, ' +
+            'rather than retyping the whole GSTIN — check it and save.',
+          dedup_key: `buyer_gstin_invalid_checksum:${documentExtractionId}:${currentRunId}:${billIndex}`,
+        },
+        { onConflict: 'dedup_key' }
+      )
+    }
+
     // GST recipient-compliance check (redesign plan §12; recipient-identity
     // expansion confirmed with the user 2026-08-29). Two rules, one combined
     // exception per bill each (not one per missing item):
@@ -460,7 +482,7 @@ export async function persistExtractionPipelineResult(
     //     bill. `low` severity: a house rule for filed paperwork, no ITC
     //     stake, so it sits alongside the other advisory flags.
     const compliance = checkGstRecipientCompliance({
-      buyerGstin: buyerGstinOcr,
+      buyerGstin: buyerGstinForCompliance,
       buyerName: bill.buyer_name,
       invoiceNumber: bill.invoice_number,
       communityGstin: serverEnv.COMMUNITY_GSTIN || null,
@@ -472,13 +494,21 @@ export async function persistExtractionPipelineResult(
       instrumentType: bill.instrument_type,
     })
 
-    if (compliance.missing.length > 0) {
+    // A present-but-checksum-failing buyer GSTIN is already reported by the
+    // dedicated buyer_gstin_invalid_checksum exception above -- don't also
+    // list it here as "missing" (it isn't; it's on the page, one character
+    // off). buyer_name / invoice_number, if genuinely absent, still surface.
+    const complianceMissing = isInvalidBuyerGstinChecksum
+      ? compliance.missing.filter((item) => item !== 'buyer_gstin')
+      : compliance.missing
+
+    if (complianceMissing.length > 0) {
       const missingLabels: Record<GstComplianceMissingItem, string> = {
         buyer_gstin: 'buyer GSTIN',
         buyer_name: 'buyer name',
         invoice_number: 'invoice number',
       }
-      const missingText = compliance.missing.map((item) => missingLabels[item]).join(', ')
+      const missingText = complianceMissing.map((item) => missingLabels[item]).join(', ')
       const { exceptionType, severity, description } = compliance.taxInvoice
         ? {
             exceptionType: 'gst_recipient_compliance_missing',
