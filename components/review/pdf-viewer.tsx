@@ -404,28 +404,35 @@ export const PdfViewer = memo(forwardRef<
   // mounted at every pane mode/width (never conditionally rendered, so
   // pdf.js's document never tears down -- checklist 3.7); its width changes
   // only as the review workspace's divider moves or the pane mode cycles.
-  // Deliberately NOT the overflow:auto scroll area (contentRef) -- see
-  // SCROLLBAR_ALLOWANCE_PX: measuring that created a scrollbar-toggle feedback
-  // loop that read as the page zooming by itself. requestAnimationFrame
-  // coalesces bursts of resize notifications during an active drag into one
-  // measurement per frame; the >1px guard drops the sub-pixel jitter a flex
-  // layout can otherwise emit every frame.
+  // Deliberately NOT the overflow:auto scroll area -- see SCROLLBAR_ALLOWANCE_PX:
+  // measuring that created a scrollbar-toggle feedback loop that read as the
+  // page zooming by itself.
+  //
+  // The measurement is committed to state only once it has held steady for
+  // SETTLE_MS. This is the load-bearing guard against the runaway zoom: any
+  // feedback loop between "render the page" and "measure the pane" -- whatever
+  // its mechanism -- oscillates faster than this, so a flapping width never
+  // reaches `containerWidth`, the render effect never re-fires from it, and the
+  // page can't pulse. A real divider drag settles well within SETTLE_MS of the
+  // user letting go, so re-fitting after a drag still feels immediate.
   useEffect(() => {
     const el = paneMeasureRef.current
     if (!el) return
-    let frame: number | null = null
+    const SETTLE_MS = 150
+    let timer: ReturnType<typeof setTimeout> | null = null
     const observer = new ResizeObserver((entries) => {
-      const width = entries[0]?.contentRect.width
-      if (width === undefined) return
-      if (frame !== null) cancelAnimationFrame(frame)
-      frame = requestAnimationFrame(() =>
-        setContainerWidth((prev) => (Math.abs(prev - width) < 1 ? prev : Math.round(width)))
-      )
+      const raw = entries[0]?.contentRect.width
+      if (raw === undefined || raw <= 0) return
+      const width = Math.round(raw)
+      if (timer !== null) clearTimeout(timer)
+      timer = setTimeout(() => {
+        setContainerWidth((prev) => (prev === width ? prev : width))
+      }, SETTLE_MS)
     })
     observer.observe(el)
     return () => {
       observer.disconnect()
-      if (frame !== null) cancelAnimationFrame(frame)
+      if (timer !== null) clearTimeout(timer)
     }
   }, [])
 
@@ -471,6 +478,12 @@ export const PdfViewer = memo(forwardRef<
       if (cancelled) return
       canvas.width = viewport.width
       canvas.height = viewport.height
+      // Grow the wrapper (canvasSize) in the SAME commit the canvas bitmap
+      // resizes, not after the paint finishes. Setting it afterwards left a
+      // 10-50ms window where the canvas was bigger than its wrapper and spilled
+      // into the scroll area -- flashing scrollbars on every single render,
+      // which is what the fit-width measurement used to feed back on.
+      setCanvasSize({ width: viewport.width, height: viewport.height })
       const task = page.render({ canvasContext: context, viewport })
       renderTaskRef.current = task
       try {
@@ -483,12 +496,12 @@ export const PdfViewer = memo(forwardRef<
       }
       if (renderTaskRef.current === task) renderTaskRef.current = null
       if (!cancelled) {
-        setCanvasSize({ width: viewport.width, height: viewport.height })
         // The canvas now genuinely shows `pageNumber`'s content -- clears
         // pageTransitioning (derived from this vs. pageNumber above) whether
         // this render was a real page change or just a zoom/rotation/resize
         // re-paint of the same page (a no-op in the latter case, since
-        // paintedPageNumber already equalled pageNumber).
+        // paintedPageNumber already equalled pageNumber). canvasSize was
+        // already set above, alongside the bitmap resize.
         setPaintedPageNumber(pageNumber)
       }
     })()
