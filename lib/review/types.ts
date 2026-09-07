@@ -160,6 +160,12 @@ export interface ReviewDocumentDetail {
   entryInvoiceNumber: string | null
   entryAmount: number | null
   entryVendorId: number | null
+  /** The linked vendor's own display name (`vendor.display_name` for
+   *  `entryVendorId`), or null when nothing is linked. The review form edits
+   *  the vendor_name transcription and the vendor_id link as two separate
+   *  controls (split vendor UI, 2026-09-07); this labels the link picker's
+   *  trigger, which the entry row alone can't do. */
+  linkedVendorName: string | null
   /** Populated only when `entryId !== null` -- the matched entry's
    * department, and stage-3 (Classify) options scoped to that department
    * (same pattern as app/(app)/entries/[id]/page.tsx). */

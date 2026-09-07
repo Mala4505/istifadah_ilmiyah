@@ -188,6 +188,7 @@ export const ExtractionForm = memo(forwardRef(function ExtractionForm(
     disabled,
     onFieldEnter,
     vendorId,
+    linkedVendorName,
     vendorAutocompleteOpen,
     onVendorAutocompleteOpenChange,
     onVendorSelect,
@@ -213,6 +214,10 @@ export const ExtractionForm = memo(forwardRef(function ExtractionForm(
     disabled: boolean
     onFieldEnter: (target: HTMLElement) => void
     vendorId: number | null
+    /** The linked vendor's own display name (null when nothing is linked) --
+     *  labels the "Linked vendor" picker's trigger. The vendor_name
+     *  transcription is edited in its own field now (split vendor UI). */
+    linkedVendorName: string | null
     vendorAutocompleteOpen: boolean
     onVendorAutocompleteOpenChange: (open: boolean) => void
     onVendorSelect: (vendor: VendorSearchResult) => void
@@ -408,11 +413,6 @@ export const ExtractionForm = memo(forwardRef(function ExtractionForm(
     }
   }
 
-  const vendorNameUncertain = headerUncertainty('vendorName')
-  const vendorNameUncertainIndex = uncertainIndexOf(vendorNameUncertain)
-  const vendorNamePageLabel = headerPageLabel(vendorNameUncertain)
-  const vendorNameOnCurrentPage = isOnCurrentPage(vendorNameUncertain)
-
   // Plan §5/§6: whether the whole bill spans more than one page -- drives both
   // the line-items caption and the multi-page fallback in headerPageLabel.
   const isMultiPage = pageNumberStart !== null && pageNumberEnd !== null && pageNumberStart !== pageNumberEnd
@@ -424,27 +424,33 @@ export const ExtractionForm = memo(forwardRef(function ExtractionForm(
   return (
     <div ref={ref} className="flex h-full min-w-0 flex-1 flex-col gap-4 overflow-y-auto p-1">
       <section className="grid grid-cols-2 gap-3 rounded-md border border-border p-3">
+        {/* Split vendor UI (2026-09-07): the vendor name is a plain editable
+            field like every other transcribed value -- when OCR misreads it,
+            the reviewer just fixes the text (it flows to vendor_name_verified
+            via buildSavePayload). Linking a vendor *entity* is the separate
+            control below and never touches this text (plan §2.4). */}
+        <div className="col-span-2">
+          <Field label="Vendor name" disabled={disabled} onKeyDown={handleEnter}
+            value={header.vendorName} onChange={(v) => onHeaderChange('vendorName', v)}
+            uncertain={headerUncertainty('vendorName')} uncertainIndex={uncertainIndexOf(headerUncertainty('vendorName'))}
+            uncertainOnCurrentPage={isOnCurrentPage(headerUncertainty('vendorName'))}
+            edited={headerEdited('vendorName')} onJumpToPage={onJumpToPage} pageLabel={headerPageLabel(headerUncertainty('vendorName'))} />
+        </div>
         <div className="col-span-2 flex flex-col gap-1.5">
           <Label>
-            Vendor
-            {vendorNamePageLabel ? (
-              <span className="ml-1 text-xs font-normal text-muted-foreground">· {vendorNamePageLabel}</span>
-            ) : null}
-            {vendorNameUncertain ? (
-              <span className="ml-1 text-orange-500" title="Model was uncertain about this value">●</span>
-            ) : null}
+            Linked vendor
+            <span className="ml-1 text-xs font-normal text-muted-foreground">
+              · for rate benchmarking; optional, and separate from the name above
+            </span>
           </Label>
           <VendorAutocomplete
-            value={header.vendorName}
+            value={linkedVendorName ?? ''}
+            searchSeed={header.vendorName}
             selectedVendorId={vendorId}
             open={vendorAutocompleteOpen}
             onOpenChange={onVendorAutocompleteOpenChange}
             onSelect={onVendorSelect}
             fieldIndex={0}
-            uncertain={!!vendorNameUncertain}
-            uncertainIndex={vendorNameUncertainIndex}
-            onCurrentPage={vendorNameOnCurrentPage}
-            onFocus={() => vendorNameUncertain && onJumpToPage?.(vendorNameUncertain.pageNumber)}
           />
         </div>
         <Field label="GSTIN" disabled={disabled} onKeyDown={handleEnter}

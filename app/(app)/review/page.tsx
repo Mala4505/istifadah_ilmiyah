@@ -597,6 +597,20 @@ async function loadDocumentDetail(
     entryHubStatusCode = hubStatuses.find((h) => h.id === entry.hub_status_id)?.code ?? null
   }
 
+  // Split vendor UI (2026-09-07): the review form edits vendor_name (the
+  // transcription) and vendor_id (the linked entity) as two separate controls.
+  // The link picker's trigger shows the linked vendor's own name, which isn't
+  // on the entry row -- one lookup here, only when something is actually linked.
+  let linkedVendorName: string | null = null
+  if (entry?.vendor_id != null) {
+    const { data: linkedVendor } = await supabase
+      .from('vendor')
+      .select('display_name')
+      .eq('id', entry.vendor_id)
+      .maybeSingle()
+    linkedVendorName = (linkedVendor?.display_name as string | undefined) ?? null
+  }
+
   // Stage 3 (Classify, §8) options, scoped to the matched entry's
   // department -- same pattern as app/(app)/entries/[id]/page.tsx. Also
   // scoped to the selected event's membership (event-scoping-and-review-
@@ -881,6 +895,7 @@ async function loadDocumentDetail(
     entryInvoiceNumber: entry?.invoice_number ?? null,
     entryAmount: entry?.amount ?? null,
     entryVendorId: entry?.vendor_id ?? null,
+    linkedVendorName,
     entryDepartmentId: entry?.department_id ?? null,
     entryDepartmentName,
     entryAdminHeadId: entry?.admin_head_id ?? null,

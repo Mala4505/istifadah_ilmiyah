@@ -30,6 +30,7 @@ const UNCERTAIN_OFF_PAGE_CLASS = 'ring-1 ring-orange-300 opacity-60 dark:ring-or
 export const VendorAutocomplete = forwardRef(function VendorAutocomplete(
   {
     value,
+    searchSeed,
     selectedVendorId,
     onSelect,
     open,
@@ -40,8 +41,14 @@ export const VendorAutocomplete = forwardRef(function VendorAutocomplete(
     onCurrentPage = true,
     onFocus,
   }: {
-    /** Current display text -- usually the OCR/verified vendor_name field. */
+    /** Trigger label -- the linked vendor's own name, or '' when nothing is
+     *  linked (split vendor UI: the vendor_name transcription is edited in its
+     *  own field now, not here). */
     value: string
+    /** What to prefill the search box with when the popover opens -- the OCR/
+     *  edited vendor_name, so linking is usually one keystroke-free glance.
+     *  Falls back to `value` when not given. */
+    searchSeed?: string
     selectedVendorId: number | null
     onSelect: (vendor: VendorSearchResult) => void
     open: boolean
@@ -76,8 +83,8 @@ export const VendorAutocomplete = forwardRef(function VendorAutocomplete(
 
   useEffect(() => {
     if (!open) return
-    setQuery(value ?? '')
-  }, [open, value])
+    setQuery(searchSeed ?? value ?? '')
+  }, [open, value, searchSeed])
 
   useEffect(() => {
     if (!open) return
@@ -118,7 +125,7 @@ export const VendorAutocomplete = forwardRef(function VendorAutocomplete(
           onFocus={onFocus}
           onClick={() => onOpenChange(true)}
         >
-          <span className="truncate">{value || 'Vendor not set'}</span>
+          <span className="truncate">{value || 'Not linked'}</span>
           <ChevronsUpDown className="h-4 w-4 shrink-0 opacity-50" />
         </Button>
       </PopoverTrigger>

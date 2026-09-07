@@ -393,6 +393,13 @@ export function ReviewWorkspace({
 
   const [lineItems, setLineItems] = useState<LineItemFormState[]>(() => buildLineItemState(detail))
   const [vendorId, setVendorId] = useState<number | null>(detail.entryVendorId)
+  // Split vendor UI: the linked vendor's own name, for the "Linked vendor"
+  // picker's trigger. Seeded from the server (detail.linkedVendorName) and
+  // updated in handleVendorSelect when the reviewer picks a different one --
+  // handleVendorSelect doesn't router.refresh(), so this can't wait on a
+  // reload. Distinct from header.vendorName, which is the editable
+  // transcription and is never touched by a vendor link (plan §2.4).
+  const [linkedVendorName, setLinkedVendorName] = useState<string | null>(detail.linkedVendorName)
   const [vendorAutocompleteOpen, setVendorAutocompleteOpen] = useState(false)
 
   // 5.2: same stability requirement as onHeaderChange above -- ExtractionForm
@@ -503,6 +510,7 @@ export function ReviewWorkspace({
     setNotes(freshHeader.notes)
     setLineItems(buildLineItemState(detail))
     setVendorId(detail.entryVendorId)
+    setLinkedVendorName(detail.linkedVendorName)
     setUncertainStepIndex(null)
     hasEditedRef.current = false
     didInitialFocusRef.current = false
@@ -1233,8 +1241,10 @@ export function ReviewWorkspace({
   function handleVendorSelect(vendor: VendorSearchResult) {
     // §2.4: linking a vendor must never overwrite what OCR actually read off
     // the bill -- header.vendorName (and vendorGstin) stay exactly as
-    // extracted, regardless of which vendor gets linked.
+    // extracted, regardless of which vendor gets linked. Only the separate
+    // "Linked vendor" trigger label follows the pick.
     setVendorId(vendor.id)
+    setLinkedVendorName(vendor.displayName)
 
     const rawName = header.vendorName.trim()
     if (!rawName) return // nothing to learn from an empty OCR field
@@ -1773,6 +1783,7 @@ export function ReviewWorkspace({
             disabled={formDisabled}
             onFieldEnter={handleFieldEnter}
             vendorId={vendorId}
+            linkedVendorName={linkedVendorName}
             vendorAutocompleteOpen={vendorAutocompleteOpen}
             onVendorAutocompleteOpenChange={setVendorAutocompleteOpen}
             onVendorSelect={handleVendorSelect}
