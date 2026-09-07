@@ -342,21 +342,20 @@ export default async function DocumentsPage({
     }
   })
 
-  // Scope filter (Direction B). RLS decides what's *visible*; this decides
-  // which slice of the visible set the header shows, mirroring /review's
-  // URL-param scope. Counts are over the full visible set so the segmented
-  // control's hints stay honest regardless of the active tab.
+  // Scope filter. RLS decides what's *visible*; this decides which slice of
+  // the visible set the header shows. Strict admin scoping (2026-09-07): a
+  // non-superadmin admin's RLS already limits them to just their own assigned
+  // documents, so there is nothing left to slice — only a superadmin gets an
+  // in-page scope control (everyone / mine / unassigned / per-person). Counts
+  // are over the full visible set so the segmented control's hints stay
+  // honest regardless of the active tab.
   const assigneeParam =
     isSA && typeof sp.assignee === 'string' && sp.assignee.trim() !== '' ? sp.assignee.trim() : null
   const scope: DocumentScope = (() => {
+    if (!isSA) return 'all' // no control and no filtering for a plain admin — RLS is the whole gate
     const raw = sp.scope
     if (raw === 'mine' || raw === 'unassigned') return raw
-    if (raw === 'everyone' && isSA) return 'everyone'
-    if (raw === 'all' && !isSA) return 'all'
-    // Admin default is `all` (their assigned + the unassigned pool) so a fresh
-    // visit — and rollout day, when every document is still unassigned —
-    // shows a populated inbox rather than an empty "Mine".
-    return isSA ? 'everyone' : 'all'
+    return 'everyone'
   })()
 
   const isAssignedToMe = (d: InboxDocumentView) => d.assignees.some((a) => a.staffId === staff.userId)
@@ -366,10 +365,9 @@ export default async function DocumentsPage({
     everyone: inboxDocuments.length,
   }
 
-  // Only admin-or-above get a scope: a `dept` viewer is never an assignee, so
-  // applying the `mine` default to them would empty their inbox. They keep
-  // the full RLS-scoped list and no scope control.
-  const visibleDocuments = !canAct
+  // Plain admin and dept both see exactly their RLS-scoped list with no
+  // control. Only a superadmin filters in-page.
+  const visibleDocuments = !isSA
     ? inboxDocuments
     : assigneeParam
       ? inboxDocuments.filter((d) => d.assignees.some((a) => a.staffId === assigneeParam))
@@ -384,12 +382,12 @@ export default async function DocumentsPage({
     : null
   const headerLabel = assigneeParam
     ? `Assigned to ${assigneeName ?? 'someone'}`
-    : scope === 'mine'
+    : !isSA
       ? 'Your assigned'
-      : scope === 'unassigned'
-        ? 'Unassigned'
-        : scope === 'all'
-          ? 'Your inbox'
+      : scope === 'mine'
+        ? 'Your assigned'
+        : scope === 'unassigned'
+          ? 'Unassigned'
           : 'All documents'
 
   const queueStalled = Boolean(
@@ -403,9 +401,8 @@ export default async function DocumentsPage({
       truncated={docsTruncated}
       docsLimit={docsLimit}
       scopeControl={
-        canAct ? (
+        isSA ? (
           <AssignmentScope
-            isSuperadmin={isSA}
             scope={scope}
             assigneeId={assigneeParam}
             staff={assignableStaff}

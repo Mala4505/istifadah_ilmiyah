@@ -19,6 +19,7 @@
 import { revalidatePath } from 'next/cache'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { getStaffContext, requireAdminOrAbove } from '@/lib/export/auth'
+import { triggerRemoteWorker } from '@/lib/jobs/trigger-worker'
 import type { JobStatus } from '@/lib/jobs/queue'
 
 const BUCKET = 'board-packs'
@@ -100,6 +101,10 @@ export async function enqueueBoardPack(): Promise<BoardPackActionResult> {
     .select('id')
     .single()
   if (error || !inserted) return { ok: false, error: 'Could not queue the board pack. Try again.' }
+
+  // Same out-of-process drain as document extraction: nudge the GitHub Actions
+  // worker to run now rather than on its scheduled tick. Best-effort.
+  await triggerRemoteWorker(`board_pack job ${inserted.id}`)
 
   revalidatePath('/reports/brief')
   return { ok: true, jobId: inserted.id as number }

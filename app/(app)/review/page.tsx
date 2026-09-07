@@ -76,11 +76,11 @@ export default async function ReviewPage({
     )
   }
 
-  // Document-assignment (2026-08-29): a non-superadmin admin's queue is
-  // already RLS-scoped to their own assigned + pool documents, so the only
-  // change for them is the header label. A superadmin sees the whole queue
-  // and gets the reviewer filter (QueueAssigneeFilter) next to the
-  // Unverified/All toggle.
+  // Document-assignment (2026-08-29; strict admin scoping 2026-09-07): a
+  // non-superadmin admin's queue is RLS-scoped to just the documents assigned
+  // to them (private.can_see_source_document), so the only change for them is
+  // the header label. A superadmin sees the whole queue and gets the reviewer
+  // filter (QueueAssigneeFilter) next to the Unverified/All toggle.
   const isSuperadminReviewer = isSuperadmin(staff.role)
   const queueHeading = isSuperadminReviewer ? 'Review queue' : 'Your review queue'
 

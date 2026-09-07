@@ -124,6 +124,20 @@ const serverSchema = z.object({
     .optional()
     .default('false')
     .transform((v) => v === 'true'),
+  // Lets a Route Handler / Server Action nudge the GitHub Actions worker
+  // (.github/workflows/worker.yml) to start *now* — by firing a
+  // `repository_dispatch` — instead of the queued job waiting for that
+  // workflow's next scheduled safety-net run. Both optional: unset (local dev,
+  // or before the one-time GitHub setup in docs/job-worker-github-actions.md)
+  // makes lib/jobs/trigger-worker.ts's triggerRemoteWorker() a quiet no-op and
+  // nothing else changes — the scheduled workflow run still drains the queue,
+  // just less promptly.
+  //   GITHUB_WORKER_REPO            "owner/repo" of this repository
+  //   GITHUB_WORKER_DISPATCH_TOKEN  a fine-grained PAT scoped to this repo with
+  //                                 Contents: Read and write (what the
+  //                                 /dispatches endpoint requires)
+  GITHUB_WORKER_REPO: z.string().optional().default(''),
+  GITHUB_WORKER_DISPATCH_TOKEN: z.string().optional().default(''),
 })
 
 function readServerEnv() {
@@ -146,6 +160,8 @@ function readServerEnv() {
     OCR_AUTO_ESCALATION: process.env.OCR_AUTO_ESCALATION,
     OCR_USE_BATCH_API: process.env.OCR_USE_BATCH_API,
     INGEST_INLINE_EXTRACTION: process.env.INGEST_INLINE_EXTRACTION,
+    GITHUB_WORKER_REPO: process.env.GITHUB_WORKER_REPO,
+    GITHUB_WORKER_DISPATCH_TOKEN: process.env.GITHUB_WORKER_DISPATCH_TOKEN,
   })
   if (!parsed.success) {
     throw new Error(

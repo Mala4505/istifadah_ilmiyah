@@ -11,9 +11,13 @@
 -- every insert/update/delete for no read benefit over the constraint's own
 -- index.
 --
--- NOTE for whoever applies this: DROP INDEX CONCURRENTLY cannot run inside a
--- transaction block, same caveat as the CREATE INDEX CONCURRENTLY statements
--- elsewhere in this plan (see 20260904000001's header note). Not verified
--- against a live plan -- review before applying.
+-- NOTE: unlike CREATE INDEX CONCURRENTLY (which scans/builds over the whole
+-- table and so needs CONCURRENTLY to avoid blocking writes for a long time),
+-- a plain DROP INDEX only removes a catalog entry -- it takes a brief
+-- ACCESS EXCLUSIVE lock regardless of table size, comparable to any other DDL
+-- statement in a migration. `supabase db push` runs each migration inside a
+-- transaction, and CONCURRENTLY cannot run inside one (SQLSTATE 25001) -- so
+-- this deliberately omits it, rather than needing a special non-transactional
+-- apply path. Not verified against a live plan -- review before applying.
 
-DROP INDEX CONCURRENTLY IF EXISTS public.document_extraction_document_idx;
+DROP INDEX IF EXISTS public.document_extraction_document_idx;

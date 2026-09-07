@@ -1,0 +1,76 @@
+# Runs worker/index.ts (the job-queue drain loop, MASTER-PLAN §3.11) as a
+# GitHub Actions job.
+#
+# Why this and not a Vercel function: on Vercel Hobby the platform hard-kills
+# any function at ~10s, and a real extraction bundle is 15-45s
+# (docs/ocr-execution-decision.md). So neither the upload route
+# (INGEST_INLINE_EXTRACTION, now off) nor /api/jobs/tick can finish an
+# extraction in-process. A GitHub Actions job has no such wall-clock limit
+# (only this workflow's `timeout-minutes`), so it runs the *same* handler code
+# (lib/jobs/handlers/) to completion. This supersedes the old cron-tick.yml,
+# which curl'd /api/jobs/tick and therefore hit the very limit it was meant to
+# work around.
+#
+# Triggers:
+#   repository_dispatch (run-worker)  fired by lib/jobs/trigger-worker.ts right
+#                                     after a document upload or a "generate
+#                                     board pack" click, so extraction starts
+#                                     within seconds. This is the primary path.
+#   schedule                          a sparse safety net: retries a job that
+#                                     failed or was left 'running' by a killed
+#                                     run, and covers the self-rescheduling
+#                                     board_pack / flags_run jobs. Kept
+#                                     infrequent on purpose — see the minutes
+#                                     budget note in
+#                                     docs/job-worker-github-actions.md.
+#   workflow_dispatch                 manual "Run workflow" button.
+#
+# One-time setup (secrets/variables, and the PAT the app uses to fire the
+# dispatch) is documented in docs/job-worker-github-actions.md.
+name: Job queue worker
+
+on:
+  repository_dispatch:
+    types: [run-worker]
+  schedule:
+    - cron: '0 */3 * * *' # every 3 hours — backstop only; uploads trigger their own run
+  workflow_dispatch: {}
+
+# Never run two drains at once (each already claims rows with `for update skip
+# locked`, but overlapping runs just waste minutes). Queue a new trigger behind
+# a run in progress rather than cancelling it mid-extraction.
+concurrency:
+  group: job-queue-worker
+  cancel-in-progress: false
+
+jobs:
+  worker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Drain the job queue
+        env:
+          # Public schema (lib/env.ts) — evaluated at worker startup too.
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY }}
+          NEXT_PUBLIC_SITE_URL: ${{ vars.SITE_URL }}
+          NEXT_PUBLIC_SENTRY_DSN: ${{ secrets.NEXT_PUBLIC_SENTRY_DSN }}
+          # Server schema (lib/env.server.ts).
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          COMMUNITY_GSTIN: ${{ vars.COMMUNITY_GSTIN }}
+          COMMUNITY_NAME: ${{ vars.COMMUNITY_NAME }}
+          OCR_AUTO_ESCALATION: ${{ vars.OCR_AUTO_ESCALATION }}
+          OCR_USE_BATCH_API: ${{ vars.OCR_USE_BATCH_API }}
+          WORKER_ID: github-actions
+          # Bounded-run mode: drain what's queued, then exit 0.
+          WORKER_EXIT_WHEN_IDLE: 'true'
+          WORKER_MAX_RUNTIME_MS: '600000'
+        run: npm run worker:ci

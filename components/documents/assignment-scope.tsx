@@ -7,10 +7,11 @@
  * action: scope is a plain URL param, so this just pushes `?scope=` /
  * `?assignee=` and lets the RSC re-read `searchParams` and re-filter.
  *
- *   admin       — All (default: their assigned + the unassigned pool) /
- *                 Mine / Unassigned
- *   superadmin  — Everyone (default) / Mine / Unassigned, plus an
- *                 "Assigned to <person>" picker for a single-person view
+ * Superadmin only (strict admin scoping, 2026-09-07): a plain admin's RLS
+ * limits them to their own assigned documents, so there is nothing to slice
+ * and the page renders no control for them. This shows Everyone (default) /
+ * Mine / Unassigned, plus an "Assigned to <person>" picker for a
+ * single-person view.
  */
 
 import { useTransition } from 'react'
@@ -22,13 +23,11 @@ import type { AssignableStaff } from '@/lib/assignment/queries'
 export type DocumentScope = 'all' | 'mine' | 'unassigned' | 'everyone'
 
 export function AssignmentScope({
-  isSuperadmin,
   scope,
   assigneeId,
   staff,
   counts,
 }: {
-  isSuperadmin: boolean
   scope: DocumentScope
   /** A single-person filter (superadmin only); null when a plain scope is active. */
   assigneeId: string | null
@@ -47,10 +46,9 @@ export function AssignmentScope({
   function selectScope(next: DocumentScope) {
     if (isPending) return
     if (next === scope && assigneeId === null) return
-    // The admin default is `all`; the superadmin default is `everyone`. Drop
-    // the param entirely when it matches the default so the URL stays clean.
-    const isDefault = isSuperadmin ? next === 'everyone' : next === 'all'
-    go(isDefault ? '' : `scope=${next}`)
+    // The superadmin default is `everyone`. Drop the param entirely when it
+    // matches the default so the URL stays clean.
+    go(next === 'everyone' ? '' : `scope=${next}`)
   }
 
   function selectAssignee(id: string) {
@@ -58,17 +56,11 @@ export function AssignmentScope({
     go(id ? `assignee=${id}` : '')
   }
 
-  const options: Array<[DocumentScope, string, number | null]> = isSuperadmin
-    ? [
-        ['everyone', 'Everyone', counts.everyone],
-        ['mine', 'Mine', counts.mine],
-        ['unassigned', 'Unassigned', counts.unassigned],
-      ]
-    : [
-        ['all', 'All', counts.everyone],
-        ['mine', 'Mine', counts.mine],
-        ['unassigned', 'Unassigned', counts.unassigned],
-      ]
+  const options: Array<[DocumentScope, string, number | null]> = [
+    ['everyone', 'Everyone', counts.everyone],
+    ['mine', 'Mine', counts.mine],
+    ['unassigned', 'Unassigned', counts.unassigned],
+  ]
 
   return (
     <div className="flex flex-wrap items-center gap-2">
@@ -96,7 +88,7 @@ export function AssignmentScope({
         })}
       </div>
 
-      {isSuperadmin && staff.length > 0 && (
+      {staff.length > 0 && (
         <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
           <span>Assigned to</span>
           <SelectNative

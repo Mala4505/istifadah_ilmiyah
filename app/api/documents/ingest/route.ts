@@ -6,6 +6,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { putDocument } from '@/lib/storage'
 import { getPdfPageCount, looksLikePdf, sha256Hex } from '@/lib/pdf'
 import { runJobById } from '@/lib/jobs/drain'
+import { triggerRemoteWorker } from '@/lib/jobs/trigger-worker'
 import { serverEnv } from '@/lib/env.server'
 import { getSelectedEvent, isEventMutable } from '@/lib/events/current'
 import { getMaxUploadPages } from '@/lib/upload-limits'
@@ -405,9 +406,16 @@ async function handlePOST(request: NextRequest) {
     extractionOutcome = await runJobById(workerId, insertedJob.id as number)
     console.log(`[ingest] document ${documentId}: own extract job ${insertedJob.id} -> ${extractionOutcome}`)
   } else {
+    // Extraction runs out-of-process: worker/index.ts as a GitHub Actions job
+    // (.github/workflows/worker.yml), which — unlike this route on Vercel
+    // Hobby — has no ~10s wall-clock kill. Nudge that workflow to start now
+    // rather than waiting for its scheduled safety-net run. Best-effort: the
+    // job is already queued, and a failed/absent dispatch just means the
+    // scheduled run picks it up later. See docs/job-worker-github-actions.md.
+    const trigger = await triggerRemoteWorker(`extract_document for source_document ${documentId}`)
     console.log(
       `[ingest] document ${documentId}: extract job ${insertedJob.id} left for the worker ` +
-        '(INGEST_INLINE_EXTRACTION=false)'
+        `(INGEST_INLINE_EXTRACTION=false; remote-worker trigger: ${trigger})`
     )
   }
 

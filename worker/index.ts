@@ -90,6 +90,23 @@ const ERROR_BACKOFF_MS = 5000
 // full-table sweep on every 2-second poll.
 const SWEEP_INTERVAL_MS = 5 * 60 * 1000
 
+// Optional bounded-run controls, for running this exact loop as a one-shot
+// GitHub Actions job (.github/workflows/worker.yml) instead of a persistent
+// service. Both unset -> the process loops forever, which is the Windows
+// Service behaviour (§13) and the local `npm run worker` behaviour, unchanged.
+//   WORKER_MAX_RUNTIME_MS  hard wall-clock cap; the loop stops before the next
+//                          claim once this elapses (a job already in flight
+//                          still finishes — the check is between iterations).
+//   WORKER_EXIT_WHEN_IDLE  once the queue polls empty IDLE_EXIT_EMPTY_POLLS
+//                          times running, exit 0 instead of sleeping forever.
+const MAX_RUNTIME_MS = Number(process.env.WORKER_MAX_RUNTIME_MS) || 0
+const EXIT_WHEN_IDLE = process.env.WORKER_EXIT_WHEN_IDLE === 'true'
+// Two, not one: the startup sweep can reclaim a stale 'running' row back to
+// 'queued', so a single empty poll right after startup isn't proof the queue
+// is drained — give the next iteration's claim a chance to see the reclaimed
+// row before deciding to exit.
+const IDLE_EXIT_EMPTY_POLLS = 2
+
 let shuttingDown = false
 let lastSweptAt = 0
 
@@ -200,8 +217,21 @@ async function loopOnce(): Promise<'claimed' | 'empty'> {
 
 async function main(): Promise<void> {
   console.log(`[worker] starting — worker id = ${serverEnv.WORKER_ID}`)
+  if (MAX_RUNTIME_MS || EXIT_WHEN_IDLE) {
+    console.log(
+      `[worker] bounded run — maxRuntimeMs=${MAX_RUNTIME_MS || 'none'}, exitWhenIdle=${EXIT_WHEN_IDLE}`
+    )
+  }
+
+  const startedAt = Date.now()
+  let consecutiveEmpty = 0
 
   while (!shuttingDown) {
+    if (MAX_RUNTIME_MS && Date.now() - startedAt >= MAX_RUNTIME_MS) {
+      console.log(`[worker] reached WORKER_MAX_RUNTIME_MS (${MAX_RUNTIME_MS}ms) — exiting`)
+      break
+    }
+
     await maybeSweep()
 
     let outcome: 'claimed' | 'empty'
@@ -214,8 +244,15 @@ async function main(): Promise<void> {
       continue
     }
 
-    if (outcome === 'empty' && !shuttingDown) {
-      await sleep(EMPTY_POLL_BACKOFF_MS)
+    if (outcome === 'empty') {
+      consecutiveEmpty++
+      if (EXIT_WHEN_IDLE && consecutiveEmpty >= IDLE_EXIT_EMPTY_POLLS) {
+        console.log('[worker] queue drained — exiting (WORKER_EXIT_WHEN_IDLE)')
+        break
+      }
+      if (!shuttingDown) await sleep(EMPTY_POLL_BACKOFF_MS)
+    } else {
+      consecutiveEmpty = 0
     }
   }
 
