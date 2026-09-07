@@ -75,6 +75,19 @@ export interface PdfViewerHandle {
 // drags the pane divider. `p-3` on the content wrapper below is 12px/side.
 const CONTENT_PADDING_PX = 24
 
+// Runaway-zoom fix: the render effect measures the NON-scrolling pane column
+// (paneMeasureRef), not the overflow:auto scroll area, and always subtracts a
+// scrollbar's width on top of the padding -- whether or not a vertical
+// scrollbar is currently showing. Measuring the scroll area directly made the
+// fit-width base scale depend on a number the render itself changes: a zoomed
+// page taller than the pane shows the scrollbar, which narrows the measured
+// width, which re-renders the page smaller, which hides the scrollbar, which
+// widens the width... the page pulsing / "zooming on its own." A fixed
+// allowance against a container the canvas can't resize breaks that loop
+// outright. 17px comfortably covers a classic Windows/Linux scrollbar (15-16px)
+// with a pixel or two to spare so the page never quite reaches the edge.
+const SCROLLBAR_ALLOWANCE_PX = 17
+
 // Minimal shape of what this component actually calls, so it doesn't need to
 // import pdfjs-dist's full type surface (imported dynamically below anyway).
 interface PdfPageProxy {
@@ -200,7 +213,11 @@ export const PdfViewer = memo(forwardRef<
 
   const docRef = useRef<PdfDocumentProxy | null>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
-  const contentRef = useRef<HTMLDivElement | null>(null)
+  // The pane column that holds the scroll area -- it has no overflow of its
+  // own, so its width is pure flex layout (pane divider position minus the
+  // thumbnail rail) and the canvas can never resize it. This is what the
+  // fit-width measurement observes; see SCROLLBAR_ALLOWANCE_PX.
+  const paneMeasureRef = useRef<HTMLDivElement | null>(null)
   const thumbCanvasRefs = useRef<Map<number, HTMLCanvasElement>>(new Map())
   // 5.9: which thumbnail pages have already been rendered (or have a render
   // in flight) -- the load-bearing duplicate-render guard pdf.js needs (a
@@ -383,29 +400,24 @@ export const PdfViewer = memo(forwardRef<
     // remount -- its value is never read.
   }, [sourceDocumentId, retryNonce])
 
-  // Measure the content wrapper's own width and re-measure on resize -- the
-  // wrapper stays mounted at every pane mode/width (never conditionally
-  // rendered, so pdf.js's document never tears down -- checklist 3.7), only
-  // its CSS width changes as the review workspace's divider moves or the
-  // pane mode cycles. requestAnimationFrame coalesces bursts of resize
-  // notifications during an active drag into one measurement per frame.
+  // Measure the pane column's width and re-measure on resize. It stays
+  // mounted at every pane mode/width (never conditionally rendered, so
+  // pdf.js's document never tears down -- checklist 3.7); its width changes
+  // only as the review workspace's divider moves or the pane mode cycles.
+  // Deliberately NOT the overflow:auto scroll area (contentRef) -- see
+  // SCROLLBAR_ALLOWANCE_PX: measuring that created a scrollbar-toggle feedback
+  // loop that read as the page zooming by itself. requestAnimationFrame
+  // coalesces bursts of resize notifications during an active drag into one
+  // measurement per frame; the >1px guard drops the sub-pixel jitter a flex
+  // layout can otherwise emit every frame.
   useEffect(() => {
-    const el = contentRef.current
+    const el = paneMeasureRef.current
     if (!el) return
     let frame: number | null = null
     const observer = new ResizeObserver((entries) => {
       const width = entries[0]?.contentRect.width
       if (width === undefined) return
       if (frame !== null) cancelAnimationFrame(frame)
-      // Runaway-zoom fix: round and drop sub-pixel changes. A zoomed page
-      // that's taller than the pane toggles the vertical scrollbar, and with
-      // a classic (space-taking) scrollbar that toggle changes contentRect
-      // width by the scrollbar's ~15px -> re-render -> the page just fits ->
-      // scrollbar hides -> width back up -> re-render bigger -> scrollbar
-      // reappears, a loop the user sees as the page pulsing in and out. The
-      // `scrollbar-gutter: stable` on the wrapper below is the real fix (the
-      // gutter is always reserved, so the toggle no longer moves the width);
-      // this guard is the backstop for any residual jitter.
       frame = requestAnimationFrame(() =>
         setContainerWidth((prev) => (Math.abs(prev - width) < 1 ? prev : Math.round(width)))
       )
@@ -434,7 +446,11 @@ export const PdfViewer = memo(forwardRef<
       const page = await doc.getPage(pageNumber)
       if (cancelled) return
       const naturalViewport = page.getViewport({ scale: 1, rotation })
-      const availableWidth = Math.max(containerWidth - CONTENT_PADDING_PX, 40)
+      // containerWidth is the non-scrolling pane column; subtract the scroll
+      // area's own padding AND a fixed scrollbar allowance so a fit-width page
+      // (zoom 1) never itself triggers the vertical scrollbar it was measured
+      // without -- the toggle that used to feed back into this measurement.
+      const availableWidth = Math.max(containerWidth - CONTENT_PADDING_PX - SCROLLBAR_ALLOWANCE_PX, 40)
       const fitWidthScale = availableWidth / naturalViewport.width
       const viewport = page.getViewport({ scale: fitWidthScale * zoom, rotation })
       const context = canvas.getContext('2d')
@@ -609,13 +625,13 @@ export const PdfViewer = memo(forwardRef<
       : 'Included in extraction'
 
   // L1 (checklist 3.7): one JSX tree for both toolbar states, not two
-  // early-returned branches -- the content wrapper (contentRef, observed by
-  // the ResizeObserver above) and the <canvas> itself (canvasRef, painted by
-  // the render effect above) have to stay the *same* DOM nodes across a
-  // Collapsed toggle. Two separate branches would give each mode its own
-  // copy of both elements: React would unmount/remount them on every toggle,
-  // orphaning the ResizeObserver (its effect only runs once, on the node it
-  // saw at mount) and leaving the fresh canvas unpainted until some other
+  // early-returned branches -- the measured pane column (paneMeasureRef,
+  // observed by the ResizeObserver above) and the <canvas> itself (canvasRef,
+  // painted by the render effect above) have to stay the *same* DOM nodes
+  // across a Collapsed toggle. Two separate branches would give each mode its
+  // own copy of both elements: React would unmount/remount them on every
+  // toggle, orphaning the ResizeObserver (its effect only runs once, on the
+  // node it saw at mount) and leaving the fresh canvas unpainted until some other
   // dependency happened to change. Only the toolbar and thumbnail rail --
   // genuinely different content, not the same element resized -- switch on
   // `collapsed`.
@@ -784,7 +800,7 @@ export const PdfViewer = memo(forwardRef<
           </div>
         ) : null}
 
-        <div className="flex min-h-0 flex-1 flex-col">
+        <div ref={paneMeasureRef} className="flex min-h-0 flex-1 flex-col">
           {/* Redesign (review pane rail): skip/unskip moved out of the
               thumbnail rail and into this compact bar -- one icon-only
               button, gated behind the confirmation Dialog below, instead of
@@ -822,7 +838,7 @@ export const PdfViewer = memo(forwardRef<
             </div>
           ) : null}
 
-          <div ref={contentRef} className="flex-1 overflow-auto p-3" style={{ scrollbarGutter: 'stable' }}>
+          <div className="flex-1 overflow-auto p-3" style={{ scrollbarGutter: 'stable' }}>
             {loading ? (
               // Roughly an A4 page's aspect ratio (1:1.414) -- the canvas below
               // renders at whatever the actual page size turns out to be, but
