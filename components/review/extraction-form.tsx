@@ -20,7 +20,7 @@ import type { Ref } from 'react'
 import { Fragment, forwardRef, memo, useId, useState } from 'react'
 import { ChevronRight } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
+import { Input, type InputProps } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import { formatBinding, type Keymap } from '@/lib/shortcuts/config'
@@ -117,6 +117,61 @@ export interface ValidationErrorSets {
 }
 
 const EMPTY_VALIDATION_ERRORS: ValidationErrorSets = { header: new Set(), lineItems: new Map() }
+
+/**
+ * Indian-grouped, ₹-prefixed rendering of a numeric field's text — shown on the
+ * money inputs (line-item rate/amount, header subtotal/tax/total) whenever
+ * they're NOT focused, so every rupee figure reads the same way as the tally
+ * footer instead of a bare run of digits. Falls back to the raw text unchanged
+ * when it's empty or can't be parsed, so a genuinely unparseable value still
+ * shows its red error ring against exactly what the reviewer typed. Never
+ * touches form state — `parseNum` already strips `₹` and commas at save time
+ * (review-workspace.tsx), and the "edited from OCR" comparison keeps working
+ * against the untouched raw value.
+ */
+function groupINR(raw: string): string {
+  const t = raw.trim()
+  if (t === '') return raw
+  const n = Number(t.replace(/^₹\s*/, '').replace(/,/g, ''))
+  if (!Number.isFinite(n)) return raw
+  return new Intl.NumberFormat('en-IN', {
+    style: 'currency',
+    currency: 'INR',
+    minimumFractionDigits: n % 1 === 0 ? 0 : 2,
+    maximumFractionDigits: 2,
+  }).format(n)
+}
+
+/**
+ * `Input` for a rupee field: identical in every way, except it displays the
+ * value Indian-grouped (groupINR) while blurred and reverts to the raw,
+ * comma-free text on focus so typing/parsing is never fought mid-keystroke —
+ * the same "plain strings, parse at save" contract this file's header comment
+ * describes, just with a friendlier resting state. All other props (ring
+ * className, title, data-* attributes, onFocus jump-to-page, onKeyDown) pass
+ * straight through.
+ */
+const MoneyInput = forwardRef<HTMLInputElement, InputProps & { value: string }>(
+  function MoneyInput({ value, onFocus, onBlur, ...props }, ref) {
+    const [focused, setFocused] = useState(false)
+    return (
+      <Input
+        {...props}
+        ref={ref}
+        inputMode="decimal"
+        value={focused ? value : groupINR(value)}
+        onFocus={(e) => {
+          setFocused(true)
+          onFocus?.(e)
+        }}
+        onBlur={(e) => {
+          setFocused(false)
+          onBlur?.(e)
+        }}
+      />
+    )
+  }
+)
 
 /** Maps HeaderFormState's camelCase keys to the wire field names
  * UNCERTAIN_FIELD_NAMES uses (lib/extraction-schema.ts) — 'notes' has no
@@ -477,17 +532,17 @@ export const ExtractionForm = memo(forwardRef(function ExtractionForm(
           uncertain={headerUncertainty('invoiceDate')} uncertainIndex={uncertainIndexOf(headerUncertainty('invoiceDate'))}
           uncertainOnCurrentPage={isOnCurrentPage(headerUncertainty('invoiceDate'))}
           edited={headerEdited('invoiceDate')} onJumpToPage={onJumpToPage} warning={invoiceDateWarning} pageLabel={headerPageLabel(headerUncertainty('invoiceDate'))} />
-        <Field label="Subtotal" inputMode="decimal" disabled={disabled} onKeyDown={handleEnter}
+        <Field label="Subtotal" inputMode="decimal" money disabled={disabled} onKeyDown={handleEnter}
           value={header.subtotal} onChange={(v) => onHeaderChange('subtotal', v)}
           uncertain={headerUncertainty('subtotal')} uncertainIndex={uncertainIndexOf(headerUncertainty('subtotal'))}
           uncertainOnCurrentPage={isOnCurrentPage(headerUncertainty('subtotal'))}
           edited={headerEdited('subtotal')} error={headerError('subtotal')} onJumpToPage={onJumpToPage} pageLabel={headerPageLabel(headerUncertainty('subtotal'))} />
-        <Field label="Tax amount" inputMode="decimal" disabled={disabled} onKeyDown={handleEnter}
+        <Field label="Tax amount" inputMode="decimal" money disabled={disabled} onKeyDown={handleEnter}
           value={header.taxAmount} onChange={(v) => onHeaderChange('taxAmount', v)}
           uncertain={headerUncertainty('taxAmount')} uncertainIndex={uncertainIndexOf(headerUncertainty('taxAmount'))}
           uncertainOnCurrentPage={isOnCurrentPage(headerUncertainty('taxAmount'))}
           edited={headerEdited('taxAmount')} error={headerError('taxAmount')} onJumpToPage={onJumpToPage} pageLabel={headerPageLabel(headerUncertainty('taxAmount'))} />
-        <Field label="Total amount" inputMode="decimal" disabled={disabled} onKeyDown={handleEnter}
+        <Field label="Total amount" inputMode="decimal" money disabled={disabled} onKeyDown={handleEnter}
           value={header.totalAmount} onChange={(v) => onHeaderChange('totalAmount', v)}
           uncertain={headerUncertainty('totalAmount')} uncertainIndex={uncertainIndexOf(headerUncertainty('totalAmount'))}
           uncertainOnCurrentPage={isOnCurrentPage(headerUncertainty('totalAmount'))}
@@ -648,7 +703,7 @@ export const ExtractionForm = memo(forwardRef(function ExtractionForm(
                         ) : null}
                       </td>
                       <td className="min-w-24 px-1 py-1">
-                        <Input inputMode="decimal" disabled={disabled}
+                        <MoneyInput disabled={disabled}
                           aria-label={`Line ${index + 1} rate`}
                           data-uncertain-index={rateUncertainIndex}
                           data-validation-error={rateError ? 'true' : undefined}
@@ -659,7 +714,7 @@ export const ExtractionForm = memo(forwardRef(function ExtractionForm(
                           onChange={(e) => onLineItemChange(item.id, 'rate', e.target.value)} onKeyDown={handleEnter} />
                       </td>
                       <td className="min-w-24 px-1 py-1">
-                        <Input inputMode="decimal" disabled={disabled}
+                        <MoneyInput disabled={disabled}
                           aria-label={`Line ${index + 1} amount`}
                           data-uncertain-index={amountUncertainIndex}
                           data-validation-error={amountError ? 'true' : undefined}
@@ -759,6 +814,7 @@ function Field({
   edited = false,
   error = false,
   warning = null,
+  money = false,
   onJumpToPage,
   pageLabel,
 }: {
@@ -768,6 +824,10 @@ function Field({
   disabled: boolean
   type?: string
   inputMode?: React.HTMLAttributes<HTMLInputElement>['inputMode']
+  /** Render the control as a MoneyInput — Indian-grouped, ₹-prefixed while
+   *  blurred, raw digits on focus. For the rupee header fields (subtotal / tax
+   *  / total), matching the line-item rate & amount cells and the tally footer. */
+  money?: boolean
   onKeyDown: (e: React.KeyboardEvent<HTMLElement>) => void
   /** Present when this field was flagged in uncertain_fields_ocr. */
   uncertain?: UncertainField
@@ -803,6 +863,9 @@ function Field({
   // htmlFor/id pair clicking the label doesn't focus the input and a screen
   // reader announces a bare "edit text". useId() gives a stable SSR-safe id.
   const fieldId = useId()
+  // value is always a string here, so MoneyInput's stricter `value: string` is
+  // satisfied at every call site — the cast just bridges the two prop shapes.
+  const Control = (money ? MoneyInput : Input) as React.ComponentType<InputProps>
   return (
     <div className="flex flex-col gap-1.5">
       <Label htmlFor={fieldId}>
@@ -816,7 +879,7 @@ function Field({
           <span className="ml-1 text-blue-500" title="Edited from the original OCR value">●</span>
         ) : null}
       </Label>
-      <Input
+      <Control
         id={fieldId}
         type={type}
         inputMode={inputMode}
