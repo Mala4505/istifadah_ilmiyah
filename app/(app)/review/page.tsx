@@ -8,6 +8,7 @@ import { QueueScopeToggle } from '@/components/review/queue-scope-toggle'
 import { QueueAssigneeFilter } from '@/components/review/queue-assignee-filter'
 import { listAssignableStaff, type AssignableStaff } from '@/lib/assignment/queries'
 import type {
+  AttachedEntryView,
   LineItemDetail,
   MatchCandidate,
   OpenExceptionSummary,
@@ -17,6 +18,7 @@ import type {
   SiblingBill,
   UncertainField,
 } from '@/lib/review/types'
+import { getBillEntryVariance } from '@/lib/documents/entry-bill-variance'
 import { friendlyErrorMessage } from '@/lib/friendly-error'
 import { isAdminOrAbove, isSuperadmin } from '@/lib/auth/roles'
 import { computeMatchCandidates } from '@/lib/review/match-candidates'
@@ -472,7 +474,7 @@ async function loadDocumentDetail(
   const user = await getCachedUser()
   if (!user) return null
 
-  const [sourceDocRes, extractionRes, lineItemsRes, pagesRes, siblingBillsRes] = await Promise.all([
+  const [sourceDocRes, extractionRes, lineItemsRes, pagesRes, siblingBillsRes, entryLinksRes] = await Promise.all([
     supabase
       .from('source_document')
       .select('id, entry_id, original_filename, match_status, claimed_by, claimed_at')
@@ -506,35 +508,71 @@ async function loadDocumentDetail(
       .select('id, bill_index, entry_id, page_number_start, page_number_end, verified_at')
       .eq('source_document_id', sourceDocumentId)
       .order('bill_index'),
+    // Phase 5 (entries<->bills M:N): this bill's linked entry ids. The RLS
+    // select policy on entry_bill_link scopes per row, so a reviewer only
+    // sees the links they're allowed to.
+    supabase
+      .from('entry_bill_link')
+      .select('entry_id')
+      .eq('document_extraction_id', documentExtractionId),
   ])
 
   const sourceDoc = sourceDocRes.data
   const extraction = extractionRes.data
   if (!sourceDoc || !extraction) return null
 
-  // document_extraction.entry_id is the source of truth for this bill's
-  // match (written per-bill by attachExtractionToEntry,
-  // lib/actions/review.ts); source_document.entry_id is only the
-  // single-bill convenience mirror written by extract.ts, so it's the
-  // fallback here, not the primary read (plan.md D1).
-  const entryId = (extraction.entry_id as number | null) ?? (sourceDoc.entry_id as number | null)
+  // Phase 5 (entries<->bills M:N): the bill's linked entries come from
+  // entry_bill_link, not the scalar document_extraction.entry_id /
+  // source_document.entry_id mirrors (those are the Phase-4-deferred reads,
+  // kept only so legacy single-entry views keep compiling). `entryId` below
+  // is re-derived as the PRIMARY link -- largest amount, id tie-break --
+  // purely for the features still gated on one entry (hub status, Classify
+  // options, exceptions filter).
+  const linkedEntryIds = [
+    ...new Set((entryLinksRes.data ?? []).map((r) => r.entry_id as number)),
+  ]
 
-  const [runRes, entryRes, exceptionsRes, hubStatuses, siblingEntryClassRes] =
+  type LinkedEntryRow = {
+    id: number
+    amount: number | null
+    ubbl_number: string
+    invoice_number: string | null
+    vendor_id: number | null
+    vendor_raw: string | null
+    hub_status_id: number | null
+    department_id: number | null
+    admin_head_id: number | null
+    zone_id: number | null
+    sub_department_id: number | null
+  }
+
+  const [linkedEntriesRes, billEntryVarianceRow] = await Promise.all([
+    linkedEntryIds.length > 0
+      ? supabase
+          .from('entries')
+          .select(
+            'id, amount, ubbl_number, invoice_number, vendor_id, vendor_raw, hub_status_id, department_id, admin_head_id, zone_id, sub_department_id'
+          )
+          .in('id', linkedEntryIds)
+      : Promise.resolve({ data: [] as LinkedEntryRow[] }),
+    getBillEntryVariance(supabase, documentExtractionId),
+  ])
+
+  const linkedEntryRows = (linkedEntriesRes.data ?? []) as LinkedEntryRow[]
+  const primaryEntryRow =
+    linkedEntryRows.length > 0
+      ? [...linkedEntryRows].sort((a, b) => (b.amount ?? 0) - (a.amount ?? 0) || a.id - b.id)[0]!
+      : null
+  const entryId = primaryEntryRow?.id ?? null
+  const entry = primaryEntryRow
+
+  const [runRes, exceptionsRes, hubStatuses, siblingEntryClassRes] =
     await Promise.all([
     extraction.current_extraction_run_id
       ? supabase
           .from('ocr_extraction_run')
           .select('extraction_confidence, legibility, model')
           .eq('id', extraction.current_extraction_run_id as number)
-          .maybeSingle()
-      : Promise.resolve({ data: null }),
-    entryId
-      ? supabase
-          .from('entries')
-          .select(
-            'id, amount, ubbl_number, invoice_number, vendor_id, hub_status_id, department_id, admin_head_id, zone_id, sub_department_id'
-          )
-          .eq('id', entryId)
           .maybeSingle()
       : Promise.resolve({ data: null }),
     supabase
@@ -573,27 +611,40 @@ async function loadDocumentDetail(
   ])
 
   const run = runRes.data as { extraction_confidence: number | null; legibility: 'clear' | 'partial' | 'poor' | null; model: string | null } | null
-  const entry = entryRes.data as {
-    id: number
-    amount: number | null
-    ubbl_number: string
-    invoice_number: string | null
-    vendor_id: number | null
-    hub_status_id: number | null
-    department_id: number | null
-    admin_head_id: number | null
-    zone_id: number | null
-    sub_department_id: number | null
-  } | null
+
+  // Perf audit Phase 2: one cached departments list, looked up by id in JS.
+  // Shared by the primary entry's label AND every entryLinks row.
+  const linkDepartmentIds = [
+    ...new Set(
+      linkedEntryRows.map((e) => e.department_id).filter((x): x is number => x !== null)
+    ),
+  ]
+  const departments = linkDepartmentIds.length > 0 ? await getCachedDepartments(supabase) : []
+  const departmentNameById = (id: number | null): string | null =>
+    id === null ? null : departments.find((d) => d.id === id)?.name ?? null
+
+  const entryLinks: AttachedEntryView[] = linkedEntryRows
+    .map((e) => ({
+      entryId: e.id,
+      ubblNumber: e.ubbl_number,
+      vendorRaw: e.vendor_raw,
+      amount: e.amount,
+      departmentName: departmentNameById(e.department_id),
+    }))
+    .sort((a, b) => (b.amount ?? 0) - (a.amount ?? 0) || a.entryId - b.entryId)
+
+  const billEntryVariance = billEntryVarianceRow
+    ? {
+        billTotal: billEntryVarianceRow.billTotal,
+        linkedEntryTotal: billEntryVarianceRow.linkedEntryTotal,
+        varianceAmount: billEntryVarianceRow.varianceAmount,
+        withinTolerance: billEntryVarianceRow.withinTolerance,
+        entryLinkCount: billEntryVarianceRow.entryLinkCount,
+      }
+    : null
 
   let entryHubStatusCode: string | null = null
-  let entryDepartmentName: string | null = null
-  if (entry?.department_id) {
-    // Perf audit Phase 2: cached departments list, looked up by id in JS
-    // instead of a live `.eq('id', ...)` query.
-    const departments = await getCachedDepartments(supabase)
-    entryDepartmentName = departments.find((d) => d.id === entry.department_id)?.name ?? null
-  }
+  const entryDepartmentName: string | null = departmentNameById(entry?.department_id ?? null)
   if (entry?.hub_status_id) {
     // hubStatuses already resolved above (same fetch as hubStatusOptions) --
     // no second hub_status round trip needed here.
@@ -851,6 +902,8 @@ async function loadDocumentDetail(
     originalFilename: sourceDoc.original_filename as string,
     matchStatus: sourceDoc.match_status as string,
     entryId,
+    entryLinks,
+    billEntryVariance,
     entryUbblNumber: entry?.ubbl_number ?? null,
     entryInvoiceNumber: entry?.invoice_number ?? null,
     entryAmount: entry?.amount ?? null,

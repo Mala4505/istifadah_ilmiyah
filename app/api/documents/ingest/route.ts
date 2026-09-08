@@ -270,6 +270,23 @@ async function handlePOST(request: NextRequest) {
 
   const documentId = inserted.id as number
 
+  // entry-bill links (Phase 3): when the upload attaches straight to an entry,
+  // extraction has not run yet so there are no bills to link. Write a
+  // placeholder entry_bill_link row (document_extraction_id null) that the
+  // extract handler promotes to per-bill rows once the bills exist. The
+  // scalar source_document.entry_id above is kept for the legacy readers and
+  // is dropped in Phase 6.
+  if (entryId !== null) {
+    const { error: linkError } = await admin.from('entry_bill_link').insert({
+      entry_id: entryId,
+      source_document_id: documentId,
+      document_extraction_id: null,
+    })
+    if (linkError) {
+      console.error(`[ingest] entry_bill_link placeholder insert failed for document ${documentId}:`, linkError.message)
+    }
+  }
+
   // Document-assignment (2026-08-29): if the upload named one or more
   // assignees, validate each is an active admin/superadmin and write the
   // `source_document_assignee` rows. Best-effort by design -- the

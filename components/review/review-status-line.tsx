@@ -30,7 +30,7 @@ import { Combobox } from '@/components/ui/combobox'
 import { formatBinding, type Keymap } from '@/lib/shortcuts/config'
 import { formatDateTime } from '@/lib/reports/format'
 import type { VendorSearchResult } from '@/lib/actions/review'
-import type { MatchCandidate, UncertainField } from '@/lib/review/types'
+import type { AttachedEntryView, MatchCandidate, UncertainField } from '@/lib/review/types'
 import { MatchStrip } from './match-strip'
 import { VendorAutocomplete } from './vendor-autocomplete'
 
@@ -87,10 +87,9 @@ function ReviewStatusLineImpl({
   connectStatus,
   documentExtractionId,
   sourceDocumentId,
-  entryId,
-  entryUbblNumber,
+  attachedEntries,
+  billTotal,
   entryDepartmentName,
-  entryAmount,
   matchCandidates,
   onMatchChanged,
   // Classify segment
@@ -123,10 +122,9 @@ function ReviewStatusLineImpl({
   connectStatus: StageStatus
   documentExtractionId: number
   sourceDocumentId: number
-  entryId: number | null
-  entryUbblNumber: string | null
+  attachedEntries: AttachedEntryView[]
+  billTotal: number | null
   entryDepartmentName: string | null
-  entryAmount: number | null
   matchCandidates: MatchCandidate[]
   onMatchChanged: () => void
 
@@ -208,10 +206,9 @@ function ReviewStatusLineImpl({
           bare
           documentExtractionId={documentExtractionId}
           sourceDocumentId={sourceDocumentId}
-          entryId={entryId}
-          entryUbblNumber={entryUbblNumber}
+          attachedEntries={attachedEntries}
+          billTotal={billTotal}
           entryDepartmentName={entryDepartmentName}
-          entryAmount={entryAmount}
           matchCandidates={matchCandidates}
           onChanged={onMatchChanged}
         />

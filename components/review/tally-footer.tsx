@@ -32,17 +32,26 @@ const TOLERANCE_TOOLTIP =
 function TallyFooterImpl({
   lineItemSum,
   documentTotal,
-  entryAmount,
+  linkedEntryTotal,
+  linkedEntryCount,
 }: {
   lineItemSum: number | null
   documentTotal: number | null
-  entryAmount: number | null
+  /** Phase 5: SUM of every linked entry's amount (from v_bill_entry_variance,
+   *  a server figure -- not recomputed on keystroke). Null when nothing is
+   *  linked / the read failed. */
+  linkedEntryTotal: number | null
+  /** How many entries are linked to this bill. */
+  linkedEntryCount: number
 }) {
   const linesMatchTotal =
     lineItemSum !== null && documentTotal !== null ? tallyWithinTolerance(lineItemSum, documentTotal) : null
   const totalMatchesEntry =
-    documentTotal !== null && entryAmount !== null ? tallyWithinTolerance(documentTotal, entryAmount) : null
-  const entryVariance = documentTotal !== null && entryAmount !== null ? documentTotal - entryAmount : null
+    documentTotal !== null && linkedEntryTotal !== null
+      ? tallyWithinTolerance(documentTotal, linkedEntryTotal)
+      : null
+  const entryVariance =
+    documentTotal !== null && linkedEntryTotal !== null ? documentTotal - linkedEntryTotal : null
 
   return (
     <TooltipProvider delayDuration={200}>
@@ -59,17 +68,23 @@ function TallyFooterImpl({
           </p>
         </div>
 
-        {/* Compared to Entries -- this bill's confirmed total vs. what the
-            department already typed into Entries before review. */}
+        {/* Compared to Entries -- this bill's total vs. the sum of every entry
+            connected to it (Phase 5, entries<->bills M:N). */}
         <div className="flex flex-1 flex-col gap-1.5 px-4 py-2.5">
           <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
             Compared to Entries
           </span>
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
             <TallyStat label="This bill" value={documentTotal} />
-            <TallyStat label="Entered in Entries" value={entryAmount} />
+            <TallyStat
+              label={`Entries linked (${linkedEntryCount})`}
+              value={linkedEntryTotal}
+            />
             {entryVariance !== null ? (
-              <span className="text-muted-foreground">variance {formatINR(Math.abs(entryVariance))}</span>
+              <span className="text-muted-foreground">
+                variance {entryVariance >= 0 ? '+' : '−'}
+                {formatINR(Math.abs(entryVariance))}
+              </span>
             ) : null}
             {totalMatchesEntry !== null ? (
               totalMatchesEntry ? (
@@ -86,8 +101,8 @@ function TallyFooterImpl({
             ) : null}
           </div>
           <p className="text-xs text-muted-foreground">
-            Checks this bill&apos;s confirmed total against what the department already recorded in Entries,
-            before this review.
+            Sums every entry connected to this bill and checks the total against this bill&apos;s own amount.
+            A total shown before Verify is an OCR read, not a confirmed figure.
           </p>
         </div>
       </div>

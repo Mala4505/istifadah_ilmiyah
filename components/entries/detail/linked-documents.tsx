@@ -20,6 +20,22 @@ export interface LinkedDocumentView {
   invoiceNumberOcr: string | null
   totalAmountOcr: number | null
   invoiceDateOcr: string | null
+  /** How many OTHER entries this bill also covers (0 = this entry only). */
+  alsoCoversOtherEntries: number
+}
+
+/**
+ * Entry-grain variance from `v_entry_bill_variance` (Phase 2), resolved on the
+ * server so the footer isn't doing client-side arithmetic over partial data.
+ */
+export interface LinkedDocumentsVariance {
+  entryAmount: number
+  billedTotal: number
+  /** entryAmount - billedTotal, signed. */
+  varianceAmount: number
+  withinTolerance: boolean
+  billCount: number
+  verifiedBillCount: number
 }
 
 /**
@@ -32,23 +48,25 @@ export function LinkedDocuments({
   entryId,
   documents,
   entryAmount,
+  variance,
 }: {
   entryId: number
   documents: LinkedDocumentView[]
   entryAmount: number | null
+  variance: LinkedDocumentsVariance | null
 }) {
   const [pendingId, setPendingId] = useState<number | null>(null)
   const [rows, setRows] = useState(documents)
 
-  // §3.2 (docs/pre-deploy-findings-and-plan.md) — this card used to list each
-  // bill's OCR'd total with no arithmetic tying them to the entry's own
-  // amount, so the tally had to be done by eye. Every number here is already
-  // on the page; this just adds them up. Bills with no OCR'd total (still in
-  // review, or extraction failed) are excluded from the sum but counted
-  // separately so the footer doesn't silently imply a false total.
-  const billsWithTotal = rows.filter((d) => d.totalAmountOcr !== null)
-  const sumOfTotals = billsWithTotal.reduce((sum, d) => sum + (d.totalAmountOcr ?? 0), 0)
-  const difference = entryAmount !== null ? entryAmount - sumOfTotals : null
+  // §3.2 (docs/pre-deploy-findings-and-plan.md) — the footer totals now come
+  // from `v_entry_bill_variance` via the RSC (`variance` prop), not from
+  // client-side arithmetic over the OCR'd per-bill totals. That fixes the old
+  // bug where a ₹0.01 rounding gap rendered the difference in red: it is red
+  // only when the gap is outside `tallyWithinTolerance`.
+  //
+  // Detaching a doc below updates `rows` optimistically but does NOT refetch
+  // `variance` — the footer figures can be briefly stale after a detach until
+  // a full navigation / revalidation refreshes the server data.
 
   function handlePreview(documentId: number) {
     void (async () => {
@@ -108,6 +126,12 @@ export function LinkedDocuments({
                       {doc.invoiceDateOcr ? ` · ${formatDate(doc.invoiceDateOcr)}` : ''}
                     </p>
                   )}
+                  {doc.alsoCoversOtherEntries > 0 && (
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Also covers {doc.alsoCoversOtherEntries} other{' '}
+                      {doc.alsoCoversOtherEntries === 1 ? 'entry' : 'entries'}
+                    </p>
+                  )}
                 </div>
               </div>
               <div className="flex flex-shrink-0 items-center gap-2 self-end sm:self-auto">
@@ -128,34 +152,46 @@ export function LinkedDocuments({
             </div>
           ))}
 
-          <div className="flex flex-col gap-1 border-t border-border pt-3 text-sm sm:flex-row sm:flex-wrap sm:items-baseline sm:justify-between sm:gap-x-4">
-            <span className="text-muted-foreground">
-              {rows.length} bill{rows.length === 1 ? '' : 's'} attached
-              {billsWithTotal.length !== rows.length && (
-                <> · {billsWithTotal.length} of {rows.length} with a read total</>
-              )}
-            </span>
-            <span className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
-              <span>
-                <span className="text-muted-foreground">Sum of bills: </span>
-                <span className="font-medium tabular-nums">{formatINR(sumOfTotals)}</span>
-              </span>
-              <span>
-                <span className="text-muted-foreground">Entry amount: </span>
-                <span className="font-medium tabular-nums">{formatINR(entryAmount)}</span>
-              </span>
-              <span>
-                <span className="text-muted-foreground">Difference: </span>
+          <div className="border-t border-border pt-3 text-sm">
+            {variance === null ? (
+              <p className="text-muted-foreground">No bill linked yet.</p>
+            ) : (
+              <div className="flex flex-col gap-1 sm:flex-row sm:flex-wrap sm:items-baseline sm:justify-between sm:gap-x-4">
+                <span className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
+                  <span>
+                    <span className="text-muted-foreground">Entry amount: </span>
+                    <span className="font-medium tabular-nums">
+                      {formatINR(variance.entryAmount ?? entryAmount)}
+                    </span>
+                  </span>
+                  <span>
+                    <span className="text-muted-foreground">Billed (sum of linked bills): </span>
+                    <span className="font-medium tabular-nums">{formatINR(variance.billedTotal)}</span>
+                  </span>
+                  <span>
+                    <span className="text-muted-foreground">Difference: </span>
+                    <span
+                      className={cn(
+                        'font-medium tabular-nums',
+                        !variance.withinTolerance && 'text-destructive'
+                      )}
+                    >
+                      {formatINR(variance.varianceAmount)}
+                    </span>
+                  </span>
+                </span>
                 <span
                   className={cn(
-                    'font-medium tabular-nums',
-                    difference !== null && difference !== 0 && 'text-destructive'
+                    'text-xs font-medium',
+                    variance.withinTolerance
+                      ? 'text-emerald-600 dark:text-emerald-400'
+                      : 'text-destructive'
                   )}
                 >
-                  {difference === null ? '—' : formatINR(difference)}
+                  {variance.withinTolerance ? 'Within tolerance' : 'Outside tolerance'}
                 </span>
-              </span>
-            </span>
+              </div>
+            )}
           </div>
         </CardContent>
       )}

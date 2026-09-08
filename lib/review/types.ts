@@ -128,6 +128,19 @@ export interface MatchCandidate {
   departmentName: string | null
 }
 
+/** One entry linked to a bill via `entry_bill_link` (Phase 5, entries<->bills
+ * M:N). The Connect step's multi-select combobox renders one row per link and
+ * sums `amount` for the live variance figure. `vendorRaw` is the entry's own
+ * `entries.vendor_raw`, `departmentName` resolved the same way as
+ * `ReviewDocumentDetail.entryDepartmentName`. */
+export interface AttachedEntryView {
+  entryId: number
+  ubblNumber: string
+  vendorRaw: string | null
+  amount: number | null
+  departmentName: string | null
+}
+
 /** One sibling bill from the same multi-bill PDF, for the bill rail (§7).
  * `matched` reflects only `document_extraction.entry_id` -- the same
  * per-bill signal `EntryAttachCombobox` reads/writes. `verifiedAt` mirrors
@@ -158,7 +171,25 @@ export interface ReviewDocumentDetail {
   pageNumberEnd: number | null
   originalFilename: string
   matchStatus: string
+  /** Phase 5: THE PRIMARY linked entry -- the largest-amount entry among
+   *  `entryLinks` (deterministic id tie-break), or null when nothing is
+   *  linked. Kept only for the features still gated on a single entry (hub
+   *  status, Classify options, the exceptions filter). The Connect step and
+   *  the variance figures read `entryLinks` / `billEntryVariance` instead. */
   entryId: number | null
+  /** Every entry linked to this bill via `entry_bill_link` (Phase 5), largest
+   *  amount first. Empty when the bill has no link yet. */
+  entryLinks: AttachedEntryView[]
+  /** Bill-grain variance from `v_bill_entry_variance` (this bill's total vs
+   *  the sum of every linked entry's amount), or null on a failed read / no
+   *  row. `billTotal` is coalesce(verified, ocr) -- an OCR read before Verify. */
+  billEntryVariance: {
+    billTotal: number | null
+    linkedEntryTotal: number
+    varianceAmount: number
+    withinTolerance: boolean
+    entryLinkCount: number
+  } | null
   entryUbblNumber: string | null
   entryInvoiceNumber: string | null
   entryAmount: number | null

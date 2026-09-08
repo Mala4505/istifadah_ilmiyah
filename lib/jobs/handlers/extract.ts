@@ -299,6 +299,23 @@ export async function persistExtractionPipelineResult(
   let totalLineItems = 0
   const allExceptionsRaised: string[] = []
 
+  // entry-bill links (Phase 3): the entry a bill's tally checks compare against.
+  // A document attached before extraction has a placeholder entry_bill_link row
+  // (document_extraction_id null); if there is exactly one such entry, treat it
+  // as this document's entry for the per-bill ocr_total_vs_amount check, exactly
+  // as the old single-bill `source_document.entry_id` mirror did. Per-bill links
+  // that already exist (a re-extraction of a reviewed multi-bill doc) are read
+  // per bill inside the loop.
+  const { data: placeholderLinks } = await admin
+    .from('entry_bill_link')
+    .select('entry_id')
+    .eq('source_document_id', sourceDocumentId)
+    .is('document_extraction_id', null)
+  const placeholderEntryId =
+    placeholderLinks && placeholderLinks.length === 1
+      ? (placeholderLinks[0]!.entry_id as number)
+      : null
+
   for (let billIndex = 0; billIndex < extraction.bills.length; billIndex++) {
     const bill = extraction.bills[billIndex]!
 
@@ -397,18 +414,11 @@ export async function persistExtractionPipelineResult(
       // wire already, so there is nothing for that pass to catch in this array.
       uncertain_fields_ocr: bill.uncertain_fields,
     }
-    // entry_id is only written here for the dominant single-bill case — a
-    // read-only mirror of source_document.entry_id, preserving today's
-    // behavior exactly. For a real multi-bill document (bills.length > 1),
-    // entry_id is intentionally omitted from the payload so it is never
-    // part of the upsert's ON CONFLICT SET clause — it stays whatever it
-    // already is on that row (null on first insert, or whatever a reviewer
-    // attached via attachExtractionToEntry), never overwritten by a
-    // re-extraction run.
-    if (extraction.bills.length === 1) {
-      upsertPayload.entry_id = doc.entryId
-    }
-
+    // entry_id is no longer written here (entry-bill links, Phase 3). The
+    // entry<->bill relationship lives in `entry_bill_link`; the placeholder
+    // promotion step after this loop links every entry that was attached to
+    // the document before extraction, and the junction→scalar mirror trigger
+    // keeps document_extraction.entry_id coherent for the legacy readers.
     const { data: extractionRow, error: extractionError } = await admin
       .from('document_extraction')
       .upsert(upsertPayload, { onConflict: 'source_document_id,bill_index' })
@@ -645,10 +655,13 @@ export async function persistExtractionPipelineResult(
     const billExceptions = await runTallyChecks(admin, {
       documentExtractionId,
       currentRunId,
-      // Reflects what's actually stored on the row right now, whether
-      // written this run (single-bill case above) or pre-existing (multi-bill
-      // case, set later via attachExtractionToEntry).
-      entryId: (extractionRow.entry_id as number | null) ?? null,
+      // entry-bill links (Phase 3): a pre-existing per-bill link wins (a
+      // re-extraction of a reviewed multi-bill doc); otherwise the single
+      // pre-extraction placeholder entry, if any; otherwise whatever the mirror
+      // trigger has left on the row.
+      entryId:
+        (extractionRow.entry_id as number | null) ??
+        placeholderEntryId,
       totalAmount: bill.total_amount,
       subtotal: bill.subtotal,
       taxAmount: bill.tax_amount,
@@ -727,6 +740,59 @@ export async function finalizeSourceDocumentExtraction(
       page_count: doc.pageCount ?? classifiedPageCount,
     })
     .eq('id', sourceDocumentId)
+
+  // ---- entry_bill_link: promote pre-extraction placeholders (entry-bill
+  // links, Phase 3). A document can be attached to entries before its bills
+  // are known (attachDocumentToEntry / the ingest route write a placeholder
+  // row with document_extraction_id null). Now that the bills are persisted,
+  // fan each placeholder out to one row per (bill, entry) and drop the
+  // placeholder. Runs here so it happens exactly once per document, after the
+  // last page in the per-page path. The mirror trigger keeps the scalar
+  // entry_id columns coherent.
+  const { data: placeholders } = await admin
+    .from('entry_bill_link')
+    .select('entry_id')
+    .eq('source_document_id', sourceDocumentId)
+    .is('document_extraction_id', null)
+  const placeholderEntryIds = [...new Set((placeholders ?? []).map((r) => r.entry_id as number))]
+  if (placeholderEntryIds.length > 0) {
+    const { data: bills } = await admin
+      .from('document_extraction')
+      .select('id')
+      .eq('source_document_id', sourceDocumentId)
+    const billIds = (bills ?? []).map((b) => b.id as number)
+
+    if (billIds.length > 0) {
+      const { data: existing } = await admin
+        .from('entry_bill_link')
+        .select('document_extraction_id, entry_id')
+        .eq('source_document_id', sourceDocumentId)
+        .not('document_extraction_id', 'is', null)
+      const existingKeys = new Set(
+        (existing ?? []).map((r) => `${r.document_extraction_id}:${r.entry_id}`)
+      )
+      const rows = billIds.flatMap((deId) =>
+        placeholderEntryIds
+          .filter((entryId) => !existingKeys.has(`${deId}:${entryId}`))
+          .map((entryId) => ({
+            entry_id: entryId,
+            source_document_id: sourceDocumentId,
+            document_extraction_id: deId,
+          }))
+      )
+      if (rows.length > 0) {
+        const { error: promoteError } = await admin.from('entry_bill_link').insert(rows)
+        if (promoteError) {
+          throw new Error(`entry_bill_link placeholder promotion failed: ${promoteError.message}`)
+        }
+      }
+      await admin
+        .from('entry_bill_link')
+        .delete()
+        .eq('source_document_id', sourceDocumentId)
+        .is('document_extraction_id', null)
+    }
+  }
 
   // I14: the ingest-time page count (ground truth once known — it comes from
   // a server-side PDF parse, not the model) silently wins over

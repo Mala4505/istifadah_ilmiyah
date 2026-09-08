@@ -29,10 +29,17 @@ const DELETE_PERMISSION_HINT =
   'Deleting needs the admin role, and a document whose extraction has already been verified cannot be deleted — cancel it instead.'
 
 /**
- * Attaches one document to one entry: sets `entry_id` and flips
- * `match_status` to 'matched' (§3.8). The inverse of "no entry expected" —
- * a document can move between the two as long as it stays reviewer/admin
- * gated, so no guard against re-attaching an already-matched document.
+ * Attaches one document to one entry (§3.8). The inverse of "no entry
+ * expected" — a document can move between the two as long as it stays
+ * reviewer/admin gated, so no guard against re-attaching an already-matched
+ * document.
+ *
+ * entry-bill links (Phase 3): the link itself is now written through
+ * `set_document_entry_links` (a document-grain replace — every bill of the PDF
+ * gets linked to `entryId`, or a placeholder row if extraction hasn't run).
+ * `source_document.entry_id` / `document_extraction.entry_id` are kept coherent
+ * by the junction→scalar mirror trigger, not written here. `match_status` is
+ * still set explicitly until Phase 4 makes it trigger-derived.
  */
 export async function attachDocumentToEntry(input: {
   documentId: number
@@ -43,9 +50,18 @@ export async function attachDocumentToEntry(input: {
   }
 
   const supabase = await createClient()
+
+  const { error: linkError } = await supabase.rpc('set_document_entry_links', {
+    p_source_document_id: input.documentId,
+    p_entry_ids: [input.entryId],
+  })
+  if (linkError) {
+    return { ok: false, error: logRawError('documents.attachDocumentToEntry', linkError.message) }
+  }
+
   const { data, error } = await supabase
     .from('source_document')
-    .update({ entry_id: input.entryId, match_status: 'matched' })
+    .update({ match_status: 'matched' })
     .eq('id', input.documentId)
     .select('id')
 
@@ -152,9 +168,20 @@ export async function bulkAttachDocuments(pairs: BulkAttachPair[]): Promise<Bulk
   let attachedCount = 0
 
   for (const pair of cleanPairs) {
+    const { error: linkError } = await supabase.rpc('set_document_entry_links', {
+      p_source_document_id: pair.documentId,
+      p_entry_ids: [pair.entryId],
+    })
+    if (linkError) {
+      failedDocumentIds.push(pair.documentId)
+      continue
+    }
+
+    // match_status stays explicit until Phase 4's trigger; the scalar entry_id
+    // is maintained by the junction→scalar mirror trigger.
     const { data, error } = await supabase
       .from('source_document')
-      .update({ entry_id: pair.entryId, match_status: 'matched' })
+      .update({ match_status: 'matched' })
       .eq('id', pair.documentId)
       .select('id')
 
@@ -218,9 +245,15 @@ export async function markNoEntryExpected(documentId: number): Promise<ActionRes
 }
 
 /**
- * Detaches a document from an entry: clears `entry_id` and sends it back to
- * 'unmatched' so it reappears in the inbox rather than staying invisibly
- * linked to the wrong entry. The inverse of attachDocumentToEntry.
+ * Detaches a document from an entry and sends it back to 'unmatched' so it
+ * reappears in the inbox rather than staying invisibly linked to the wrong
+ * entry. The inverse of attachDocumentToEntry.
+ *
+ * entry-bill links (Phase 3): removes every link between this document and
+ * `entryId` via `remove_entry_bill_links`; the scalar `entry_id` columns follow
+ * through the mirror trigger. Pre-Phase-5 a document has at most one linked
+ * entry so blanket 'unmatched' is still correct here — Phase 4's match_status
+ * trigger is what handles the "still linked to another entry" case.
  */
 export async function detachDocumentFromEntry(
   documentId: number,
@@ -231,9 +264,18 @@ export async function detachDocumentFromEntry(
   }
 
   const supabase = await createClient()
+
+  const { error: unlinkError } = await supabase.rpc('remove_entry_bill_links', {
+    p_source_document_id: documentId,
+    p_entry_id: entryId,
+  })
+  if (unlinkError) {
+    return { ok: false, error: logRawError('documents.detachDocumentFromEntry', unlinkError.message) }
+  }
+
   const { data, error } = await supabase
     .from('source_document')
-    .update({ entry_id: null, match_status: 'unmatched' })
+    .update({ match_status: 'unmatched' })
     .eq('id', documentId)
     .select('id')
 

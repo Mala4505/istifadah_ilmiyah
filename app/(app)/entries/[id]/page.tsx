@@ -27,6 +27,11 @@ import type {
   ZoneOption,
 } from '@/components/entries/detail/types'
 import { createClient, getCachedUser } from '@/lib/supabase/server'
+import {
+  getEntryBillVariance,
+  getBillEntryVarianceMany,
+  type BillEntryVariance,
+} from '@/lib/documents/entry-bill-variance'
 import { getSelectedEventId } from '@/lib/events/current'
 import { getStaffContext } from '@/lib/export/auth'
 import { isAdminOrAbove } from '@/lib/auth/roles'
@@ -231,65 +236,111 @@ export default async function EntryDetailPage({
   // attached documents, plus the OCR'd values the match was made on — not
   // just a bare count (see components/entries/detail/linked-documents.tsx).
   //
-  // Checklist 1.4's documented follow-up (plan.md D1): a source_document
-  // whose match lives solely on one bill's document_extraction.entry_id
-  // (multi-bill PDF, 20260817000002) used to be invisible here, because
-  // this query only ever looked at source_document.entry_id — the
-  // single-bill convenience mirror written by extract.ts, not the source of
-  // truth for a per-bill match. Two lookups, unioned: source_document rows
-  // matched directly (the common, single-bill case) plus source_document
-  // ids reached only through a per-bill document_extraction.entry_id match.
-  // 7.1: these two have no dependency on one another -- Promise.all removes
-  // one more sequential hop.
-  const [{ data: perBillMatches }, { data: directMatches }] = await Promise.all([
-    supabase.from('document_extraction').select('source_document_id').eq('entry_id', id),
-    supabase.from('source_document').select('id').eq('entry_id', id),
+  // Source of truth is `entry_bill_link` (20260908000001): one row per
+  // (bill, entry), `document_extraction_id` null on a pre-extraction
+  // placeholder. The old two-query union over the scalar
+  // `document_extraction.entry_id` / `source_document.entry_id` mirrors —
+  // and the "prefer the bill whose own entry_id matches" heuristic — are
+  // replaced by this one read plus a `v_entry_bill_variance` point read.
+  // getEntryBillVariance only needs `id`, so it runs alongside the link read.
+  const [{ data: linkRows }, entryBillVariance] = await Promise.all([
+    supabase
+      .from('entry_bill_link')
+      .select('source_document_id, document_extraction_id')
+      .eq('entry_id', id),
+    getEntryBillVariance(supabase, id),
   ])
-  const linkedSourceDocIds = Array.from(
-    new Set([
-      ...(perBillMatches ?? []).map((r) => r.source_document_id as number),
-      ...(directMatches ?? []).map((r) => r.id as number),
-    ])
-  )
 
-  const { data: linkedDocsData } =
+  const linkedSourceDocIds = Array.from(
+    new Set((linkRows ?? []).map((r) => r.source_document_id as number))
+  )
+  // Non-null linked bill ids, and — per source_document — the set of bills
+  // linked to THIS entry (a placeholder-only doc has none).
+  const linkedExtractionIds: number[] = []
+  const linkedExtractionIdsByDocId = new Map<number, Set<number>>()
+  for (const row of linkRows ?? []) {
+    if (row.document_extraction_id === null) continue
+    const exId = row.document_extraction_id as number
+    const docId = row.source_document_id as number
+    linkedExtractionIds.push(exId)
+    const set = linkedExtractionIdsByDocId.get(docId) ?? new Set<number>()
+    set.add(exId)
+    linkedExtractionIdsByDocId.set(docId, set)
+  }
+
+  // The linked source documents, plus (in parallel — it only needs the link
+  // rows) the per-bill entry-coverage counts for the "also covers N other
+  // entries" badge.
+  const [linkedDocsResult, billEntryVarianceMany] = await Promise.all([
     linkedSourceDocIds.length > 0
-      ? await supabase
+      ? supabase
           .from('source_document')
           .select('id, original_filename, uploaded_at, page_count')
           .in('id', linkedSourceDocIds)
           .order('uploaded_at', { ascending: false })
-      : { data: [] as { id: number; original_filename: string; uploaded_at: string; page_count: number | null }[] }
+      : Promise.resolve({
+          data: [] as {
+            id: number
+            original_filename: string
+            uploaded_at: string
+            page_count: number | null
+          }[],
+        }),
+    linkedExtractionIds.length > 0
+      ? getBillEntryVarianceMany(supabase, linkedExtractionIds)
+      : Promise.resolve(new Map<number, BillEntryVariance>()),
+  ])
+  const linkedDocsData = linkedDocsResult.data
   const linkedDocIds = (linkedDocsData ?? []).map((d) => d.id)
+
   interface LinkedExtractionRow {
     source_document_id: number
-    entry_id: number | null
+    id: number
     vendor_name_ocr: string | null
     invoice_number_ocr: string | null
     total_amount_ocr: number | null
     invoice_date_ocr: string | null
+    bill_index: number | null
   }
   const { data: linkedExtractionsData } =
     linkedDocIds.length > 0
       ? await supabase
           .from('document_extraction')
           .select(
-            'source_document_id, entry_id, vendor_name_ocr, invoice_number_ocr, total_amount_ocr, invoice_date_ocr'
+            'source_document_id, id, vendor_name_ocr, invoice_number_ocr, total_amount_ocr, invoice_date_ocr, bill_index'
           )
           .in('source_document_id', linkedDocIds)
           .order('bill_index')
       : { data: [] as LinkedExtractionRow[] }
-  // Prefer the bill whose own entry_id actually matches this entry — on a
-  // multi-bill document that's the bill this page is about, not whichever
-  // one sorted first. Only a document reached solely through the
-  // source_document-level mirror (no per-bill match at all) falls back to
-  // its first bill's fields, same as before this fix.
+  // Per source_document, pick the bill actually linked to THIS entry (its id
+  // is in this entry's link rows). Rows arrive in ascending bill_index, so
+  // `existing` is always the lowest-index bill seen so far — the fallback
+  // used for a placeholder-only doc where nothing is linked at bill grain.
   const linkedExtractionByDocId = new Map<number, LinkedExtractionRow>()
   for (const extraction of linkedExtractionsData ?? []) {
-    const existing = linkedExtractionByDocId.get(extraction.source_document_id)
-    if (!existing || extraction.entry_id === id) {
-      linkedExtractionByDocId.set(extraction.source_document_id, extraction)
+    const docId = extraction.source_document_id
+    const linkedIds = linkedExtractionIdsByDocId.get(docId)
+    const existing = linkedExtractionByDocId.get(docId)
+    if (!existing) {
+      linkedExtractionByDocId.set(docId, extraction)
+      continue
     }
+    const existingIsLinked = linkedIds?.has(existing.id) ?? false
+    const currentIsLinked = linkedIds?.has(extraction.id) ?? false
+    if (currentIsLinked && !existingIsLinked) {
+      linkedExtractionByDocId.set(docId, extraction)
+    }
+  }
+  // "also covers N other entries" per doc: (max entryLinkCount among that
+  // doc's bills linked to this entry) - 1, floored at 0.
+  const sharedByDocId = new Map<number, number>()
+  for (const [docId, linkedIds] of linkedExtractionIdsByDocId) {
+    let maxLinkCount = 0
+    for (const exId of linkedIds) {
+      const v = billEntryVarianceMany.get(exId)
+      if (v && v.entryLinkCount > maxLinkCount) maxLinkCount = v.entryLinkCount
+    }
+    sharedByDocId.set(docId, Math.max(0, maxLinkCount - 1))
   }
   const linkedDocuments: LinkedDocumentView[] = (linkedDocsData ?? []).map((d) => {
     const extraction = linkedExtractionByDocId.get(d.id)
@@ -302,8 +353,19 @@ export default async function EntryDetailPage({
       invoiceNumberOcr: extraction?.invoice_number_ocr ?? null,
       totalAmountOcr: extraction?.total_amount_ocr ?? null,
       invoiceDateOcr: extraction?.invoice_date_ocr ?? null,
+      alsoCoversOtherEntries: sharedByDocId.get(d.id) ?? 0,
     }
   })
+  const linkedDocumentsVariance = entryBillVariance
+    ? {
+        entryAmount: entryBillVariance.entryAmount,
+        billedTotal: entryBillVariance.billedTotal,
+        varianceAmount: entryBillVariance.varianceAmount,
+        withinTolerance: entryBillVariance.withinTolerance,
+        billCount: entryBillVariance.billCount,
+        verifiedBillCount: entryBillVariance.verifiedBillCount,
+      }
+    : null
 
   // §3.3 — this entry's open issues. Two categories, queried separately
   // rather than through v_open_issues: that view's output columns don't
@@ -393,7 +455,12 @@ export default async function EntryDetailPage({
 
       <ImportFieldsPanel entry={entry} vendorConfirmed={vendorConfirmed} budgetHeadRaw={budgetHeadRaw} />
 
-      <LinkedDocuments entryId={entry.id} documents={linkedDocuments} entryAmount={entry.amount} />
+      <LinkedDocuments
+        entryId={entry.id}
+        documents={linkedDocuments}
+        entryAmount={entry.amount}
+        variance={linkedDocumentsVariance}
+      />
 
       <EntryIssues
         entryId={entry.id}

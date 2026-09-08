@@ -548,25 +548,28 @@ export async function attachExtractionToEntry(input: {
   // event-scoping-and-review-fixes-plan.md §1.6: same guard as
   // saveVerification above -- attaching a bill to an entry is a ledger
   // mutation, so it's blocked while a past (non-current) event is selected.
+  // (private.assert_entry_bill_link_allowed re-checks this in SQL too.)
   const selectedEvent = await getSelectedEvent()
   if (!isEventMutable(selectedEvent)) {
     return { ok: false, error: 'This event is closed to edits. Switch to the current event to attach documents.' }
   }
 
-  const { data, error } = await supabase
-    .from('document_extraction')
-    .update({ entry_id: input.entryId })
-    .eq('id', input.documentExtractionId)
-    .select('id, vendor_name_ocr, vendor_name_verified')
-
+  // entry-bill links (Phase 3): still a single-entry REPLACE for this bill
+  // (matches the current combobox's replace-on-click). Phase 5's multi-select
+  // combobox switches to addBillEntryLink / detachExtractionFromEntry /
+  // setBillEntryLinks. document_extraction.entry_id follows via the mirror
+  // trigger.
+  const { error } = await supabase.rpc('set_bill_entry_links', {
+    p_document_extraction_id: input.documentExtractionId,
+    p_entry_ids: [input.entryId],
+  })
   if (error) return { ok: false, error: logRawError('review.attachExtractionToEntry', error.message) }
-  if (!data || data.length === 0) {
-    return {
-      ok: false,
-      error:
-        'No document extraction was updated. This usually means a viewer role (reviewer/admin required), or the document is no longer visible to you.',
-    }
-  }
+
+  const { data: bill } = await supabase
+    .from('document_extraction')
+    .select('vendor_name_ocr, vendor_name_verified')
+    .eq('id', input.documentExtractionId)
+    .maybeSingle()
 
   revalidatePath('/review')
   // The inbox's match state / "Connect" column reads this bill's entry_id --
@@ -578,10 +581,112 @@ export async function attachExtractionToEntry(input: {
   // into a failure (see the function's own try/catch).
   await learnVendorAliasesFromAttach({
     entryId: input.entryId,
-    vendorNameOcr: data[0]?.vendor_name_ocr as string | null,
-    vendorNameVerified: data[0]?.vendor_name_verified as string | null,
+    vendorNameOcr: (bill?.vendor_name_ocr as string | null) ?? null,
+    vendorNameVerified: (bill?.vendor_name_verified as string | null) ?? null,
   })
 
+  return { ok: true }
+}
+
+/**
+ * entry-bill links: add ONE entry to a bill's link set without disturbing the
+ * others (the additive click in Phase 5's multi-select combobox). Keeps the
+ * same event guard and vendor-alias learning as attachExtractionToEntry.
+ */
+export async function addBillEntryLink(input: {
+  documentExtractionId: number
+  entryId: number
+}): Promise<SimpleActionResult> {
+  if (!Number.isInteger(input.documentExtractionId) || !Number.isInteger(input.entryId)) {
+    return { ok: false, error: 'Invalid document extraction or entry id.' }
+  }
+
+  const supabase = await createClient()
+  const selectedEvent = await getSelectedEvent()
+  if (!isEventMutable(selectedEvent)) {
+    return { ok: false, error: 'This event is closed to edits. Switch to the current event to attach documents.' }
+  }
+
+  const { error } = await supabase.rpc('add_bill_entry_link', {
+    p_document_extraction_id: input.documentExtractionId,
+    p_entry_id: input.entryId,
+  })
+  if (error) return { ok: false, error: logRawError('review.addBillEntryLink', error.message) }
+
+  const { data: bill } = await supabase
+    .from('document_extraction')
+    .select('vendor_name_ocr, vendor_name_verified')
+    .eq('id', input.documentExtractionId)
+    .maybeSingle()
+
+  revalidatePath('/review')
+  revalidatePath('/documents')
+
+  await learnVendorAliasesFromAttach({
+    entryId: input.entryId,
+    vendorNameOcr: (bill?.vendor_name_ocr as string | null) ?? null,
+    vendorNameVerified: (bill?.vendor_name_verified as string | null) ?? null,
+  })
+
+  return { ok: true }
+}
+
+/**
+ * entry-bill links: remove ONE entry from a bill's link set. The inverse of
+ * addBillEntryLink -- the ✕ on a linked row in Phase 5's combobox.
+ */
+export async function detachExtractionFromEntry(input: {
+  documentExtractionId: number
+  entryId: number
+}): Promise<SimpleActionResult> {
+  if (!Number.isInteger(input.documentExtractionId) || !Number.isInteger(input.entryId)) {
+    return { ok: false, error: 'Invalid document extraction or entry id.' }
+  }
+
+  const supabase = await createClient()
+  const selectedEvent = await getSelectedEvent()
+  if (!isEventMutable(selectedEvent)) {
+    return { ok: false, error: 'This event is closed to edits. Switch to the current event to change links.' }
+  }
+
+  const { error } = await supabase.rpc('remove_bill_entry_link', {
+    p_document_extraction_id: input.documentExtractionId,
+    p_entry_id: input.entryId,
+  })
+  if (error) return { ok: false, error: logRawError('review.detachExtractionFromEntry', error.message) }
+
+  revalidatePath('/review')
+  revalidatePath('/documents')
+  return { ok: true }
+}
+
+/**
+ * entry-bill links: atomically replace a bill's ENTIRE link set (Phase 5's
+ * "select every entry under this bill" in one shot).
+ */
+export async function setBillEntryLinks(input: {
+  documentExtractionId: number
+  entryIds: number[]
+}): Promise<SimpleActionResult> {
+  if (!Number.isInteger(input.documentExtractionId)) {
+    return { ok: false, error: 'Invalid document extraction id.' }
+  }
+  const entryIds = (input.entryIds ?? []).filter((id) => Number.isInteger(id) && id > 0)
+
+  const supabase = await createClient()
+  const selectedEvent = await getSelectedEvent()
+  if (!isEventMutable(selectedEvent)) {
+    return { ok: false, error: 'This event is closed to edits. Switch to the current event to change links.' }
+  }
+
+  const { error } = await supabase.rpc('set_bill_entry_links', {
+    p_document_extraction_id: input.documentExtractionId,
+    p_entry_ids: entryIds,
+  })
+  if (error) return { ok: false, error: logRawError('review.setBillEntryLinks', error.message) }
+
+  revalidatePath('/review')
+  revalidatePath('/documents')
   return { ok: true }
 }
 

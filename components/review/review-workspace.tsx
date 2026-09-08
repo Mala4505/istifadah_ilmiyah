@@ -1796,10 +1796,9 @@ export function ReviewWorkspace({
         connectStatus={connectStatus}
         documentExtractionId={detail.documentExtractionId}
         sourceDocumentId={detail.sourceDocumentId}
-        entryId={detail.entryId}
-        entryUbblNumber={detail.entryUbblNumber}
+        attachedEntries={detail.entryLinks}
+        billTotal={documentTotal ?? detail.billEntryVariance?.billTotal ?? null}
         entryDepartmentName={detail.entryDepartmentName}
-        entryAmount={detail.entryAmount}
         matchCandidates={liveMatchCandidates ?? detail.matchCandidates}
         onMatchChanged={() => router.refresh()}
         classifyStatus={classifyStatus}
@@ -1909,7 +1908,12 @@ export function ReviewWorkspace({
         </div>
       </div>
 
-      <TallyFooter lineItemSum={lineItemSum} documentTotal={documentTotal} entryAmount={detail.entryAmount} />
+      <TallyFooter
+        lineItemSum={lineItemSum}
+        documentTotal={documentTotal}
+        linkedEntryTotal={detail.billEntryVariance?.linkedEntryTotal ?? null}
+        linkedEntryCount={detail.billEntryVariance?.entryLinkCount ?? 0}
+      />
 
       <Dialog
         open={confirmAction !== null}

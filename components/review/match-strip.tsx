@@ -6,11 +6,11 @@
  * every document, single-bill or not, needs a way to connect (or explicitly
  * decline to connect) a ledger entry from this screen.
  *
- * States, chosen purely from `entryId`/`matchCandidates` (both already
+ * States, chosen purely from `attachedEntries`/`matchCandidates` (both already
  * computed server-side in app/(app)/review/page.tsx's loadDocumentDetail):
- *   - Matched: entryId !== null.
- *   - Suggested: entryId === null && matchCandidates.length > 0.
- *   - Unmatched: entryId === null && matchCandidates.length === 0.
+ *   - Linked: attachedEntries.length > 0.
+ *   - Suggested: attachedEntries.length === 0 && matchCandidates.length > 0.
+ *   - Unmatched: attachedEntries.length === 0 && matchCandidates.length === 0.
  *
  * Redesign plan §4: all three states now render through one
  * EntryAttachCombobox trigger (see that file's header) instead of separate
@@ -20,10 +20,12 @@
 
 import { memo, useState } from 'react'
 import { toast } from 'sonner'
+import { AlertTriangle, CheckCircle2 } from 'lucide-react'
 import { toastError } from '@/components/ui/error-toast'
 import { Button } from '@/components/ui/button'
 import { markNoEntryExpected } from '@/lib/actions/documents'
-import type { MatchCandidate } from '@/lib/review/types'
+import { tallyWithinTolerance } from '@/lib/normalize'
+import type { AttachedEntryView, MatchCandidate } from '@/lib/review/types'
 import { formatINR } from '@/lib/reports/format'
 import { EntryAttachCombobox } from './entry-attach-combobox'
 
@@ -32,20 +34,23 @@ import { EntryAttachCombobox } from './entry-attach-combobox'
 function MatchStripImpl({
   documentExtractionId,
   sourceDocumentId,
-  entryId,
-  entryUbblNumber,
+  attachedEntries,
+  billTotal,
   entryDepartmentName,
-  entryAmount,
   matchCandidates,
   onChanged,
   bare = false,
 }: {
   documentExtractionId: number
   sourceDocumentId: number
-  entryId: number | null
-  entryUbblNumber: string | null
+  /** Every entry linked to this bill (Phase 5). Empty = no match yet. */
+  attachedEntries: AttachedEntryView[]
+  /** This bill's own total (coalesce(verified, ocr)) for the variance chip
+   *  and the popover footer. Null suppresses both. */
+  billTotal: number | null
+  /** Primary linked entry's department -- only used for the single-entry
+   *  label beside the trigger. */
   entryDepartmentName: string | null
-  entryAmount: number | null
   matchCandidates: MatchCandidate[]
   onChanged: () => void
   /** Redesign plan §4: when embedded inline in the Connect segment of
@@ -88,16 +93,44 @@ function MatchStripImpl({
     </Button>
   )
 
-  if (entryId !== null) {
+  if (attachedEntries.length > 0) {
+    const entryTotal = attachedEntries.reduce((sum, e) => sum + (e.amount ?? 0), 0)
+    const diff = billTotal !== null ? billTotal - entryTotal : null
+    const withinTolerance = billTotal !== null ? tallyWithinTolerance(billTotal, entryTotal) : null
+
     return (
       <div className={`flex flex-wrap items-center gap-2 text-sm ${cardClass}`}>
         <EntryAttachCombobox
           documentExtractionId={documentExtractionId}
-          attachedLabel={`${entryUbblNumber ?? ''}${entryAmount !== null ? ` · ${formatINR(entryAmount)}` : ''}`}
+          attachedEntries={attachedEntries}
+          billTotal={billTotal}
           onAttached={onChanged}
           className="w-56"
         />
-        {entryDepartmentName ? <span className="truncate text-xs text-muted-foreground">{entryDepartmentName}</span> : null}
+        {/* Highlight-only variance chip (plan §4). Never blocks Save or the
+            control -- it just tells the reviewer whether the linked entries
+            sum to the bill. */}
+        {diff !== null && withinTolerance !== null ? (
+          withinTolerance ? (
+            <span
+              className="flex shrink-0 items-center gap-1 text-xs font-medium text-emerald-600 dark:text-emerald-400"
+              title="Linked entries match this bill within tolerance"
+            >
+              <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
+            </span>
+          ) : (
+            <span
+              className="flex shrink-0 items-center gap-1 text-xs font-medium text-destructive"
+              title="Linked entries do not sum to this bill"
+            >
+              <AlertTriangle className="h-3.5 w-3.5" aria-hidden="true" />
+              {formatINR(Math.abs(diff))}
+            </span>
+          )
+        ) : null}
+        {attachedEntries.length === 1 && entryDepartmentName ? (
+          <span className="truncate text-xs text-muted-foreground">{entryDepartmentName}</span>
+        ) : null}
       </div>
     )
   }
@@ -106,7 +139,8 @@ function MatchStripImpl({
     <div className={`flex flex-wrap items-center gap-2 text-sm ${cardClass}`}>
       <EntryAttachCombobox
         documentExtractionId={documentExtractionId}
-        attachedLabel={null}
+        attachedEntries={[]}
+        billTotal={billTotal}
         suggestedCandidates={matchCandidates}
         onAttached={onChanged}
         className="w-56"
