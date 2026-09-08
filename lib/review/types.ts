@@ -142,10 +142,10 @@ export interface AttachedEntryView {
 }
 
 /** One sibling bill from the same multi-bill PDF, for the bill rail (§7).
- * `matched` reflects only `document_extraction.entry_id` -- the same
- * per-bill signal `EntryAttachCombobox` reads/writes. `verifiedAt` mirrors
- * `document_extraction.verified_at` -- 2.3: lets review-workspace.tsx find
- * the next unverified sibling in this document for Save to advance to,
+ * `matched` is true when the bill has at least one `entry_bill_link` row --
+ * the same per-bill signal `EntryAttachCombobox` reads/writes. `verifiedAt`
+ * mirrors `document_extraction.verified_at` -- 2.3: lets review-workspace.tsx
+ * find the next unverified sibling in this document for Save to advance to,
  * without depending on the (possibly filtered) review queue. */
 export interface SiblingBill {
   documentExtractionId: number

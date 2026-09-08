@@ -524,10 +524,9 @@ export async function flagReviewException(input: {
 /**
  * Attaches a single bill (`document_extraction` row) to its ledger entry --
  * the per-bill counterpart to attachDocumentToEntry
- * (lib/actions/documents.ts), which stays whole-document. Only meaningful
- * once a source_document produces more than one bill (Phase 2, plan.md
- * §3): single-bill documents keep matching via source_document.entry_id
- * through the existing document-inbox flow, untouched.
+ * (lib/actions/documents.ts), which stays whole-document. Both write the same
+ * `entry_bill_link` junction (via RPCs); this one links one specific bill,
+ * that one links every bill of the PDF.
  *
  * Redesign plan §10: this is also the review page's one write path for
  * "attach a bill to an entry" (MatchStrip's Attach button, its ranked
@@ -554,11 +553,10 @@ export async function attachExtractionToEntry(input: {
     return { ok: false, error: 'This event is closed to edits. Switch to the current event to attach documents.' }
   }
 
-  // entry-bill links (Phase 3): still a single-entry REPLACE for this bill
-  // (matches the current combobox's replace-on-click). Phase 5's multi-select
-  // combobox switches to addBillEntryLink / detachExtractionFromEntry /
-  // setBillEntryLinks. document_extraction.entry_id follows via the mirror
-  // trigger.
+  // entry-bill links: a single-entry REPLACE for this bill (matches the
+  // combobox's replace-on-click for the first pick). The multi-select combobox
+  // uses addBillEntryLink / detachExtractionFromEntry / setBillEntryLinks.
+  // source_document.match_status is re-derived by the junction trigger.
   const { error } = await supabase.rpc('set_bill_entry_links', {
     p_document_extraction_id: input.documentExtractionId,
     p_entry_ids: [input.entryId],
@@ -903,13 +901,22 @@ export async function refreshMatchCandidates(input: {
 
   const { data: extraction, error } = await supabase
     .from('document_extraction')
-    .select('id, entry_id')
+    .select('id')
     .eq('id', input.documentExtractionId)
     .maybeSingle()
 
   if (error) return { ok: false, error: logRawError('review.refreshMatchCandidates', error.message) }
   if (!extraction) return { ok: false, error: 'That bill no longer exists.' }
-  if ((extraction.entry_id as number | null) !== null) return { ok: true, candidates: [] }
+
+  // Entry-bill links (Phase 4): a bill already linked to one entry may still
+  // need a second — the old "attached ⇒ no suggestions" short-circuit is gone.
+  // The entries already on this bill are read here (RLS-scoped) and passed to
+  // the RPC as the only exclusion.
+  const { data: linkedRows } = await supabase
+    .from('entry_bill_link')
+    .select('entry_id')
+    .eq('document_extraction_id', input.documentExtractionId)
+  const excludeEntryIds = [...new Set((linkedRows ?? []).map((r) => r.entry_id as number))]
 
   const selectedEventId = (await getSelectedEvent())?.id ?? null
 
@@ -922,6 +929,7 @@ export async function refreshMatchCandidates(input: {
         totalAmount: input.totalAmount,
         invoiceDate: input.invoiceDate,
         invoiceNumber: input.invoiceNumber,
+        excludeEntryIds,
       },
       selectedEventId,
     )

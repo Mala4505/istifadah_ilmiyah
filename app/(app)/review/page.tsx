@@ -477,13 +477,13 @@ async function loadDocumentDetail(
   const [sourceDocRes, extractionRes, lineItemsRes, pagesRes, siblingBillsRes, entryLinksRes] = await Promise.all([
     supabase
       .from('source_document')
-      .select('id, entry_id, original_filename, match_status, claimed_by, claimed_at')
+      .select('id, original_filename, match_status, claimed_by, claimed_at')
       .eq('id', sourceDocumentId)
       .maybeSingle(),
     supabase
       .from('document_extraction')
       .select(
-        'id, entry_id, current_extraction_run_id, verified_at, bill_index, page_number_start, page_number_end, vendor_name_ocr, vendor_name_verified, vendor_gstin_ocr, vendor_gstin_verified, vendor_phone_ocr, vendor_phone_verified, vendor_email_ocr, vendor_email_verified, vendor_address_ocr, vendor_address_verified, buyer_gstin_ocr, buyer_gstin_verified, buyer_name_ocr, buyer_name_verified, invoice_number_ocr, invoice_number_verified, invoice_date_ocr, invoice_date_verified, subtotal_ocr, subtotal_verified, tax_amount_ocr, tax_amount_verified, total_amount_ocr, total_amount_verified, notes_ocr, notes_verified, uncertain_fields_ocr, instrument_type_ocr, tax_breakdown_ocr'
+        'id, current_extraction_run_id, verified_at, bill_index, page_number_start, page_number_end, vendor_name_ocr, vendor_name_verified, vendor_gstin_ocr, vendor_gstin_verified, vendor_phone_ocr, vendor_phone_verified, vendor_email_ocr, vendor_email_verified, vendor_address_ocr, vendor_address_verified, buyer_gstin_ocr, buyer_gstin_verified, buyer_name_ocr, buyer_name_verified, invoice_number_ocr, invoice_number_verified, invoice_date_ocr, invoice_date_verified, subtotal_ocr, subtotal_verified, tax_amount_ocr, tax_amount_verified, total_amount_ocr, total_amount_verified, notes_ocr, notes_verified, uncertain_fields_ocr, instrument_type_ocr, tax_breakdown_ocr'
       )
       .eq('id', documentExtractionId)
       .maybeSingle(),
@@ -505,32 +505,48 @@ async function loadDocumentDetail(
     // serialize this behind the rest of this document's own data.
     supabase
       .from('document_extraction')
-      .select('id, bill_index, entry_id, page_number_start, page_number_end, verified_at')
+      .select('id, bill_index, page_number_start, page_number_end, verified_at')
       .eq('source_document_id', sourceDocumentId)
       .order('bill_index'),
-    // Phase 5 (entries<->bills M:N): this bill's linked entry ids. The RLS
-    // select policy on entry_bill_link scopes per row, so a reviewer only
-    // sees the links they're allowed to.
+    // Phase 5/4 (entries<->bills M:N): every link on this whole PDF -- this
+    // bill's own, plus each sibling bill's, in one round trip. The RLS select
+    // policy on entry_bill_link scopes per row, so a reviewer only sees the
+    // links they're allowed to.
     supabase
       .from('entry_bill_link')
-      .select('entry_id')
-      .eq('document_extraction_id', documentExtractionId),
+      .select('document_extraction_id, entry_id')
+      .eq('source_document_id', sourceDocumentId),
   ])
 
   const sourceDoc = sourceDocRes.data
   const extraction = extractionRes.data
   if (!sourceDoc || !extraction) return null
 
-  // Phase 5 (entries<->bills M:N): the bill's linked entries come from
-  // entry_bill_link, not the scalar document_extraction.entry_id /
-  // source_document.entry_id mirrors (those are the Phase-4-deferred reads,
-  // kept only so legacy single-entry views keep compiling). `entryId` below
+  // entries<->bills M:N: the bill's linked entries come from entry_bill_link
+  // (the scalar entry_id columns are gone -- 20260908000004). `entryId` below
   // is re-derived as the PRIMARY link -- largest amount, id tie-break --
   // purely for the features still gated on one entry (hub status, Classify
   // options, exceptions filter).
+  const allLinkRows = (entryLinksRes.data ?? []) as {
+    document_extraction_id: number | null
+    entry_id: number
+  }[]
   const linkedEntryIds = [
-    ...new Set((entryLinksRes.data ?? []).map((r) => r.entry_id as number)),
+    ...new Set(
+      allLinkRows
+        .filter((r) => r.document_extraction_id === documentExtractionId)
+        .map((r) => r.entry_id),
+    ),
   ]
+  // Per-sibling-bill linked entry ids (drives the bill rail's matched/finished
+  // state -- was document_extraction.entry_id before Phase 4).
+  const linkedEntryIdsByBill = new Map<number, number[]>()
+  for (const r of allLinkRows) {
+    if (r.document_extraction_id === null) continue
+    const list = linkedEntryIdsByBill.get(r.document_extraction_id) ?? []
+    if (!list.includes(r.entry_id)) list.push(r.entry_id)
+    linkedEntryIdsByBill.set(r.document_extraction_id, list)
+  }
 
   type LinkedEntryRow = {
     id: number
@@ -593,17 +609,11 @@ async function loadDocumentDetail(
     // Page-rail "done" indicator: a page is only fully done once every bill
     // covering it has cleared all three Review stages, the same predicate
     // v_review_queue uses to keep/drop a bill (20260907000002) -- not just
-    // stage 1 (verified_at). siblingBillsRes already carries each bill's
-    // verified_at + entry_id; this pulls the Classify fields for those
-    // entries so `billFinished` below can check Connect + Classify too.
+    // stage 1 (verified_at). This pulls the Classify fields for every entry
+    // linked to any sibling bill (entry_bill_link, Phase 4) so `billFinished`
+    // below can check Connect + Classify too.
     (() => {
-      const ids = [
-        ...new Set(
-          (siblingBillsRes.data ?? [])
-            .map((b) => b.entry_id as number | null)
-            .filter((x): x is number => x !== null)
-        ),
-      ]
+      const ids = [...new Set([...linkedEntryIdsByBill.values()].flat())]
       return ids.length > 0
         ? supabase.from('entries').select('id, admin_head_id, zone_id, sub_department_id').in('id', ids)
         : Promise.resolve({ data: [] })
@@ -748,30 +758,31 @@ async function loadDocumentDetail(
   // an in-session vendor/total/date edit run the identical pipeline
   // (pre-filter RPC + lib/matching.ts's rankCandidates). Uses verified
   // values over OCR where a reviewer has already corrected a field.
-  let matchCandidates: MatchCandidate[] = []
-  if (entryId === null) {
-    matchCandidates = await computeMatchCandidates(
-      supabase,
-      {
-        vendorId: null,
-        vendorName:
-          (extraction.vendor_name_verified as string | null) ?? (extraction.vendor_name_ocr as string | null),
-        totalAmount:
-          (extraction.total_amount_verified as number | null) ?? (extraction.total_amount_ocr as number | null),
-        invoiceDate:
-          (extraction.invoice_date_verified as string | null) ?? (extraction.invoice_date_ocr as string | null),
-        invoiceNumber:
-          (extraction.invoice_number_verified as string | null) ?? (extraction.invoice_number_ocr as string | null),
-      },
-      selectedEventId,
-    )
-  }
+  // Entry-bill links (Phase 4): computed even once the bill has a linked entry
+  // — a bill may cover several entries, so "already attached" no longer means
+  // "nothing left to suggest". The entries already on this bill are excluded.
+  const matchCandidates: MatchCandidate[] = await computeMatchCandidates(
+    supabase,
+    {
+      vendorId: null,
+      vendorName:
+        (extraction.vendor_name_verified as string | null) ?? (extraction.vendor_name_ocr as string | null),
+      totalAmount:
+        (extraction.total_amount_verified as number | null) ?? (extraction.total_amount_ocr as number | null),
+      invoiceDate:
+        (extraction.invoice_date_verified as string | null) ?? (extraction.invoice_date_ocr as string | null),
+      invoiceNumber:
+        (extraction.invoice_number_verified as string | null) ?? (extraction.invoice_number_ocr as string | null),
+      excludeEntryIds: linkedEntryIds,
+    },
+    selectedEventId,
+  )
 
   const siblingBills: SiblingBill[] = (siblingBillsRes.data ?? [])
     .map((b) => ({
       documentExtractionId: b.id as number,
       billIndex: b.bill_index as number,
-      matched: (b.entry_id as number | null) !== null,
+      matched: (linkedEntryIdsByBill.get(b.id as number)?.length ?? 0) > 0,
       verifiedAt: b.verified_at as string | null,
       pageNumberStart: b.page_number_start as number | null,
       pageNumberEnd: b.page_number_end as number | null,
@@ -820,13 +831,14 @@ async function loadDocumentDetail(
   // is vacuously true so `covering.length > 0` is the real gate.
   const noEntryExpected = (sourceDoc.match_status as string | null) === 'no_entry_expected'
   const billRanges = (siblingBillsRes.data ?? []).map((b) => {
-    const bEntryId = b.entry_id as number | null
+    const bEntryIds = linkedEntryIdsByBill.get(b.id as number) ?? []
     return {
       start: b.page_number_start as number | null,
       end: b.page_number_end as number | null,
       finished:
         (b.verified_at as string | null) !== null &&
-        (noEntryExpected || (bEntryId !== null && classifiedEntryIds.has(bEntryId))),
+        (noEntryExpected ||
+          (bEntryIds.length > 0 && bEntryIds.every((id) => classifiedEntryIds.has(id)))),
     }
   })
   function isPageVerified(pageNumber: number): boolean {

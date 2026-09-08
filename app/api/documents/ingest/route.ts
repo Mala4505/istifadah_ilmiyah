@@ -247,14 +247,15 @@ async function handlePOST(request: NextRequest) {
   const { data: inserted, error: insertError } = await admin
     .from('source_document')
     .insert({
-      entry_id: entryId,
       storage_path: storagePath,
       original_filename: safeFilename(file.name),
       file_hash_sha256: fileHash,
       mime_type: 'application/pdf',
       page_count: pageCount,
       upload_status: 'uploaded',
-      match_status: entryId === null ? 'unmatched' : 'matched',
+      // match_status is derived by private.sync_source_document_match_status
+      // (Phase 4): the placeholder entry_bill_link insert below flips it to
+      // 'matched' when this upload attaches straight to an entry.
       uploaded_by: staff.userId,
       event_id: eventId,
     })
@@ -273,9 +274,8 @@ async function handlePOST(request: NextRequest) {
   // entry-bill links (Phase 3): when the upload attaches straight to an entry,
   // extraction has not run yet so there are no bills to link. Write a
   // placeholder entry_bill_link row (document_extraction_id null) that the
-  // extract handler promotes to per-bill rows once the bills exist. The
-  // scalar source_document.entry_id above is kept for the legacy readers and
-  // is dropped in Phase 6.
+  // extract handler promotes to per-bill rows once the bills exist. This insert
+  // also fires the match_status trigger, flipping the doc to 'matched'.
   if (entryId !== null) {
     const { error: linkError } = await admin.from('entry_bill_link').insert({
       entry_id: entryId,

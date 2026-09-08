@@ -51,11 +51,7 @@ export async function fetchDocumentFacts(admin: AdminClient): Promise<DocumentFa
       round_off_ocr, round_off_verified,
       tax_breakdown_ocr, tax_breakdown_verified,
       place_of_supply_ocr, place_of_supply_verified,
-      verified_at,
-      source_document:source_document_id (
-        entry_id,
-        entries:entry_id ( vendor_id )
-      )
+      verified_at
     `
     )
     .not('verified_at', 'is', null)
@@ -64,19 +60,49 @@ export async function fetchDocumentFacts(admin: AdminClient): Promise<DocumentFa
     throw new Error(`fetchDocumentFacts: query failed: ${error.message}`)
   }
 
+  // entry-bill links (Phase 4): a bill's entry / vendor is no longer a scalar
+  // on source_document. Resolve each bill's PRIMARY linked entry (largest
+  // amount, id tie-break — the same rule as v_bill_primary_entry) in one
+  // round trip, then attribute entryId / vendorId from it.
+  const extractionIds = (data ?? []).map((r) => r.id as number)
+  const primaryByBill = new Map<
+    number,
+    { entryId: number; vendorId: number | null; amount: number }
+  >()
+  if (extractionIds.length > 0) {
+    const { data: linkRows, error: linkError } = await admin
+      .from('entry_bill_link')
+      .select('document_extraction_id, entries:entry_id ( id, amount, vendor_id )')
+      .in('document_extraction_id', extractionIds)
+    if (linkError) {
+      throw new Error(`fetchDocumentFacts: entry_bill_link query failed: ${linkError.message}`)
+    }
+    for (const link of linkRows ?? []) {
+      const billId = link.document_extraction_id as number | null
+      if (billId === null) continue
+      const e = Array.isArray(link.entries) ? link.entries[0] : link.entries
+      if (!e) continue
+      const entryId = e.id as number
+      const amount = e.amount === null ? 0 : Number(e.amount)
+      const current = primaryByBill.get(billId)
+      if (
+        !current ||
+        amount > current.amount ||
+        (amount === current.amount && entryId < current.entryId)
+      ) {
+        primaryByBill.set(billId, { entryId, vendorId: (e.vendor_id as number | null) ?? null, amount })
+      }
+    }
+  }
+
   return (data ?? []).map((row): DocumentFacts => {
-    // Supabase's generated types treat a to-one embed as an array; PostgREST
-    // returns a single object because source_document_id is a unique FK. Both
-    // shapes are handled defensively rather than trusting the array framing.
-    const sourceDoc = Array.isArray(row.source_document) ? row.source_document[0] : row.source_document
-    const entryRaw = sourceDoc?.entries
-    const entry = Array.isArray(entryRaw) ? entryRaw[0] : entryRaw
+    const primary = primaryByBill.get(row.id as number)
 
     return {
       documentExtractionId: row.id as number,
       sourceDocumentId: row.source_document_id as number,
-      entryId: (sourceDoc?.entry_id as number | null) ?? null,
-      vendorId: (entry?.vendor_id as number | null) ?? null,
+      entryId: primary?.entryId ?? null,
+      vendorId: primary?.vendorId ?? null,
       vendorName: preferVerified(row.vendor_name_verified, row.vendor_name_ocr),
       vendorGstin: preferVerified(row.vendor_gstin_verified, row.vendor_gstin_ocr),
       invoiceNumber: preferVerified(row.invoice_number_verified, row.invoice_number_ocr),

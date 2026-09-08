@@ -104,7 +104,6 @@ type AdminClient = ReturnType<typeof createAdminClient>
 /** What persistExtractionPipelineResult needs about the source_document row. */
 export interface SourceDocumentForExtraction {
   storagePath: string
-  entryId: number | null
   pageCount: number | null
 }
 
@@ -121,7 +120,7 @@ export async function fetchSourceDocumentForExtraction(
 ): Promise<SourceDocumentForExtraction> {
   const { data: doc, error: docError } = await admin
     .from('source_document')
-    .select('id, storage_path, entry_id, page_count')
+    .select('id, storage_path, page_count')
     .eq('id', sourceDocumentId)
     .single()
 
@@ -133,7 +132,6 @@ export async function fetchSourceDocumentForExtraction(
 
   return {
     storagePath: doc.storage_path as string,
-    entryId: (doc.entry_id as number | null) ?? null,
     pageCount: (doc.page_count as number | null) ?? null,
   }
 }
@@ -302,10 +300,9 @@ export async function persistExtractionPipelineResult(
   // entry-bill links (Phase 3): the entry a bill's tally checks compare against.
   // A document attached before extraction has a placeholder entry_bill_link row
   // (document_extraction_id null); if there is exactly one such entry, treat it
-  // as this document's entry for the per-bill ocr_total_vs_amount check, exactly
-  // as the old single-bill `source_document.entry_id` mirror did. Per-bill links
-  // that already exist (a re-extraction of a reviewed multi-bill doc) are read
-  // per bill inside the loop.
+  // as this document's entry for the per-bill ocr_total_vs_amount check. Per-bill
+  // links that already exist (a re-extraction of a reviewed multi-bill doc) are
+  // read per bill inside the loop.
   const { data: placeholderLinks } = await admin
     .from('entry_bill_link')
     .select('entry_id')
@@ -414,15 +411,14 @@ export async function persistExtractionPipelineResult(
       // wire already, so there is nothing for that pass to catch in this array.
       uncertain_fields_ocr: bill.uncertain_fields,
     }
-    // entry_id is no longer written here (entry-bill links, Phase 3). The
+    // entry_id is no longer written here (entry-bill links, Phase 3/4). The
     // entry<->bill relationship lives in `entry_bill_link`; the placeholder
     // promotion step after this loop links every entry that was attached to
-    // the document before extraction, and the junction→scalar mirror trigger
-    // keeps document_extraction.entry_id coherent for the legacy readers.
+    // the document before extraction.
     const { data: extractionRow, error: extractionError } = await admin
       .from('document_extraction')
       .upsert(upsertPayload, { onConflict: 'source_document_id,bill_index' })
-      .select('id, entry_id')
+      .select('id')
       .single()
 
     if (extractionError || !extractionRow) {
@@ -652,16 +648,29 @@ export async function persistExtractionPipelineResult(
       ])
 
     // ---- §8 point 5: tally checks, immediately on write, scoped to this bill.
+    //
+    // entry-bill links (Phase 4): the ocr_total_vs_amount check compares a
+    // bill's total against ONE entry amount, so it only makes sense when the
+    // bill covers exactly one entry. A pre-existing per-bill link set of size
+    // one wins (a re-extraction of a reviewed doc); else the single
+    // pre-extraction placeholder entry; else null (0 or 2+ entries => the
+    // check is skipped, it would fire on every legitimate multi-entry bill).
+    const { data: billLinkRows } = await admin
+      .from('entry_bill_link')
+      .select('entry_id')
+      .eq('document_extraction_id', documentExtractionId)
+    const billLinkedEntryIds = [...new Set((billLinkRows ?? []).map((r) => r.entry_id as number))]
+    const singleEntryId =
+      billLinkedEntryIds.length === 1
+        ? billLinkedEntryIds[0]!
+        : billLinkedEntryIds.length === 0
+          ? placeholderEntryId
+          : null
+
     const billExceptions = await runTallyChecks(admin, {
       documentExtractionId,
       currentRunId,
-      // entry-bill links (Phase 3): a pre-existing per-bill link wins (a
-      // re-extraction of a reviewed multi-bill doc); otherwise the single
-      // pre-extraction placeholder entry, if any; otherwise whatever the mirror
-      // trigger has left on the row.
-      entryId:
-        (extractionRow.entry_id as number | null) ??
-        placeholderEntryId,
+      entryId: singleEntryId,
       totalAmount: bill.total_amount,
       subtotal: bill.subtotal,
       taxAmount: bill.tax_amount,
@@ -747,8 +756,8 @@ export async function finalizeSourceDocumentExtraction(
   // row with document_extraction_id null). Now that the bills are persisted,
   // fan each placeholder out to one row per (bill, entry) and drop the
   // placeholder. Runs here so it happens exactly once per document, after the
-  // last page in the per-page path. The mirror trigger keeps the scalar
-  // entry_id columns coherent.
+  // last page in the per-page path. The junction triggers re-derive
+  // source_document.match_status from the resulting rows.
   const { data: placeholders } = await admin
     .from('entry_bill_link')
     .select('entry_id')

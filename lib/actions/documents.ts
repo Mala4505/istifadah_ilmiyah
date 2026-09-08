@@ -34,12 +34,12 @@ const DELETE_PERMISSION_HINT =
  * reviewer/admin gated, so no guard against re-attaching an already-matched
  * document.
  *
- * entry-bill links (Phase 3): the link itself is now written through
+ * entry-bill links (Phase 3/4): the link itself is written through
  * `set_document_entry_links` (a document-grain replace — every bill of the PDF
  * gets linked to `entryId`, or a placeholder row if extraction hasn't run).
- * `source_document.entry_id` / `document_extraction.entry_id` are kept coherent
- * by the junction→scalar mirror trigger, not written here. `match_status` is
- * still set explicitly until Phase 4 makes it trigger-derived.
+ * `source_document.match_status` is derived from the junction by
+ * `private.sync_source_document_match_status` (Phase 4), not written here —
+ * a half-connected multi-bill PDF correctly stays 'unmatched'.
  */
 export async function attachDocumentToEntry(input: {
   documentId: number
@@ -57,17 +57,6 @@ export async function attachDocumentToEntry(input: {
   })
   if (linkError) {
     return { ok: false, error: logRawError('documents.attachDocumentToEntry', linkError.message) }
-  }
-
-  const { data, error } = await supabase
-    .from('source_document')
-    .update({ match_status: 'matched' })
-    .eq('id', input.documentId)
-    .select('id')
-
-  if (error) return { ok: false, error: logRawError('documents.attachDocumentToEntry', error.message) }
-  if (!data || data.length === 0) {
-    return { ok: false, error: `No document was updated. ${PERMISSION_HINT}` }
   }
 
   revalidatePath('/documents')
@@ -174,20 +163,9 @@ export async function bulkAttachDocuments(pairs: BulkAttachPair[]): Promise<Bulk
     })
     if (linkError) {
       failedDocumentIds.push(pair.documentId)
-      continue
-    }
-
-    // match_status stays explicit until Phase 4's trigger; the scalar entry_id
-    // is maintained by the junction→scalar mirror trigger.
-    const { data, error } = await supabase
-      .from('source_document')
-      .update({ match_status: 'matched' })
-      .eq('id', pair.documentId)
-      .select('id')
-
-    if (error || !data || data.length === 0) {
-      failedDocumentIds.push(pair.documentId)
     } else {
+      // match_status is derived from the junction by
+      // private.sync_source_document_match_status (Phase 4).
       attachedCount++
     }
   }
@@ -249,11 +227,10 @@ export async function markNoEntryExpected(documentId: number): Promise<ActionRes
  * reappears in the inbox rather than staying invisibly linked to the wrong
  * entry. The inverse of attachDocumentToEntry.
  *
- * entry-bill links (Phase 3): removes every link between this document and
- * `entryId` via `remove_entry_bill_links`; the scalar `entry_id` columns follow
- * through the mirror trigger. Pre-Phase-5 a document has at most one linked
- * entry so blanket 'unmatched' is still correct here — Phase 4's match_status
- * trigger is what handles the "still linked to another entry" case.
+ * entry-bill links (Phase 3/4): removes every link between this document and
+ * `entryId` via `remove_entry_bill_links`. `match_status` follows from
+ * `private.sync_source_document_match_status` — it drops to 'unmatched' only
+ * if no bill of the document is still linked to something.
  */
 export async function detachDocumentFromEntry(
   documentId: number,
@@ -271,17 +248,6 @@ export async function detachDocumentFromEntry(
   })
   if (unlinkError) {
     return { ok: false, error: logRawError('documents.detachDocumentFromEntry', unlinkError.message) }
-  }
-
-  const { data, error } = await supabase
-    .from('source_document')
-    .update({ match_status: 'unmatched' })
-    .eq('id', documentId)
-    .select('id')
-
-  if (error) return { ok: false, error: logRawError('documents.detachDocumentFromEntry', error.message) }
-  if (!data || data.length === 0) {
-    return { ok: false, error: `No document was updated. ${PERMISSION_HINT}` }
   }
 
   revalidatePath('/documents')
@@ -566,11 +532,10 @@ export interface DocumentViewDetail {
  * URL so a reviewer doesn't have to re-enter the `/review` queue just to
  * see a bill's line items again.
  *
- * `entryId`, when passed, picks the specific bill matched to that entry out
- * of a multi-bill PDF (document_extraction.entry_id, same per-bill source of
- * truth used throughout review.ts); omitted or unmatched falls back to the
- * first bill by bill_index, mirroring the same convention already used to
- * build LinkedDocumentView on the entry detail page.
+ * `entryId`, when passed, picks the specific bill linked to that entry out
+ * of a multi-bill PDF (entry_bill_link, Phase 4); omitted or unlinked falls
+ * back to the first bill by bill_index, mirroring the same convention already
+ * used to build LinkedDocumentView on the entry detail page.
  */
 export async function getDocumentViewDetail(
   documentId: number,
@@ -587,7 +552,7 @@ export async function getDocumentViewDetail(
     supabase
       .from('document_extraction')
       .select(
-        'id, bill_index, entry_id, verified_at, vendor_name_ocr, vendor_name_verified, vendor_gstin_ocr, vendor_gstin_verified, vendor_phone_ocr, vendor_phone_verified, vendor_email_ocr, vendor_email_verified, vendor_address_ocr, vendor_address_verified, buyer_gstin_ocr, buyer_gstin_verified, buyer_name_ocr, buyer_name_verified, invoice_number_ocr, invoice_number_verified, invoice_date_ocr, invoice_date_verified, subtotal_ocr, subtotal_verified, tax_amount_ocr, tax_amount_verified, total_amount_ocr, total_amount_verified, notes_ocr, notes_verified'
+        'id, bill_index, verified_at, vendor_name_ocr, vendor_name_verified, vendor_gstin_ocr, vendor_gstin_verified, vendor_phone_ocr, vendor_phone_verified, vendor_email_ocr, vendor_email_verified, vendor_address_ocr, vendor_address_verified, buyer_gstin_ocr, buyer_gstin_verified, buyer_name_ocr, buyer_name_verified, invoice_number_ocr, invoice_number_verified, invoice_date_ocr, invoice_date_verified, subtotal_ocr, subtotal_verified, tax_amount_ocr, tax_amount_verified, total_amount_ocr, total_amount_verified, notes_ocr, notes_verified'
       )
       .eq('source_document_id', documentId)
       .order('bill_index'),
@@ -599,7 +564,21 @@ export async function getDocumentViewDetail(
     return { ok: false, error: 'This document has not been extracted yet, or is not visible to you.' }
   }
 
-  const extraction = (entryId !== undefined ? extractions.find((e) => e.entry_id === entryId) : undefined) ?? extractions[0]!
+  // entry-bill links (Phase 4): pick the bill linked to `entryId`, if given.
+  let linkedBillIds = new Set<number>()
+  if (entryId !== undefined) {
+    const { data: linkRows } = await supabase
+      .from('entry_bill_link')
+      .select('document_extraction_id')
+      .eq('source_document_id', documentId)
+      .eq('entry_id', entryId)
+    linkedBillIds = new Set(
+      (linkRows ?? [])
+        .map((r) => r.document_extraction_id as number | null)
+        .filter((id): id is number => id !== null)
+    )
+  }
+  const extraction = extractions.find((e) => linkedBillIds.has(e.id as number)) ?? extractions[0]!
 
   const { data: lineItemsData, error: lineItemsError } = await supabase
     .from('document_extraction_line_item')

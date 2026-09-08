@@ -12,6 +12,10 @@
  *   - Suggested: attachedEntries.length === 0 && matchCandidates.length > 0.
  *   - Unmatched: attachedEntries.length === 0 && matchCandidates.length === 0.
  *
+ * Entry-bill links (Phase 4): a bill can cover several entries, so the Linked
+ * state still forwards `matchCandidates` (already filtered to exclude the
+ * entries on this bill) to the combobox — the reviewer can keep adding.
+ *
  * Redesign plan §4: all three states now render through one
  * EntryAttachCombobox trigger (see that file's header) instead of separate
  * pill/text/button layouts -- Suggested and Unmatched only differ in whether
@@ -104,6 +108,7 @@ function MatchStripImpl({
           documentExtractionId={documentExtractionId}
           attachedEntries={attachedEntries}
           billTotal={billTotal}
+          suggestedCandidates={matchCandidates}
           onAttached={onChanged}
           className="w-56"
         />

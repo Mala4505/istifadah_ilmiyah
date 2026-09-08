@@ -12,9 +12,9 @@
  * "Awaiting bill" filters can never disagree.
  *
  * A row counts as "has a bill" when `document_count > 0` -- i.e. at least one
- * `source_document` is linked to the entry, whether directly
- * (source_document.entry_id) or via one of its bills
- * (document_extraction.entry_id). Void entries are excluded from every count.
+ * `source_document` is linked to the entry through `entry_bill_link` (a
+ * pre-extraction placeholder link counts). Void entries are excluded from
+ * every count.
  *
  * Best-effort and defensively coded: any failed sub-query degrades to 0 rather
  * than throwing -- this is a header summary, not a critical path.

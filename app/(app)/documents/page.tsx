@@ -132,7 +132,7 @@ export default async function DocumentsPage({
 
   let docsQuery = supabase
     .from('source_document')
-    .select('id, original_filename, upload_status, match_status, uploaded_at, page_count, entry_id')
+    .select('id, original_filename, upload_status, match_status, uploaded_at, page_count')
     .in('match_status', ['unmatched', 'suggested'])
   if (selectedEventId !== null) {
     docsQuery = docsQuery.eq('event_id', selectedEventId)
@@ -208,7 +208,6 @@ export default async function DocumentsPage({
     invoice_number_verified: string | null
     total_amount_verified: number | null
     verified_at: string | null
-    entry_id: number | null
   }
 
   const { data: extractionsData } =
@@ -216,11 +215,36 @@ export default async function DocumentsPage({
       ? await supabase
           .from('document_extraction')
           .select(
-            'id, source_document_id, bill_index, vendor_name_ocr, invoice_date_ocr, invoice_number_ocr, total_amount_ocr, vendor_name_verified, invoice_date_verified, invoice_number_verified, total_amount_verified, verified_at, entry_id'
+            'id, source_document_id, bill_index, vendor_name_ocr, invoice_date_ocr, invoice_number_ocr, total_amount_ocr, vendor_name_verified, invoice_date_verified, invoice_number_verified, total_amount_verified, verified_at'
           )
           .in('source_document_id', docIds)
           .order('bill_index', { ascending: true })
       : { data: [] as ExtractionRow[] }
+
+  // entry-bill links (Phase 4): the Connect/Classify stage state per bill was
+  // document_extraction.entry_id / source_document.entry_id; it now comes from
+  // entry_bill_link. Placeholder rows (document_extraction_id null) belong to a
+  // doc attached before extraction and count for every one of its bills.
+  const { data: linkRowsData } =
+    docIds.length > 0
+      ? await supabase
+          .from('entry_bill_link')
+          .select('source_document_id, document_extraction_id, entry_id')
+          .in('source_document_id', docIds)
+      : { data: [] as { source_document_id: number; document_extraction_id: number | null; entry_id: number }[] }
+  const linkedEntryIdsByBill = new Map<number, number[]>()
+  const placeholderEntryIdsByDoc = new Map<number, number[]>()
+  for (const r of linkRowsData ?? []) {
+    if (r.document_extraction_id !== null) {
+      const list = linkedEntryIdsByBill.get(r.document_extraction_id) ?? []
+      if (!list.includes(r.entry_id)) list.push(r.entry_id)
+      linkedEntryIdsByBill.set(r.document_extraction_id, list)
+    } else {
+      const list = placeholderEntryIdsByDoc.get(r.source_document_id) ?? []
+      if (!list.includes(r.entry_id)) list.push(r.entry_id)
+      placeholderEntryIdsByDoc.set(r.source_document_id, list)
+    }
+  }
 
   const extractionsByDocId = new Map<number, ExtractionRow[]>()
   for (const extraction of extractionsData ?? []) {
@@ -234,19 +258,13 @@ export default async function DocumentsPage({
 
   // Review completion (2026-09-07): "Reviewed" on the inbox now means all
   // three Review stages are done, not just stage 1 (verify). Stage 2
-  // (connect) is this bill's own entry_id, or the document's when the bill
-  // has none, or the document being marked 'no entry expected'. Stage 3
-  // (classify) reads the connected entry's admin_head/zone/sub_department --
-  // one bounded `.in()` over just the entry ids actually referenced here.
+  // (connect) is whether the bill has any entry_bill_link (or the document is
+  // marked 'no entry expected'). Stage 3 (classify) reads every linked entry's
+  // admin_head/zone/sub_department -- one bounded `.in()` over just the entry
+  // ids actually referenced here.
   const matchStatusByDocId = new Map<number, string>(docs.map((d) => [d.id, d.match_status as string]))
-  const docEntryIdByDocId = new Map<number, number | null>(docs.map((d) => [d.id, (d.entry_id as number | null) ?? null]))
   const connectedEntryIds = Array.from(
-    new Set(
-      [
-        ...(extractionsData ?? []).map((e) => e.entry_id as number | null),
-        ...docs.map((d) => (d.entry_id as number | null) ?? null),
-      ].filter((id): id is number => id !== null)
-    )
+    new Set((linkRowsData ?? []).map((r) => r.entry_id as number))
   )
   const { data: connectedEntriesData } =
     connectedEntryIds.length > 0
@@ -376,11 +394,15 @@ export default async function DocumentsPage({
     const noEntryExpected = docMatchStatus === 'no_entry_expected'
 
     const bills: DocumentExtractionSummary[] = extractions.map((extraction) => {
-      const effectiveEntryId = (extraction.entry_id as number | null) ?? docEntryIdByDocId.get(doc.id) ?? null
-      const connectDone = noEntryExpected || effectiveEntryId !== null
+      const billEntryIds =
+        linkedEntryIdsByBill.get(extraction.id) ?? placeholderEntryIdsByDoc.get(doc.id) ?? []
+      const connectDone = noEntryExpected || billEntryIds.length > 0
       // Nothing to classify when there's no entry -- treat as satisfied so a
       // 'no entry expected' bill can still read as fully done once verified.
-      const classifyDone = effectiveEntryId === null ? connectDone : classifiedEntryIds.has(effectiveEntryId)
+      const classifyDone =
+        billEntryIds.length === 0
+          ? connectDone
+          : billEntryIds.every((id) => classifiedEntryIds.has(id))
       return {
         id: extraction.id,
         billIndex: extraction.bill_index,

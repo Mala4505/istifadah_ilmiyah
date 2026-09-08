@@ -47,14 +47,13 @@ export type EntryRow = {
 
 type SourceDocumentRow = {
   id: number
-  entry_id: number | null
+  match_status: string
   upload_status: string
   uploaded_at: string
 }
 
 type ExtractionJoinRow = {
   source_document_id: number
-  entry_id: number | null
   verified_at: string | null
 }
 
@@ -294,7 +293,7 @@ export async function loadHeroMetrics(
     supabase.from('v_budget_vs_actual').select('approved_amount').eq('event_id', eventId).returns<BudgetApprovedRow[]>(),
     supabase
       .from('source_document')
-      .select('id, entry_id, upload_status, uploaded_at')
+      .select('id, match_status, upload_status, uploaded_at')
       .eq('event_id', eventId)
       .returns<SourceDocumentRow[]>(),
     eventId === null
@@ -313,7 +312,7 @@ export async function loadHeroMetrics(
       ? { data: [] as ExtractionJoinRow[], error: null as { message: string } | null }
       : await supabase
           .from('document_extraction')
-          .select('source_document_id, entry_id, verified_at')
+          .select('source_document_id, verified_at')
           .in('source_document_id', docIds)
           .returns<ExtractionJoinRow[]>()
 
@@ -409,11 +408,9 @@ export async function loadHeroMetrics(
     // A document with zero extraction rows yet does not count as verified --
     // `bills.length > 0` guards that, matching the spec's explicit note.
     if (bills.length > 0 && bills.every((b) => b.verified_at !== null)) verifiedCount += 1
-    // coalesce(document_extraction.entry_id, source_document.entry_id), same
-    // pattern as 20260821000002_entry_id_coalesce_fix.sql, applied per
-    // document: a multi-bill document counts as matched once any one of its
-    // bills has a per-bill match, or the legacy doc-level entry_id is set.
-    if (doc.entry_id !== null || bills.some((b) => b.entry_id !== null)) matchedCount += 1
+    // entry-bill links (Phase 4): match_status is trigger-derived from
+    // entry_bill_link -- 'matched' means every bill of the PDF is linked.
+    if (doc.match_status === 'matched') matchedCount += 1
   }
 
   const pipeline = [

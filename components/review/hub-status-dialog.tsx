@@ -5,7 +5,7 @@
  * setHubStatus directly, per the task brief -- this dialog is only a thin
  * keyboard-triggered front end for it, the same action the entry-detail
  * screen's HubStatusSection calls. Only rendered/enabled when
- * `detail.canSetHubStatus` is true (source_document.entry_id is set) --
+ * `detail.canSetHubStatus` is true (the bill has a primary linked entry) --
  * §7's "this is the point of the whole queue" note about earning the right
  * to move an entry forward presupposes an entry to move.
  */

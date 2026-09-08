@@ -574,10 +574,9 @@ export function ReviewWorkspace({
   // already attached. Reverting an edit back to the server's values clears
   // the live list, so the server's own suggestions show again.
   useEffect(() => {
-    if (detail.entryId !== null) {
-      setLiveMatchCandidates(null)
-      return
-    }
+    // Entry-bill links (Phase 4): still re-matches once the bill has a linked
+    // entry — a bill may cover several. refreshMatchCandidates excludes the
+    // entries already on this bill server-side.
     const currentKey = matchInputsKey(vendorId, vendorName, totalAmount, invoiceDate, invoiceNumber)
     if (currentKey === serverMatchInputsRef.current) {
       setLiveMatchCandidates(null)
@@ -598,7 +597,7 @@ export function ReviewWorkspace({
       })
     }, 600)
     return () => clearTimeout(handle)
-  }, [vendorId, vendorName, totalAmount, invoiceDate, invoiceNumber, detail.entryId, detail.documentExtractionId])
+  }, [vendorId, vendorName, totalAmount, invoiceDate, invoiceNumber, detail.documentExtractionId])
 
   // L3 (plan §11, checklist 3.3): "edited from OCR" is a different question
   // from `dirty` above -- dirty compares against this mount's initial

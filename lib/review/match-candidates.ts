@@ -36,6 +36,14 @@ export interface MatchCandidateInput {
   totalAmount: number | null
   invoiceDate: string | null
   invoiceNumber: string | null
+  /**
+   * Entries already linked to THIS bill (entry-bill links, Phase 4). Excluded
+   * from the suggestion list so the reviewer only ever sees entries they have
+   * not connected yet. Being matched to some *other* bill is no longer a
+   * reason to exclude an entry — `match_candidate_entries` dropped that global
+   * filter when one bill became able to cover several entries.
+   */
+  excludeEntryIds?: number[]
 }
 
 interface CandidateRow {
@@ -74,6 +82,8 @@ export async function computeMatchCandidates(
     p_amount: input.totalAmount,
     p_invoice_number: input.invoiceNumber,
     p_vendor_raw: input.vendorName,
+    p_exclude_entry_ids:
+      input.excludeEntryIds && input.excludeEntryIds.length > 0 ? input.excludeEntryIds : null,
   })
 
   const candidatePool: MatchableEntry[] = ((candidateRows ?? []) as CandidateRow[]).map((e) => ({
