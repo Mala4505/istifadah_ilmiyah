@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server'
-import * as Sentry from '@sentry/nextjs'
 import { serverEnv } from '@/lib/env.server'
 import { drainJobQueue } from '@/lib/jobs/drain'
 import { getStaffContext } from '@/lib/export/auth'
