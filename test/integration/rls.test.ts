@@ -75,6 +75,35 @@ const LEDGER = {
   jobs: [] as number[],
   users: [] as string[],
   objects: [] as string[],
+  sourceDocuments: [] as number[],
+}
+
+/**
+ * `entries.event_id` and `source_document.event_id` are NOT NULL (event scoping,
+ * 20260822000005). Event rows are pre-existing production data — read-only here,
+ * same as staff/department/vendor — so fixtures BORROW the current event's id
+ * rather than creating one (an `event` insert would have to reason about the
+ * `is_current` partial-unique index). Assertions never filter by event, so which
+ * event the fixture rows sit in is immaterial to every test.
+ */
+let _eventIdPromise: Promise<number> | undefined
+async function getEventId(): Promise<number> {
+  if (!_eventIdPromise) {
+    _eventIdPromise = (async () => {
+      const { data, error } = await svc
+        .from('event')
+        .select('id')
+        .order('is_current', { ascending: false })
+        .order('id', { ascending: true })
+        .limit(1)
+        .maybeSingle()
+      if (error || !data) {
+        throw new Error(`getEventId: no event row to borrow (${error?.message ?? 'empty'})`)
+      }
+      return data.id as number
+    })()
+  }
+  return _eventIdPromise
 }
 
 /** Delete by exact primary key only. An empty id list is a no-op, never a bare DELETE. */
@@ -99,10 +128,47 @@ type Fixture = {
   inactive?: FixtureUser
   /** Storage paths created during the test, removed on cleanup. */
   objects: string[]
+  /** source_document ids created via `insertBill` during the test. Cascade-deleted
+   *  (bills, entry_bill_link, ...) on cleanup. */
+  sourceDocuments: number[]
+  /** Create a source_document + one bill inside this fixture's lifecycle. */
+  makeBill: () => Promise<{ sourceDocumentId: number; billId: number }>
   cleanup: () => Promise<void>
 }
 
 type FixtureUser = { id: string; email: string; client: SupabaseClient }
+
+/**
+ * GoTrue rate-limits `admin.createUser` and `signInWithPassword` on a short
+ * window. Each fixture makes 3-4 users, so a full run does ~70 auth calls in a
+ * minute — enough to trip a 429. Retry those two calls (only) with backoff;
+ * everything else fails fast as before.
+ */
+async function withAuthRetry<T extends { error: { message: string; status?: number } | null }>(
+  label: string,
+  fn: () => Promise<T>
+): Promise<T> {
+  const delays = [1500, 3000, 6000, 12000, 20000]
+  for (let attempt = 0; ; attempt++) {
+    let res: T
+    try {
+      res = await fn()
+    } catch (e) {
+      // A thrown `fetch failed` (transient GoTrue network blip) is retried the
+      // same way a returned 429 is; anything else rethrows immediately.
+      if (attempt >= delays.length || !/fetch failed|ETIMEDOUT|ECONNRESET|network/i.test(String(e))) {
+        throw e
+      }
+      await new Promise((r) => setTimeout(r, delays[attempt]))
+      continue
+    }
+    const msg = res.error?.message ?? ''
+    const retryable =
+      !!res.error && (res.error.status === 429 || /rate limit|fetch failed/i.test(msg))
+    if (!retryable || attempt >= delays.length) return res
+    await new Promise((r) => setTimeout(r, delays[attempt]))
+  }
+}
 
 async function makeUser(
   suffix: string,
@@ -114,12 +180,14 @@ async function makeUser(
   const email = `${TAG}-${label}-${suffix}@rls-test.example.com`
   const password = `Rls!${RUN_ID}${Math.random().toString(36).slice(2, 10)}`
 
-  const { data, error } = await svc.auth.admin.createUser({
-    email,
-    password,
-    email_confirm: true,
-    user_metadata: { full_name: `${TAG} ${label} ${suffix}` },
-  })
+  const { data, error } = await withAuthRetry(`createUser(${label})`, () =>
+    svc.auth.admin.createUser({
+      email,
+      password,
+      email_confirm: true,
+      user_metadata: { full_name: `${TAG} ${label} ${suffix}` },
+    })
+  )
   if (error || !data.user) throw new Error(`createUser(${label}): ${error?.message}`)
   const id = data.user.id
   LEDGER.users.push(id)
@@ -148,7 +216,9 @@ async function makeUser(
   const client = createClient(SUPABASE_URL, PUBLISHABLE_KEY, {
     auth: { autoRefreshToken: false, persistSession: false },
   })
-  const { error: signInErr } = await client.auth.signInWithPassword({ email, password })
+  const { error: signInErr } = await withAuthRetry(`signIn(${label})`, () =>
+    client.auth.signInWithPassword({ email, password })
+  )
   if (signInErr) throw new Error(`signIn(${label}): ${signInErr.message}`)
 
   return { id, email, client }
@@ -171,6 +241,7 @@ async function insertEntry(suffix: string, letter: string, departmentId: number)
     .insert({
       ubbl_number: `${TAG}-${suffix}-${letter}`,
       department_id: departmentId,
+      event_id: await getEventId(),
       type: 'invoice',
       source: 'manual',
       amount: letter === 'a' ? '111.11' : '222.22',
@@ -183,6 +254,37 @@ async function insertEntry(suffix: string, letter: string, departmentId: number)
   if (error || !data) throw new Error(`insert entry ${letter}: ${error?.message}`)
   LEDGER.entries.push(data.id)
   return data.id
+}
+
+/** A source_document + one bill (document_extraction). Everything hanging off the
+ *  source_document row — bills, entry_bill_link, reconciliation_exception, ... —
+ *  is `on delete cascade`, so cleanup only has to delete the source_document. */
+async function insertBill(
+  suffix: string,
+  tracker: number[]
+): Promise<{ sourceDocumentId: number; billId: number }> {
+  const { data: sd, error: sdErr } = await svc
+    .from('source_document')
+    .insert({
+      event_id: await getEventId(),
+      storage_path: `${TAG}/${suffix}/doc.pdf`,
+      original_filename: `${TAG}-${suffix}.pdf`,
+      file_hash_sha256: `${TAG}${suffix}`.padEnd(64, '0').slice(0, 64),
+      mime_type: 'application/pdf',
+    })
+    .select('id')
+    .single()
+  if (sdErr || !sd) throw new Error(`insert source_document: ${sdErr?.message}`)
+  tracker.push(sd.id)
+  LEDGER.sourceDocuments.push(sd.id)
+
+  const { data: bill, error: billErr } = await svc
+    .from('document_extraction')
+    .insert({ source_document_id: sd.id, bill_index: 0, total_amount_ocr: '333.33' })
+    .select('id')
+    .single()
+  if (billErr || !bill) throw new Error(`insert document_extraction: ${billErr?.message}`)
+  return { sourceDocumentId: sd.id as number, billId: bill.id as number }
 }
 
 /**
@@ -202,6 +304,7 @@ async function withFixture(
     entries: [] as number[],
     departments: [] as number[],
     users: [] as string[],
+    sourceDocuments: [] as number[],
   }
 
   const cleanup = async () => {
@@ -217,6 +320,9 @@ async function withFixture(
       if (error) problems.push(`storage: ${error.message}`)
     }
     for (const step of [
+      // source_document first: entry_bill_link / document_extraction / ... all
+      // cascade from it, so this clears the bill side before the entries go.
+      () => del('source_document', created.sourceDocuments),
       () => del('entries', created.entries),
       async () => {
         if (created.users.length === 0) return
@@ -225,7 +331,9 @@ async function withFixture(
       },
       async () => {
         for (const id of created.users) {
-          const { error } = await svc.auth.admin.deleteUser(id)
+          const { error } = await withAuthRetry(`deleteUser(${id})`, () =>
+            svc.auth.admin.deleteUser(id)
+          )
           if (error) throw new Error(`auth user ${id}: ${error.message}`)
         }
       },
@@ -275,6 +383,8 @@ async function withFixture(
       deptUser,
       inactive,
       objects,
+      sourceDocuments: created.sourceDocuments,
+      makeBill: () => insertBill(suffix, created.sourceDocuments),
       cleanup,
     }
     await run(fx)
@@ -512,6 +622,7 @@ describe('RLS as three users (superadmin / admin / dept)', () => {
           .from('entries')
           .insert({
             ubbl_number: `${TAG}-${fx.suffix}-insert-dept`,
+            event_id: await getEventId(),
             department_id: fx.deptA,
             source: 'manual',
             amount: '1.00',
@@ -525,6 +636,7 @@ describe('RLS as three users (superadmin / admin / dept)', () => {
           .from('entries')
           .insert({
             ubbl_number: `${TAG}-${fx.suffix}-insert-admin`,
+            event_id: await getEventId(),
             department_id: fx.deptB,
             source: 'manual',
             amount: '1.00',
@@ -538,6 +650,7 @@ describe('RLS as three users (superadmin / admin / dept)', () => {
           .from('entries')
           .insert({
             ubbl_number: `${TAG}-${fx.suffix}-insert-superadmin`,
+            event_id: await getEventId(),
             department_id: fx.deptA,
             source: 'manual',
             amount: '1.00',
@@ -559,6 +672,7 @@ describe('RLS as three users (superadmin / admin / dept)', () => {
         .from('entries')
         .insert({
           ubbl_number: `${TAG}-${fx.suffix}-insert-dept-other`,
+          event_id: await getEventId(),
           department_id: fx.deptB,
           source: 'manual',
           amount: '1.00',
@@ -1219,6 +1333,116 @@ describe('RLS as three users (superadmin / admin / dept)', () => {
 })
 
 // ===========================================================================
+// entry_bill_link — entries <-> bills many-to-many (20260908000001 / ...0003).
+// Writes are RPC-only (reviewer/admin gated); the SELECT policy scopes PER ROW
+// (can_see_source_document AND can_see_entry); can_see_source_document reads the
+// junction with OR semantics across every linked entry's department.
+// ===========================================================================
+describe('entry_bill_link (entries <-> bills M:N)', () => {
+  it('RPC-gates writes to reviewer/admin, scopes the junction SELECT per row, and blocks direct writes', async () => {
+    await withFixture({}, async (fx) => {
+      const { sourceDocumentId, billId } = await fx.makeBill()
+
+      // --- 1. the link RPC enforces the reviewer/admin role -------------
+      // (checked before visibility, so no assignee/link setup is needed to
+      //  see this rejection).
+      const deptRpc = await fx.deptUser.client.rpc('set_bill_entry_links', {
+        p_document_extraction_id: billId,
+        p_entry_ids: [fx.entryA],
+      })
+      expect(deptRpc.error, 'a dept user must not be able to link bills to entries').not.toBeNull()
+
+      // --- 2. a privileged reviewer CAN link, across two departments ----
+      // superadmin (not admin): a plain admin cannot see an unassigned,
+      // not-yet-linked document — that is the pre-existing "unmatched docs are
+      // the non-admin triage pool" rule in can_see_source_document, unchanged
+      // by this feature. Real admin reviewers reach such a doc via assignment.
+      const writeRpc = await fx.superadminUser.client.rpc('set_bill_entry_links', {
+        p_document_extraction_id: billId,
+        p_entry_ids: [fx.entryA, fx.entryB],
+      })
+      expect(writeRpc.error).toBeNull()
+
+      const truth = await svc
+        .from('entry_bill_link')
+        .select('entry_id')
+        .eq('document_extraction_id', billId)
+      expect(new Set((truth.data ?? []).map((r) => r.entry_id))).toEqual(
+        new Set([fx.entryA, fx.entryB])
+      )
+
+      // --- 3. SELECT policy scopes PER ROW ------------------------------
+      // dept-A user sees the entryA link only; superadmin sees both.
+      const deptRows = await fx.deptUser.client
+        .from('entry_bill_link')
+        .select('entry_id')
+        .eq('document_extraction_id', billId)
+      expect(deptRows.error).toBeNull()
+      expect((deptRows.data ?? []).map((r) => r.entry_id)).toEqual([fx.entryA])
+
+      const superRows = await fx.superadminUser.client
+        .from('entry_bill_link')
+        .select('entry_id')
+        .eq('document_extraction_id', billId)
+      expect(new Set((superRows.data ?? []).map((r) => r.entry_id))).toEqual(
+        new Set([fx.entryA, fx.entryB])
+      )
+
+      // A direct lookup on the dept-B row returns nothing, not an error —
+      // filtered out, not missing.
+      const deptBRow = await fx.deptUser.client
+        .from('entry_bill_link')
+        .select('entry_id')
+        .eq('document_extraction_id', billId)
+        .eq('entry_id', fx.entryB)
+      expect(deptBRow.error).toBeNull()
+      expect(deptBRow.data).toEqual([])
+
+      // --- 4. can_see_source_document reads the junction with OR semantics
+      // The bill carries no entry_id column at all; the dept-A user can still
+      // read it because one of its links points at a dept-A entry.
+      const deptDoc = await fx.deptUser.client
+        .from('document_extraction')
+        .select('id')
+        .eq('id', billId)
+      expect(deptDoc.error).toBeNull()
+      expect(deptDoc.data).toHaveLength(1)
+
+      // --- 5. direct INSERT / DELETE on entry_bill_link is blocked ----
+      // for every authenticated role (writes are RPC-only).
+      for (const u of [fx.deptUser, fx.adminUser, fx.superadminUser]) {
+        const ins = await u.client.from('entry_bill_link').insert({
+          entry_id: fx.entryA,
+          source_document_id: sourceDocumentId,
+          document_extraction_id: billId,
+        })
+        expect(ins.error, 'direct INSERT on entry_bill_link must be denied').not.toBeNull()
+
+        await u.client.from('entry_bill_link').delete().eq('document_extraction_id', billId)
+      }
+      // Ground truth: nothing was actually deleted by those attempts.
+      const afterDeletes = await svc
+        .from('entry_bill_link')
+        .select('id')
+        .eq('document_extraction_id', billId)
+      expect(afterDeletes.data ?? [], 'direct DELETE on entry_bill_link must be a no-op').toHaveLength(2)
+
+      // --- 6. detach via the RPC ------------------------------------
+      const detach = await fx.superadminUser.client.rpc('remove_bill_entry_link', {
+        p_document_extraction_id: billId,
+        p_entry_id: fx.entryB,
+      })
+      expect(detach.error).toBeNull()
+      const afterDetach = await svc
+        .from('entry_bill_link')
+        .select('entry_id')
+        .eq('document_extraction_id', billId)
+      expect((afterDetach.data ?? []).map((r) => r.entry_id)).toEqual([fx.entryA])
+    })
+  })
+})
+
+// ===========================================================================
 // Final safety net: prove nothing this suite created is still in the database.
 // ===========================================================================
 afterAll(async () => {
@@ -1240,6 +1464,7 @@ afterAll(async () => {
     }
   }
 
+  await sweep('source_document', LEDGER.sourceDocuments)
   await sweep('entries', LEDGER.entries)
   await sweep('zone', LEDGER.zones)
   await sweep('vendor', LEDGER.vendors)
@@ -1250,9 +1475,11 @@ afterAll(async () => {
   // user is gone, their staff_department rows are provably gone too — no separate
   // ledger/sweep entry needed for that table.
   for (const id of LEDGER.users) {
-    const { data } = await svc.auth.admin.getUserById(id)
+    const { data } = await withAuthRetry(`getUserById(${id})`, () =>
+      svc.auth.admin.getUserById(id)
+    )
     if (data?.user) {
-      await svc.auth.admin.deleteUser(id)
+      await withAuthRetry(`deleteUser(${id})`, () => svc.auth.admin.deleteUser(id))
       const { data: again } = await svc.auth.admin.getUserById(id)
       if (again?.user) leftovers.push(`auth.users: ${id}`)
     }
@@ -1277,7 +1504,7 @@ afterAll(async () => {
 
   // eslint-disable-next-line no-console
   console.log(
-    '\n[rls cleanup] run=%s | ledger: %d entries, %d departments, %d users, %d zones, %d vendors, %d jobs, %d objects',
+    '\n[rls cleanup] run=%s | ledger: %d entries, %d departments, %d users, %d zones, %d vendors, %d jobs, %d objects, %d source_documents',
     RUN_ID,
     LEDGER.entries.length,
     LEDGER.departments.length,
@@ -1285,7 +1512,8 @@ afterAll(async () => {
     LEDGER.zones.length,
     LEDGER.vendors.length,
     LEDGER.jobs.length,
-    LEDGER.objects.length
+    LEDGER.objects.length,
+    LEDGER.sourceDocuments.length
   )
   // eslint-disable-next-line no-console
   console.log(
