@@ -24,6 +24,13 @@ import { SpendCurveSection } from '@/components/reports/sections/spend-curve'
 import { EventComparisonSection } from '@/components/reports/sections/event-comparison'
 import { SectionSkeleton } from '@/components/reports/sections/surface-loading'
 import { parsePositiveIntParam } from '@/lib/reports/search-params'
+import { BudgetOverview } from '@/components/reports/overviews/budget-overview'
+import {
+  OVERVIEW_SECTION,
+  resolveSection,
+  isSectionInPane,
+  groupHiddenInPane,
+} from '@/lib/reports/surface-sections'
 
 /**
  * Budget & Spend surface (reporting-blueprint.md §5 / §8 Phase Three). One
@@ -59,13 +66,16 @@ const getBudgetStructure = cache(loadBudgetStructure)
 export default async function BudgetSurfacePage({
   searchParams,
 }: {
-  searchParams: Promise<{ revision_head_id?: string }>
+  searchParams: Promise<{ revision_head_id?: string; report?: string }>
 }) {
   const compareBasis = await getCompareBasis()
   const selectedEvent = await getSelectedEvent()
   const eventName = selectedEvent?.name ?? null
   const sp = await searchParams
   const revisionHeadId = parsePositiveIntParam(sp.revision_head_id)
+  const active = resolveSection('budget', sp.report)
+  const isOverview = active.id === OVERVIEW_SECTION.id
+  const only = isOverview ? null : active.id
 
   return (
     <div className="flex flex-col gap-4">
@@ -80,70 +90,87 @@ export default async function BudgetSurfacePage({
           Full report &amp; drill workspace →
         </Link>
       </div>
-      <p className="max-w-2xl text-sm text-muted-foreground">
-        Budget against actual at three levels — head, department, sub-department — the administrative head each rupee sits
-        under, spend across the 13 zones and by category, how the money splits by entry type, the advances still
-        outstanding, the reimbursement profile, the weekly spend curve, and this event against the last. Every figure links
-        through to the entries behind it.
-      </p>
-
-      <Suspense fallback={<SectionSkeleton />}>
-        <BudgetByHeadGroup compareBasis={compareBasis} selectedEvent={selectedEvent} />
-      </Suspense>
-      <Suspense fallback={<SectionSkeleton />}>
-        <RevisionHistoryGroup compareBasis={compareBasis} revisionHeadId={revisionHeadId} />
-      </Suspense>
-      <Suspense fallback={<SectionSkeleton />}>
-        <AdminHeadGroup compareBasis={compareBasis} />
-      </Suspense>
-      <Suspense fallback={<SectionSkeleton />}>
-        <ZoneSpendGroup compareBasis={compareBasis} selectedEvent={selectedEvent} />
-      </Suspense>
-      <Suspense fallback={<SectionSkeleton />}>
-        <ZoneCategoryGroup compareBasis={compareBasis} revisionHeadId={revisionHeadId} />
-      </Suspense>
-      <Suspense fallback={<SectionSkeleton />}>
-        <EntryTypeFlowGroup compareBasis={compareBasis} />
-      </Suspense>
-      <Suspense fallback={<SectionSkeleton />}>
-        <SpendCurveGroup compareBasis={compareBasis} />
-      </Suspense>
-      <Suspense fallback={<SectionSkeleton />}>
-        <EventComparisonGroup />
-      </Suspense>
+      {isOverview ? (
+        <>
+          <p className="max-w-2xl text-sm text-muted-foreground">
+            Budget against actual at three levels — head, department, sub-department — the administrative head each rupee
+            sits under, spend across the 13 zones and by category, how the money splits by entry type, the advances still
+            outstanding, the reimbursement profile, the weekly spend curve, and this event against the last. Every figure
+            links through to the entries behind it.
+          </p>
+          <Suspense fallback={<SectionSkeleton />}>
+            <BudgetOverview compareBasis={compareBasis} selectedEvent={selectedEvent} />
+          </Suspense>
+        </>
+      ) : (
+        <>
+          <Suspense fallback={<SectionSkeleton />}>
+            <BudgetByHeadGroup only={only} compareBasis={compareBasis} selectedEvent={selectedEvent} />
+          </Suspense>
+          <Suspense fallback={<SectionSkeleton />}>
+            <RevisionHistoryGroup only={only} compareBasis={compareBasis} revisionHeadId={revisionHeadId} />
+          </Suspense>
+          <Suspense fallback={<SectionSkeleton />}>
+            <AdminHeadGroup only={only} compareBasis={compareBasis} />
+          </Suspense>
+          <Suspense fallback={<SectionSkeleton />}>
+            <ZoneSpendGroup only={only} compareBasis={compareBasis} selectedEvent={selectedEvent} />
+          </Suspense>
+          <Suspense fallback={<SectionSkeleton />}>
+            <ZoneCategoryGroup only={only} compareBasis={compareBasis} revisionHeadId={revisionHeadId} />
+          </Suspense>
+          <Suspense fallback={<SectionSkeleton />}>
+            <EntryTypeFlowGroup only={only} compareBasis={compareBasis} />
+          </Suspense>
+          <Suspense fallback={<SectionSkeleton />}>
+            <SpendCurveGroup only={only} compareBasis={compareBasis} />
+          </Suspense>
+          <Suspense fallback={<SectionSkeleton />}>
+            <EventComparisonGroup only={only} />
+          </Suspense>
+        </>
+      )}
     </div>
   )
 }
 
-async function BudgetByHeadGroup({ compareBasis, selectedEvent }: { compareBasis: CompareBasis; selectedEvent: Event | null }) {
+async function BudgetByHeadGroup({ only, compareBasis, selectedEvent }: { only: string | null; compareBasis: CompareBasis; selectedEvent: Event | null }) {
+  if (groupHiddenInPane(only, ['budget-vs-actual', 'department-budget-vs-actual', 'sub-department-budget-vs-actual'])) return null
   const data = await getBudgetSurface(compareBasis, selectedEvent)
   return (
     <>
-      <BudgetByHeadSection
-        rows={data.byHead.rows}
-        deptRows={data.byDepartment.rows}
-        error={data.byHead.error}
-        compareBasis={compareBasis}
-        previousActualTotal={data.byHead.previousActualTotal}
-      />
-      <DepartmentBudgetSection
-        rows={data.byDepartment.rows}
-        error={data.byDepartment.error}
-        compareBasis={compareBasis}
-        previousActualTotal={data.byDepartment.previousActualTotal}
-      />
-      <SubDepartmentBudgetSection
-        rows={data.bySubDepartment.rows}
-        deptRows={data.byDepartment.rows}
-        error={data.bySubDepartment.error}
-        compareBasis={compareBasis}
-        previousActualTotal={data.bySubDepartment.previousActualTotal}
-      />
+      {isSectionInPane(only, 'budget-vs-actual') && (
+        <BudgetByHeadSection
+          rows={data.byHead.rows}
+          deptRows={data.byDepartment.rows}
+          error={data.byHead.error}
+          compareBasis={compareBasis}
+          previousActualTotal={data.byHead.previousActualTotal}
+        />
+      )}
+      {isSectionInPane(only, 'department-budget-vs-actual') && (
+        <DepartmentBudgetSection
+          rows={data.byDepartment.rows}
+          error={data.byDepartment.error}
+          compareBasis={compareBasis}
+          previousActualTotal={data.byDepartment.previousActualTotal}
+        />
+      )}
+      {isSectionInPane(only, 'sub-department-budget-vs-actual') && (
+        <SubDepartmentBudgetSection
+          rows={data.bySubDepartment.rows}
+          deptRows={data.byDepartment.rows}
+          error={data.bySubDepartment.error}
+          compareBasis={compareBasis}
+          previousActualTotal={data.bySubDepartment.previousActualTotal}
+        />
+      )}
     </>
   )
 }
 
-async function RevisionHistoryGroup({ compareBasis, revisionHeadId }: { compareBasis: CompareBasis; revisionHeadId: number | null }) {
+async function RevisionHistoryGroup({ only, compareBasis, revisionHeadId }: { only: string | null; compareBasis: CompareBasis; revisionHeadId: number | null }) {
+  if (groupHiddenInPane(only, ['budget-revision-history'])) return null
   const structure = await getBudgetStructure(compareBasis, revisionHeadId)
   return (
     <BudgetRevisionHistorySection
@@ -154,7 +181,8 @@ async function RevisionHistoryGroup({ compareBasis, revisionHeadId }: { compareB
   )
 }
 
-async function AdminHeadGroup({ compareBasis }: { compareBasis: CompareBasis }) {
+async function AdminHeadGroup({ only, compareBasis }: { only: string | null; compareBasis: CompareBasis }) {
+  if (groupHiddenInPane(only, ['admin-head-accountability'])) return null
   const adminHead = await loadAdminHeadAccountability(compareBasis)
   return (
     <AdminHeadAccountabilitySection
@@ -166,7 +194,8 @@ async function AdminHeadGroup({ compareBasis }: { compareBasis: CompareBasis }) 
   )
 }
 
-async function ZoneSpendGroup({ compareBasis, selectedEvent }: { compareBasis: CompareBasis; selectedEvent: Event | null }) {
+async function ZoneSpendGroup({ only, compareBasis, selectedEvent }: { only: string | null; compareBasis: CompareBasis; selectedEvent: Event | null }) {
+  if (groupHiddenInPane(only, ['zone-spend'])) return null
   const data = await getBudgetSurface(compareBasis, selectedEvent)
   return (
     <ZoneSpendSection
@@ -178,47 +207,60 @@ async function ZoneSpendGroup({ compareBasis, selectedEvent }: { compareBasis: C
   )
 }
 
-async function ZoneCategoryGroup({ compareBasis, revisionHeadId }: { compareBasis: CompareBasis; revisionHeadId: number | null }) {
+async function ZoneCategoryGroup({ only, compareBasis, revisionHeadId }: { only: string | null; compareBasis: CompareBasis; revisionHeadId: number | null }) {
+  if (groupHiddenInPane(only, ['zone-category-matrix', 'budget-category-mix'])) return null
   const structure = await getBudgetStructure(compareBasis, revisionHeadId)
   return (
     <>
-      <ZoneCategoryMatrixSection rows={structure.zoneCategoryMatrix.rows} error={structure.zoneCategoryMatrix.error} />
-      <BudgetCategoryMixSection rows={structure.budgetCategoryMix.rows} error={structure.budgetCategoryMix.error} />
+      {isSectionInPane(only, 'zone-category-matrix') && (
+        <ZoneCategoryMatrixSection rows={structure.zoneCategoryMatrix.rows} error={structure.zoneCategoryMatrix.error} />
+      )}
+      {isSectionInPane(only, 'budget-category-mix') && (
+        <BudgetCategoryMixSection rows={structure.budgetCategoryMix.rows} error={structure.budgetCategoryMix.error} />
+      )}
     </>
   )
 }
 
-async function EntryTypeFlowGroup({ compareBasis }: { compareBasis: CompareBasis }) {
+async function EntryTypeFlowGroup({ only, compareBasis }: { only: string | null; compareBasis: CompareBasis }) {
+  if (groupHiddenInPane(only, ['entry-type-split', 'outstanding-advance-ageing', 'reimbursement-profile'])) return null
   const entryTypeFlow = await loadEntryTypeFlow(compareBasis)
   return (
     <>
-      <EntryTypeSplitSection
-        rows={entryTypeFlow.entryTypeSplit.rows}
-        error={entryTypeFlow.entryTypeSplit.error}
-        compareBasis={compareBasis}
-        previousReimbursementSharePct={entryTypeFlow.entryTypeSplit.previousReimbursementSharePct}
-      />
-      <OutstandingAdvanceAgeingSection
-        rows={entryTypeFlow.outstandingAdvanceAgeing.rows}
-        error={entryTypeFlow.outstandingAdvanceAgeing.error}
-        compareBasis={compareBasis}
-        previousOutstandingCount={entryTypeFlow.outstandingAdvanceAgeing.previousOutstandingCount}
-        previousOutstandingAmount={entryTypeFlow.outstandingAdvanceAgeing.previousOutstandingAmount}
-      />
-      <ReimbursementProfileSection
-        rows={entryTypeFlow.reimbursementProfile.rows}
-        byType={entryTypeFlow.reimbursementProfile.byType}
-        error={entryTypeFlow.reimbursementProfile.error}
-        byTypeError={entryTypeFlow.reimbursementProfile.byTypeError}
-        compareBasis={compareBasis}
-        previousTotalReimbursed={entryTypeFlow.reimbursementProfile.previousTotalReimbursed}
-        previousReimburseeCount={entryTypeFlow.reimbursementProfile.previousReimburseeCount}
-      />
+      {isSectionInPane(only, 'entry-type-split') && (
+        <EntryTypeSplitSection
+          rows={entryTypeFlow.entryTypeSplit.rows}
+          error={entryTypeFlow.entryTypeSplit.error}
+          compareBasis={compareBasis}
+          previousReimbursementSharePct={entryTypeFlow.entryTypeSplit.previousReimbursementSharePct}
+        />
+      )}
+      {isSectionInPane(only, 'outstanding-advance-ageing') && (
+        <OutstandingAdvanceAgeingSection
+          rows={entryTypeFlow.outstandingAdvanceAgeing.rows}
+          error={entryTypeFlow.outstandingAdvanceAgeing.error}
+          compareBasis={compareBasis}
+          previousOutstandingCount={entryTypeFlow.outstandingAdvanceAgeing.previousOutstandingCount}
+          previousOutstandingAmount={entryTypeFlow.outstandingAdvanceAgeing.previousOutstandingAmount}
+        />
+      )}
+      {isSectionInPane(only, 'reimbursement-profile') && (
+        <ReimbursementProfileSection
+          rows={entryTypeFlow.reimbursementProfile.rows}
+          byType={entryTypeFlow.reimbursementProfile.byType}
+          error={entryTypeFlow.reimbursementProfile.error}
+          byTypeError={entryTypeFlow.reimbursementProfile.byTypeError}
+          compareBasis={compareBasis}
+          previousTotalReimbursed={entryTypeFlow.reimbursementProfile.previousTotalReimbursed}
+          previousReimburseeCount={entryTypeFlow.reimbursementProfile.previousReimburseeCount}
+        />
+      )}
     </>
   )
 }
 
-async function SpendCurveGroup({ compareBasis }: { compareBasis: CompareBasis }) {
+async function SpendCurveGroup({ only, compareBasis }: { only: string | null; compareBasis: CompareBasis }) {
+  if (groupHiddenInPane(only, ['spend-curve'])) return null
   const spendCurve = await loadSpendCurveOpenAgeing(compareBasis)
   return (
     <SpendCurveSection
@@ -236,7 +278,8 @@ async function SpendCurveGroup({ compareBasis }: { compareBasis: CompareBasis })
   )
 }
 
-async function EventComparisonGroup() {
+async function EventComparisonGroup({ only }: { only: string | null }) {
+  if (groupHiddenInPane(only, ['event-comparison'])) return null
   const eventComparison = await loadEventComparison()
   return (
     <EventComparisonSection

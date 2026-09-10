@@ -34,6 +34,13 @@ import { ZoneUnitEconomicsSection } from '@/components/reports/sections/zone-uni
 import { HsnGstAnomalySection } from '@/components/reports/sections/hsn-gst-anomaly'
 import { VendorRiskBoardSection } from '@/components/reports/sections/vendor-risk-board'
 import { SectionSkeleton } from '@/components/reports/sections/surface-loading'
+import { VendorsOverview } from '@/components/reports/overviews/vendors-overview'
+import {
+  OVERVIEW_SECTION,
+  resolveSection,
+  isSectionInPane,
+  groupHiddenInPane,
+} from '@/lib/reports/surface-sections'
 
 /**
  * Vendors & Purchases surface (reporting-blueprint.md §5 / §8 Phase Three).
@@ -66,7 +73,16 @@ export const dynamic = 'force-dynamic'
 
 const getQuantityZonePrice = cache(loadQuantityZonePrice)
 
-export default async function VendorsSurfacePage() {
+export default async function VendorsSurfacePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ report?: string }>
+}) {
+  const { report } = await searchParams
+  const active = resolveSection('vendors', report)
+  const isOverview = active.id === OVERVIEW_SECTION.id
+  const only = isOverview ? null : active.id
+
   const compareBasis = await getCompareBasis()
   const selectedEvent = await getSelectedEvent()
   const eventName = selectedEvent?.name ?? null
@@ -84,92 +100,116 @@ export default async function VendorsSurfacePage() {
           Full report &amp; drill workspace →
         </Link>
       </div>
-      <p className="max-w-2xl text-sm text-muted-foreground">
-        Who the money went to and what it bought — vendor spend with document coverage and open-flag exposure, spend grouped
-        into cross-vendor item families, and median rate benchmarks wherever enough vendors bill the same family to make the
-        comparison meaningful. Every vendor links through to the entries behind it; CSV export on every section.
-      </p>
-
-      <Suspense fallback={<SectionSkeleton />}>
-        <VendorsSurfaceGroup compareBasis={compareBasis} selectedEvent={selectedEvent} />
-      </Suspense>
-      <Suspense fallback={<SectionSkeleton />}>
-        <PurchaseTreeGroup compareBasis={compareBasis} selectedEvent={selectedEvent} />
-      </Suspense>
-      <Suspense fallback={<SectionSkeleton />}>
-        <VendorScorecardGroup compareBasis={compareBasis} selectedEvent={selectedEvent} />
-      </Suspense>
-      <Suspense fallback={<SectionSkeleton />}>
-        <VendorDependencyGroup compareBasis={compareBasis} selectedEvent={selectedEvent} />
-      </Suspense>
-      <Suspense fallback={<SectionSkeleton />}>
-        <VendorPriceRankingGroup compareBasis={compareBasis} selectedEvent={selectedEvent} />
-      </Suspense>
-      <Suspense fallback={<SectionSkeleton />}>
-        <RelatedPartyGroup compareBasis={compareBasis} selectedEvent={selectedEvent} />
-      </Suspense>
-      <Suspense fallback={<SectionSkeleton />}>
-        <RateDriftDiscountGroup compareBasis={compareBasis} selectedEvent={selectedEvent} />
-      </Suspense>
-      <Suspense fallback={<SectionSkeleton />}>
-        <QuantityZoneGroup compareBasis={compareBasis} selectedEvent={selectedEvent} />
-      </Suspense>
-      <Suspense fallback={<SectionSkeleton />}>
-        <HsnGstAnomalyGroup compareBasis={compareBasis} />
-      </Suspense>
-      <Suspense fallback={<SectionSkeleton />}>
-        <VendorRiskBoardGroup compareBasis={compareBasis} />
-      </Suspense>
+      {isOverview ? (
+        <>
+          <p className="max-w-2xl text-sm text-muted-foreground">
+            Who the money went to and what it bought — vendor spend with document coverage and open-flag exposure, spend
+            grouped into cross-vendor item families, and median rate benchmarks wherever enough vendors bill the same
+            family to make the comparison meaningful. Every vendor links through to the entries behind it; CSV export on
+            every section.
+          </p>
+          <Suspense fallback={<SectionSkeleton />}>
+            <VendorsOverview compareBasis={compareBasis} selectedEvent={selectedEvent} />
+          </Suspense>
+        </>
+      ) : (
+        <>
+          <Suspense fallback={<SectionSkeleton />}>
+            <VendorsSurfaceGroup only={only} compareBasis={compareBasis} selectedEvent={selectedEvent} />
+          </Suspense>
+          <Suspense fallback={<SectionSkeleton />}>
+            <PurchaseTreeGroup only={only} compareBasis={compareBasis} selectedEvent={selectedEvent} />
+          </Suspense>
+          <Suspense fallback={<SectionSkeleton />}>
+            <VendorScorecardGroup only={only} compareBasis={compareBasis} selectedEvent={selectedEvent} />
+          </Suspense>
+          <Suspense fallback={<SectionSkeleton />}>
+            <VendorDependencyGroup only={only} compareBasis={compareBasis} selectedEvent={selectedEvent} />
+          </Suspense>
+          <Suspense fallback={<SectionSkeleton />}>
+            <VendorPriceRankingGroup only={only} compareBasis={compareBasis} selectedEvent={selectedEvent} />
+          </Suspense>
+          <Suspense fallback={<SectionSkeleton />}>
+            <RelatedPartyGroup only={only} compareBasis={compareBasis} selectedEvent={selectedEvent} />
+          </Suspense>
+          <Suspense fallback={<SectionSkeleton />}>
+            <RateDriftDiscountGroup only={only} compareBasis={compareBasis} selectedEvent={selectedEvent} />
+          </Suspense>
+          <Suspense fallback={<SectionSkeleton />}>
+            <QuantityZoneGroup only={only} compareBasis={compareBasis} selectedEvent={selectedEvent} />
+          </Suspense>
+          <Suspense fallback={<SectionSkeleton />}>
+            <HsnGstAnomalyGroup only={only} compareBasis={compareBasis} />
+          </Suspense>
+          <Suspense fallback={<SectionSkeleton />}>
+            <VendorRiskBoardGroup only={only} compareBasis={compareBasis} />
+          </Suspense>
+        </>
+      )}
     </div>
   )
 }
 
-async function VendorsSurfaceGroup({ compareBasis, selectedEvent }: { compareBasis: CompareBasis; selectedEvent: Event | null }) {
+async function VendorsSurfaceGroup({ only, compareBasis, selectedEvent }: { only: string | null; compareBasis: CompareBasis; selectedEvent: Event | null }) {
+  if (groupHiddenInPane(only, ['vendor-spend', 'vendor-concentration', 'above-median-overpayment', 'instrument-type-mix', 'spend-by-family', 'rate-benchmark'])) return null
   const data = await loadVendorsSurface(compareBasis, selectedEvent)
   return (
     <>
-      <VendorSpendSection
-        rows={data.vendorSpend.rows}
-        error={data.vendorSpend.error}
-        concentrationError={data.vendorSpend.concentrationError}
-        compareBasis={compareBasis}
-        previousSpendTotal={data.vendorSpend.previousSpendTotal}
-      />
-      <VendorConcentrationSection
-        points={data.concentrationCurve.points}
-        error={data.concentrationCurve.error}
-        compareBasis={compareBasis}
-        previousTopShare={data.concentrationCurve.previousTopShare}
-      />
-      <AboveMedianOverpaymentSection
-        rows={data.overpayment.rows}
-        error={data.overpayment.error}
-        compareBasis={compareBasis}
-        previousTotal={data.overpayment.previousTotal}
-      />
-      <InstrumentTypeMixSection
-        rows={data.instrumentMix.rows}
-        error={data.instrumentMix.error}
-        compareBasis={compareBasis}
-        previousBackedPct={data.instrumentMix.previousBackedPct}
-      />
-      <SpendByFamilySection
-        rows={data.spendByFamily.rows}
-        error={data.spendByFamily.error}
-        compareBasis={compareBasis}
-        previousSpendTotal={data.spendByFamily.previousSpendTotal}
-      />
-      <RateBenchmarkSection
-        rows={data.rateBenchmark.rows}
-        error={data.rateBenchmark.error}
-        compareBasis={compareBasis}
-        previousReliableCount={data.rateBenchmark.previousReliableCount}
-      />
+      {isSectionInPane(only, 'vendor-spend') && (
+        <VendorSpendSection
+          rows={data.vendorSpend.rows}
+          error={data.vendorSpend.error}
+          concentrationError={data.vendorSpend.concentrationError}
+          compareBasis={compareBasis}
+          previousSpendTotal={data.vendorSpend.previousSpendTotal}
+        />
+      )}
+      {isSectionInPane(only, 'vendor-concentration') && (
+        <VendorConcentrationSection
+          points={data.concentrationCurve.points}
+          error={data.concentrationCurve.error}
+          compareBasis={compareBasis}
+          previousTopShare={data.concentrationCurve.previousTopShare}
+        />
+      )}
+      {isSectionInPane(only, 'above-median-overpayment') && (
+        <AboveMedianOverpaymentSection
+          rows={data.overpayment.rows}
+          error={data.overpayment.error}
+          compareBasis={compareBasis}
+          previousTotal={data.overpayment.previousTotal}
+        />
+      )}
+      {isSectionInPane(only, 'instrument-type-mix') && (
+        <InstrumentTypeMixSection
+          rows={data.instrumentMix.rows}
+          error={data.instrumentMix.error}
+          compareBasis={compareBasis}
+          previousBackedPct={data.instrumentMix.previousBackedPct}
+        />
+      )}
+      {isSectionInPane(only, 'spend-by-family') && (
+        <SpendByFamilySection
+          rows={data.spendByFamily.rows}
+          error={data.spendByFamily.error}
+          compareBasis={compareBasis}
+          previousSpendTotal={data.spendByFamily.previousSpendTotal}
+        />
+      )}
+      {isSectionInPane(only, 'rate-benchmark') && (
+        <RateBenchmarkSection
+          rows={data.rateBenchmark.rows}
+          error={data.rateBenchmark.error}
+          compareBasis={compareBasis}
+          previousReliableCount={data.rateBenchmark.previousReliableCount}
+        />
+      )}
     </>
   )
 }
 
-async function PurchaseTreeGroup({ compareBasis, selectedEvent }: { compareBasis: CompareBasis; selectedEvent: Event | null }) {
+async function PurchaseTreeGroup({ only, compareBasis, selectedEvent }: { only: string | null; compareBasis: CompareBasis; selectedEvent: Event | null }) {
+  if (groupHiddenInPane(only, ['purchase-tree'])) return null
   const purchaseTree = await loadPurchaseTree(compareBasis, selectedEvent)
   return (
     <PurchaseTreeSection
@@ -181,55 +221,68 @@ async function PurchaseTreeGroup({ compareBasis, selectedEvent }: { compareBasis
   )
 }
 
-async function VendorScorecardGroup({ compareBasis, selectedEvent }: { compareBasis: CompareBasis; selectedEvent: Event | null }) {
+async function VendorScorecardGroup({ only, compareBasis, selectedEvent }: { only: string | null; compareBasis: CompareBasis; selectedEvent: Event | null }) {
+  if (groupHiddenInPane(only, ['vendor-scorecard', 'vendor-activity-span'])) return null
   const vendorScorecard = await loadVendorScorecard(compareBasis, selectedEvent)
   return (
     <>
-      <VendorScorecardSection
-        rows={vendorScorecard.scorecard.rows}
-        error={vendorScorecard.scorecard.error}
-        compareBasis={compareBasis}
-        previousAttentionCount={vendorScorecard.scorecard.previousAttentionCount}
-      />
-      <VendorActivitySpanSection
-        rows={vendorScorecard.activitySpan.rows}
-        error={vendorScorecard.activitySpan.error}
-        compareBasis={compareBasis}
-        previousMaterialCount={vendorScorecard.activitySpan.previousMaterialCount}
-        eventStartsOn={vendorScorecard.eventStartsOn}
-        eventEndsOn={vendorScorecard.eventEndsOn}
-      />
+      {isSectionInPane(only, 'vendor-scorecard') && (
+        <VendorScorecardSection
+          rows={vendorScorecard.scorecard.rows}
+          error={vendorScorecard.scorecard.error}
+          compareBasis={compareBasis}
+          previousAttentionCount={vendorScorecard.scorecard.previousAttentionCount}
+        />
+      )}
+      {isSectionInPane(only, 'vendor-activity-span') && (
+        <VendorActivitySpanSection
+          rows={vendorScorecard.activitySpan.rows}
+          error={vendorScorecard.activitySpan.error}
+          compareBasis={compareBasis}
+          previousMaterialCount={vendorScorecard.activitySpan.previousMaterialCount}
+          eventStartsOn={vendorScorecard.eventStartsOn}
+          eventEndsOn={vendorScorecard.eventEndsOn}
+        />
+      )}
     </>
   )
 }
 
-async function VendorDependencyGroup({ compareBasis, selectedEvent }: { compareBasis: CompareBasis; selectedEvent: Event | null }) {
+async function VendorDependencyGroup({ only, compareBasis, selectedEvent }: { only: string | null; compareBasis: CompareBasis; selectedEvent: Event | null }) {
+  if (groupHiddenInPane(only, ['department-dependency', 'vendor-exclusivity', 'new-vendor-first-bill'])) return null
   const vendorDependency = await loadVendorDependency(compareBasis, selectedEvent)
   return (
     <>
-      <DepartmentDependencySection
-        rows={vendorDependency.departmentDependency.rows}
-        error={vendorDependency.departmentDependency.error}
-        compareBasis={compareBasis}
-        previousOverThresholdCount={vendorDependency.departmentDependency.previousOverThresholdCount}
-      />
-      <VendorExclusivitySection
-        rows={vendorDependency.vendorExclusivity.rows}
-        error={vendorDependency.vendorExclusivity.error}
-        compareBasis={compareBasis}
-        previousMaterialCount={vendorDependency.vendorExclusivity.previousMaterialCount}
-      />
-      <NewVendorFirstBillSection
-        rows={vendorDependency.newVendorFirstBill.rows}
-        error={vendorDependency.newVendorFirstBill.error}
-        compareBasis={compareBasis}
-        previousFindingCount={vendorDependency.newVendorFirstBill.previousFindingCount}
-      />
+      {isSectionInPane(only, 'department-dependency') && (
+        <DepartmentDependencySection
+          rows={vendorDependency.departmentDependency.rows}
+          error={vendorDependency.departmentDependency.error}
+          compareBasis={compareBasis}
+          previousOverThresholdCount={vendorDependency.departmentDependency.previousOverThresholdCount}
+        />
+      )}
+      {isSectionInPane(only, 'vendor-exclusivity') && (
+        <VendorExclusivitySection
+          rows={vendorDependency.vendorExclusivity.rows}
+          error={vendorDependency.vendorExclusivity.error}
+          compareBasis={compareBasis}
+          previousMaterialCount={vendorDependency.vendorExclusivity.previousMaterialCount}
+        />
+      )}
+      {isSectionInPane(only, 'new-vendor-first-bill') && (
+        <NewVendorFirstBillSection
+          rows={vendorDependency.newVendorFirstBill.rows}
+          error={vendorDependency.newVendorFirstBill.error}
+          compareBasis={compareBasis}
+          previousFindingCount={vendorDependency.newVendorFirstBill.previousFindingCount}
+        />
+      )}
     </>
   )
 }
 
-async function VendorPriceRankingGroup({ compareBasis, selectedEvent }: { compareBasis: CompareBasis; selectedEvent: Event | null }) {
+async function VendorPriceRankingGroup({ only, compareBasis, selectedEvent }: { only: string | null; compareBasis: CompareBasis; selectedEvent: Event | null }) {
+  if (groupHiddenInPane(only, ['vendor-price-ranking'])) return null
   const quantityZonePrice = await getQuantityZonePrice(compareBasis, selectedEvent)
   return (
     <VendorPriceRankingSection
@@ -241,67 +294,83 @@ async function VendorPriceRankingGroup({ compareBasis, selectedEvent }: { compar
   )
 }
 
-async function RelatedPartyGroup({ compareBasis, selectedEvent }: { compareBasis: CompareBasis; selectedEvent: Event | null }) {
+async function RelatedPartyGroup({ only, compareBasis, selectedEvent }: { only: string | null; compareBasis: CompareBasis; selectedEvent: Event | null }) {
+  if (groupHiddenInPane(only, ['related-party-clusters', 'gstin-tax-exposure'])) return null
   const relatedPartyGstin = await loadRelatedPartyGstin(compareBasis, selectedEvent)
   return (
     <>
-      <RelatedPartyClustersSection
-        edges={relatedPartyGstin.relatedPartyClusters.edges}
-        clusters={relatedPartyGstin.relatedPartyClusters.clusters}
-        error={relatedPartyGstin.relatedPartyClusters.error}
-      />
-      <GstinTaxExposureSection
-        rows={relatedPartyGstin.taxCreditExposure.rows}
-        error={relatedPartyGstin.taxCreditExposure.error}
-        compareBasis={compareBasis}
-        previousAtRiskTotal={relatedPartyGstin.taxCreditExposure.previousAtRiskTotal}
-      />
+      {isSectionInPane(only, 'related-party-clusters') && (
+        <RelatedPartyClustersSection
+          edges={relatedPartyGstin.relatedPartyClusters.edges}
+          clusters={relatedPartyGstin.relatedPartyClusters.clusters}
+          error={relatedPartyGstin.relatedPartyClusters.error}
+        />
+      )}
+      {isSectionInPane(only, 'gstin-tax-exposure') && (
+        <GstinTaxExposureSection
+          rows={relatedPartyGstin.taxCreditExposure.rows}
+          error={relatedPartyGstin.taxCreditExposure.error}
+          compareBasis={compareBasis}
+          previousAtRiskTotal={relatedPartyGstin.taxCreditExposure.previousAtRiskTotal}
+        />
+      )}
     </>
   )
 }
 
-async function RateDriftDiscountGroup({ compareBasis, selectedEvent }: { compareBasis: CompareBasis; selectedEvent: Event | null }) {
+async function RateDriftDiscountGroup({ only, compareBasis, selectedEvent }: { only: string | null; compareBasis: CompareBasis; selectedEvent: Event | null }) {
+  if (groupHiddenInPane(only, ['rate-drift', 'discount-consistency'])) return null
   const rateDriftDiscount = await loadRateDriftDiscount(compareBasis, selectedEvent)
   return (
     <>
-      <RateDriftSection
-        series={rateDriftDiscount.rateDrift.series}
-        error={rateDriftDiscount.rateDrift.error}
-        compareBasis={compareBasis}
-        previousDriftingCount={rateDriftDiscount.rateDrift.previousDriftingCount}
-      />
-      <DiscountConsistencySection
-        groups={rateDriftDiscount.discountConsistency.groups}
-        error={rateDriftDiscount.discountConsistency.error}
-        compareBasis={compareBasis}
-        previousInconsistentCount={rateDriftDiscount.discountConsistency.previousInconsistentCount}
-        coverage={rateDriftDiscount.discountConsistency.coverage}
-      />
+      {isSectionInPane(only, 'rate-drift') && (
+        <RateDriftSection
+          series={rateDriftDiscount.rateDrift.series}
+          error={rateDriftDiscount.rateDrift.error}
+          compareBasis={compareBasis}
+          previousDriftingCount={rateDriftDiscount.rateDrift.previousDriftingCount}
+        />
+      )}
+      {isSectionInPane(only, 'discount-consistency') && (
+        <DiscountConsistencySection
+          groups={rateDriftDiscount.discountConsistency.groups}
+          error={rateDriftDiscount.discountConsistency.error}
+          compareBasis={compareBasis}
+          previousInconsistentCount={rateDriftDiscount.discountConsistency.previousInconsistentCount}
+          coverage={rateDriftDiscount.discountConsistency.coverage}
+        />
+      )}
     </>
   )
 }
 
-async function QuantityZoneGroup({ compareBasis, selectedEvent }: { compareBasis: CompareBasis; selectedEvent: Event | null }) {
+async function QuantityZoneGroup({ only, compareBasis, selectedEvent }: { only: string | null; compareBasis: CompareBasis; selectedEvent: Event | null }) {
+  if (groupHiddenInPane(only, ['quantity-by-unit', 'zone-unit-economics'])) return null
   const quantityZonePrice = await getQuantityZonePrice(compareBasis, selectedEvent)
   return (
     <>
-      <QuantityByUnitSection
-        rows={quantityZonePrice.quantityByUnit.rows}
-        error={quantityZonePrice.quantityByUnit.error}
-        compareBasis={compareBasis}
-        previousPairCount={quantityZonePrice.quantityByUnit.previousPairCount}
-      />
-      <ZoneUnitEconomicsSection
-        rows={quantityZonePrice.zoneUnitEconomics.rows}
-        error={quantityZonePrice.zoneUnitEconomics.error}
-        compareBasis={compareBasis}
-        previousWideSpreadCount={quantityZonePrice.zoneUnitEconomics.previousWideSpreadCount}
-      />
+      {isSectionInPane(only, 'quantity-by-unit') && (
+        <QuantityByUnitSection
+          rows={quantityZonePrice.quantityByUnit.rows}
+          error={quantityZonePrice.quantityByUnit.error}
+          compareBasis={compareBasis}
+          previousPairCount={quantityZonePrice.quantityByUnit.previousPairCount}
+        />
+      )}
+      {isSectionInPane(only, 'zone-unit-economics') && (
+        <ZoneUnitEconomicsSection
+          rows={quantityZonePrice.zoneUnitEconomics.rows}
+          error={quantityZonePrice.zoneUnitEconomics.error}
+          compareBasis={compareBasis}
+          previousWideSpreadCount={quantityZonePrice.zoneUnitEconomics.previousWideSpreadCount}
+        />
+      )}
     </>
   )
 }
 
-async function HsnGstAnomalyGroup({ compareBasis }: { compareBasis: CompareBasis }) {
+async function HsnGstAnomalyGroup({ only, compareBasis }: { only: string | null; compareBasis: CompareBasis }) {
+  if (groupHiddenInPane(only, ['hsn-gst-anomaly'])) return null
   const hsnGstAnomaly = await loadHsnGstAnomaly(compareBasis)
   return (
     <HsnGstAnomalySection
@@ -317,7 +386,8 @@ async function HsnGstAnomalyGroup({ compareBasis }: { compareBasis: CompareBasis
   )
 }
 
-async function VendorRiskBoardGroup({ compareBasis }: { compareBasis: CompareBasis }) {
+async function VendorRiskBoardGroup({ only, compareBasis }: { only: string | null; compareBasis: CompareBasis }) {
+  if (groupHiddenInPane(only, ['vendor-risk-board'])) return null
   const dupRisk = await loadDuplicateVendorRisk(compareBasis)
   return (
     <VendorRiskBoardSection
