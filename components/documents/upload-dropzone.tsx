@@ -2,10 +2,13 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
-import { AlertCircle, CheckCircle2, Circle, FileText, Loader2, UploadCloud, WifiOff, X, XCircle } from 'lucide-react'
+import { AlertCircle, CheckCircle2, Circle, FileText, Loader2, Scissors, UploadCloud, WifiOff, X, XCircle } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { friendlyErrorMessage, logRawError } from '@/lib/friendly-error'
+import { getPdfPageCountClient, splitPdfByRanges } from '@/lib/pdf-client'
+import { parseSplitRanges } from '@/lib/split-ranges'
+import { SplitPreviewModal } from './split-preview-modal'
 import { stagesFor, type StageState } from './document-card'
 import { formatElapsed } from './format'
 import { AssigneePicker, assigneeFirstNames } from './assignee-picker'
@@ -48,7 +51,14 @@ import type { InboxDocumentView } from './types'
  * removed/dismissed.
  */
 
-type UploadItemStatus = 'staged' | 'uploading' | 'tracking' | 'error' | 'connection-lost'
+type UploadItemStatus =
+  | 'staged'
+  | 'oversize' // page count is over maxUploadPages — must be split before it can be sent
+  | 'splitting' // pdf-lib is slicing it into the typed ranges right now
+  | 'uploading'
+  | 'tracking'
+  | 'error'
+  | 'connection-lost'
 
 type DocStatus = InboxDocumentView['uploadStatus']
 
@@ -57,6 +67,10 @@ interface UploadItem {
   filename: string
   status: UploadItemStatus
   progress: number
+  /** Server-independent page count from `getPdfPageCountClient`, filled in
+   *  just after staging. `undefined` when the client-side parse failed — the
+   *  ingest route's own validation is then the single source of truth. */
+  pageCount?: number
   error?: string
   documentId?: number
   docStatus?: DocStatus
@@ -199,12 +213,117 @@ function StageTracker({
   )
 }
 
+/**
+ * Inline "split before uploading" panel for a staged PDF whose page count is
+ * over the upload limit. Two ways in: click "Choose split points" to see every
+ * page as a thumbnail and drop cuts visually (SplitPreviewModal), or type the
+ * ranges directly. Both run through the same validation and hand the ranges to
+ * `onSplit`; a keystroke only re-renders this panel, not the whole file list.
+ */
+function SplitPanel({
+  file,
+  pageCount,
+  maxUploadPages,
+  splitting,
+  onSplit,
+}: {
+  file: File | undefined
+  pageCount: number
+  maxUploadPages: number
+  splitting: boolean
+  onSplit: (ranges: Array<{ start: number; end: number }>) => void
+}) {
+  const [text, setText] = useState('')
+  const [previewOpen, setPreviewOpen] = useState(false)
+  const parsed = text.trim().length > 0 ? parseSplitRanges(text, pageCount, maxUploadPages) : null
+  const plan = parsed && 'ranges' in parsed ? parsed : null
+
+  return (
+    <div className="flex flex-col gap-1.5 rounded-md border border-amber-300/60 bg-amber-50 px-2.5 py-2 dark:border-amber-900 dark:bg-amber-950/40">
+      <p className="text-xs text-amber-900 dark:text-amber-200">
+        This PDF has {pageCount} pages — over the {maxUploadPages}-page limit. Split it into parts here before
+        uploading; leftover pages at the end are added as one final part.
+      </p>
+      <div className="flex flex-wrap items-center gap-2">
+        {file && (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="flex-shrink-0"
+            disabled={splitting}
+            onClick={() => setPreviewOpen(true)}
+          >
+            <Scissors className="mr-1 h-3.5 w-3.5" aria-hidden="true" />
+            Choose split points
+          </Button>
+        )}
+        <input
+          type="text"
+          inputMode="numeric"
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          disabled={splitting}
+          placeholder={`or type ranges: 1-${maxUploadPages}, ${maxUploadPages + 1}-${pageCount}`}
+          aria-label="Page ranges for each part"
+          className="min-w-[8rem] flex-1 rounded border border-border bg-background px-2 py-1 text-sm disabled:opacity-60"
+        />
+        <Button
+          type="button"
+          size="sm"
+          className="flex-shrink-0"
+          disabled={!plan || splitting}
+          onClick={() => plan && onSplit(plan.ranges)}
+        >
+          {splitting ? (
+            <>
+              <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+              Splitting&hellip;
+            </>
+          ) : (
+            'Split & stage'
+          )}
+        </Button>
+      </div>
+      {parsed && 'error' in parsed && <p className="text-xs text-destructive">{parsed.error}</p>}
+      {plan && (
+        <p className="text-xs text-amber-800 dark:text-amber-300">
+          &rarr; {plan.ranges.length} file{plan.ranges.length === 1 ? '' : 's'}:{' '}
+          {plan.ranges.map((r) => r.end - r.start + 1).join(', ')} pages
+          {plan.autoBundledTail ? ' (last part added automatically)' : ''}
+        </p>
+      )}
+      {file && previewOpen && (
+        <SplitPreviewModal
+          open={previewOpen}
+          onOpenChange={setPreviewOpen}
+          file={file}
+          pageCount={pageCount}
+          maxUploadPages={maxUploadPages}
+          initialRanges={plan?.ranges}
+          onConfirm={(ranges) => {
+            setText(ranges.map((r) => `${r.start}-${r.end}`).join(', '))
+            onSplit(ranges)
+          }}
+        />
+      )}
+    </div>
+  )
+}
+
 export function UploadDropzone({
   onUploaded,
   compact = false,
   assignableStaff = [],
+  maxUploadPages,
 }: {
   onUploaded: () => void
+  /** Admin-configured page-count ceiling for a single PDF upload
+   *  (`app_settings.max_upload_pages`, via `getMaxUploadPages`). A staged PDF
+   *  over this renders an inline "split before uploading" panel instead of an
+   *  upload button — the slice happens client-side (pdf-lib) and each piece
+   *  then uploads through the unchanged ingest pipeline. */
+  maxUploadPages: number
   /** Active admins + superadmins for the "assign this batch to" picker shown
    *  in the staged-files confirmation area ("dividing the document inbox",
    *  2026-08-29). Empty (the default) hides the picker entirely — e.g. for a
@@ -252,22 +371,66 @@ export function UploadDropzone({
     }
   }, [])
 
-  const handleFiles = useCallback((fileList: FileList | File[]) => {
-    const all = Array.from(fileList)
-    const pdfFiles = all.filter(isPdf)
-    const rejectedCount = all.length - pdfFiles.length
-    if (rejectedCount > 0) {
-      toast.error(`${rejectedCount} file${rejectedCount === 1 ? '' : 's'} skipped — only PDF is supported.`)
-    }
-    if (pdfFiles.length === 0) return
+  // Page-count check for a freshly staged PDF, run off the critical path.
+  // pdf-lib parses in the browser exactly as it does server-side; a parse
+  // failure here is swallowed (just logged) so the item stays 'staged' and
+  // the ingest route's own validation / `page_count_unresolved` handling
+  // remains the single source of truth for a bad PDF. A count over the limit
+  // flips the item to 'oversize', which swaps its upload button for the split
+  // panel and keeps it out of "Upload all".
+  const checkPageCount = useCallback(
+    (key: string, file: File) => {
+      void (async () => {
+        try {
+          const bytes = new Uint8Array(await file.arrayBuffer())
+          const pageCount = await getPdfPageCountClient(bytes)
+          setItems((current) =>
+            current.map((c) =>
+              c.key === key
+                ? {
+                    ...c,
+                    pageCount,
+                    status: c.status === 'staged' && pageCount > maxUploadPages ? 'oversize' : c.status,
+                  }
+                : c
+            )
+          )
+        } catch (err) {
+          logRawError('upload-dropzone-page-count', err)
+        }
+      })()
+    },
+    [maxUploadPages]
+  )
 
-    const newItems: UploadItem[] = pdfFiles.map((f) => {
-      const key = `${f.name}-${f.size}-${Date.now()}-${Math.random().toString(36).slice(2)}`
-      filesRef.current.set(key, f)
-      return { key, filename: f.name, status: 'staged', progress: 0 }
-    })
-    setItems((current) => [...newItems, ...current])
-  }, [])
+  const handleFiles = useCallback(
+    (fileList: FileList | File[]) => {
+      const all = Array.from(fileList)
+      const pdfFiles = all.filter(isPdf)
+      const rejectedCount = all.length - pdfFiles.length
+      if (rejectedCount > 0) {
+        toast.error(`${rejectedCount} file${rejectedCount === 1 ? '' : 's'} skipped — only PDF is supported.`)
+      }
+      if (pdfFiles.length === 0) return
+
+      const staged = pdfFiles.map((f) => {
+        const key = `${f.name}-${f.size}-${Date.now()}-${Math.random().toString(36).slice(2)}`
+        filesRef.current.set(key, f)
+        return { key, file: f }
+      })
+      setItems((current) => [
+        ...staged.map(({ key, file }) => ({
+          key,
+          filename: file.name,
+          status: 'staged' as const,
+          progress: 0,
+        })),
+        ...current,
+      ])
+      for (const { key, file } of staged) checkPageCount(key, file)
+    },
+    [checkPageCount]
+  )
 
   const stopTracking = useCallback((key: string) => {
     const timer = pollTimersRef.current.get(key)
@@ -388,6 +551,64 @@ export function UploadDropzone({
         })
     },
     [beginTracking, onUploaded]
+  )
+
+  // Slice an oversized staged PDF into the typed ranges, client-side, and
+  // replace the one oversized item with N ordinary staged items. From here
+  // they're indistinguishable from any other staged file — same startUpload,
+  // same uploadOne, same status polling; the server never sees the original.
+  const splitItem = useCallback(
+    (item: UploadItem, ranges: Array<{ start: number; end: number }>) => {
+      const file = filesRef.current.get(item.key)
+      if (!file) return
+
+      setItems((current) => current.map((c) => (c.key === item.key ? { ...c, status: 'splitting' } : c)))
+
+      void (async () => {
+        try {
+          const bytes = new Uint8Array(await file.arrayBuffer())
+          const parts = await splitPdfByRanges(bytes, ranges)
+          const stem = file.name.replace(/\.pdf$/i, '')
+
+          // splitPdfByRanges returns exactly one part per range, in order.
+          const newItems: UploadItem[] = ranges.map(({ start, end }, i) => {
+            const partBytes = parts[i]
+            if (!partBytes) throw new Error('split produced fewer parts than ranges')
+            const name = `${stem}__p${start}-${end}.pdf`
+            // Copy into a fresh Uint8Array so the File constructor gets a plain
+            // ArrayBuffer-backed view (pdf-lib's save() output is typed with a
+            // wider ArrayBufferLike that BlobPart doesn't accept).
+            const partFile = new File([new Uint8Array(partBytes)], name, { type: 'application/pdf' })
+            const key = `${name}-${partFile.size}-${Date.now()}-${i}-${Math.random().toString(36).slice(2)}`
+            filesRef.current.set(key, partFile)
+            return { key, filename: name, status: 'staged', progress: 0, pageCount: end - start + 1 }
+          })
+
+          filesRef.current.delete(item.key)
+          setItems((current) => {
+            const idx = current.findIndex((c) => c.key === item.key)
+            if (idx === -1) return current
+            const next = [...current]
+            next.splice(idx, 1, ...newItems)
+            return next
+          })
+        } catch (err) {
+          logRawError('upload-dropzone-split', err)
+          setItems((current) =>
+            current.map((c) =>
+              c.key === item.key
+                ? {
+                    ...c,
+                    status: 'error',
+                    error: 'Could not split this PDF here. Split it into smaller files by hand and upload those instead.',
+                  }
+                : c
+            )
+          )
+        }
+      })()
+    },
+    []
   )
 
   function uploadAllStaged() {
@@ -518,14 +739,21 @@ export function UploadDropzone({
           {items.map((item) => (
             <div
               key={item.key}
-              className="flex items-center gap-2 rounded-md border border-border bg-card px-3 py-2 text-sm"
+              className="flex flex-col gap-2 rounded-md border border-border bg-card px-3 py-2 text-sm"
             >
+              <div className="flex items-center gap-2">
               <FileText className="h-4 w-4 flex-shrink-0 text-muted-foreground" aria-hidden="true" />
               <span className="min-w-0 flex-1 truncate">{item.filename}</span>
               {item.status === 'staged' && (
                 <Button type="button" size="sm" variant="outline" onClick={() => startUpload(item)}>
                   Upload &amp; extract
                 </Button>
+              )}
+              {(item.status === 'oversize' || item.status === 'splitting') && (
+                <span className="flex flex-shrink-0 items-center gap-1.5 text-xs text-amber-700 dark:text-amber-400">
+                  <Scissors className="h-3.5 w-3.5" aria-hidden="true" />
+                  {item.pageCount} pages
+                </span>
               )}
               {item.status === 'uploading' && (
                 <span className="flex flex-shrink-0 items-center gap-1.5 text-xs text-muted-foreground">
@@ -568,14 +796,28 @@ export function UploadDropzone({
                 onClick={() => removeItem(item.key)}
                 className="flex-shrink-0 rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
                 aria-label={
-                  item.status === 'staged' || item.status === 'uploading'
+                  item.status === 'staged' || item.status === 'uploading' || item.status === 'oversize'
                     ? `Cancel ${item.filename}`
                     : `Dismiss ${item.filename}`
                 }
-                title={item.status === 'staged' || item.status === 'uploading' ? 'Cancel' : 'Dismiss'}
+                title={
+                  item.status === 'staged' || item.status === 'uploading' || item.status === 'oversize'
+                    ? 'Cancel'
+                    : 'Dismiss'
+                }
               >
                 <X className="h-3.5 w-3.5" aria-hidden="true" />
               </button>
+              </div>
+              {(item.status === 'oversize' || item.status === 'splitting') && item.pageCount !== undefined && (
+                <SplitPanel
+                  file={filesRef.current.get(item.key)}
+                  pageCount={item.pageCount}
+                  maxUploadPages={maxUploadPages}
+                  splitting={item.status === 'splitting'}
+                  onSplit={(ranges) => splitItem(item, ranges)}
+                />
+              )}
             </div>
           ))}
           {hasFinished && (

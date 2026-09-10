@@ -20,6 +20,7 @@ import { isAdminOrAbove, isSuperadmin } from '@/lib/auth/roles'
 import { getSelectedEventId } from '@/lib/events/current'
 import { getDocumentAssignees, listAssignableStaff, type AssignableStaff } from '@/lib/assignment/queries'
 import { getCachedAdminHeads, getCachedZones, getCachedCostCenters } from '@/lib/cache/reference-data'
+import { getMaxUploadPages } from '@/lib/upload-limits'
 
 /** A stalled queue is "the oldest queued job has been waiting longer than this" (checklist 2.15, D8) — long enough that a normal extraction backlog doesn't false-positive. */
 const STALLED_QUEUE_THRESHOLD_MS = 10 * 60 * 1000
@@ -364,21 +365,31 @@ export default async function DocumentsPage({
   // whichever batch it's closest to rather than paying for a third
   // sequential round trip.
   const admin = createAdminClient()
-  const [adminHeadLookupData, zoneLookupData, costCenterLookupData, oldestQueuedJobResult, billKpis] =
-    await Promise.all([
-      getCachedAdminHeads(supabase, staff.userId),
-      getCachedZones(supabase, staff.userId),
-      getCachedCostCenters(supabase),
-      admin
-        .from('job_queue')
-        .select('created_at')
-        .eq('status', 'queued')
-        .eq('job_type', 'extract_document')
-        .order('created_at', { ascending: true })
-        .limit(1)
-        .maybeSingle(),
-      getBillKpis(supabase, { selectedEventId, scopeSourceDocIds: kpiScopeSourceDocIds }),
-    ])
+  const [
+    adminHeadLookupData,
+    zoneLookupData,
+    costCenterLookupData,
+    oldestQueuedJobResult,
+    billKpis,
+    maxUploadPages,
+  ] = await Promise.all([
+    getCachedAdminHeads(supabase, staff.userId),
+    getCachedZones(supabase, staff.userId),
+    getCachedCostCenters(supabase),
+    admin
+      .from('job_queue')
+      .select('created_at')
+      .eq('status', 'queued')
+      .eq('job_type', 'extract_document')
+      .order('created_at', { ascending: true })
+      .limit(1)
+      .maybeSingle(),
+    getBillKpis(supabase, { selectedEventId, scopeSourceDocIds: kpiScopeSourceDocIds }),
+    // Same read the ingest route does for its own page-limit check — the
+    // upload dropzone needs it to know when to show the "split before
+    // uploading" panel (plan "recursive-finding-yao" §5).
+    getMaxUploadPages(supabase),
+  ])
   const oldestQueuedJob = oldestQueuedJobResult.data
   const adminHeadOptions: LookupOption[] = adminHeadLookupData
     .filter((h) => h.is_active && activeAdminHeadIds.includes(h.id))
@@ -538,6 +549,7 @@ export default async function DocumentsPage({
         adminHeadOptions={adminHeadOptions}
         zoneOptions={zoneOptions}
         costCenterOptions={costCenterOptions}
+        maxUploadPages={maxUploadPages}
       />
     </PageShell>
   )

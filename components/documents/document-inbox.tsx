@@ -70,6 +70,7 @@ export function DocumentInbox({
   adminHeadOptions,
   zoneOptions,
   costCenterOptions,
+  maxUploadPages,
 }: {
   initialDocuments: InboxDocumentView[]
   canAct: boolean
@@ -84,6 +85,10 @@ export function DocumentInbox({
   zoneOptions: LookupOption[]
   /** Only needed for the bulk-attach follow-up dialog (5.12) — the single-attach inline prompt (5.11) doesn't touch cost center. */
   costCenterOptions: LookupOption[]
+  /** Admin-configured page-count ceiling for a single PDF upload, passed
+   *  straight through to the upload dropzone's "split before uploading"
+   *  panel. Fetched once in app/(app)/documents/page.tsx. */
+  maxUploadPages: number
 }) {
   const router = useRouter()
   const [documents, setDocuments] = useState(initialDocuments)
@@ -520,6 +525,7 @@ export function DocumentInbox({
         onUploaded={() => router.refresh()}
         compact={documents.length > 0}
         assignableStaff={canAct ? assignableStaff : []}
+        maxUploadPages={maxUploadPages}
       />
 
       {canAct && selectedCount > 0 && (
