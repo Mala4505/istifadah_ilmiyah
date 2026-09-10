@@ -1,10 +1,15 @@
 import { Suspense } from 'react'
+import type { SupabaseClient } from '@supabase/supabase-js'
 import { Card, CardContent } from '@/components/ui/card'
 import { FriendlyError } from '@/components/ui/friendly-error'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { getStaffContext } from '@/lib/export/auth'
 import { DocumentInbox } from '@/components/documents/document-inbox'
+import { InboxViewNav } from '@/components/documents/inbox-view-nav'
+import { WorkloadBoard } from '@/components/documents/workload-board'
+import { WorkloadBoardSkeleton } from '@/components/documents/workload-board-skeleton'
+import { getAssignmentWorkload } from '@/lib/assignment/workload'
 import { BillKpiBar } from '@/components/documents/bill-kpi-bar'
 import { getBillKpis } from '@/lib/documents/bill-kpis'
 import { AssignmentScope, type DocumentScope } from '@/components/documents/assignment-scope'
@@ -73,7 +78,7 @@ export default async function DocumentsPage({
   // used to filter the RLS-scoped list in-page — see the scope block below.
   // `docsLimit` (7.5) is read up front too, ahead of the docs query itself —
   // see the block right after selectedEventId is resolved.
-  searchParams: Promise<{ scope?: string; assignee?: string; docsLimit?: string }>
+  searchParams: Promise<{ scope?: string; assignee?: string; docsLimit?: string; view?: string }>
 }) {
   const staff = await getStaffContext()
 
@@ -106,16 +111,32 @@ export default async function DocumentsPage({
   const isSA = isSuperadmin(staff.role)
   const supabase = await createClient()
 
+  // Read once, up front — `sp.view` gates the workload branch immediately
+  // below; `docsLimit` gates the docs query further down; `scope`/`assignee`
+  // are still read closer to where they're used, unchanged from before.
+  const sp = await searchParams
+
+  // Workload view (redesign plan Phase 1.2): the superadmin assignment board,
+  // folded in from the former /documents/workload route (which now redirects
+  // here). It shares none of the inbox queries below, so branch out before any
+  // of them run. Non-superadmins never get the `?view=` toggle and fall
+  // through to their normal inbox.
+  if (isSA && sp.view === 'workload') {
+    return (
+      <PageShell>
+        <InboxViewNav current="workload" />
+        <Suspense fallback={<WorkloadBoardSkeleton />}>
+          <WorkloadView supabase={supabase} />
+        </Suspense>
+      </PageShell>
+    )
+  }
+
   // Phase 6 Step 2 §1: the inbox is scoped to whichever event is currently
   // selected (cookie, defaulting to the current event) -- a reviewer parked
   // on a past event must not see the current event's unmatched documents
   // mixed into a supposedly read-only, past-event view, and vice versa.
   const selectedEventId = await getSelectedEventId()
-
-  // Read once, up front — `docsLimit` gates the docs query immediately
-  // below; `scope`/`assignee` are still read further down, closer to where
-  // they're used, unchanged from before.
-  const sp = await searchParams
 
   // 7.5: `docsLimit` widens the fetch beyond the default DOCUMENT_QUERY_CAP
   // when the reviewer clicks "Load more" (a real navigation — see
@@ -506,6 +527,7 @@ export default async function DocumentsPage({
         ) : null
       }
     >
+      {isSA && <InboxViewNav current="inbox" />}
       <BillKpiBar kpis={billKpis} scope={isSA ? 'all' : canAct ? 'mine' : 'open'} />
       <DocumentInbox
         initialDocuments={visibleDocuments}
@@ -519,6 +541,16 @@ export default async function DocumentsPage({
       />
     </PageShell>
   )
+}
+
+/**
+ * Workload view body (redesign plan Phase 1.2). Its own async component so the
+ * board renders behind a <Suspense> boundary and the branch above stays a
+ * cheap, synchronous early return.
+ */
+async function WorkloadView({ supabase }: { supabase: SupabaseClient }) {
+  const workload = await getAssignmentWorkload(supabase)
+  return <WorkloadBoard pool={workload.pool} perStaff={workload.perStaff} />
 }
 
 function PageShell({
