@@ -32,7 +32,6 @@ import type { CompareBasis } from '@/lib/reports/compare-basis'
 import { formatNumber, formatINRCompact, humanizeCode } from '@/lib/reports/format'
 import {
   ROW_CAP,
-  resolvePreviousEvent,
   buildTrailingWeeklySeries,
   round2Local,
   type HubAgeingRow,
@@ -41,6 +40,7 @@ import {
   type ExceptionHeatmapRow,
   type AmountAtRiskByStatusRow,
 } from '@/lib/reports/sections/shared'
+import { resolvePreviousEvent } from '@/lib/reports/sections/resolve-previous-event'
 
 // Phase 3.4 (docs/reports-settings-workload-redesign-plan.md) -- one-sentence
 // insight per section, computed here purely from rows already fetched above,

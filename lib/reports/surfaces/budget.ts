@@ -22,12 +22,12 @@ import { formatPercent } from '@/lib/reports/format'
 import type { CompareBasis } from '@/lib/reports/compare-basis'
 import {
   ROW_CAP,
-  resolvePreviousEvent,
   type BudgetVsActualRow,
   type DepartmentBudgetVsActualRow,
   type SubDepartmentBudgetVsActualRow,
   type ZoneSpendRow,
 } from '@/lib/reports/sections/shared'
+import { resolvePreviousEvent } from '@/lib/reports/sections/resolve-previous-event'
 
 export type BudgetSurfaceData = {
   eventName: string | null

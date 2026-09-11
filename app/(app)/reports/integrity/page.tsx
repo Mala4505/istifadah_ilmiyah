@@ -208,6 +208,7 @@ async function OpenItemAgeingGroup({ only, compareBasis }: { only: string | null
       agedOpenCount={spendOpen.openItemAgeing.agedOpenCount}
       agedAmountAtRisk={spendOpen.openItemAgeing.agedAmountAtRisk}
       previousAgedOpenCount={spendOpen.openItemAgeing.previousAgedOpenCount}
+      insight={spendOpen.openItemAgeing.insight}
     />
   )
 }
@@ -236,6 +237,7 @@ async function ComplianceAndRiskGroup({
           atRiskTotal={data.compliance.atRiskTotal}
           byType={data.compliance.byType}
           previousAtRisk={data.compliance.previousAtRisk}
+          insight={data.compliance.insight}
         />
       )}
       {isSectionInPane(only, 'exception-heatmap') && (
@@ -244,6 +246,7 @@ async function ComplianceAndRiskGroup({
           error={data.exceptionHeatmap.error}
           compareBasis={compareBasis}
           previousTotalAtRisk={data.exceptionHeatmap.previousTotalAtRisk}
+          insight={data.exceptionHeatmap.insight}
         />
       )}
       {isSectionInPane(only, 'amount-at-risk-waterfall') && (
@@ -251,6 +254,7 @@ async function ComplianceAndRiskGroup({
           rows={data.amountAtRiskWaterfall.rows}
           error={data.amountAtRiskWaterfall.error}
           totalSpend={data.amountAtRiskWaterfall.totalSpend}
+          insight={data.amountAtRiskWaterfall.insight}
         />
       )}
     </>
@@ -266,6 +270,7 @@ async function DuplicateRegisterGroup({ only, compareBasis }: { only: string | n
       error={dupRisk.duplicateRegister.error}
       compareBasis={compareBasis}
       previousPreventedAmount={dupRisk.duplicateRegister.previousPreventedAmount}
+      insight={dupRisk.duplicateRegister.insight}
     />
   )
 }
@@ -284,6 +289,7 @@ async function ReconciliationGroup({ only, compareBasis }: { only: string | null
           materialAbsGapTotal={recon.ledgerBillReconciliation.materialAbsGapTotal}
           compareBasis={compareBasis}
           previousMaterialCount={recon.ledgerBillReconciliation.previousMaterialCount}
+          insight={recon.ledgerBillReconciliation.insight}
         />
       )}
       {isSectionInPane(only, 'entries-without-bill') && (
@@ -297,6 +303,7 @@ async function ReconciliationGroup({ only, compareBasis }: { only: string | null
           undocumentedPctOfSpend={recon.entriesWithoutBill.undocumentedPctOfSpend}
           compareBasis={compareBasis}
           previousTotalUndocumented={recon.entriesWithoutBill.previousTotalUndocumented}
+          insight={recon.entriesWithoutBill.insight}
         />
       )}
     </>
@@ -317,6 +324,7 @@ async function ForensicsGroup({ only, compareBasis }: { only: string | null; com
           totalCount={forensics.benford.totalCount}
           compareBasis={compareBasis}
           previousMad={forensics.benford.previousMad}
+          insight={forensics.benford.insight}
         />
       )}
       {isSectionInPane(only, 'round-number-bias') && (
@@ -330,6 +338,7 @@ async function ForensicsGroup({ only, compareBasis }: { only: string | null; com
           overallSharePct={forensics.roundNumber.overallSharePct}
           compareBasis={compareBasis}
           previousOverallSharePct={forensics.roundNumber.previousOverallSharePct}
+          insight={forensics.roundNumber.insight}
         />
       )}
     </>
@@ -348,6 +357,7 @@ async function ThresholdSplittingGroup({ only }: { only: string | null }) {
       entriesError={thresholdSplit.entriesError}
       splittingFlags={thresholdSplit.splittingFlags}
       splittingFlagsError={thresholdSplit.splittingFlagsError}
+      insight={thresholdSplit.insight}
     />
   )
 }

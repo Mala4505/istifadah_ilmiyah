@@ -3,7 +3,7 @@ import type { Event } from '@/lib/events/types'
 import type { CompareBasis } from '@/lib/reports/compare-basis'
 import { loadBudgetSurface } from '@/lib/reports/surfaces/budget'
 import { loadSpendCurveOpenAgeing } from '@/lib/reports/surfaces/spend-curve-open-ageing'
-import { DepartmentBudgetSection } from '@/components/reports/sections/department-budget'
+import { DepartmentBudgetExplorerSection } from '@/components/reports/sections/department-budget-explorer'
 import { SpendCurveSection } from '@/components/reports/sections/spend-curve'
 import { SectionSkeleton } from '@/components/reports/sections/surface-loading'
 import { KpiTile } from '@/components/reports/charts/kpi-tile'
@@ -48,7 +48,7 @@ const getSpendCurveOpenAgeing = cache(loadSpendCurveOpenAgeing)
  * and N follows.
  */
 const FLAGSHIP_SECTION_IDS: ReadonlySet<string> = new Set([
-  'department-budget-vs-actual', // <DepartmentBudgetSection>
+  'department-budget-explorer', // <DepartmentBudgetExplorerSection>
   'spend-curve', // <SpendCurveSection>
 ])
 
@@ -159,11 +159,13 @@ async function DepartmentFlagship({
 }) {
   const data = await getBudgetSurface(compareBasis, selectedEvent)
   return (
-    <DepartmentBudgetSection
-      rows={data.byDepartment.rows}
-      error={data.byDepartment.error}
+    <DepartmentBudgetExplorerSection
+      deptRows={data.byDepartment.rows}
+      subDeptRows={data.bySubDepartment.rows}
+      deptError={data.byDepartment.error}
+      subDeptError={data.bySubDepartment.error}
       compareBasis={compareBasis}
-      previousActualTotal={data.byDepartment.previousActualTotal}
+      previousDeptActualTotal={data.byDepartment.previousActualTotal}
       eventName={selectedEvent?.name ?? null}
     />
   )

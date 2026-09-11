@@ -18,9 +18,7 @@
  * loaders.
  */
 import { startOfISOWeek, subWeeks } from 'date-fns'
-import type { SupabaseClient } from '@supabase/supabase-js'
-import { getAllEvents } from '@/lib/events/current'
-import { COMPARE_BASIS_LABELS, type CompareBasis } from '@/lib/reports/compare-basis'
+import { COMPARE_BASIS_LABELS, type CompareBasis } from '@/lib/reports/compare-basis-labels'
 import { formatINRCompact, formatNumber } from '@/lib/reports/format'
 import type { DonutSegment } from '@/components/reports/charts/donut-chart'
 
@@ -562,25 +560,6 @@ export function buildConcentrationCurve(
 // ---------------------------------------------------------------------------
 
 export type DeltaTone = 'good' | 'bad' | 'neutral'
-
-/**
- * The event immediately older than `currentEventId`, or null when the basis
- * isn't 'prior_event', there's no active event, or the current event is the
- * oldest on record. Surface loaders call this before deciding whether to
- * issue their prior-period query round.
- */
-export async function resolvePreviousEvent(
-  supabase: SupabaseClient,
-  compareBasis: CompareBasis,
-  currentEventId: number | null
-): Promise<{ id: number; name: string } | null> {
-  if (compareBasis !== 'prior_event' || currentEventId === null) return null
-  const events = await getAllEvents() // most-recent Hijri year first
-  const idx = events.findIndex((e) => e.id === currentEventId)
-  if (idx === -1) return null
-  const previous = events[idx + 1] ?? null
-  return previous ? { id: previous.id, name: previous.name } : null
-}
 
 /**
  * A KpiTile `delta` string like "+₹3.2 L vs prior event", or undefined when

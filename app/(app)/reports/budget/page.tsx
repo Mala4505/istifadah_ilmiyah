@@ -10,8 +10,6 @@ import { loadEntryTypeFlow } from '@/lib/reports/surfaces/entry-type-flow'
 import { loadSpendCurveOpenAgeing } from '@/lib/reports/surfaces/spend-curve-open-ageing'
 import { loadEventComparison } from '@/lib/reports/surfaces/event-comparison'
 import { BudgetByHeadSection } from '@/components/reports/sections/budget-by-head'
-import { DepartmentBudgetSection } from '@/components/reports/sections/department-budget'
-import { SubDepartmentBudgetSection } from '@/components/reports/sections/sub-department-budget'
 import { DepartmentBudgetExplorerSection } from '@/components/reports/sections/department-budget-explorer'
 import { ZoneSpendSection } from '@/components/reports/sections/zone-spend'
 import { AdminHeadAccountabilitySection } from '@/components/reports/sections/admin-head-accountability'
@@ -136,15 +134,7 @@ export default async function BudgetSurfacePage({
 }
 
 async function BudgetByHeadGroup({ only, compareBasis, selectedEvent }: { only: string | null; compareBasis: CompareBasis; selectedEvent: Event | null }) {
-  if (
-    groupHiddenInPane(only, [
-      'budget-vs-actual',
-      'department-budget-vs-actual',
-      'sub-department-budget-vs-actual',
-      'department-budget-explorer',
-    ])
-  )
-    return null
+  if (groupHiddenInPane(only, ['budget-vs-actual', 'department-budget-explorer'])) return null
   const data = await getBudgetSurface(compareBasis, selectedEvent)
   return (
     <>
@@ -156,26 +146,6 @@ async function BudgetByHeadGroup({ only, compareBasis, selectedEvent }: { only: 
           compareBasis={compareBasis}
           previousActualTotal={data.byHead.previousActualTotal}
           insight={data.byHead.insight}
-        />
-      )}
-      {isSectionInPane(only, 'department-budget-vs-actual') && (
-        <DepartmentBudgetSection
-          rows={data.byDepartment.rows}
-          error={data.byDepartment.error}
-          compareBasis={compareBasis}
-          previousActualTotal={data.byDepartment.previousActualTotal}
-          insight={data.byDepartment.insight}
-          eventName={selectedEvent?.name ?? null}
-        />
-      )}
-      {isSectionInPane(only, 'sub-department-budget-vs-actual') && (
-        <SubDepartmentBudgetSection
-          rows={data.bySubDepartment.rows}
-          deptRows={data.byDepartment.rows}
-          error={data.bySubDepartment.error}
-          compareBasis={compareBasis}
-          previousActualTotal={data.bySubDepartment.previousActualTotal}
-          insight={data.bySubDepartment.insight}
         />
       )}
       {isSectionInPane(only, 'department-budget-explorer') && (

@@ -26,7 +26,8 @@ import { getSelectedEvent } from '@/lib/events/current'
 import { friendlyDataError } from '@/lib/friendly-error'
 import { formatINRCompact, formatNumber, formatPercent, humanizeCode } from '@/lib/reports/format'
 import type { CompareBasis } from '@/lib/reports/compare-basis'
-import { ROW_CAP, resolvePreviousEvent } from '@/lib/reports/sections/shared'
+import { ROW_CAP } from '@/lib/reports/sections/shared'
+import { resolvePreviousEvent } from '@/lib/reports/sections/resolve-previous-event'
 
 // ---------------------------------------------------------------------------
 // Row shapes -- field names match each view's SELECT list verbatim so the

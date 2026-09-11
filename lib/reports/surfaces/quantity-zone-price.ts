@@ -23,11 +23,11 @@ import type { CompareBasis } from '@/lib/reports/compare-basis'
 import { RATE_BENCHMARK_MIN_VENDORS } from '@/lib/analytics/thresholds'
 import { formatINR, formatNumber } from '@/lib/reports/format'
 import {
-  resolvePreviousEvent,
   type QuantityByUnitRow,
   type ZoneUnitEconomicsRow,
   type VendorPriceByFamilyRow,
 } from '@/lib/reports/sections/shared'
+import { resolvePreviousEvent } from '@/lib/reports/sections/resolve-previous-event'
 
 // QuantityByUnitRow / ZoneUnitEconomicsRow / VendorPriceByFamilyRow now live
 // in lib/reports/sections/shared.tsx (hoisted during Phase Five integration);

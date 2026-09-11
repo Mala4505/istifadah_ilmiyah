@@ -9,28 +9,22 @@
  * Unlike `active_event_id` (which changes which event's rows you query),
  * this is a pure view preference -- it never gates a mutation -- so unlike
  * `setActiveEvent` its server action is not admin-gated.
+ *
+ * The client-safe pieces (the `CompareBasis` type, the cookie name,
+ * `isCompareBasis`, and `COMPARE_BASIS_LABELS`) live in
+ * ./compare-basis-labels and are re-exported here so every existing import
+ * from '@/lib/reports/compare-basis' keeps resolving unchanged. Only
+ * `getCompareBasis()` -- the one thing that actually needs `cookies()` --
+ * stays defined in this file.
  */
 import { cookies } from 'next/headers'
+import { COMPARE_BASIS_COOKIE, isCompareBasis, type CompareBasis } from './compare-basis-labels'
 
-export const COMPARE_BASIS_COOKIE = 'report_compare_basis'
-
-export type CompareBasis = 'prior_week' | 'prior_event' | 'none'
-
-const VALID_BASES: readonly CompareBasis[] = ['prior_week', 'prior_event', 'none']
-
-export function isCompareBasis(value: string | undefined): value is CompareBasis {
-  return VALID_BASES.includes(value as CompareBasis)
-}
+export * from './compare-basis-labels'
 
 /** Reads the `report_compare_basis` cookie; defaults to `prior_week` when
  *  unset or unrecognised. */
 export async function getCompareBasis(): Promise<CompareBasis> {
   const raw = (await cookies()).get(COMPARE_BASIS_COOKIE)?.value
   return isCompareBasis(raw) ? raw : 'prior_week'
-}
-
-export const COMPARE_BASIS_LABELS: Record<CompareBasis, string> = {
-  prior_week: 'vs last week',
-  prior_event: 'vs prior event',
-  none: 'No comparison',
 }

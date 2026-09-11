@@ -34,7 +34,8 @@ import { createClient } from '@/lib/supabase/server'
 import { getSelectedEvent } from '@/lib/events/current'
 import { friendlyDataError } from '@/lib/friendly-error'
 import type { CompareBasis } from '@/lib/reports/compare-basis'
-import { ROW_CAP, resolvePreviousEvent, round2Local } from '@/lib/reports/sections/shared'
+import { ROW_CAP, round2Local } from '@/lib/reports/sections/shared'
+import { resolvePreviousEvent } from '@/lib/reports/sections/resolve-previous-event'
 import { formatNumber, formatPercent } from '@/lib/reports/format'
 
 // ---------------------------------------------------------------------------

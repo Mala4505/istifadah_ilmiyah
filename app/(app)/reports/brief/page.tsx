@@ -290,7 +290,14 @@ export default async function ExecutiveBriefPage({
 async function WeeklyDigestGroup({ eventId }: { eventId: number | null }) {
   const weeklyDigest = await loadWeeklyDigest(eventId)
   const digestErrorText = Object.values(weeklyDigest.errors).find((e): e is string => e != null) ?? null
-  return <WeeklyDigestSection items={weeklyDigest.items} hasError={digestErrorText != null} errorText={digestErrorText} />
+  return (
+    <WeeklyDigestSection
+      items={weeklyDigest.items}
+      hasError={digestErrorText != null}
+      errorText={digestErrorText}
+      insight={weeklyDigest.insight}
+    />
+  )
 }
 
 async function RupeeProvenanceGroup({ compareBasis, traceEntryId }: { compareBasis: CompareBasis; traceEntryId: number | null }) {
@@ -301,6 +308,7 @@ async function RupeeProvenanceGroup({ compareBasis, traceEntryId }: { compareBas
       candidatesError={provenance.candidatesError}
       chain={provenance.chain}
       traceEntryId={provenance.traceEntryId}
+      insight={provenance.insight}
     />
   )
 }

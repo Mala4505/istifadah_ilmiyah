@@ -31,8 +31,6 @@ export const OVERVIEW_SECTION: ReportSectionRef = { id: 'overview', label: 'Over
 
 const BUDGET_SECTIONS: ReportSectionRef[] = [
   { id: 'budget-vs-actual', label: 'Budget vs Actual' },
-  { id: 'department-budget-vs-actual', label: 'Department Budget vs Actual' },
-  { id: 'sub-department-budget-vs-actual', label: 'Sub-department Budget vs Actual' },
   { id: 'department-budget-explorer', label: 'Department Budget Explorer' },
   { id: 'budget-revision-history', label: 'Budget Revision History' },
   { id: 'admin-head-accountability', label: 'Admin-head Accountability' },
@@ -93,8 +91,6 @@ const INTEGRITY_SECTIONS: ReportSectionRef[] = [
  */
 const EXPLORE_SECTIONS: ReportSectionRef[] = [
   { id: 'budget-vs-actual', label: 'Budget vs Actual' },
-  { id: 'department-budget-vs-actual', label: 'Department Budget vs Actual' },
-  { id: 'sub-department-budget-vs-actual', label: 'Sub-department Budget vs Actual' },
   { id: 'department-budget-explorer', label: 'Department Budget Explorer' },
   { id: 'vendor-spend', label: 'Vendor Spend' },
   { id: 'zone-spend', label: 'Spend by Zone' },

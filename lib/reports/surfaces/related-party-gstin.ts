@@ -25,11 +25,11 @@ import type { CompareBasis } from '@/lib/reports/compare-basis'
 import { formatINRCompact, formatNumber, formatPercent } from '@/lib/reports/format'
 import {
   ROW_CAP,
-  resolvePreviousEvent,
   type VendorSharedIdentityEdgeRow,
   type TaxCreditExposureRow,
   type VendorCluster,
 } from '@/lib/reports/sections/shared'
+import { resolvePreviousEvent } from '@/lib/reports/sections/resolve-previous-event'
 
 // VendorSharedIdentityEdgeRow / TaxCreditExposureRow / VendorCluster now live
 // in lib/reports/sections/shared.tsx (hoisted during Phase Five integration);

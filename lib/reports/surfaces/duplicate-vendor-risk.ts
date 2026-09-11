@@ -55,7 +55,8 @@ import { friendlyDataError } from '@/lib/friendly-error'
 import type { CompareBasis } from '@/lib/reports/compare-basis'
 import { RATE_ABOVE_BENCHMARK_PCT } from '@/lib/analytics/thresholds'
 import { formatINRCompact, formatNumber } from '@/lib/reports/format'
-import { ROW_CAP, resolvePreviousEvent } from '@/lib/reports/sections/shared'
+import { ROW_CAP } from '@/lib/reports/sections/shared'
+import { resolvePreviousEvent } from '@/lib/reports/sections/resolve-previous-event'
 import { PRICE_POSITION_TOLERANCE } from '@/lib/reports/surfaces/vendor-scorecard'
 
 // ---------------------------------------------------------------------------

@@ -52,11 +52,11 @@ import { friendlyDataError } from '@/lib/friendly-error'
 import type { CompareBasis } from '@/lib/reports/compare-basis'
 import {
   ROW_CAP,
-  resolvePreviousEvent,
   round2Local,
   type RateDriftRow,
   type DiscountConsistencyRow,
 } from '@/lib/reports/sections/shared'
+import { resolvePreviousEvent } from '@/lib/reports/sections/resolve-previous-event'
 
 // RateDriftRow / DiscountConsistencyRow (the view-shape rows) now live in
 // lib/reports/sections/shared.tsx (hoisted during Phase Five integration);

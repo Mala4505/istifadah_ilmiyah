@@ -22,7 +22,8 @@ import { createClient } from '@/lib/supabase/server'
 import type { Event } from '@/lib/events/types'
 import { friendlyDataError } from '@/lib/friendly-error'
 import type { CompareBasis } from '@/lib/reports/compare-basis'
-import { ROW_CAP, resolvePreviousEvent, round2Local, type PurchaseTreeRow } from '@/lib/reports/sections/shared'
+import { ROW_CAP, round2Local, type PurchaseTreeRow } from '@/lib/reports/sections/shared'
+import { resolvePreviousEvent } from '@/lib/reports/sections/resolve-previous-event'
 import { formatINRCompact, formatNumber, formatPercent } from '@/lib/reports/format'
 
 // PurchaseTreeRow now lives in lib/reports/sections/shared.tsx (hoisted during

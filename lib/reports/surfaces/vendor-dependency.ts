@@ -22,11 +22,11 @@ import type { CompareBasis } from '@/lib/reports/compare-basis'
 import { formatDate, formatINR, formatNumber, formatPercent } from '@/lib/reports/format'
 import {
   ROW_CAP,
-  resolvePreviousEvent,
   type DepartmentVendorDependencyRow,
   type VendorExclusivityRow,
   type VendorFirstBillRow,
 } from '@/lib/reports/sections/shared'
+import { resolvePreviousEvent } from '@/lib/reports/sections/resolve-previous-event'
 
 // DepartmentVendorDependencyRow / VendorExclusivityRow / VendorFirstBillRow
 // now live in lib/reports/sections/shared.tsx (hoisted during Phase Five

@@ -35,8 +35,6 @@ import { ORDINAL_RAMP } from '@/components/reports/charts/ordinal-ramp'
 import { formatINRCompact, formatNumber } from '@/lib/reports/format'
 import { SectionSkeleton } from '@/components/reports/sections/surface-loading'
 import { BudgetByHeadSection } from '@/components/reports/sections/budget-by-head'
-import { DepartmentBudgetSection } from '@/components/reports/sections/department-budget'
-import { SubDepartmentBudgetSection } from '@/components/reports/sections/sub-department-budget'
 import { DepartmentBudgetExplorerSection } from '@/components/reports/sections/department-budget-explorer'
 import { ZoneSpendSection } from '@/components/reports/sections/zone-spend'
 import { VendorSpendSection } from '@/components/reports/sections/vendor-spend'
@@ -387,15 +385,7 @@ export default async function ReportsPage({
 }
 
 async function BudgetGroup1({ only, compareBasis, selectedEvent }: { only: string | null; compareBasis: CompareBasis; selectedEvent: Event | null }) {
-  if (
-    groupHiddenInPane(only, [
-      'budget-vs-actual',
-      'department-budget-vs-actual',
-      'sub-department-budget-vs-actual',
-      'department-budget-explorer',
-    ])
-  )
-    return null
+  if (groupHiddenInPane(only, ['budget-vs-actual', 'department-budget-explorer'])) return null
   const budget = await getBudgetSurface(compareBasis, selectedEvent)
   return (
     <>
@@ -406,24 +396,7 @@ async function BudgetGroup1({ only, compareBasis, selectedEvent }: { only: strin
           error={budget.byHead.error}
           compareBasis={compareBasis}
           previousActualTotal={budget.byHead.previousActualTotal}
-        />
-      )}
-      {isSectionInPane(only, 'department-budget-vs-actual') && (
-        <DepartmentBudgetSection
-          rows={budget.byDepartment.rows}
-          error={budget.byDepartment.error}
-          compareBasis={compareBasis}
-          previousActualTotal={budget.byDepartment.previousActualTotal}
-          eventName={selectedEvent?.name ?? null}
-        />
-      )}
-      {isSectionInPane(only, 'sub-department-budget-vs-actual') && (
-        <SubDepartmentBudgetSection
-          rows={budget.bySubDepartment.rows}
-          deptRows={budget.byDepartment.rows}
-          error={budget.bySubDepartment.error}
-          compareBasis={compareBasis}
-          previousActualTotal={budget.bySubDepartment.previousActualTotal}
+          insight={budget.byHead.insight}
         />
       )}
       {isSectionInPane(only, 'department-budget-explorer') && (
@@ -450,6 +423,7 @@ async function BudgetGroup2({ only, compareBasis, selectedEvent }: { only: strin
       error={budget.byZone.error}
       compareBasis={compareBasis}
       previousTotal={budget.byZone.previousTotal}
+      insight={budget.byZone.insight}
     />
   )
 }
@@ -464,6 +438,7 @@ async function VendorsGroup1({ only, compareBasis, selectedEvent }: { only: stri
       concentrationError={vendors.vendorSpend.concentrationError}
       compareBasis={compareBasis}
       previousSpendTotal={vendors.vendorSpend.previousSpendTotal}
+      insight={vendors.vendorSpend.insight}
     />
   )
 }
@@ -479,6 +454,7 @@ async function VendorsGroup2({ only, compareBasis, selectedEvent }: { only: stri
           error={vendors.spendByFamily.error}
           compareBasis={compareBasis}
           previousSpendTotal={vendors.spendByFamily.previousSpendTotal}
+          insight={vendors.spendByFamily.insight}
         />
       )}
       {isSectionInPane(only, 'rate-benchmark') && (
@@ -487,6 +463,7 @@ async function VendorsGroup2({ only, compareBasis, selectedEvent }: { only: stri
           error={vendors.rateBenchmark.error}
           compareBasis={compareBasis}
           previousReliableCount={vendors.rateBenchmark.previousReliableCount}
+          insight={vendors.rateBenchmark.insight}
         />
       )}
     </>
@@ -512,6 +489,7 @@ async function VendorsGroup3({ only, compareBasis, selectedEvent }: { only: stri
           error={vendors.overpayment.error}
           compareBasis={compareBasis}
           previousTotal={vendors.overpayment.previousTotal}
+          insight={vendors.overpayment.insight}
         />
       )}
       {isSectionInPane(only, 'instrument-type-mix') && (
@@ -520,6 +498,7 @@ async function VendorsGroup3({ only, compareBasis, selectedEvent }: { only: stri
           error={vendors.instrumentMix.error}
           compareBasis={compareBasis}
           previousBackedPct={vendors.instrumentMix.previousBackedPct}
+          insight={vendors.instrumentMix.insight}
         />
       )}
     </>
@@ -550,6 +529,7 @@ async function IntegrityGroup1({
           buckets={integrity.hubAgeing.buckets}
           series={integrity.hubAgeing.series}
           previousCount={integrity.hubAgeing.previousCount}
+          insight={integrity.hubAgeing.insight}
         />
       )}
       {isSectionInPane(only, 'open-issues') && (
@@ -560,6 +540,7 @@ async function IntegrityGroup1({
           series={integrity.openIssues.series}
           atRiskTotal={integrity.openIssues.atRiskTotal}
           previousAtRisk={integrity.openIssues.previousAtRisk}
+          insight={integrity.openIssues.insight}
         />
       )}
       {isSectionInPane(only, 'compliance') && (
@@ -571,6 +552,7 @@ async function IntegrityGroup1({
           atRiskTotal={integrity.compliance.atRiskTotal}
           byType={integrity.compliance.byType}
           previousAtRisk={integrity.compliance.previousAtRisk}
+          insight={integrity.compliance.insight}
         />
       )}
     </>
@@ -598,6 +580,7 @@ async function IntegrityGroup2({
           error={integrity.exceptionHeatmap.error}
           compareBasis={compareBasis}
           previousTotalAtRisk={integrity.exceptionHeatmap.previousTotalAtRisk}
+          insight={integrity.exceptionHeatmap.insight}
         />
       )}
       {isSectionInPane(only, 'amount-at-risk-waterfall') && (
@@ -605,6 +588,7 @@ async function IntegrityGroup2({
           rows={integrity.amountAtRiskWaterfall.rows}
           totalSpend={integrity.amountAtRiskWaterfall.totalSpend}
           error={integrity.amountAtRiskWaterfall.error}
+          insight={integrity.amountAtRiskWaterfall.insight}
         />
       )}
     </>
@@ -620,6 +604,7 @@ async function PurchaseTreeGroup({ only, compareBasis, selectedEvent }: { only: 
       error={purchaseTree.purchaseTree.error}
       compareBasis={compareBasis}
       previousTotal={purchaseTree.purchaseTree.previousTotal}
+      insight={purchaseTree.purchaseTree.insight}
     />
   )
 }
@@ -635,6 +620,7 @@ async function VendorScorecardGroup({ only, compareBasis, selectedEvent }: { onl
           error={vendorScorecard.scorecard.error}
           compareBasis={compareBasis}
           previousAttentionCount={vendorScorecard.scorecard.previousAttentionCount}
+          insight={vendorScorecard.scorecard.insight}
         />
       )}
       {isSectionInPane(only, 'vendor-activity-span') && (
@@ -645,6 +631,7 @@ async function VendorScorecardGroup({ only, compareBasis, selectedEvent }: { onl
           previousMaterialCount={vendorScorecard.activitySpan.previousMaterialCount}
           eventStartsOn={vendorScorecard.eventStartsOn}
           eventEndsOn={vendorScorecard.eventEndsOn}
+          insight={vendorScorecard.activitySpan.insight}
         />
       )}
     </>
@@ -662,6 +649,7 @@ async function VendorDependencyGroup({ only, compareBasis, selectedEvent }: { on
           error={vendorDependency.departmentDependency.error}
           compareBasis={compareBasis}
           previousOverThresholdCount={vendorDependency.departmentDependency.previousOverThresholdCount}
+          insight={vendorDependency.departmentDependency.insight}
         />
       )}
       {isSectionInPane(only, 'vendor-exclusivity') && (
@@ -670,6 +658,7 @@ async function VendorDependencyGroup({ only, compareBasis, selectedEvent }: { on
           error={vendorDependency.vendorExclusivity.error}
           compareBasis={compareBasis}
           previousMaterialCount={vendorDependency.vendorExclusivity.previousMaterialCount}
+          insight={vendorDependency.vendorExclusivity.insight}
         />
       )}
       {isSectionInPane(only, 'new-vendor-first-bill') && (
@@ -678,6 +667,7 @@ async function VendorDependencyGroup({ only, compareBasis, selectedEvent }: { on
           error={vendorDependency.newVendorFirstBill.error}
           compareBasis={compareBasis}
           previousFindingCount={vendorDependency.newVendorFirstBill.previousFindingCount}
+          insight={vendorDependency.newVendorFirstBill.insight}
         />
       )}
     </>
@@ -693,6 +683,7 @@ async function VendorPriceRankingGroup({ only, compareBasis, selectedEvent }: { 
       error={quantityZonePrice.vendorPriceByFamily.error}
       compareBasis={compareBasis}
       previousMultiVendorCount={quantityZonePrice.vendorPriceByFamily.previousMultiVendorCount}
+      insight={quantityZonePrice.vendorPriceByFamily.insight}
     />
   )
 }
@@ -707,6 +698,7 @@ async function RelatedPartyGroup({ only, compareBasis, selectedEvent }: { only: 
           edges={relatedPartyGstin.relatedPartyClusters.edges}
           clusters={relatedPartyGstin.relatedPartyClusters.clusters}
           error={relatedPartyGstin.relatedPartyClusters.error}
+          insight={relatedPartyGstin.relatedPartyClusters.insight}
         />
       )}
       {isSectionInPane(only, 'gstin-tax-exposure') && (
@@ -715,6 +707,7 @@ async function RelatedPartyGroup({ only, compareBasis, selectedEvent }: { only: 
           error={relatedPartyGstin.taxCreditExposure.error}
           compareBasis={compareBasis}
           previousAtRiskTotal={relatedPartyGstin.taxCreditExposure.previousAtRiskTotal}
+          insight={relatedPartyGstin.taxCreditExposure.insight}
         />
       )}
     </>
@@ -732,6 +725,7 @@ async function RateDriftDiscountGroup({ only, compareBasis, selectedEvent }: { o
           error={rateDriftDiscount.rateDrift.error}
           compareBasis={compareBasis}
           previousDriftingCount={rateDriftDiscount.rateDrift.previousDriftingCount}
+          insight={rateDriftDiscount.rateDrift.insight}
         />
       )}
       {isSectionInPane(only, 'discount-consistency') && (
@@ -741,6 +735,7 @@ async function RateDriftDiscountGroup({ only, compareBasis, selectedEvent }: { o
           compareBasis={compareBasis}
           previousInconsistentCount={rateDriftDiscount.discountConsistency.previousInconsistentCount}
           coverage={rateDriftDiscount.discountConsistency.coverage}
+          insight={rateDriftDiscount.discountConsistency.insight}
         />
       )}
     </>
@@ -758,6 +753,7 @@ async function QuantityZoneGroup({ only, compareBasis, selectedEvent }: { only: 
           error={quantityZonePrice.quantityByUnit.error}
           compareBasis={compareBasis}
           previousPairCount={quantityZonePrice.quantityByUnit.previousPairCount}
+          insight={quantityZonePrice.quantityByUnit.insight}
         />
       )}
       {isSectionInPane(only, 'zone-unit-economics') && (
@@ -766,6 +762,7 @@ async function QuantityZoneGroup({ only, compareBasis, selectedEvent }: { only: 
           error={quantityZonePrice.zoneUnitEconomics.error}
           compareBasis={compareBasis}
           previousWideSpreadCount={quantityZonePrice.zoneUnitEconomics.previousWideSpreadCount}
+          insight={quantityZonePrice.zoneUnitEconomics.insight}
         />
       )}
     </>
@@ -780,6 +777,7 @@ async function BudgetStructureGroup1({ only, compareBasis, revisionHeadId }: { o
       rows={budgetStructure.revisionHistory.rows}
       error={budgetStructure.revisionHistory.error}
       selectedHeadId={budgetStructure.revisionHeadId}
+      insight={budgetStructure.revisionHistory.insight}
     />
   )
 }
@@ -790,10 +788,18 @@ async function BudgetStructureGroup2({ only, compareBasis, revisionHeadId }: { o
   return (
     <>
       {isSectionInPane(only, 'zone-category-matrix') && (
-        <ZoneCategoryMatrixSection rows={budgetStructure.zoneCategoryMatrix.rows} error={budgetStructure.zoneCategoryMatrix.error} />
+        <ZoneCategoryMatrixSection
+          rows={budgetStructure.zoneCategoryMatrix.rows}
+          error={budgetStructure.zoneCategoryMatrix.error}
+          insight={budgetStructure.zoneCategoryMatrix.insight}
+        />
       )}
       {isSectionInPane(only, 'budget-category-mix') && (
-        <BudgetCategoryMixSection rows={budgetStructure.budgetCategoryMix.rows} error={budgetStructure.budgetCategoryMix.error} />
+        <BudgetCategoryMixSection
+          rows={budgetStructure.budgetCategoryMix.rows}
+          error={budgetStructure.budgetCategoryMix.error}
+          insight={budgetStructure.budgetCategoryMix.insight}
+        />
       )}
     </>
   )
@@ -808,6 +814,7 @@ async function AdminHeadGroup({ only, compareBasis }: { only: string | null; com
       error={adminHead.accountability.error}
       compareBasis={compareBasis}
       previousSpendTotal={adminHead.accountability.previousSpendTotal}
+      insight={adminHead.accountability.insight}
     />
   )
 }
@@ -823,6 +830,7 @@ async function EntryTypeFlowGroup({ only, compareBasis }: { only: string | null;
           error={entryTypeFlow.entryTypeSplit.error}
           compareBasis={compareBasis}
           previousReimbursementSharePct={entryTypeFlow.entryTypeSplit.previousReimbursementSharePct}
+          insight={entryTypeFlow.entryTypeSplit.insight}
         />
       )}
       {isSectionInPane(only, 'outstanding-advance-ageing') && (
@@ -832,6 +840,7 @@ async function EntryTypeFlowGroup({ only, compareBasis }: { only: string | null;
           compareBasis={compareBasis}
           previousOutstandingCount={entryTypeFlow.outstandingAdvanceAgeing.previousOutstandingCount}
           previousOutstandingAmount={entryTypeFlow.outstandingAdvanceAgeing.previousOutstandingAmount}
+          insight={entryTypeFlow.outstandingAdvanceAgeing.insight}
         />
       )}
       {isSectionInPane(only, 'reimbursement-profile') && (
@@ -843,6 +852,7 @@ async function EntryTypeFlowGroup({ only, compareBasis }: { only: string | null;
           compareBasis={compareBasis}
           previousTotalReimbursed={entryTypeFlow.reimbursementProfile.previousTotalReimbursed}
           previousReimburseeCount={entryTypeFlow.reimbursementProfile.previousReimburseeCount}
+          insight={entryTypeFlow.reimbursementProfile.insight}
         />
       )}
     </>
@@ -864,6 +874,7 @@ async function SpendCurveGroup1({ only, compareBasis }: { only: string | null; c
       meanWeeklyAmount={spendCurveOpen.spendCurve.meanWeeklyAmount}
       peakMultipleOfMean={spendCurveOpen.spendCurve.peakMultipleOfMean}
       previousPeakWeekAmount={spendCurveOpen.spendCurve.previousPeakWeekAmount}
+      insight={spendCurveOpen.spendCurve.insight}
     />
   )
 }
@@ -879,6 +890,7 @@ async function SpendCurveGroup2({ only, compareBasis }: { only: string | null; c
       agedOpenCount={spendCurveOpen.openItemAgeing.agedOpenCount}
       agedAmountAtRisk={spendCurveOpen.openItemAgeing.agedAmountAtRisk}
       previousAgedOpenCount={spendCurveOpen.openItemAgeing.previousAgedOpenCount}
+      insight={spendCurveOpen.openItemAgeing.insight}
     />
   )
 }
@@ -895,6 +907,7 @@ async function EventComparisonGroup({ only }: { only: string | null }) {
       error={eventComparison.error}
       currentTotal={eventComparison.currentTotal}
       baseTotal={eventComparison.baseTotal}
+      insight={eventComparison.insight}
     />
   )
 }
@@ -908,6 +921,7 @@ async function DuplicateRegisterGroup({ only, compareBasis }: { only: string | n
       error={dupVendorRisk.duplicateRegister.error}
       compareBasis={compareBasis}
       previousPreventedAmount={dupVendorRisk.duplicateRegister.previousPreventedAmount}
+      insight={dupVendorRisk.duplicateRegister.insight}
     />
   )
 }
@@ -926,6 +940,7 @@ async function ReconciliationGroup({ only, compareBasis }: { only: string | null
           materialAbsGapTotal={reconciliationGap.ledgerBillReconciliation.materialAbsGapTotal}
           compareBasis={compareBasis}
           previousMaterialCount={reconciliationGap.ledgerBillReconciliation.previousMaterialCount}
+          insight={reconciliationGap.ledgerBillReconciliation.insight}
         />
       )}
       {isSectionInPane(only, 'entries-without-bill') && (
@@ -939,6 +954,7 @@ async function ReconciliationGroup({ only, compareBasis }: { only: string | null
           undocumentedPctOfSpend={reconciliationGap.entriesWithoutBill.undocumentedPctOfSpend}
           compareBasis={compareBasis}
           previousTotalUndocumented={reconciliationGap.entriesWithoutBill.previousTotalUndocumented}
+          insight={reconciliationGap.entriesWithoutBill.insight}
         />
       )}
     </>
@@ -959,6 +975,7 @@ async function ForensicsGroup({ only, compareBasis }: { only: string | null; com
           totalCount={amountForensics.benford.totalCount}
           compareBasis={compareBasis}
           previousMad={amountForensics.benford.previousMad}
+          insight={amountForensics.benford.insight}
         />
       )}
       {isSectionInPane(only, 'round-number-bias') && (
@@ -972,6 +989,7 @@ async function ForensicsGroup({ only, compareBasis }: { only: string | null; com
           overallSharePct={amountForensics.roundNumber.overallSharePct}
           compareBasis={compareBasis}
           previousOverallSharePct={amountForensics.roundNumber.previousOverallSharePct}
+          insight={amountForensics.roundNumber.insight}
         />
       )}
     </>
@@ -990,6 +1008,7 @@ async function ThresholdSplittingGroup({ only }: { only: string | null }) {
       entriesError={thresholdSplit.entriesError}
       splittingFlags={thresholdSplit.splittingFlags}
       splittingFlagsError={thresholdSplit.splittingFlagsError}
+      insight={thresholdSplit.insight}
     />
   )
 }
@@ -1007,6 +1026,7 @@ async function HsnGstAnomalyGroup({ only, compareBasis }: { only: string | null;
       anomalyCount={hsnGstAnomaly.anomalyCount}
       billsWithBothRates={hsnGstAnomaly.billsWithBothRates}
       compareBasis={compareBasis}
+      insight={hsnGstAnomaly.insight}
     />
   )
 }
@@ -1020,6 +1040,7 @@ async function VendorRiskBoardGroup({ only, compareBasis }: { only: string | nul
       error={dupVendorRisk.vendorRiskBoard.error}
       compareBasis={compareBasis}
       previousElevatedCount={dupVendorRisk.vendorRiskBoard.previousElevatedCount}
+      insight={dupVendorRisk.vendorRiskBoard.insight}
     />
   )
 }
@@ -1028,7 +1049,14 @@ async function WeeklyDigestGroup({ only, eventId }: { only: string | null; event
   if (groupHiddenInPane(only, ['weekly-digest'])) return null
   const weeklyDigest = await loadWeeklyDigest(eventId)
   const digestErrorText = Object.values(weeklyDigest.errors).find((e): e is string => e != null) ?? null
-  return <WeeklyDigestSection items={weeklyDigest.items} hasError={digestErrorText != null} errorText={digestErrorText} />
+  return (
+    <WeeklyDigestSection
+      items={weeklyDigest.items}
+      hasError={digestErrorText != null}
+      errorText={digestErrorText}
+      insight={weeklyDigest.insight}
+    />
+  )
 }
 
 async function RupeeProvenanceGroup({ only, compareBasis, traceEntryId }: { only: string | null; compareBasis: CompareBasis; traceEntryId: number | null }) {
@@ -1040,6 +1068,7 @@ async function RupeeProvenanceGroup({ only, compareBasis, traceEntryId }: { only
       candidatesError={rupeeProvenance.candidatesError}
       chain={rupeeProvenance.chain}
       traceEntryId={rupeeProvenance.traceEntryId}
+      insight={rupeeProvenance.insight}
     />
   )
 }

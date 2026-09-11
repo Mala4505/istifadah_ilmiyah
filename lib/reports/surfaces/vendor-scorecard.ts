@@ -25,10 +25,10 @@ import { CONCENTRATION_MIN_TOTAL } from '@/lib/analytics/thresholds'
 import { formatDate, formatINRCompact, formatNumber } from '@/lib/reports/format'
 import {
   ROW_CAP,
-  resolvePreviousEvent,
   type VendorScorecardRow,
   type VendorActivitySpanRow,
 } from '@/lib/reports/sections/shared'
+import { resolvePreviousEvent } from '@/lib/reports/sections/resolve-previous-event'
 
 // VendorScorecardRow / VendorActivitySpanRow now live in
 // lib/reports/sections/shared.tsx (hoisted during Phase Five integration);

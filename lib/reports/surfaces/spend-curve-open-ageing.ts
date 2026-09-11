@@ -33,7 +33,8 @@ import { getSelectedEvent } from '@/lib/events/current'
 import { friendlyDataError } from '@/lib/friendly-error'
 import { formatDate, formatINR, formatNumber } from '@/lib/reports/format'
 import type { CompareBasis } from '@/lib/reports/compare-basis'
-import { ROW_CAP, resolvePreviousEvent, round2Local } from '@/lib/reports/sections/shared'
+import { ROW_CAP, round2Local } from '@/lib/reports/sections/shared'
+import { resolvePreviousEvent } from '@/lib/reports/sections/resolve-previous-event'
 
 /** A-11 -- one row per (event, ISO week) across the gap-filled event span
  *  (20260903000015_spend_curve_open_ageing_views.sql). The four window

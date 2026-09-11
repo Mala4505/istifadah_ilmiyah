@@ -31,7 +31,6 @@ import { RATE_BENCHMARK_MIN_OBSERVATIONS, RATE_BENCHMARK_MIN_VENDORS } from '@/l
 import { formatINRCompact, formatNumber, formatPercent } from '@/lib/reports/format'
 import {
   ROW_CAP,
-  resolvePreviousEvent,
   buildConcentrationCurve,
   round2Local,
   ITC_BACKED_INSTRUMENT_TYPES,
@@ -44,6 +43,7 @@ import {
   type VendorConcentrationRow,
   type VendorSpendRow,
 } from '@/lib/reports/sections/shared'
+import { resolvePreviousEvent } from '@/lib/reports/sections/resolve-previous-event'
 
 /** B-01 headline: top-8 vendors' cumulative share, for the prior-event delta. */
 const CONCENTRATION_HEADLINE_COUNT = 8
