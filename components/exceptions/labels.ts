@@ -32,10 +32,29 @@ export const EXCEPTION_TYPE_LABELS: Record<string, string> = {
   ocr_meta_commentary: 'OCR meta-commentary',
   // our own GSTIN/name missing on a non-tax bill (plan §12 recipient-identity expansion)
   recipient_identity_missing: 'Our GSTIN / name missing from bill',
+  // manual Review-page flag reasons (2026-09-11)
+  not_clear: 'Not clear',
+  not_visible: 'Not visible',
 }
 
 /** In CHECK-constraint order (MASTER-PLAN §3.10 migration). */
 export const EXCEPTION_TYPES = Object.keys(EXCEPTION_TYPE_LABELS)
+
+/**
+ * The reason picker on the Review page's manual "Flag exception" dialog
+ * (2026-09-11) -- a reviewer picks one of these three, which flows straight
+ * to `flagReviewException`'s `reason` param and becomes the exception_type on
+ * the reconciliation_exception row (20260911000003 migration). 'other' is
+ * the only one that still requires a free-text note (existing behaviour);
+ * the note is optional context on the other two.
+ */
+export const MANUAL_FLAG_REASONS = [
+  { value: 'not_clear', label: 'Not clear' },
+  { value: 'not_visible', label: 'Not visible' },
+  { value: 'other', label: 'Other' },
+] as const
+
+export type ManualFlagReason = (typeof MANUAL_FLAG_REASONS)[number]['value']
 
 export function exceptionTypeLabel(type: string): string {
   return EXCEPTION_TYPE_LABELS[type] ?? type

@@ -405,6 +405,7 @@ export function DocumentCard({
         sourceDocumentId: document.id,
         documentExtractionId: billId,
         entryId: chosenEntryId,
+        reason: 'other',
         note,
       })
       if (!result.ok) {

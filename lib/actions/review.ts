@@ -23,6 +23,7 @@ import { reExtractFieldScoped, reExtractPageScoped } from '@/lib/jobs/handlers/r
 import { getSelectedEvent, isEventMutable } from '@/lib/events/current'
 import { computeMatchCandidates } from '@/lib/review/match-candidates'
 import type { MatchCandidate } from '@/lib/review/types'
+import type { ManualFlagReason } from '@/components/exceptions/labels'
 
 const CLAIM_STALE_AFTER_MS = 15 * 60 * 1000 // §7: "Claims expire after 15 minutes of inactivity"
 
@@ -479,20 +480,30 @@ export async function getReviewDocumentUrl(
 }
 
 /**
- * `E` -- flag as exception, with a required note (§7). A single-table
- * insert gated by the new `reconciliation_exception_insert` RLS policy
- * (20260813000003), not a SECURITY DEFINER RPC -- there is no multi-table
- * write or cross-department concern here the way save/verify has.
+ * `E` -- flag as exception (§7). A single-table insert gated by the new
+ * `reconciliation_exception_insert` RLS policy (20260813000003), not a
+ * SECURITY DEFINER RPC -- there is no multi-table write or cross-department
+ * concern here the way save/verify has.
+ *
+ * `reason` (2026-09-11, ManualFlagReason from components/exceptions/labels.ts)
+ * is the reviewer's pick from the dialog's preset list -- it becomes the
+ * exception_type directly (20260911000003 migration widened the CHECK
+ * constraint for 'not_clear'/'not_visible') so the toolbar badge and
+ * /exceptions both show a plain reason instead of the generic 'other' every
+ * manual flag used to collapse into. Only 'other' still requires a note --
+ * 'not_clear'/'not_visible' are self-explanatory, so the note is optional
+ * extra context there.
  */
 export async function flagReviewException(input: {
   sourceDocumentId: number
   documentExtractionId: number
   entryId: number | null
+  reason: ManualFlagReason
   note: string
 }): Promise<SimpleActionResult> {
   const note = input.note.trim()
-  if (!note) {
-    return { ok: false, error: 'A note is required to flag an exception.' }
+  if (input.reason === 'other' && !note) {
+    return { ok: false, error: 'A note is required for "Other".' }
   }
 
   const supabase = await createClient()
@@ -506,9 +517,9 @@ export async function flagReviewException(input: {
   const { error } = await supabase.from('reconciliation_exception').insert({
     entry_id: input.entryId,
     document_extraction_id: input.documentExtractionId,
-    exception_type: 'other',
+    exception_type: input.reason,
     severity: 'medium',
-    description: note,
+    description: note || null,
     status: 'open',
   })
 
