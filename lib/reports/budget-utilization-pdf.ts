@@ -1,13 +1,16 @@
 /**
  * "Budget Utilization Report" PDF -- an A4 table shaped after the
- * department's own printed budget sheet (Sr. No / Department / Actuals /
- * Budget), with a "% of Budget Used" column appended at the end.
+ * department's own printed budget sheet (Sr. No / Department / Budget /
+ * Actuals), with a "% of Budget Used" column appended at the end.
  *
  * Deliberately a real bordered table (unlike board-pack/pdf.ts's monospace
  * text grid) since this PDF -- not an .xlsx alongside it -- is the
- * deliverable here. Plain black-on-white throughout: no fills, no colour --
- * the source sheet highlights rows by hand, this export does not reproduce
- * that.
+ * deliverable here. Styled (dark header band, zebra-striped rows, a muted
+ * grid) but *uniformly* so -- every row gets the same treatment regardless
+ * of its numbers. The source sheet highlights individual rows by hand to
+ * flag specific departments; this export does not reproduce that, since a
+ * value-driven colour would misrepresent the export as carrying the same
+ * manual judgement calls.
  *
  * `buildBudgetUtilizationPdf(rows, opts)` -> the PDF as bytes. Pure: no I/O.
  * pdf-lib is dynamically imported, same pattern as lib/reports/board-pack/pdf.ts.
@@ -35,8 +38,8 @@ function pdfSafe(text: string): string {
 const PAGE_W = 595.28 // A4 pt, portrait
 const PAGE_H = 841.89
 const MARGIN = 40
-const HEADER_ROW_H = 20
-const BASE_ROW_H = 16
+const HEADER_ROW_H = 24
+const BASE_ROW_H = 18
 const LINE_H = 10 // per wrapped line inside a taller row
 
 type Col = {
@@ -46,11 +49,11 @@ type Col = {
 }
 
 const COLUMNS: Col[] = [
-  { header: 'Sr. No', width: 35, align: 'left' },
-  { header: 'Department', width: 195, align: 'left' },
-  { header: 'Actual', width: 85, align: 'right' },
-  { header: 'Budget', width: 85, align: 'right' },
-  { header: '% of Budget Used', width: 115, align: 'right' },
+  { header: 'SR. NO', width: 40, align: 'left' },
+  { header: 'DEPARTMENT', width: 190, align: 'left' },
+  { header: 'BUDGET', width: 85, align: 'right' },
+  { header: 'ACTUAL', width: 85, align: 'right' },
+  { header: '% OF BUDGET USED', width: 115, align: 'right' },
 ]
 
 /** Wraps `text` to `maxW` at `size`, returning the lines (at least one). */
@@ -82,7 +85,17 @@ export async function buildBudgetUtilizationPdf(
 
   const tableW = COLUMNS.reduce((s, c) => s + c.width, 0)
   const tableX = MARGIN
-  const black = rgb(0, 0, 0)
+
+  // A restrained, uniform palette -- no colour is ever chosen by a row's
+  // values, only by its position (header vs. body, even vs. odd row).
+  const ink = rgb(0.11, 0.11, 0.13)
+  const headerBg = rgb(0.17, 0.21, 0.29)
+  const headerText = rgb(1, 1, 1)
+  const stripeBg = rgb(0.94, 0.95, 0.97)
+  const gridColor = rgb(0.72, 0.73, 0.76)
+  const titleColor = rgb(0.08, 0.09, 0.11)
+  const subtitleColor = rgb(0.42, 0.44, 0.48)
+  const accentColor = headerBg
 
   let page = doc.addPage([PAGE_W, PAGE_H])
   let y = PAGE_H - MARGIN
@@ -93,46 +106,41 @@ export async function buildBudgetUtilizationPdf(
   let pageHeaderTop = 0
 
   // ---- Title + generated stamp (first page only) -------------------------
-  page.drawText(pdfSafe('Budget Utilization Report'), { x: MARGIN, y, size: 16, font: bold, color: black })
-  y -= 20
-  const generatedLabel = `Generated: ${opts.generatedAt.toLocaleString('en-IN', {
+  page.drawText(pdfSafe('Budget Utilization Report'), { x: MARGIN, y, size: 20, font: bold, color: titleColor })
+  y -= 18
+  const generatedLabel = `Generated ${opts.generatedAt.toLocaleString('en-IN', {
     year: 'numeric',
     month: 'short',
     day: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
-  })}${opts.eventName ? `  ·  ${opts.eventName}` : ''}`
-  page.drawText(pdfSafe(generatedLabel), { x: MARGIN, y, size: 9, font, color: black })
-  y -= 20
+  })}${opts.eventName ? `   ·   ${opts.eventName}` : ''}`
+  page.drawText(pdfSafe(generatedLabel), { x: MARGIN, y, size: 9, font, color: subtitleColor })
+  y -= 10
+  page.drawLine({ start: { x: MARGIN, y }, end: { x: MARGIN + tableW, y }, thickness: 1.5, color: accentColor })
+  y -= 14
 
   function drawVerticalBorders(headerTop: number, bottom: number): void {
     let vx = tableX
     for (const col of COLUMNS) {
-      page.drawLine({ start: { x: vx, y: headerTop }, end: { x: vx, y: bottom }, thickness: 0.4, color: black })
+      page.drawLine({ start: { x: vx, y: headerTop }, end: { x: vx, y: bottom }, thickness: 0.5, color: gridColor })
       vx += col.width
     }
-    page.drawLine({ start: { x: vx, y: headerTop }, end: { x: vx, y: bottom }, thickness: 0.4, color: black })
+    page.drawLine({ start: { x: vx, y: headerTop }, end: { x: vx, y: bottom }, thickness: 0.5, color: gridColor })
   }
 
   function drawHeaderRow(): void {
     const rowTop = y
+    page.drawRectangle({ x: tableX, y: rowTop - HEADER_ROW_H, width: tableW, height: HEADER_ROW_H, color: headerBg })
     let x = tableX
     for (const col of COLUMNS) {
-      const textY = rowTop - HEADER_ROW_H + 6
+      const textY = rowTop - HEADER_ROW_H + 8
       const label = pdfSafe(col.header)
       const textX =
-        col.align === 'right' ? x + col.width - 6 - bold.widthOfTextAtSize(label, 9) : x + 4
-      page.drawText(label, { x: textX, y: textY, size: 9, font: bold, color: black })
+        col.align === 'right' ? x + col.width - 6 - bold.widthOfTextAtSize(label, 8.5) : x + 6
+      page.drawText(label, { x: textX, y: textY, size: 8.5, font: bold, color: headerText })
       x += col.width
     }
-    // horizontal rules for the header
-    page.drawLine({ start: { x: tableX, y: rowTop }, end: { x: tableX + tableW, y: rowTop }, thickness: 0.75, color: black })
-    page.drawLine({
-      start: { x: tableX, y: rowTop - HEADER_ROW_H },
-      end: { x: tableX + tableW, y: rowTop - HEADER_ROW_H },
-      thickness: 0.75,
-      color: black,
-    })
     pageHeaderTop = rowTop
     y = rowTop - HEADER_ROW_H
   }
@@ -148,17 +156,21 @@ export async function buildBudgetUtilizationPdf(
 
   for (let i = 0; i < rows.length; i += 1) {
     const r = rows[i]!
-    const deptLines = wrapText(pdfSafe(r.department_name), font, 9, COLUMNS[1]!.width - 8)
-    const rowH = Math.max(BASE_ROW_H, deptLines.length * LINE_H + 6)
+    const deptLines = wrapText(pdfSafe(r.department_name), font, 9, COLUMNS[1]!.width - 10)
+    const rowH = Math.max(BASE_ROW_H, deptLines.length * LINE_H + 8)
 
     if (y - rowH < MARGIN) newPage()
 
     const rowTop = y
+    if (i % 2 === 1) {
+      page.drawRectangle({ x: tableX, y: rowTop - rowH, width: tableW, height: rowH, color: stripeBg })
+    }
+
     const cells = [
       String(i + 1),
       null, // department drawn separately (may wrap)
-      formatINR(r.actual_amount),
       formatINR(r.budget_amount),
+      formatINR(r.actual_amount),
       r.budget_status_note ?? formatPercent(r.pct_of_budget),
     ]
 
@@ -167,18 +179,18 @@ export async function buildBudgetUtilizationPdf(
       const col = COLUMNS[c]!
       if (c === 1) {
         deptLines.forEach((line, li) => {
-          page.drawText(line, { x: x + 4, y: rowTop - 12 - li * LINE_H, size: 9, font, color: black })
+          page.drawText(line, { x: x + 6, y: rowTop - 13 - li * LINE_H, size: 9, font, color: ink })
         })
       } else {
         const label = pdfSafe(cells[c] as string)
-        const textX = col.align === 'right' ? x + col.width - 6 - font.widthOfTextAtSize(label, 9) : x + 4
-        page.drawText(label, { x: textX, y: rowTop - 12, size: 9, font, color: black })
+        const textX = col.align === 'right' ? x + col.width - 6 - font.widthOfTextAtSize(label, 9) : x + 6
+        page.drawText(label, { x: textX, y: rowTop - 13, size: 9, font, color: ink })
       }
       x += col.width
     }
 
     y = rowTop - rowH
-    page.drawLine({ start: { x: tableX, y }, end: { x: tableX + tableW, y }, thickness: 0.4, color: black })
+    page.drawLine({ start: { x: tableX, y }, end: { x: tableX + tableW, y }, thickness: 0.5, color: gridColor })
   }
 
   drawVerticalBorders(pageHeaderTop, y) // close out the final page
