@@ -744,6 +744,15 @@ export function UploadDropzone({
               <div className="flex items-center gap-2">
               <FileText className="h-4 w-4 flex-shrink-0 text-muted-foreground" aria-hidden="true" />
               <span className="min-w-0 flex-1 truncate">{item.filename}</span>
+              {/* Page count shown for every item once known — staged, mid-upload,
+                  already tracked/uploaded, or errored — not just an oversized one
+                  (2026-09-11: "already uploaded and to be uploaded all" should
+                  show the page no.). */}
+              {item.pageCount !== undefined && (
+                <span className="flex-shrink-0 text-[11px] text-muted-foreground">
+                  {item.pageCount} {item.pageCount === 1 ? 'page' : 'pages'}
+                </span>
+              )}
               {item.status === 'staged' && (
                 <Button type="button" size="sm" variant="outline" onClick={() => startUpload(item)}>
                   Upload &amp; extract
@@ -752,7 +761,7 @@ export function UploadDropzone({
               {(item.status === 'oversize' || item.status === 'splitting') && (
                 <span className="flex flex-shrink-0 items-center gap-1.5 text-xs text-amber-700 dark:text-amber-400">
                   <Scissors className="h-3.5 w-3.5" aria-hidden="true" />
-                  {item.pageCount} pages
+                  over limit
                 </span>
               )}
               {item.status === 'uploading' && (
