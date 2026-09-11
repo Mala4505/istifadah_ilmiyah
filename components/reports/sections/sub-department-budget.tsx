@@ -86,12 +86,14 @@ export function SubDepartmentBudgetSection({
   error,
   compareBasis,
   previousActualTotal,
+  insight,
 }: {
   rows: SubDepartmentBudgetVsActualRow[]
   deptRows: DepartmentBudgetVsActualRow[]
   error: string | null
   compareBasis: CompareBasis
   previousActualTotal: number | null
+  insight?: string | null
 }) {
   const tableRows = buildTableRows(rows, deptRows)
 
@@ -186,7 +188,7 @@ export function SubDepartmentBudgetSection({
             deltaTone="neutral"
           />
           <BarList items={barItems} valueFormatter={formatINRCompact} />
-          <p className="text-sm text-muted-foreground">{subDeptBudgetSentence(rows)}</p>
+          <p className="text-sm text-muted-foreground">{insight ?? subDeptBudgetSentence(rows)}</p>
           <BudgetStatusLegend />
           <DataTable columns={columns} rows={tableRows} getRowKey={(r) => r.rowKey} />
         </>

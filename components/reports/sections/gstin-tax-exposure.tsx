@@ -73,11 +73,13 @@ export function GstinTaxExposureSection({
   error,
   compareBasis,
   previousAtRiskTotal,
+  insight,
 }: {
   rows: TaxCreditExposureRow[]
   error: string | null
   compareBasis: CompareBasis
   previousAtRiskTotal: number | null
+  insight?: string | null
 }) {
   const { atRisk } = totals(rows)
   const previous = compareBasis === 'prior_event' ? previousAtRiskTotal : null
@@ -156,7 +158,7 @@ export function GstinTaxExposureSection({
             delta={formatDeltaVs(compareBasis, atRisk, previous, 'inr')}
             deltaTone={deltaToneHigherIsBad(atRisk, previous)}
           />
-          <p className="text-sm text-muted-foreground">{taxExposureSentence(rows)}</p>
+          <p className="text-sm text-muted-foreground">{insight ?? taxExposureSentence(rows)}</p>
           <TaxExposureChart departments={deptRows} />
           <DataTable
             columns={columns}

@@ -72,6 +72,7 @@ export function ComplianceSection({
   atRiskTotal,
   byType,
   previousAtRisk,
+  insight,
 }: {
   rows: ComplianceRow[]
   error: string | null
@@ -80,6 +81,7 @@ export function ComplianceSection({
   atRiskTotal: number
   byType: [string, number][]
   previousAtRisk: number | null
+  insight?: string | null
 }) {
   const severity = severitySegments(rows)
 
@@ -138,7 +140,7 @@ export function ComplianceSection({
               </div>
             ))}
           </div>
-          <p className="text-sm text-muted-foreground">{complianceSentence(rows, byType, atRiskTotal)}</p>
+          <p className="text-sm text-muted-foreground">{insight ?? complianceSentence(rows, byType, atRiskTotal)}</p>
           {severity.length > 0 && <DonutChart segments={severity} centerLabel={`${rows.length} flags`} />}
           <DataTable columns={complianceColumns} rows={rows} getRowKey={(r) => r.id} />
         </>

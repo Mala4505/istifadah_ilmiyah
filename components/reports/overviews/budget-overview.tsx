@@ -164,6 +164,7 @@ async function DepartmentFlagship({
       error={data.byDepartment.error}
       compareBasis={compareBasis}
       previousActualTotal={data.byDepartment.previousActualTotal}
+      eventName={selectedEvent?.name ?? null}
     />
   )
 }

@@ -140,6 +140,7 @@ export function OpenItemAgeingSection({
   agedOpenCount,
   agedAmountAtRisk,
   previousAgedOpenCount,
+  insight,
 }: {
   rows: OpenItemAgeingRow[]
   error: string | null
@@ -147,6 +148,7 @@ export function OpenItemAgeingSection({
   agedOpenCount: number
   agedAmountAtRisk: number
   previousAgedOpenCount: number | null
+  insight?: string | null
 }) {
   const matrix = buildAgeSeverityMatrix(rows)
   const ranking = buildDepartmentRanking(rows).filter((d) => d.agedAtRisk > 0 || d.oldestDays > 30)
@@ -200,7 +202,7 @@ export function OpenItemAgeingSection({
             deltaTone={deltaToneHigherIsBad(agedOpenCount, previousAgedOpenCount)}
           />
           <p className="text-sm text-muted-foreground">
-            {openItemAgeingSentence(rows, agedOpenCount, agedAmountAtRisk)}
+            {insight ?? openItemAgeingSentence(rows, agedOpenCount, agedAmountAtRisk)}
           </p>
 
           {/* age_bucket × severity matrix — count on top, ₹ at risk below. */}

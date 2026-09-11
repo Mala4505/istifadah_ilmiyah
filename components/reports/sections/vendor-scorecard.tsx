@@ -63,11 +63,13 @@ export function VendorScorecardSection({
   error,
   compareBasis,
   previousAttentionCount,
+  insight,
 }: {
   rows: VendorScorecardRow[]
   error: string | null
   compareBasis: CompareBasis
   previousAttentionCount: number | null
+  insight?: string | null
 }) {
   const attention = rows.filter(vendorNeedsAttention)
   const previous = compareBasis === 'prior_event' ? previousAttentionCount : null
@@ -145,7 +147,7 @@ export function VendorScorecardSection({
             delta={formatDeltaVs(compareBasis, attention.length, previous, 'count')}
             deltaTone={deltaToneHigherIsBad(attention.length, previous)}
           />
-          <p className="text-sm text-muted-foreground">{vendorScorecardSentence(rows)}</p>
+          <p className="text-sm text-muted-foreground">{insight ?? vendorScorecardSentence(rows)}</p>
           <VendorScorecardGrid vendors={gridVendors} />
           <DataTable
             columns={columns}

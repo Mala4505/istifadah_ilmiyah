@@ -67,11 +67,13 @@ export function VendorPriceRankingSection({
   error,
   compareBasis,
   previousMultiVendorCount,
+  insight,
 }: {
   rows: VendorPriceByFamilyRow[]
   error: string | null
   compareBasis: CompareBasis
   previousMultiVendorCount: number | null
+  insight?: string | null
 }) {
   const multiVendorCount = countMultiVendorFamilies(rows)
   const previous = compareBasis === 'prior_event' ? previousMultiVendorCount : null
@@ -157,7 +159,7 @@ export function VendorPriceRankingSection({
             delta={formatDeltaVs(compareBasis, multiVendorCount, previous, 'count')}
             deltaTone={deltaToneHigherIsGood(multiVendorCount, previous)}
           />
-          <p className="text-sm text-muted-foreground">{vendorPriceRankingSentence(rows)}</p>
+          <p className="text-sm text-muted-foreground">{insight ?? vendorPriceRankingSentence(rows)}</p>
           <VendorPriceRankingChart dots={dots} />
           <DataTable
             columns={columns}

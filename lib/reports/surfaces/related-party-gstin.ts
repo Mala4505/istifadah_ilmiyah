@@ -22,6 +22,7 @@ import { createClient } from '@/lib/supabase/server'
 import type { Event } from '@/lib/events/types'
 import { friendlyDataError } from '@/lib/friendly-error'
 import type { CompareBasis } from '@/lib/reports/compare-basis'
+import { formatINRCompact, formatNumber, formatPercent } from '@/lib/reports/format'
 import {
   ROW_CAP,
   resolvePreviousEvent,
@@ -115,6 +116,48 @@ export function buildVendorClusters(
   return clusters.sort((a, b) => b.combinedSpend - a.combinedSpend)
 }
 
+/** "N clusters span M vendor names that share an identity — the largest, led
+ *  by {vendor}, combines K vendor names behind ₹X of spend." Clusters are
+ *  already sorted by combinedSpend desc (buildVendorClusters), and each
+ *  cluster's vendors by spend desc. */
+export function relatedPartyClustersInsight(clusters: VendorCluster[]): string | null {
+  if (clusters.length === 0) return null
+  const vendorsInvolved = clusters.reduce((s, c) => s + c.vendors.length, 0)
+  const largest = clusters[0]!
+  const lead = largest.vendors[0]!
+  return (
+    `${formatNumber(clusters.length)} cluster${clusters.length === 1 ? '' : 's'} span ${formatNumber(
+      vendorsInvolved
+    )} vendor name${vendorsInvolved === 1 ? '' : 's'} that share an identity — the largest, led by ${lead.name}, ` +
+    `combines ${formatNumber(largest.vendors.length)} vendor names behind ${formatINRCompact(
+      largest.combinedSpend
+    )} of this event's spend.`
+  )
+}
+
+/** "Of ₹X tax charged this event, ₹Y (Z%) sits on a bill with an open GSTIN
+ *  or recipient-compliance exception — led by {department} at ₹W." */
+export function taxCreditExposureInsight(rows: TaxCreditExposureRow[]): string | null {
+  const total = rows.reduce((s, r) => s + r.total_tax_amount, 0)
+  if (total <= 0) return null
+  const atRisk = rows.reduce((s, r) => s + r.at_risk_tax_amount, 0)
+  if (atRisk <= 0) {
+    return `All ${formatINRCompact(total)} of tax charged this event sits on bills with a clean GSTIN checksum and our own GSTIN/name on record — none currently at risk.`
+  }
+  const atRiskPct = (atRisk / total) * 100
+  const byDept = new Map<string, number>()
+  for (const r of rows) {
+    if (r.at_risk_tax_amount <= 0) continue
+    const label = r.department_name ?? 'No department'
+    byDept.set(label, (byDept.get(label) ?? 0) + r.at_risk_tax_amount)
+  }
+  const lead = [...byDept.entries()].sort((a, b) => b[1] - a[1])[0]
+  const leadText = lead ? ` — led by ${lead[0]} at ${formatINRCompact(lead[1])}` : ''
+  return `Of ${formatINRCompact(total)} tax charged this event, ${formatINRCompact(atRisk)} (${formatPercent(
+    atRiskPct
+  )}) sits on a bill with an open GSTIN checksum or recipient-compliance exception${leadText}.`
+}
+
 export type RelatedPartyGstinData = {
   eventName: string | null
   previousEventName: string | null
@@ -122,11 +165,13 @@ export type RelatedPartyGstinData = {
     edges: VendorSharedIdentityEdgeRow[]
     clusters: VendorCluster[]
     error: string | null
+    insight: string | null
   }
   taxCreditExposure: {
     rows: TaxCreditExposureRow[]
     error: string | null
     previousAtRiskTotal: number | null
+    insight: string | null
   }
 }
 
@@ -212,11 +257,13 @@ export async function loadRelatedPartyGstin(compareBasis: CompareBasis, selected
       edges,
       clusters,
       error: friendlyDataError(edgesRes.error, 'reports:related-party:edges'),
+      insight: relatedPartyClustersInsight(clusters),
     },
     taxCreditExposure: {
       rows: taxRes.data ?? [],
       error: friendlyDataError(taxRes.error, 'reports:tax-exposure'),
       previousAtRiskTotal,
+      insight: taxCreditExposureInsight(taxRes.data ?? []),
     },
   }
 }

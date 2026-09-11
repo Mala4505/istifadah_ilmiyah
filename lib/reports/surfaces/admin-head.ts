@@ -45,6 +45,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { getSelectedEvent } from '@/lib/events/current'
 import { friendlyDataError } from '@/lib/friendly-error'
+import { formatINRCompact, formatNumber, formatPercent } from '@/lib/reports/format'
 import type { CompareBasis } from '@/lib/reports/compare-basis'
 import { ROW_CAP, resolvePreviousEvent, round2Local } from '@/lib/reports/sections/shared'
 
@@ -99,7 +100,23 @@ export type AdminHeadAccountabilitySurfaceData = {
     /** Sum of totalAmount across the rows — the KPI headline figure. */
     spendThroughHeads: number
     previousSpendTotal: number | null
+    insight: string | null
   }
+}
+
+/** Mirrors admin-head-accountability.tsx's adminHeadAccountabilitySentence. */
+function adminHeadAccountabilityInsight(rows: AdminHeadAccountabilityRow[]): string | null {
+  if (rows.length === 0) return null
+  const total = rows.reduce((sum, r) => sum + r.totalAmount, 0)
+  const lead = [...rows].sort((a, b) => b.totalAmount - a.totalAmount)[0]!
+  const base = `${formatNumber(rows.length)} administrative head${rows.length === 1 ? '' : 's'} account for ${formatINRCompact(
+    total
+  )} this event — led by ${lead.adminHeadName} at ${formatINRCompact(lead.totalAmount)} (${formatPercent(
+    lead.shareOfEventPct
+  )} of the total)`
+  const overBudget = rows.filter(headDepartmentIsOverBudget)
+  if (overBudget.length === 0) return `${base}. No head sits in a department that is over its budget.`
+  return `${base}. ${formatNumber(overBudget.length)} of them sit in a department that is over its budget.`
 }
 
 const SPEND_SELECT =
@@ -212,6 +229,7 @@ export async function loadAdminHeadAccountability(
       error,
       spendThroughHeads: eventTotal,
       previousSpendTotal,
+      insight: adminHeadAccountabilityInsight(rows),
     },
   }
 }

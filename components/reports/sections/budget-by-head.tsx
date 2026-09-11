@@ -47,12 +47,14 @@ export function BudgetByHeadSection({
   error,
   compareBasis,
   previousActualTotal,
+  insight,
 }: {
   rows: BudgetVsActualRow[]
   deptRows: DepartmentBudgetVsActualRow[]
   error: string | null
   compareBasis: CompareBasis
   previousActualTotal: number | null
+  insight?: string | null
 }) {
   const departmentLabel = departmentLabelFactory(deptRows)
 
@@ -147,7 +149,7 @@ export function BudgetByHeadSection({
             deltaTone="neutral"
           />
           <BarList items={barItems} valueFormatter={formatINRCompact} />
-          <p className="text-sm text-muted-foreground">{budgetVsActualSentence(rows)}</p>
+          <p className="text-sm text-muted-foreground">{insight ?? budgetVsActualSentence(rows)}</p>
           <BudgetStatusLegend />
           <DataTable columns={columns} rows={grouped} getRowKey={(r) => r.budget_head_id} />
         </>

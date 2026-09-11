@@ -26,11 +26,13 @@ export function SpendByFamilySection({
   error,
   compareBasis,
   previousSpendTotal,
+  insight,
 }: {
   rows: SpendByFamilyRow[]
   error: string | null
   compareBasis: CompareBasis
   previousSpendTotal: number | null
+  insight?: string | null
 }) {
   const barItems: BarListItem[] = rows
     .filter((r) => r.total_spend > 0)
@@ -96,8 +98,8 @@ export function SpendByFamilySection({
             delta={formatDeltaVs(compareBasis, spendTotal, previous, 'inr')}
             deltaTone="neutral"
           />
+          <p className="text-sm text-muted-foreground">{insight ?? familySpendSentence(rows, spendTotal)}</p>
           <BarList items={barItems} valueFormatter={formatINRCompact} />
-          <p className="text-sm text-muted-foreground">{familySpendSentence(rows, spendTotal)}</p>
           <DataTable columns={columns} rows={rows} getRowKey={(r) => r.item_family_id} />
         </>
       )}

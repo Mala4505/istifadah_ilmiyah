@@ -73,6 +73,7 @@ export function ThresholdSplittingSection({
   entriesError,
   splittingFlags,
   splittingFlagsError,
+  insight,
 }: {
   activeThresholds: ActiveThreshold[]
   thresholdError: string | null
@@ -81,6 +82,7 @@ export function ThresholdSplittingSection({
   entriesError: string | null
   splittingFlags: SplittingFlagRow[]
   splittingFlagsError: string | null
+  insight?: string | null
 }) {
   const bars = histogram.map((b) => ({
     bucketLabel: b.bucketLabel,
@@ -177,7 +179,7 @@ export function ThresholdSplittingSection({
             </p>
           )}
           <p className="text-sm text-muted-foreground">
-            {thresholdSplittingSentence(entryCount, activeThresholds, histogram, splittingFlags.length)}
+            {insight ?? thresholdSplittingSentence(entryCount, activeThresholds, histogram, splittingFlags.length)}
           </p>
           <AmountHistogramChart bars={bars} thresholds={thresholds} />
 

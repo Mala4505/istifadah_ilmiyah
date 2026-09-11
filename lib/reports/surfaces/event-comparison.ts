@@ -29,6 +29,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { getAllEvents } from '@/lib/events/current'
 import { friendlyDataError } from '@/lib/friendly-error'
+import { formatNumber, formatPercent } from '@/lib/reports/format'
 import { ROW_CAP, round2Local } from '@/lib/reports/sections/shared'
 
 /** One department's spend in both events plus the derived comparison. */
@@ -61,6 +62,7 @@ export type EventComparisonSurfaceData = {
   error: string | null
   currentTotal: number
   baseTotal: number
+  insight: string | null
 }
 
 const EMPTY: EventComparisonSurfaceData = {
@@ -71,6 +73,32 @@ const EMPTY: EventComparisonSurfaceData = {
   error: null,
   currentTotal: 0,
   baseTotal: 0,
+  insight: null,
+}
+
+/** Mirrors event-comparison.tsx's eventComparisonSentence. */
+function eventComparisonInsight(
+  rows: EventComparisonRow[],
+  baseName: string,
+  currentName: string,
+  baseTotal: number,
+  currentTotal: number
+): string | null {
+  const bothActive = rows.filter((r) => r.baseAmount > 0 && r.currentAmount > 0)
+  if (bothActive.length === 0) return null
+  const overallIndex = baseTotal > 0 ? Math.round((currentTotal / baseTotal) * 100) : null
+  const pct = baseTotal > 0 ? ((currentTotal - baseTotal) / baseTotal) * 100 : null
+  const direction = pct == null ? 'changed' : pct > 0.5 ? 'rose' : pct < -0.5 ? 'fell' : 'held roughly flat'
+  const magnitude = pct == null ? '' : ` ${formatPercent(Math.abs(pct))}`
+  const indexBit = overallIndex == null ? '' : ` (index ${overallIndex})`
+  const lead = [...bothActive].sort((a, b) => (b.indexed ?? 0) - (a.indexed ?? 0))[0]!
+  const leadBit =
+    lead.indexed != null
+      ? ` — led by ${lead.department_name ?? `#${lead.department_id}`} at index ${Math.round(lead.indexed)}.`
+      : '.'
+  return `Across ${formatNumber(bothActive.length)} department${
+    bothActive.length === 1 ? '' : 's'
+  } active in both ${baseName} and ${currentName}, spend ${direction}${magnitude} overall${indexBit}${leadBit}`
 }
 
 const SELECT = 'department_id, department_name, event_id, actual_amount'
@@ -124,13 +152,17 @@ export async function loadEventComparison(): Promise<EventComparisonSurfaceData>
     })
     .sort((a, b) => b.currentAmount - a.currentAmount)
 
+  const currentTotal = round2Local(rows.reduce((s, r) => s + r.currentAmount, 0))
+  const baseTotal = round2Local(rows.reduce((s, r) => s + r.baseAmount, 0))
+
   return {
     hasComparison: true,
     currentEventName: current.name,
     baseEventName: base.name,
     rows,
     error,
-    currentTotal: round2Local(rows.reduce((s, r) => s + r.currentAmount, 0)),
-    baseTotal: round2Local(rows.reduce((s, r) => s + r.baseAmount, 0)),
+    currentTotal,
+    baseTotal,
+    insight: eventComparisonInsight(rows, base.name, current.name, baseTotal, currentTotal),
   }
 }

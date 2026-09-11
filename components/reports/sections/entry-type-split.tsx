@@ -74,11 +74,13 @@ export function EntryTypeSplitSection({
   error,
   compareBasis,
   previousReimbursementSharePct,
+  insight,
 }: {
   rows: EntryTypeByDepartmentRow[]
   error: string | null
   compareBasis: CompareBasis
   previousReimbursementSharePct: number | null
+  insight?: string | null
 }) {
   const share = reimbursementShare(rows)
   const isHigh = share.reimbursementSharePct >= REIMBURSEMENT_SHARE_HIGH_PCT
@@ -171,7 +173,7 @@ export function EntryTypeSplitSection({
             delta={delta}
             deltaTone={isHigh ? 'bad' : 'neutral'}
           />
-          <p className="text-sm text-muted-foreground">{entryTypeSplitSentence(rows)}</p>
+          <p className="text-sm text-muted-foreground">{insight ?? entryTypeSplitSentence(rows)}</p>
           <EntryTypeSplitChart departments={departments} />
           <DataTable columns={columns} rows={tableRows} getRowKey={(r) => r.rowKey} />
         </>

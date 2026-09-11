@@ -35,6 +35,7 @@ import { friendlyDataError } from '@/lib/friendly-error'
 import type { CompareBasis } from '@/lib/reports/compare-basis'
 import { MEDIUM_SEVERITY_AMOUNT } from '@/lib/analytics/thresholds'
 import { ROW_CAP, resolvePreviousEvent, round2Local } from '@/lib/reports/sections/shared'
+import { formatNumber, formatINRCompact, formatPercent } from '@/lib/reports/format'
 
 // ---------------------------------------------------------------------------
 // Row shapes -- field names match each view's `select` list verbatim so the
@@ -144,6 +145,47 @@ function buildGapHistogram(rows: LedgerBillReconciliationRow[]): GapHistogramBuc
 }
 
 // ---------------------------------------------------------------------------
+// Phase 3.4 insight sentences -- one-line takeaways computed purely from the
+// rows already fetched above, mirroring each section component's own
+// "Sentence" helper so overview pages (no row-level data) can show the same
+// headline. Null when there's nothing worth saying.
+// ---------------------------------------------------------------------------
+
+function ledgerBillReconciliationInsight(rows: LedgerBillReconciliationRow[]): string | null {
+  if (rows.length === 0) return null
+  const material = rows.filter(isMaterialGap)
+  if (material.length === 0) {
+    return `All ${formatNumber(rows.length)} entries with a verified bill total match the ledger figure within tolerance.`
+  }
+  const totalGap = material.reduce((s, r) => s + (r.abs_gap_amount ?? 0), 0)
+  const worst = [...material].sort((a, b) => (b.abs_gap_amount ?? 0) - (a.abs_gap_amount ?? 0))[0]!
+  const who = worst.vendor_display_name ?? (worst.vendor_id != null ? `vendor #${worst.vendor_id}` : `entry #${worst.entry_id}`)
+  return `Of ${formatNumber(rows.length)} entries with a verified bill total, ${formatNumber(
+    material.length
+  )} carry a non-trivial gap against the ledger figure — ${formatINRCompact(totalGap)} in total. Largest is ${who} at ${formatINRCompact(
+    worst.abs_gap_amount
+  )}.`
+}
+
+function entriesWithoutBillInsight(
+  totalUndocumented: number,
+  pctOfSpend: number | null,
+  entryCount: number,
+  noDocumentCount: number,
+  topDepartment: UndocumentedRollupRow | null
+): string | null {
+  if (entryCount === 0) return null
+  const pct = pctOfSpend != null ? ` — ${formatPercent(pctOfSpend)} of event spend —` : ''
+  const lead =
+    topDepartment && topDepartment.dimension_name
+      ? ` Most of it is in ${topDepartment.dimension_name} (${formatINRCompact(topDepartment.undocumented_amount)}).`
+      : ''
+  return `${formatINRCompact(totalUndocumented)} of spend${pct} sits on ${formatNumber(
+    entryCount
+  )} entr${entryCount === 1 ? 'y' : 'ies'} with no usable bill — ${formatNumber(
+    noDocumentCount
+  )} with nothing uploaded at all.${lead}`
+}
 
 export type ReconciliationGapSurfaceData = {
   eventName: string | null
@@ -156,6 +198,7 @@ export type ReconciliationGapSurfaceData = {
     histogram: GapHistogramBucket[]
     previousMaterialCount: number | null
     previousMaterialAbsGapTotal: number | null
+    insight: string | null
   }
   entriesWithoutBill: {
     rows: EntryWithoutBillRow[]
@@ -167,6 +210,7 @@ export type ReconciliationGapSurfaceData = {
     eventSpend: number
     undocumentedPctOfSpend: number | null
     previousTotalUndocumented: number | null
+    insight: string | null
   }
 }
 
@@ -238,6 +282,7 @@ export async function loadReconciliationGap(compareBasis: CompareBasis): Promise
 
   const totalUndocumented = sumBy(byDepartment, (r) => r.undocumented_amount)
   const noDocumentCount = byDepartment.reduce((s, r) => s + r.no_document_count, 0)
+  const undocumentedEntryCount = byDepartment.reduce((s, r) => s + r.entry_count, 0)
   const eventSpend = sumBy(spendRes.data ?? [], (r) => r.amount)
   const undocumentedPctOfSpend = eventSpend > 0 ? round2Local((totalUndocumented / eventSpend) * 100) : null
 
@@ -279,6 +324,7 @@ export async function loadReconciliationGap(compareBasis: CompareBasis): Promise
       histogram,
       previousMaterialCount,
       previousMaterialAbsGapTotal,
+      insight: ledgerBillReconciliationInsight(reconRows),
     },
     entriesWithoutBill: {
       rows: noBillRows,
@@ -293,6 +339,7 @@ export async function loadReconciliationGap(compareBasis: CompareBasis): Promise
       eventSpend,
       undocumentedPctOfSpend,
       previousTotalUndocumented,
+      insight: entriesWithoutBillInsight(totalUndocumented, undocumentedPctOfSpend, undocumentedEntryCount, noDocumentCount, byDepartment[0] ?? null),
     },
   }
 }

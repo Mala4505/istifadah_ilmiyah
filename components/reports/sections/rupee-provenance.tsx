@@ -347,11 +347,17 @@ export function RupeeProvenanceSection({
   candidatesError,
   chain,
   traceEntryId,
+  insight,
 }: {
   candidates: RupeeProvenanceEntryRow[]
   candidatesError: string | null
   chain: RupeeProvenanceChain | null
   traceEntryId: number | null
+  /** Phase 3.4 insight slot. The loader always returns null here (a single
+   *  picked rupee has no aggregate takeaway), so this falls back to the
+   *  section's own `rupeeProvenanceSentence(chain)` -- kept as a prop only so
+   *  a future loader-level override is possible without a type error. */
+  insight?: string | null
 }) {
   const pickerCandidates = candidates.map(toCandidate)
   const selectedNotFound = traceEntryId != null && chain == null
@@ -371,7 +377,7 @@ export function RupeeProvenanceSection({
         />
       ) : (
         <>
-          <p className="text-sm text-muted-foreground">{rupeeProvenanceSentence(chain)}</p>
+          <p className="text-sm text-muted-foreground">{insight ?? rupeeProvenanceSentence(chain)}</p>
           <RupeeProvenancePicker candidates={pickerCandidates} selectedId={traceEntryId} />
           {selectedNotFound && (
             <p className="text-xs text-amber-600 dark:text-amber-400">

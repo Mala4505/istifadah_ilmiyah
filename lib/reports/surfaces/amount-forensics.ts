@@ -35,6 +35,7 @@ import { getSelectedEvent } from '@/lib/events/current'
 import { friendlyDataError } from '@/lib/friendly-error'
 import type { CompareBasis } from '@/lib/reports/compare-basis'
 import { ROW_CAP, resolvePreviousEvent, round2Local } from '@/lib/reports/sections/shared'
+import { formatNumber, formatPercent } from '@/lib/reports/format'
 
 // ---------------------------------------------------------------------------
 // Row shapes. These live here for now; the parent hoists them into
@@ -184,6 +185,49 @@ export function buildRoundNumberRollups(rows: RoundNumberBiasRow[]): {
 }
 
 // ---------------------------------------------------------------------------
+// Phase 3.4 insight sentences -- mirrors each section component's own
+// "Sentence" helper, computed purely from the rows/rollups already derived
+// above, so overview pages can show the same headline. Null when there's
+// nothing worth saying.
+// ---------------------------------------------------------------------------
+
+function widestDeviation(rows: BenfordDigitRow[]): BenfordDigitRow | null {
+  const usable = rows.filter((r) => r.total_count > 0)
+  if (usable.length === 0) return null
+  return [...usable].sort((a, b) => Math.abs(b.deviation_pct) - Math.abs(a.deviation_pct))[0]!
+}
+
+function benfordInsight(rows: BenfordDigitRow[], mad: number | null): string | null {
+  const worst = widestDeviation(rows)
+  if (worst == null || mad == null) return null
+  const conforms = benfordConformity(mad).tone === 'good'
+  const verb = conforms ? 'conform to' : 'deviate from'
+  return `Leading digits ${verb} Benford's expected curve — the widest gap is digit ${worst.leading_digit}, appearing ${worst.observed_pct.toFixed(
+    1
+  )}% against an expected ${worst.expected_pct.toFixed(1)}%.`
+}
+
+function roundNumberInsight(
+  overallRoundCount: number,
+  overallEntryCount: number,
+  overallSharePct: number,
+  byDepartment: RoundNumberRollup[],
+  byVendor: RoundNumberRollup[]
+): string | null {
+  if (overallEntryCount === 0) return null
+  const base = `${formatNumber(overallRoundCount)} of ${formatNumber(overallEntryCount)} amounts this event (${formatPercent(
+    overallSharePct
+  )}) are round thousands`
+  const topDept = byDepartment[0]
+  const topVendor = byVendor[0]
+  if (!topDept && !topVendor) return `${base}.`
+  const bits: string[] = []
+  if (topDept) bits.push(`${topDept.label} at ${formatPercent(topDept.roundSharePct)}`)
+  if (topVendor) bits.push(`${topVendor.label} at ${formatPercent(topVendor.roundSharePct)}`)
+  return `${base} — led by ${bits.join(' and ')}.`
+}
+
+// ---------------------------------------------------------------------------
 // Surface data + loader.
 // ---------------------------------------------------------------------------
 
@@ -197,6 +241,7 @@ export type AmountForensicsSurfaceData = {
     conformity: BenfordConformity
     totalCount: number
     previousMad: number | null
+    insight: string | null
   }
   roundNumber: {
     rows: RoundNumberBiasRow[]
@@ -207,6 +252,7 @@ export type AmountForensicsSurfaceData = {
     overallRoundCount: number
     overallSharePct: number
     previousOverallSharePct: number | null
+    insight: string | null
   }
 }
 
@@ -277,6 +323,7 @@ export async function loadAmountForensics(compareBasis: CompareBasis): Promise<A
       conformity: benfordConformity(mad),
       totalCount,
       previousMad,
+      insight: benfordInsight(benfordRows, mad),
     },
     roundNumber: {
       rows: roundRows,
@@ -287,6 +334,13 @@ export async function loadAmountForensics(compareBasis: CompareBasis): Promise<A
       overallRoundCount: rollups.overallRoundCount,
       overallSharePct: rollups.overallSharePct,
       previousOverallSharePct,
+      insight: roundNumberInsight(
+        rollups.overallRoundCount,
+        rollups.overallEntryCount,
+        rollups.overallSharePct,
+        rollups.byDepartment,
+        rollups.byVendor
+      ),
     },
   }
 }

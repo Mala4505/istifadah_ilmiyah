@@ -45,10 +45,12 @@ export function RelatedPartyClustersSection({
   edges,
   clusters,
   error,
+  insight,
 }: {
   edges: VendorSharedIdentityEdgeRow[]
   clusters: VendorCluster[]
   error: string | null
+  insight?: string | null
 }) {
   const vendorsInvolved = clusters.reduce((s, c) => s + c.vendors.length, 0)
 
@@ -112,7 +114,7 @@ export function RelatedPartyClustersSection({
             delta={`${formatNumber(vendorsInvolved)} vendor${vendorsInvolved === 1 ? '' : 's'} involved`}
             deltaTone="neutral"
           />
-          <p className="text-sm text-muted-foreground">{relatedPartyClustersSentence(clusters)}</p>
+          <p className="text-sm text-muted-foreground">{insight ?? relatedPartyClustersSentence(clusters)}</p>
           <RelatedPartyNetworkChart clusters={clusters} />
           <DataTable
             columns={columns}

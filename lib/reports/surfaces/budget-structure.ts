@@ -27,6 +27,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { getSelectedEvent } from '@/lib/events/current'
 import { friendlyDataError } from '@/lib/friendly-error'
+import { formatINRCompact, formatNumber, formatPercent } from '@/lib/reports/format'
 import type { CompareBasis } from '@/lib/reports/compare-basis'
 import { ROW_CAP } from '@/lib/reports/sections/shared'
 
@@ -89,9 +90,97 @@ export type BudgetStructureSurfaceData = {
   eventName: string | null
   /** Echoed back from the URL param, validated to a positive integer or null. */
   revisionHeadId: number | null
-  revisionHistory: { rows: BudgetRevisionHistoryRow[]; error: string | null }
-  zoneCategoryMatrix: { rows: ZoneCategoryMatrixRow[]; error: string | null }
-  budgetCategoryMix: { rows: BudgetCategoryMixRow[]; error: string | null }
+  revisionHistory: { rows: BudgetRevisionHistoryRow[]; error: string | null; insight: string | null }
+  zoneCategoryMatrix: { rows: ZoneCategoryMatrixRow[]; error: string | null; insight: string | null }
+  budgetCategoryMix: { rows: BudgetCategoryMixRow[]; error: string | null; insight: string | null }
+}
+
+/** Mirrors budget-revision-history.tsx's budgetRevisionHistorySentence
+ *  (self-contained here, not imported from the component, so this data
+ *  loader doesn't take on a dependency on the UI layer). */
+function budgetRevisionHistoryInsight(rows: BudgetRevisionHistoryRow[]): string | null {
+  const byHead = new Map<number, BudgetRevisionHistoryRow[]>()
+  for (const row of rows) {
+    const bucket = byHead.get(row.budget_head_id)
+    if (bucket) bucket.push(row)
+    else byHead.set(row.budget_head_id, [row])
+  }
+  const revised = [...byHead.values()]
+    .filter((snaps) => snaps.length >= 2)
+    .map((snaps) => {
+      const ordered = [...snaps].sort((a, b) => a.revision_seq - b.revision_seq)
+      const first = ordered[0]!
+      const last = ordered[ordered.length - 1]!
+      return {
+        label: first.budget_head_label,
+        revisionCount: ordered.length,
+        firstEffective: first.effective_amount,
+        latestEffective: last.effective_amount,
+        upwardTotal: Math.max(0, last.effective_amount - first.effective_amount),
+      }
+    })
+    .sort((a, b) => b.upwardTotal - a.upwardTotal || b.revisionCount - a.revisionCount)
+
+  if (revised.length === 0) return null
+  const cameBackForMore = revised.filter((s) => s.upwardTotal > 0)
+  if (cameBackForMore.length === 0) {
+    return `${formatNumber(revised.length)} budget head${revised.length === 1 ? '' : 's'} ${
+      revised.length === 1 ? 'has' : 'have'
+    } been re-allocated, but none ended higher than its first ask.`
+  }
+  const totalAdded = cameBackForMore.reduce((sum, s) => sum + s.upwardTotal, 0)
+  const top = cameBackForMore[0]!
+  return `${formatNumber(cameBackForMore.length)} of ${formatNumber(
+    revised.length
+  )} re-allocated budget head${revised.length === 1 ? '' : 's'} ended higher than the first ask — ${formatINRCompact(
+    totalAdded
+  )} added in total. ${top.label} rose the most, from ${formatINRCompact(top.firstEffective)} to ${formatINRCompact(
+    top.latestEffective
+  )}.`
+}
+
+/** Mirrors zone-category-matrix.tsx's zoneCategoryMatrixSentence. */
+function zoneCategoryMatrixInsight(rows: ZoneCategoryMatrixRow[]): string | null {
+  if (rows.length === 0) return null
+  type Agg = { label: string; total: number; topCategory: string | null; topCategoryAmount: number }
+  const byZone = new Map<string, Agg>()
+  for (const r of rows) {
+    const key = r.zone_id != null ? `z${r.zone_id}` : 'znone'
+    const agg = byZone.get(key) ?? { label: r.zone_name, total: 0, topCategory: null, topCategoryAmount: -1 }
+    agg.total += r.total_amount
+    if (r.total_amount > agg.topCategoryAmount) {
+      agg.topCategoryAmount = r.total_amount
+      agg.topCategory = r.cost_center_name
+    }
+    byZone.set(key, agg)
+  }
+  const ranked = [...byZone.values()]
+    .filter((z) => z.total > 0)
+    .sort((a, b) => b.topCategoryAmount / b.total - a.topCategoryAmount / a.total)
+  const top = ranked[0]
+  if (!top || top.topCategory == null) return null
+  const share = (top.topCategoryAmount / top.total) * 100
+  return `${top.label} has the most concentrated mix — ${formatPercent(share)} of its ${formatINRCompact(
+    top.total
+  )} goes to ${top.topCategory}.`
+}
+
+/** Mirrors budget-category-mix.tsx's budgetCategoryMixSentence. */
+function budgetCategoryMixInsight(rows: BudgetCategoryMixRow[]): string | null {
+  const total = rows.reduce((sum, r) => sum + r.total_amount, 0)
+  const ranked = [...rows].filter((r) => r.total_amount > 0).sort((a, b) => b.total_amount - a.total_amount)
+  if (ranked.length === 0 || total <= 0) return null
+  const top = ranked[0]!
+  const sharePct = (top.total_amount / total) * 100
+  const threePart =
+    ranked.length >= 3
+      ? ` The top three together are ${formatPercent(
+          (ranked.slice(0, 3).reduce((sum, r) => sum + r.total_amount, 0) / total) * 100
+        )} of spend.`
+      : ''
+  return `${top.cost_center_name} is the largest budget category at ${formatPercent(sharePct)} of ${formatINRCompact(
+    total
+  )} across ${formatNumber(ranked.length)} categories.${threePart}`
 }
 
 const REVISION_SELECT =
@@ -147,14 +236,17 @@ export async function loadBudgetStructure(
     revisionHistory: {
       rows: revisionRes.data ?? [],
       error: friendlyDataError(revisionRes.error, 'reports:budget-structure:revision-history'),
+      insight: budgetRevisionHistoryInsight(revisionRes.data ?? []),
     },
     zoneCategoryMatrix: {
       rows: matrixRes.data ?? [],
       error: friendlyDataError(matrixRes.error, 'reports:budget-structure:zone-category-matrix'),
+      insight: zoneCategoryMatrixInsight(matrixRes.data ?? []),
     },
     budgetCategoryMix: {
       rows: mixRes.data ?? [],
       error: friendlyDataError(mixRes.error, 'reports:budget-structure:budget-category-mix'),
+      insight: budgetCategoryMixInsight(mixRes.data ?? []),
     },
   }
 }

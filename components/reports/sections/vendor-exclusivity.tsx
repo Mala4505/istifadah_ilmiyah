@@ -37,11 +37,13 @@ export function VendorExclusivitySection({
   error,
   compareBasis,
   previousMaterialCount,
+  insight,
 }: {
   rows: VendorExclusivityRow[]
   error: string | null
   compareBasis: CompareBasis
   previousMaterialCount: number | null
+  insight?: string | null
 }) {
   const materialCount = countMaterialSingleDepartmentVendors(rows)
   const previous = compareBasis === 'prior_event' ? previousMaterialCount : null
@@ -116,7 +118,7 @@ export function VendorExclusivitySection({
             delta={formatDeltaVs(compareBasis, materialCount, previous, 'count')}
             deltaTone={deltaToneHigherIsBad(materialCount, previous)}
           />
-          <p className="text-sm text-muted-foreground">{vendorExclusivitySentence(rows)}</p>
+          <p className="text-sm text-muted-foreground">{insight ?? vendorExclusivitySentence(rows)}</p>
           <VendorExclusivityChart bars={bars} />
           <DataTable
             columns={columns}

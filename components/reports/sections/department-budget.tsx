@@ -4,8 +4,10 @@ import { EmptyState } from '@/components/reports/empty-state'
 import { DataTable, type DataTableColumn } from '@/components/reports/data-table'
 import { BarList, type BarListItem } from '@/components/reports/bar-list'
 import { ExportCsvButton } from '@/components/reports/export-csv-button'
+import { ExportPdfButton } from '@/components/reports/export-pdf-button'
 import { KpiTile } from '@/components/reports/charts/kpi-tile'
 import { toCsv } from '@/lib/reports/csv'
+import { buildBudgetUtilizationPdf } from '@/lib/reports/budget-utilization-pdf'
 import { formatDate, formatINR, formatINRCompact, formatNumber, formatPercent } from '@/lib/reports/format'
 import type { CompareBasis } from '@/lib/reports/compare-basis'
 import {
@@ -29,16 +31,20 @@ export function deptBudgetSentence(rows: DepartmentBudgetVsActualRow[]): string 
   return `${over.length} of ${withBudget.length} departments are over budget — ${top.department_name} is highest at ${formatPercent(top.pct_of_budget)}.`
 }
 
-export function DepartmentBudgetSection({
+export async function DepartmentBudgetSection({
   rows,
   error,
   compareBasis,
   previousActualTotal,
+  insight,
+  eventName = null,
 }: {
   rows: DepartmentBudgetVsActualRow[]
   error: string | null
   compareBasis: CompareBasis
   previousActualTotal: number | null
+  insight?: string | null
+  eventName?: string | null
 }) {
   const barItems: BarListItem[] = rows
     .filter((r) => (r.actual_amount ?? 0) > 0)
@@ -83,6 +89,12 @@ export function DepartmentBudgetSection({
   const actualTotal = rows.reduce((s, r) => s + (r.actual_amount ?? 0), 0)
   const previous = compareBasis === 'prior_event' ? previousActualTotal : null
 
+  const generatedAt = new Date()
+  const budgetUtilizationBase64 = Buffer.from(
+    await buildBudgetUtilizationPdf(rows, { eventName, generatedAt })
+  ).toString('base64')
+  const filenameDate = generatedAt.toISOString().slice(0, 16).replace(/[-:]/g, '').replace('T', '-')
+
   return (
     <ReportSection
       id="department-budget-vs-actual"
@@ -93,19 +105,27 @@ export function DepartmentBudgetSection({
           : 'A separate, department-grained figure from Budget vs Actual above — imported directly per department, not rolled up from budget heads.'
       }
       action={
-        <ExportCsvButton
-          filename="department-budget-vs-actual.csv"
-          rowCount={rows.length}
-          csv={toCsv(rows, [
-            { header: 'Department', value: (r) => r.department_name },
-            { header: 'As Of', value: (r) => r.as_of },
-            { header: 'Budget Amount', value: (r) => r.budget_amount },
-            { header: 'Actual (sum of amounts)', value: (r) => r.actual_amount },
-            { header: '% of Budget', value: (r) => r.pct_of_budget },
-            { header: 'Note', value: (r) => r.budget_status_note },
-            { header: 'Entries', value: (r) => r.entry_count },
-          ])}
-        />
+        <div className="flex items-center gap-2">
+          <ExportPdfButton
+            filename={`budget-utilization-report-${filenameDate}.pdf`}
+            rowCount={rows.length}
+            base64={budgetUtilizationBase64}
+            label="Budget Utilization Report"
+          />
+          <ExportCsvButton
+            filename="department-budget-vs-actual.csv"
+            rowCount={rows.length}
+            csv={toCsv(rows, [
+              { header: 'Department', value: (r) => r.department_name },
+              { header: 'As Of', value: (r) => r.as_of },
+              { header: 'Budget Amount', value: (r) => r.budget_amount },
+              { header: 'Actual (sum of amounts)', value: (r) => r.actual_amount },
+              { header: '% of Budget', value: (r) => r.pct_of_budget },
+              { header: 'Note', value: (r) => r.budget_status_note },
+              { header: 'Entries', value: (r) => r.entry_count },
+            ])}
+          />
+        </div>
       }
     >
       {error ? (
@@ -124,7 +144,7 @@ export function DepartmentBudgetSection({
             deltaTone="neutral"
           />
           <BarList items={barItems} valueFormatter={formatINRCompact} />
-          <p className="text-sm text-muted-foreground">{deptBudgetSentence(rows)}</p>
+          <p className="text-sm text-muted-foreground">{insight ?? deptBudgetSentence(rows)}</p>
           <BudgetStatusLegend />
           <DataTable columns={columns} rows={rows} getRowKey={(r) => r.department_id} />
         </>

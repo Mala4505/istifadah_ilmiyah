@@ -53,6 +53,7 @@ export function LedgerBillReconciliationSection({
   materialAbsGapTotal,
   compareBasis,
   previousMaterialCount,
+  insight,
 }: {
   rows: LedgerBillReconciliationRow[]
   error: string | null
@@ -61,6 +62,7 @@ export function LedgerBillReconciliationSection({
   materialAbsGapTotal: number
   compareBasis: CompareBasis
   previousMaterialCount: number | null
+  insight?: string | null
 }) {
   const previous = compareBasis === 'prior_event' ? previousMaterialCount : null
 
@@ -173,7 +175,7 @@ export function LedgerBillReconciliationSection({
             deltaTone={deltaToneHigherIsBad(materialCount, previous)}
           />
           <KpiTile label="Total gap across those entries" value={formatINRCompact(materialAbsGapTotal)} />
-          <p className="text-sm text-muted-foreground">{ledgerBillReconciliationSentence(rows)}</p>
+          <p className="text-sm text-muted-foreground">{insight ?? ledgerBillReconciliationSentence(rows)}</p>
           <GapDistributionChart bars={bars} />
           <DataTable
             columns={columns}

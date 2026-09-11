@@ -47,11 +47,13 @@ export function PurchaseTreeSection({
   error,
   compareBasis,
   previousTotal,
+  insight,
 }: {
   rows: PurchaseTreeRow[]
   error: string | null
   compareBasis: CompareBasis
   previousTotal: number | null
+  insight?: string | null
 }) {
   const total = rows.reduce((s, r) => s + r.line_amount, 0)
   const previous = compareBasis === 'prior_event' ? previousTotal : null
@@ -124,7 +126,7 @@ export function PurchaseTreeSection({
             delta={formatDeltaVs(compareBasis, total, previous, 'inr')}
             deltaTone="neutral"
           />
-          <p className="text-sm text-muted-foreground">{purchaseTreeSentence(rows)}</p>
+          <p className="text-sm text-muted-foreground">{insight ?? purchaseTreeSentence(rows)}</p>
           <PurchaseTreeChart rows={rows} />
           <DataTable
             columns={columns}

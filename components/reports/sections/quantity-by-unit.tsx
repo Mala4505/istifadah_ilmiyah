@@ -48,11 +48,13 @@ export function QuantityByUnitSection({
   error,
   compareBasis,
   previousPairCount,
+  insight,
 }: {
   rows: QuantityByUnitRow[]
   error: string | null
   compareBasis: CompareBasis
   previousPairCount: number | null
+  insight?: string | null
 }) {
   const bars = rows.map(toBar)
   const previous = compareBasis === 'prior_event' ? previousPairCount : null
@@ -109,7 +111,7 @@ export function QuantityByUnitSection({
             delta={formatDeltaVs(compareBasis, rows.length, previous, 'count')}
             deltaTone={deltaToneHigherIsGood(rows.length, previous)}
           />
-          <p className="text-sm text-muted-foreground">{quantityByUnitSentence(rows)}</p>
+          <p className="text-sm text-muted-foreground">{insight ?? quantityByUnitSentence(rows)}</p>
           <QuantityByUnitChart bars={bars} />
           <DataTable
             columns={columns}

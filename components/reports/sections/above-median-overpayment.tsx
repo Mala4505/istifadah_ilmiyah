@@ -55,11 +55,13 @@ export function AboveMedianOverpaymentSection({
   error,
   compareBasis,
   previousTotal,
+  insight,
 }: {
   rows: RateObservationRow[]
   error: string | null
   compareBasis: CompareBasis
   previousTotal: number | null
+  insight?: string | null
 }) {
   const cmp = comparable(rows)
   const totalOverpayment = rows.reduce((s, r) => s + r.overpayment_amount, 0)
@@ -158,7 +160,7 @@ export function AboveMedianOverpaymentSection({
             delta={formatDeltaVs(compareBasis, totalOverpayment, previous, 'inr')}
             deltaTone={deltaToneHigherIsBad(totalOverpayment, previous)}
           />
-          <p className="text-sm text-muted-foreground">{aboveMedianOverpaymentSentence(rows)}</p>
+          <p className="text-sm text-muted-foreground">{insight ?? aboveMedianOverpaymentSentence(rows)}</p>
           <StripPlotChart dots={dots} excludedCount={excludedCount} />
           <DataTable
             columns={columns}

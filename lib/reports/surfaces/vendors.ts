@@ -28,6 +28,7 @@ import type { Event } from '@/lib/events/types'
 import { friendlyDataError } from '@/lib/friendly-error'
 import type { CompareBasis } from '@/lib/reports/compare-basis'
 import { RATE_BENCHMARK_MIN_OBSERVATIONS, RATE_BENCHMARK_MIN_VENDORS } from '@/lib/analytics/thresholds'
+import { formatINRCompact, formatNumber, formatPercent } from '@/lib/reports/format'
 import {
   ROW_CAP,
   resolvePreviousEvent,
@@ -63,6 +64,76 @@ function backedPctOf(rows: { instrument_type: string; total_amount: number }[]):
   return round2Local((backed / total) * 100)
 }
 
+/** "{Vendor} is the largest vendor, accounting for {pct}% of spend across N
+ *  vendors." Rows are already ordered by total_amount desc (query order). */
+export function vendorSpendInsight(rows: MergedVendorRow[]): string | null {
+  if (rows.length === 0) return null
+  const top = rows[0]!
+  return top.pct_of_total_spend != null
+    ? `${top.display_name} is the largest vendor, accounting for ${formatPercent(top.pct_of_total_spend)} of spend across ${formatNumber(rows.length)} vendors.`
+    : `${top.display_name} is the largest vendor by spend, across ${formatNumber(rows.length)} vendors.`
+}
+
+/** "Across N comparable purchases in M item families, ₹X sits above our own
+ *  median rate for the same item and unit — led by {family} at ₹Y." */
+export function aboveMedianOverpaymentInsight(rows: RateObservationRow[]): string | null {
+  const cmp = rows.filter((r) => r.median_rate != null && r.median_rate > 0)
+  if (cmp.length === 0) return null
+  const total = rows.reduce((s, r) => s + r.overpayment_amount, 0)
+  const familyCount = new Set(cmp.map((r) => r.family_key)).size
+  const base = `Across ${formatNumber(cmp.length)} comparable purchase${cmp.length === 1 ? '' : 's'} in ${formatNumber(
+    familyCount
+  )} item famil${familyCount === 1 ? 'y' : 'ies'}`
+  if (total <= 0) return `${base}, none is priced above our own median rate for the same item and unit.`
+  const byFamily = new Map<string, { label: string; sum: number }>()
+  for (const r of rows) {
+    if (r.overpayment_amount <= 0) continue
+    const cur = byFamily.get(r.family_key) ?? { label: r.family_label, sum: 0 }
+    cur.sum += r.overpayment_amount
+    byFamily.set(r.family_key, cur)
+  }
+  const lead = [...byFamily.values()].sort((a, b) => b.sum - a.sum)[0]!
+  return `${base}, ${formatINRCompact(total)} sits above our own median rate for the same item and unit — led by ${lead.label} at ${formatINRCompact(lead.sum)}.`
+}
+
+/** "₹X of spend (Y%) is not backed by a tax invoice or bill of supply." */
+export function instrumentTypeMixInsight(rows: InstrumentTypeMixRow[]): string | null {
+  const total = rows.reduce((s, r) => s + r.total_amount, 0)
+  if (total <= 0) return null
+  const backed = rows
+    .filter((r) => ITC_BACKED_INSTRUMENT_TYPES.has(r.instrument_type))
+    .reduce((s, r) => s + r.total_amount, 0)
+  const unbacked = total - backed
+  if (unbacked <= 0) return "Every rupee of this event's spend is backed by a tax invoice or bill of supply."
+  const pct = (unbacked / total) * 100
+  return `${formatINRCompact(unbacked)} of spend (${formatPercent(pct)}) is not backed by a tax invoice or bill of supply.`
+}
+
+/** "{Family} is the largest item family, at X% of tracked family spend." */
+export function spendByFamilyInsight(rows: SpendByFamilyRow[]): string | null {
+  const withSpend = rows.filter((r) => r.total_spend > 0)
+  const total = rows.reduce((s, r) => s + r.total_spend, 0)
+  if (withSpend.length === 0 || total <= 0) return null
+  const top = withSpend[0]! // already ordered by total_spend desc (v_spend_by_family query)
+  const share = (top.total_spend / total) * 100
+  return `${top.label} is the largest item family, at ${formatPercent(share)} of tracked family spend.`
+}
+
+/** "N of M item family/unit pairs have a reliable benchmark... {family} has
+ *  the widest spread — its highest rate is Xx the median." */
+export function rateBenchmarkInsight(rows: RateBenchmarkRow[]): string | null {
+  if (rows.length === 0) return null
+  const reliableCount = rows.filter(
+    (r) => r.vendor_count >= RATE_BENCHMARK_MIN_VENDORS && r.observation_count >= RATE_BENCHMARK_MIN_OBSERVATIONS
+  ).length
+  const widest = [...rows]
+    .filter((r) => r.median_rate != null && r.median_rate > 0 && r.max_rate != null)
+    .sort((a, b) => b.max_rate! / b.median_rate! - a.max_rate! / a.median_rate!)[0]
+  const base = `${formatNumber(reliableCount)} of ${formatNumber(rows.length)} item family/unit pairs have a reliable benchmark (≥${RATE_BENCHMARK_MIN_VENDORS} vendors, ≥${RATE_BENCHMARK_MIN_OBSERVATIONS} observations).`
+  if (!widest) return base
+  return `${base} ${widest.family_label} has the widest spread — its highest rate is ${(widest.max_rate! / widest.median_rate!).toFixed(1)}x the median.`
+}
+
 export type VendorsSurfaceData = {
   eventName: string | null
   previousEventName: string | null
@@ -71,13 +142,14 @@ export type VendorsSurfaceData = {
     error: string | null
     concentrationError: string | null
     previousSpendTotal: number | null
+    insight: string | null
   }
-  spendByFamily: { rows: SpendByFamilyRow[]; error: string | null; previousSpendTotal: number | null }
-  rateBenchmark: { rows: RateBenchmarkRow[]; error: string | null; previousReliableCount: number | null }
+  spendByFamily: { rows: SpendByFamilyRow[]; error: string | null; previousSpendTotal: number | null; insight: string | null }
+  rateBenchmark: { rows: RateBenchmarkRow[]; error: string | null; previousReliableCount: number | null; insight: string | null }
   /** C-04 above-median overpayment — one row per comparable rate observation. */
-  overpayment: { rows: RateObservationRow[]; error: string | null; previousTotal: number | null }
+  overpayment: { rows: RateObservationRow[]; error: string | null; previousTotal: number | null; insight: string | null }
   /** C-09 instrument-type mix — per (department, instrument_type) entry count + ₹. */
-  instrumentMix: { rows: InstrumentTypeMixRow[]; error: string | null; previousBackedPct: number | null }
+  instrumentMix: { rows: InstrumentTypeMixRow[]; error: string | null; previousBackedPct: number | null; insight: string | null }
   /** B-01 concentration curve — cumulated app-side from v_vendor_concentration
    *  (same view the vendor-spend merge already loads), so its load error is the
    *  concentration query's error. */
@@ -240,16 +312,19 @@ export async function loadVendorsSurface(compareBasis: CompareBasis, selectedEve
       error: friendlyDataError(spendRes.error, 'reports:vendors:spend'),
       concentrationError: friendlyDataError(concentrationRes.error, 'reports:vendors:concentration'),
       previousSpendTotal: prior.vendorSpendTotal,
+      insight: vendorSpendInsight(mergedVendorRows),
     },
     spendByFamily: {
       rows: familyRes.data ?? [],
       error: friendlyDataError(familyRes.error, 'reports:vendors:family'),
       previousSpendTotal: prior.familySpendTotal,
+      insight: spendByFamilyInsight(familyRes.data ?? []),
     },
     rateBenchmark: {
       rows: benchmarkRes.data ?? [],
       error: friendlyDataError(benchmarkRes.error, 'reports:vendors:benchmark'),
       previousReliableCount: prior.benchmarkReliableCount,
+      insight: rateBenchmarkInsight(benchmarkRes.data ?? []),
     },
     concentrationCurve: {
       points: concentrationCurve,
@@ -260,11 +335,13 @@ export async function loadVendorsSurface(compareBasis: CompareBasis, selectedEve
       rows: overpaymentRes.data ?? [],
       error: friendlyDataError(overpaymentRes.error, 'reports:vendors:overpayment'),
       previousTotal: prior.overpaymentTotal,
+      insight: aboveMedianOverpaymentInsight(overpaymentRes.data ?? []),
     },
     instrumentMix: {
       rows: instrumentMixRes.data ?? [],
       error: friendlyDataError(instrumentMixRes.error, 'reports:vendors:instrument-mix'),
       previousBackedPct: prior.instrumentBackedPct,
+      insight: instrumentTypeMixInsight(instrumentMixRes.data ?? []),
     },
   }
 }

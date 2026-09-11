@@ -19,6 +19,7 @@ import { createClient } from '@/lib/supabase/server'
 import type { Event } from '@/lib/events/types'
 import { friendlyDataError } from '@/lib/friendly-error'
 import type { CompareBasis } from '@/lib/reports/compare-basis'
+import { formatDate, formatINR, formatNumber, formatPercent } from '@/lib/reports/format'
 import {
   ROW_CAP,
   resolvePreviousEvent,
@@ -76,6 +77,43 @@ export function countNewVendorFirstBillFindings(rows: { is_new_mid_event: boolea
   return rows.filter((r) => r.is_new_mid_event && r.opening_bill_is_largest).length
 }
 
+/** "N departments rely on a single vendor for more than half their spend —
+ *  worst is {department}, where {vendor} carries {share}% of spend." */
+export function departmentDependencyInsight(rows: DepartmentVendorDependencyRow[]): string | null {
+  const over = rows.filter((r) => (r.top_vendor_share_pct ?? 0) > DEPARTMENT_DEPENDENCY_THRESHOLD_PCT)
+  if (over.length === 0) return null
+  const worst = [...over].sort((a, b) => (b.top_vendor_share_pct ?? 0) - (a.top_vendor_share_pct ?? 0))[0]!
+  return `${formatNumber(over.length)} department${over.length === 1 ? '' : 's'} rely on a single vendor for more than half their spend — worst is ${
+    worst.department_name
+  }, where ${worst.top_vendor_display_name} carries ${formatPercent(worst.top_vendor_share_pct)} of spend.`
+}
+
+/** "N vendors serve exactly one department this event — the largest is
+ *  {vendor} at {spend} in {department}." */
+export function vendorExclusivityInsight(rows: VendorExclusivityRow[]): string | null {
+  const exclusive = rows.filter((r) => r.distinct_department_count === 1)
+  if (exclusive.length === 0) return null
+  const largest = [...exclusive].sort((a, b) => b.total_spend - a.total_spend)[0]!
+  return `${formatNumber(exclusive.length)} vendor${exclusive.length === 1 ? '' : 's'} serve exactly one department this event — the largest is ${
+    largest.vendor_display_name
+  } at ${formatINR(largest.total_spend)} in ${largest.department_name ?? 'that department'}.`
+}
+
+/** "N of M vendors first seen mid-event has an opening bill that is already
+ *  their largest — the biggest is {vendor} at {amount} on {date}." */
+export function newVendorFirstBillInsight(rows: VendorFirstBillRow[]): string | null {
+  const newMidEvent = rows.filter((r) => r.is_new_mid_event)
+  if (newMidEvent.length === 0) return null
+  const finding = newMidEvent.filter((r) => r.opening_bill_is_largest)
+  if (finding.length === 0) {
+    return `${formatNumber(newMidEvent.length)} vendor${newMidEvent.length === 1 ? ' was' : 's were'} first seen mid-event; none of their opening bills is currently their largest.`
+  }
+  const biggest = [...finding].sort((a, b) => b.first_entry_amount - a.first_entry_amount)[0]!
+  return `${formatNumber(finding.length)} of ${formatNumber(newMidEvent.length)} vendor${newMidEvent.length === 1 ? '' : 's'} first seen mid-event has an opening bill that is already their largest — the biggest is ${
+    biggest.vendor_display_name
+  } at ${formatINR(biggest.first_entry_amount)} on ${formatDate(biggest.first_entry_date)}.`
+}
+
 export type VendorDependencyData = {
   eventName: string | null
   previousEventName: string | null
@@ -83,16 +121,19 @@ export type VendorDependencyData = {
     rows: DepartmentVendorDependencyRow[]
     error: string | null
     previousOverThresholdCount: number | null
+    insight: string | null
   }
   vendorExclusivity: {
     rows: VendorExclusivityRow[]
     error: string | null
     previousMaterialCount: number | null
+    insight: string | null
   }
   newVendorFirstBill: {
     rows: VendorFirstBillRow[]
     error: string | null
     previousFindingCount: number | null
+    insight: string | null
   }
 }
 
@@ -191,16 +232,19 @@ export async function loadVendorDependency(compareBasis: CompareBasis, selectedE
       rows: departmentDependencyRows,
       error: friendlyDataError(departmentDependencyRes.error, 'reports:vendors:department-dependency'),
       previousOverThresholdCount: prior.overThresholdCount,
+      insight: departmentDependencyInsight(departmentDependencyRows),
     },
     vendorExclusivity: {
       rows: vendorExclusivityRows,
       error: friendlyDataError(vendorExclusivityRes.error, 'reports:vendors:vendor-exclusivity'),
       previousMaterialCount: prior.materialCount,
+      insight: vendorExclusivityInsight(vendorExclusivityRows),
     },
     newVendorFirstBill: {
       rows: vendorFirstBillRows,
       error: friendlyDataError(vendorFirstBillRes.error, 'reports:vendors:new-vendor-first-bill'),
       previousFindingCount: prior.findingCount,
+      insight: newVendorFirstBillInsight(vendorFirstBillRows),
     },
   }
 }

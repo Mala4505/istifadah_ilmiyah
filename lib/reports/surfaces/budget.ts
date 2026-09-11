@@ -18,6 +18,7 @@
 import { createClient } from '@/lib/supabase/server'
 import type { Event } from '@/lib/events/types'
 import { friendlyDataError } from '@/lib/friendly-error'
+import { formatPercent } from '@/lib/reports/format'
 import type { CompareBasis } from '@/lib/reports/compare-basis'
 import {
   ROW_CAP,
@@ -31,10 +32,71 @@ import {
 export type BudgetSurfaceData = {
   eventName: string | null
   previousEventName: string | null
-  byHead: { rows: BudgetVsActualRow[]; error: string | null; previousActualTotal: number | null }
-  byDepartment: { rows: DepartmentBudgetVsActualRow[]; error: string | null; previousActualTotal: number | null }
-  bySubDepartment: { rows: SubDepartmentBudgetVsActualRow[]; error: string | null; previousActualTotal: number | null }
-  byZone: { rows: ZoneSpendRow[]; error: string | null; previousTotal: number | null }
+  byHead: { rows: BudgetVsActualRow[]; error: string | null; previousActualTotal: number | null; insight: string | null }
+  byDepartment: {
+    rows: DepartmentBudgetVsActualRow[]
+    error: string | null
+    previousActualTotal: number | null
+    insight: string | null
+  }
+  bySubDepartment: {
+    rows: SubDepartmentBudgetVsActualRow[]
+    error: string | null
+    previousActualTotal: number | null
+    insight: string | null
+  }
+  byZone: { rows: ZoneSpendRow[]; error: string | null; previousTotal: number | null; insight: string | null }
+}
+
+/** Mirrors budget-by-head.tsx's budgetVsActualSentence — kept here so the
+ *  overview compositions can show the one-line takeaway without the full row
+ *  set. Returns null (not a "no budget" sentence) when there's nothing to say. */
+function budgetByHeadInsight(rows: BudgetVsActualRow[]): string | null {
+  const withBudget = rows.filter((r) => r.approved_amount != null && r.approved_amount > 0)
+  if (withBudget.length === 0) return null
+  const over = withBudget.filter((r) => (r.pct_of_approved ?? 0) > 100)
+  const near = withBudget.filter((r) => (r.pct_of_approved ?? 0) > 90 && (r.pct_of_approved ?? 0) <= 100)
+  if (over.length === 0 && near.length === 0) {
+    return `All ${withBudget.length} budget heads with an approved figure are within budget.`
+  }
+  const parts: string[] = []
+  if (over.length > 0) parts.push(`${over.length} ${over.length === 1 ? 'head is' : 'heads are'} over its approved budget`)
+  if (near.length > 0) parts.push(`${near.length} ${near.length === 1 ? 'head is' : 'heads are'} above 90% with balance left`)
+  return `${parts.join(', and ')}, out of ${withBudget.length} heads with an approved figure.`
+}
+
+/** Mirrors department-budget.tsx's deptBudgetSentence. */
+function departmentBudgetInsight(rows: DepartmentBudgetVsActualRow[]): string | null {
+  const withBudget = rows.filter((r) => r.budget_amount != null && r.budget_amount > 0)
+  if (withBudget.length === 0) return null
+  const over = [...withBudget]
+    .filter((r) => (r.pct_of_budget ?? 0) > 100)
+    .sort((a, b) => (b.pct_of_budget ?? 0) - (a.pct_of_budget ?? 0))
+  if (over.length === 0) return `All ${withBudget.length} departments with a budget set are within it.`
+  const top = over[0]!
+  return `${over.length} of ${withBudget.length} departments are over budget — ${top.department_name} is highest at ${formatPercent(top.pct_of_budget)}.`
+}
+
+/** Mirrors sub-department-budget.tsx's subDeptBudgetSentence. */
+function subDepartmentBudgetInsight(rows: SubDepartmentBudgetVsActualRow[]): string | null {
+  const withBudget = rows.filter((r) => r.budget_amount != null && r.budget_amount > 0)
+  if (withBudget.length === 0) return null
+  const over = [...withBudget]
+    .filter((r) => (r.pct_of_budget ?? 0) > 100)
+    .sort((a, b) => (b.pct_of_budget ?? 0) - (a.pct_of_budget ?? 0))
+  if (over.length === 0) return `All ${withBudget.length} sub-departments with a budget set are within it.`
+  const top = over[0]!
+  return `${over.length} of ${withBudget.length} sub-departments are over budget — ${top.department_name} — ${top.sub_department_name} is highest at ${formatPercent(top.pct_of_budget)}.`
+}
+
+/** Mirrors zone-spend.tsx's zoneSpendSentence. */
+function zoneSpendInsight(rows: ZoneSpendRow[]): string | null {
+  const withSpend = rows.filter((r) => (r.total_amount ?? 0) > 0)
+  const total = withSpend.reduce((s, r) => s + (r.total_amount ?? 0), 0)
+  if (withSpend.length === 0 || total <= 0) return null
+  const top = [...withSpend].sort((a, b) => (b.total_amount ?? 0) - (a.total_amount ?? 0))[0]!
+  const share = ((top.total_amount ?? 0) / total) * 100
+  return `${top.zone_name} is the highest-spend zone, at ${formatPercent(share)} of total zone spend across ${withSpend.length} zones.`
 }
 
 const HEAD_SELECT =
@@ -124,21 +186,25 @@ export async function loadBudgetSurface(compareBasis: CompareBasis, selectedEven
       rows: headRes.data ?? [],
       error: friendlyDataError(headRes.error, 'reports:budget:head'),
       previousActualTotal: prior.headActualTotal,
+      insight: budgetByHeadInsight(headRes.data ?? []),
     },
     byDepartment: {
       rows: deptRes.data ?? [],
       error: friendlyDataError(deptRes.error, 'reports:budget:dept'),
       previousActualTotal: prior.deptActualTotal,
+      insight: departmentBudgetInsight(deptRes.data ?? []),
     },
     bySubDepartment: {
       rows: subDeptRes.data ?? [],
       error: friendlyDataError(subDeptRes.error, 'reports:budget:subDept'),
       previousActualTotal: prior.subDeptActualTotal,
+      insight: subDepartmentBudgetInsight(subDeptRes.data ?? []),
     },
     byZone: {
       rows: (zoneRes.data ?? []).slice(0, ROW_CAP),
       error: friendlyDataError(zoneRes.error, 'reports:budget:zone'),
       previousTotal: prior.zoneTotal,
+      insight: zoneSpendInsight((zoneRes.data ?? []).slice(0, ROW_CAP)),
     },
   }
 }

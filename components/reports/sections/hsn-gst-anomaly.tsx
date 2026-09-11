@@ -54,6 +54,7 @@ export function HsnGstAnomalySection({
   anomalyCount,
   billsWithBothRates,
   compareBasis,
+  insight,
 }: {
   rows: HsnGstAnomalyRow[]
   error: string | null
@@ -63,6 +64,7 @@ export function HsnGstAnomalySection({
   anomalyCount: number
   billsWithBothRates: number
   compareBasis: CompareBasis
+  insight?: string | null
 }) {
   const previous = compareBasis === 'prior_event' ? previousCoveragePct : null
 
@@ -204,7 +206,7 @@ export function HsnGstAnomalySection({
             )}
           </div>
           <p className="text-sm text-muted-foreground">
-            {hsnGstAnomalySentence(rows, coveragePct, billsWithBothRates, anomalyCount, hsnRateTableEmpty)}
+            {insight ?? hsnGstAnomalySentence(rows, coveragePct, billsWithBothRates, anomalyCount, hsnRateTableEmpty)}
           </p>
           <DataTable columns={columns} rows={tableRows} getRowKey={(r) => r.bill_id} />
         </>

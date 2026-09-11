@@ -87,11 +87,13 @@ export function InstrumentTypeMixSection({
   error,
   compareBasis,
   previousBackedPct,
+  insight,
 }: {
   rows: InstrumentTypeMixRow[]
   error: string | null
   compareBasis: CompareBasis
   previousBackedPct: number | null
+  insight?: string | null
 }) {
   const departments = buildDepartments(rows)
   const totalSpend = rows.reduce((s, r) => s + r.total_amount, 0)
@@ -157,7 +159,7 @@ export function InstrumentTypeMixSection({
             delta={formatDeltaVs(compareBasis, backedPct, previous, 'count')}
             deltaTone={deltaToneHigherIsGood(backedPct, previous)}
           />
-          <p className="text-sm text-muted-foreground">{instrumentTypeMixSentence(rows)}</p>
+          <p className="text-sm text-muted-foreground">{insight ?? instrumentTypeMixSentence(rows)}</p>
           <InstrumentMixChart departments={departments} />
           <DataTable columns={columns} rows={departments} getRowKey={(d) => d.key} />
         </>

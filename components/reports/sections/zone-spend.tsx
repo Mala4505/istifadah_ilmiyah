@@ -26,11 +26,13 @@ export function ZoneSpendSection({
   error,
   compareBasis,
   previousTotal,
+  insight,
 }: {
   rows: ZoneSpendRow[]
   error: string | null
   compareBasis: CompareBasis
   previousTotal: number | null
+  insight?: string | null
 }) {
   const barItems: BarListItem[] = rows
     .filter((r) => (r.total_amount ?? 0) > 0)
@@ -90,7 +92,7 @@ export function ZoneSpendSection({
             deltaTone="neutral"
           />
           <BarList items={barItems} valueFormatter={formatINRCompact} />
-          <p className="text-sm text-muted-foreground">{zoneSpendSentence(rows, spendTotal)}</p>
+          <p className="text-sm text-muted-foreground">{insight ?? zoneSpendSentence(rows, spendTotal)}</p>
           <DataTable columns={columns} rows={rows} getRowKey={(r) => r.zone_id ?? 'unassigned'} />
         </>
       )}

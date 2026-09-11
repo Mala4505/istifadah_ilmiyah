@@ -41,11 +41,13 @@ export function RateDriftSection({
   error,
   compareBasis,
   previousDriftingCount,
+  insight,
 }: {
   series: RateDriftSeries[]
   error: string | null
   compareBasis: CompareBasis
   previousDriftingCount: number | null
+  insight?: string | null
 }) {
   const flagged = drifting(series)
   const previous = compareBasis === 'prior_event' ? previousDriftingCount : null
@@ -120,7 +122,7 @@ export function RateDriftSection({
             delta={formatDeltaVs(compareBasis, flagged.length, previous, 'count')}
             deltaTone={deltaToneHigherIsBad(flagged.length, previous)}
           />
-          <p className="text-sm text-muted-foreground">{rateDriftSentence(series)}</p>
+          <p className="text-sm text-muted-foreground">{insight ?? rateDriftSentence(series)}</p>
           <RateDriftChart series={chartSeries} />
           <DataTable
             columns={columns}

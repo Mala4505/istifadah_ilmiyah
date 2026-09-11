@@ -228,6 +228,7 @@ export type RateDriftDiscountData = {
     error: string | null
     /** Count of drifting series (>= RATE_DRIFT_FLAG_PCT) in the prior event, for the KPI delta. */
     previousDriftingCount: number | null
+    insight: string | null
   }
   discountConsistency: {
     groups: DiscountConsistencyGroup[]
@@ -235,7 +236,34 @@ export type RateDriftDiscountData = {
     coverage: { observed: number; total: number }
     /** Count of inconsistent groups (>= DISCOUNT_SPREAD_FLAG_PP) in the prior event, for the KPI delta. */
     previousInconsistentCount: number | null
+    insight: string | null
   }
+}
+
+/** "M of N vendor-item pairs tracked over 2+ weeks have drifted >= RATE_DRIFT_FLAG_PCT%, led by X." */
+function rateDriftInsight(series: RateDriftSeries[]): string | null {
+  if (series.length === 0) return null
+  const flagged = series.filter((s) => s.driftPct != null && s.driftPct >= RATE_DRIFT_FLAG_PCT)
+  if (flagged.length === 0) {
+    return `None of the ${series.length} vendor-item pair${series.length === 1 ? '' : 's'} tracked over 2+ weeks has drifted ${RATE_DRIFT_FLAG_PCT} percentage points or more since its first week.`
+  }
+  const lead = [...flagged].sort((a, b) => (b.driftPct ?? 0) - (a.driftPct ?? 0))[0]!
+  return `${flagged.length} of ${series.length} vendor-item pair${series.length === 1 ? '' : 's'} tracked this event ${
+    flagged.length === 1 ? 'has' : 'have'
+  } drifted ${RATE_DRIFT_FLAG_PCT}pp or more, led by ${lead.vendorName} · ${lead.familyLabel} at ${lead.driftPct! > 0 ? '+' : ''}${lead.driftPct!.toFixed(1)}%.`
+}
+
+/** "M of N vendor+item-family pairs compared across departments show a discount spread >= DISCOUNT_SPREAD_FLAG_PP pp, led by X." */
+function discountConsistencyInsight(groups: DiscountConsistencyGroup[]): string | null {
+  if (groups.length === 0) return null
+  const multiDept = groups.filter((g) => g.departments.length >= 2)
+  if (multiDept.length === 0) return null
+  const flagged = multiDept.filter((g) => g.spreadPp >= DISCOUNT_SPREAD_FLAG_PP)
+  if (flagged.length === 0) {
+    return `None of the ${multiDept.length} vendor and item-family pair${multiDept.length === 1 ? '' : 's'} compared across departments shows a discount spread of ${DISCOUNT_SPREAD_FLAG_PP} percentage points or more.`
+  }
+  const lead = [...flagged].sort((a, b) => b.spreadPp - a.spreadPp)[0]!
+  return `${flagged.length} of ${multiDept.length} vendor and item-family pair${multiDept.length === 1 ? '' : 's'} show a discount spread of ${DISCOUNT_SPREAD_FLAG_PP}pp or more, led by ${lead.vendorName} · ${lead.familyLabel} at ${lead.spreadPp.toFixed(1)}pp.`
 }
 
 /**
@@ -307,12 +335,14 @@ export async function loadRateDriftDiscount(compareBasis: CompareBasis, selected
       series: driftSeries,
       error: friendlyDataError(driftRes.error, 'reports:vendors:rate-drift'),
       previousDriftingCount,
+      insight: rateDriftInsight(driftSeries),
     },
     discountConsistency: {
       groups: discountGroups,
       error: friendlyDataError(discountRes.error, 'reports:vendors:discount-consistency'),
       coverage,
       previousInconsistentCount,
+      insight: discountConsistencyInsight(discountGroups),
     },
   }
 }

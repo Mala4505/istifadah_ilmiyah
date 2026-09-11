@@ -37,6 +37,7 @@ import { SectionSkeleton } from '@/components/reports/sections/surface-loading'
 import { BudgetByHeadSection } from '@/components/reports/sections/budget-by-head'
 import { DepartmentBudgetSection } from '@/components/reports/sections/department-budget'
 import { SubDepartmentBudgetSection } from '@/components/reports/sections/sub-department-budget'
+import { DepartmentBudgetExplorerSection } from '@/components/reports/sections/department-budget-explorer'
 import { ZoneSpendSection } from '@/components/reports/sections/zone-spend'
 import { VendorSpendSection } from '@/components/reports/sections/vendor-spend'
 import { VendorConcentrationSection } from '@/components/reports/sections/vendor-concentration'
@@ -386,7 +387,15 @@ export default async function ReportsPage({
 }
 
 async function BudgetGroup1({ only, compareBasis, selectedEvent }: { only: string | null; compareBasis: CompareBasis; selectedEvent: Event | null }) {
-  if (groupHiddenInPane(only, ['budget-vs-actual', 'department-budget-vs-actual', 'sub-department-budget-vs-actual'])) return null
+  if (
+    groupHiddenInPane(only, [
+      'budget-vs-actual',
+      'department-budget-vs-actual',
+      'sub-department-budget-vs-actual',
+      'department-budget-explorer',
+    ])
+  )
+    return null
   const budget = await getBudgetSurface(compareBasis, selectedEvent)
   return (
     <>
@@ -405,6 +414,7 @@ async function BudgetGroup1({ only, compareBasis, selectedEvent }: { only: strin
           error={budget.byDepartment.error}
           compareBasis={compareBasis}
           previousActualTotal={budget.byDepartment.previousActualTotal}
+          eventName={selectedEvent?.name ?? null}
         />
       )}
       {isSectionInPane(only, 'sub-department-budget-vs-actual') && (
@@ -414,6 +424,17 @@ async function BudgetGroup1({ only, compareBasis, selectedEvent }: { only: strin
           error={budget.bySubDepartment.error}
           compareBasis={compareBasis}
           previousActualTotal={budget.bySubDepartment.previousActualTotal}
+        />
+      )}
+      {isSectionInPane(only, 'department-budget-explorer') && (
+        <DepartmentBudgetExplorerSection
+          deptRows={budget.byDepartment.rows}
+          subDeptRows={budget.bySubDepartment.rows}
+          deptError={budget.byDepartment.error}
+          subDeptError={budget.bySubDepartment.error}
+          compareBasis={compareBasis}
+          previousDeptActualTotal={budget.byDepartment.previousActualTotal}
+          eventName={selectedEvent?.name ?? null}
         />
       )}
     </>

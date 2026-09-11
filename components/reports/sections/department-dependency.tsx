@@ -41,11 +41,13 @@ export function DepartmentDependencySection({
   error,
   compareBasis,
   previousOverThresholdCount,
+  insight,
 }: {
   rows: DepartmentVendorDependencyRow[]
   error: string | null
   compareBasis: CompareBasis
   previousOverThresholdCount: number | null
+  insight?: string | null
 }) {
   const overThresholdCount = countOverThreshold(rows)
   const previous = compareBasis === 'prior_event' ? previousOverThresholdCount : null
@@ -124,7 +126,7 @@ export function DepartmentDependencySection({
             delta={formatDeltaVs(compareBasis, overThresholdCount, previous, 'count')}
             deltaTone={deltaToneHigherIsBad(overThresholdCount, previous)}
           />
-          <p className="text-sm text-muted-foreground">{departmentDependencySentence(rows)}</p>
+          <p className="text-sm text-muted-foreground">{insight ?? departmentDependencySentence(rows)}</p>
           <DepartmentDependencyChart bars={bars} />
           <DataTable
             columns={columns}

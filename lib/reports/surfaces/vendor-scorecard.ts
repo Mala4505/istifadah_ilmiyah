@@ -22,6 +22,7 @@ import type { Event } from '@/lib/events/types'
 import { friendlyDataError } from '@/lib/friendly-error'
 import type { CompareBasis } from '@/lib/reports/compare-basis'
 import { CONCENTRATION_MIN_TOTAL } from '@/lib/analytics/thresholds'
+import { formatDate, formatINRCompact, formatNumber } from '@/lib/reports/format'
 import {
   ROW_CAP,
   resolvePreviousEvent,
@@ -70,6 +71,45 @@ export function isMaterialSingleAppearance(row: { single_appearance: boolean; to
   return row.single_appearance && (row.total_spend ?? 0) >= SINGLE_APPEARANCE_MATERIALITY_THRESHOLD
 }
 
+/** "N of M vendors are priced above our own benchmark or carry an open flag
+ *  — led by {vendor} at {ratio}× median and {count} open flags." */
+export function vendorScorecardInsight(rows: VendorScorecardRow[]): string | null {
+  if (rows.length === 0) return null
+  const attention = rows.filter(vendorNeedsAttention)
+  if (attention.length === 0) {
+    return `All ${formatNumber(rows.length)} vendors are priced at or within ${Math.round(
+      PRICE_POSITION_TOLERANCE * 100
+    )}% of our own benchmark this event, with no open flags.`
+  }
+  const lead = [...attention].sort(
+    (a, b) => b.open_flag_count - a.open_flag_count || (b.avg_price_ratio ?? 0) - (a.avg_price_ratio ?? 0)
+  )[0]!
+  const bits: string[] = []
+  if (lead.avg_price_ratio != null && priceIsAboveBenchmark(lead)) bits.push(`${lead.avg_price_ratio.toFixed(2)}× our median`)
+  if (lead.open_flag_count > 0) bits.push(`${formatNumber(lead.open_flag_count)} open flag${lead.open_flag_count === 1 ? '' : 's'}`)
+  const leadDetail = bits.length > 0 ? ` — led by ${lead.display_name} at ${bits.join(' and ')}` : ` — led by ${lead.display_name}`
+  return `${formatNumber(attention.length)} of ${formatNumber(
+    rows.length
+  )} vendors are priced above our own benchmark or carry an open flag this event${leadDetail}.`
+}
+
+/** "N vendors appear only once this event, for ₹X combined — the largest is
+ *  {vendor} at ₹Y on {date}, never seen again." */
+export function vendorActivitySpanInsight(rows: VendorActivitySpanRow[]): string | null {
+  if (rows.length === 0) return null
+  const material = rows.filter(isMaterialSingleAppearance)
+  if (material.length === 0) {
+    return `No vendor appears only once for ₹${formatNumber(SINGLE_APPEARANCE_MATERIALITY_THRESHOLD)} or more this event — every large purchase sits with a vendor seen more than once.`
+  }
+  const lead = [...material].sort((a, b) => (b.total_spend ?? 0) - (a.total_spend ?? 0))[0]!
+  const total = material.reduce((s, r) => s + (r.total_spend ?? 0), 0)
+  return `${formatNumber(material.length)} vendor${material.length === 1 ? '' : 's'} appear${
+    material.length === 1 ? 's' : ''
+  } only once this event, for ${formatINRCompact(total)} combined — the largest is ${lead.display_name} at ${formatINRCompact(
+    lead.total_spend
+  )} on ${formatDate(lead.first_entry_date)}, never seen again.`
+}
+
 export type VendorScorecardSurfaceData = {
   eventName: string | null
   previousEventName: string | null
@@ -83,12 +123,14 @@ export type VendorScorecardSurfaceData = {
     rows: VendorScorecardRow[]
     error: string | null
     previousAttentionCount: number | null
+    insight: string | null
   }
   activitySpan: {
     rows: VendorActivitySpanRow[]
     error: string | null
     previousMaterialCount: number | null
     previousMaterialAmount: number | null
+    insight: string | null
   }
 }
 
@@ -156,12 +198,14 @@ export async function loadVendorScorecard(compareBasis: CompareBasis, selectedEv
       rows: scorecardRows,
       error: friendlyDataError(scorecardRes.error, 'reports:vendors:scorecard'),
       previousAttentionCount,
+      insight: vendorScorecardInsight(scorecardRows),
     },
     activitySpan: {
       rows: activityRows,
       error: friendlyDataError(activityRes.error, 'reports:vendors:activity-span'),
       previousMaterialCount,
       previousMaterialAmount,
+      insight: vendorActivitySpanInsight(activityRows),
     },
   }
 }

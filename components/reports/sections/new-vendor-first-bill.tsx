@@ -48,11 +48,13 @@ export function NewVendorFirstBillSection({
   error,
   compareBasis,
   previousFindingCount,
+  insight,
 }: {
   rows: VendorFirstBillRow[]
   error: string | null
   compareBasis: CompareBasis
   previousFindingCount: number | null
+  insight?: string | null
 }) {
   const findingCount = countNewVendorFirstBillFindings(rows)
   const previous = compareBasis === 'prior_event' ? previousFindingCount : null
@@ -129,7 +131,7 @@ export function NewVendorFirstBillSection({
             delta={formatDeltaVs(compareBasis, findingCount, previous, 'count')}
             deltaTone={deltaToneHigherIsBad(findingCount, previous)}
           />
-          <p className="text-sm text-muted-foreground">{newVendorFirstBillSentence(rows)}</p>
+          <p className="text-sm text-muted-foreground">{insight ?? newVendorFirstBillSentence(rows)}</p>
           <NewVendorFirstBillChart points={points} />
           <DataTable
             columns={columns}

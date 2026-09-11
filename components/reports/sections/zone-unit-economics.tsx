@@ -81,11 +81,13 @@ export function ZoneUnitEconomicsSection({
   error,
   compareBasis,
   previousWideSpreadCount,
+  insight,
 }: {
   rows: ZoneUnitEconomicsRow[]
   error: string | null
   compareBasis: CompareBasis
   previousWideSpreadCount: number | null
+  insight?: string | null
 }) {
   const wideSpreadCount = countWideSpreadFamilies(rows)
   const previous = compareBasis === 'prior_event' ? previousWideSpreadCount : null
@@ -166,7 +168,7 @@ export function ZoneUnitEconomicsSection({
             delta={formatDeltaVs(compareBasis, wideSpreadCount, previous, 'count')}
             deltaTone={deltaToneHigherIsBad(wideSpreadCount, previous)}
           />
-          <p className="text-sm text-muted-foreground">{zoneUnitEconomicsSentence(rows)}</p>
+          <p className="text-sm text-muted-foreground">{insight ?? zoneUnitEconomicsSentence(rows)}</p>
           <ZoneEconomicsMatrixChart rows={matrixRows} columns={matrixCols} cells={cells} />
           <DataTable
             columns={columns}

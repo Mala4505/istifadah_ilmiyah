@@ -126,11 +126,13 @@ export function ExceptionHeatmapSection({
   error,
   compareBasis,
   previousTotalAtRisk,
+  insight,
 }: {
   rows: ExceptionHeatmapRow[]
   error: string | null
   compareBasis: CompareBasis
   previousTotalAtRisk: number | null
+  insight?: string | null
 }) {
   const totalAtRisk = rows.reduce((s, r) => s + r.amount_at_risk, 0)
   const { cells, rowAxis, colAxis } = buildHeatmapCells(rows)
@@ -171,7 +173,7 @@ export function ExceptionHeatmapSection({
             delta={formatDeltaVs(compareBasis, totalAtRisk, previous, 'inr')}
             deltaTone={deltaToneHigherIsBad(totalAtRisk, previous)}
           />
-          <p className="text-sm text-muted-foreground">{exceptionHeatmapSentence(rows)}</p>
+          <p className="text-sm text-muted-foreground">{insight ?? exceptionHeatmapSentence(rows)}</p>
           <HeatmapMatrixChart rows={rowAxis} columns={colAxis} cells={cells} />
           <DataTable
             columns={heatmapColumns}

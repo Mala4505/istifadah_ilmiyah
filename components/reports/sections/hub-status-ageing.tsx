@@ -47,6 +47,7 @@ export function HubStatusAgeingSection({
   buckets,
   series,
   previousCount,
+  insight,
 }: {
   rows: HubAgeingRow[]
   error: string | null
@@ -54,6 +55,7 @@ export function HubStatusAgeingSection({
   buckets: AgeingBuckets
   series: number[]
   previousCount: number | null
+  insight?: string | null
 }) {
   return (
     <ReportSection
@@ -98,7 +100,7 @@ export function HubStatusAgeingSection({
               </div>
             ))}
           </div>
-          <p className="text-sm text-muted-foreground">{hubAgeingSentence(buckets, rows.length)}</p>
+          <p className="text-sm text-muted-foreground">{insight ?? hubAgeingSentence(buckets, rows.length)}</p>
           <DataTable columns={ageingColumns} rows={rows} getRowKey={(r) => r.entry_id} />
         </>
       )}

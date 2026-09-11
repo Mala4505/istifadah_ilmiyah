@@ -30,12 +30,14 @@ export function VendorSpendSection({
   concentrationError,
   compareBasis,
   previousSpendTotal,
+  insight,
 }: {
   rows: MergedVendorRow[]
   error: string | null
   concentrationError: string | null
   compareBasis: CompareBasis
   previousSpendTotal: number | null
+  insight?: string | null
 }) {
   const barItems: BarListItem[] = rows.slice(0, 12).map((r) => ({
     key: r.vendor_id,
@@ -124,8 +126,8 @@ export function VendorSpendSection({
             delta={formatDeltaVs(compareBasis, spendTotal, previous, 'inr')}
             deltaTone="neutral"
           />
+          <p className="text-sm text-muted-foreground">{insight ?? vendorSpendSentence(rows)}</p>
           <BarList items={barItems} valueFormatter={formatINRCompact} />
-          <p className="text-sm text-muted-foreground">{vendorSpendSentence(rows)}</p>
           <DataTable columns={columns} rows={rows} getRowKey={(r) => r.vendor_id} />
         </>
       )}

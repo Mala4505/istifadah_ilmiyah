@@ -23,6 +23,7 @@ import type { Event } from '@/lib/events/types'
 import { friendlyDataError } from '@/lib/friendly-error'
 import type { CompareBasis } from '@/lib/reports/compare-basis'
 import { ROW_CAP, resolvePreviousEvent, round2Local, type PurchaseTreeRow } from '@/lib/reports/sections/shared'
+import { formatINRCompact, formatNumber, formatPercent } from '@/lib/reports/format'
 
 // PurchaseTreeRow now lives in lib/reports/sections/shared.tsx (hoisted during
 // Phase Five integration, alongside every other Phase Four/Five row type);
@@ -37,7 +38,26 @@ export type PurchaseTreeSurfaceData = {
     rows: PurchaseTreeRow[]
     error: string | null
     previousTotal: number | null
+    insight: string | null
   }
+}
+
+/** "₹X went to N item families this event, led by {family} at Y% of the total." */
+function purchaseTreeInsight(rows: PurchaseTreeRow[]): string | null {
+  if (rows.length === 0) return null
+  const total = rows.reduce((s, r) => s + r.line_amount, 0)
+  if (total <= 0) return null
+  const byFamily = new Map<number, { label: string; sum: number }>()
+  for (const r of rows) {
+    const cur = byFamily.get(r.item_family_id) ?? { label: r.family_label, sum: 0 }
+    cur.sum += r.line_amount
+    byFamily.set(r.item_family_id, cur)
+  }
+  const lead = [...byFamily.values()].sort((a, b) => b.sum - a.sum)[0]!
+  const leadSharePct = (lead.sum / total) * 100
+  return `${formatINRCompact(total)} went to ${formatNumber(byFamily.size)} item famil${
+    byFamily.size === 1 ? 'y' : 'ies'
+  } this event, led by ${lead.label} at ${formatPercent(leadSharePct)} of the total.`
 }
 
 const PURCHASE_TREE_SELECT =
@@ -83,6 +103,7 @@ export async function loadPurchaseTree(compareBasis: CompareBasis, selectedEvent
       rows,
       error: friendlyDataError(treeRes.error, 'reports:vendors:purchase-tree'),
       previousTotal,
+      insight: purchaseTreeInsight(rows),
     },
   }
 }

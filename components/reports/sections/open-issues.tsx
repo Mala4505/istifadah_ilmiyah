@@ -60,6 +60,7 @@ export function OpenIssuesSection({
   series,
   atRiskTotal,
   previousAtRisk,
+  insight,
 }: {
   rows: OpenIssueRow[]
   error: string | null
@@ -67,6 +68,7 @@ export function OpenIssuesSection({
   series: number[]
   atRiskTotal: number
   previousAtRisk: number | null
+  insight?: string | null
 }) {
   const severity = severitySegments(rows)
 
@@ -102,7 +104,7 @@ export function OpenIssuesSection({
             deltaTone={deltaToneHigherIsBad(atRiskTotal, previousAtRisk)}
             series={series}
           />
-          <p className="text-sm text-muted-foreground">{openIssuesSentence(rows)}</p>
+          <p className="text-sm text-muted-foreground">{insight ?? openIssuesSentence(rows)}</p>
           {severity.length > 0 && <DonutChart segments={severity} centerLabel={`${rows.length} issues`} />}
           <DataTable
             columns={issueColumns}

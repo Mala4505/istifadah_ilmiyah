@@ -39,11 +39,16 @@ export function DonutChart({
   centerLabel,
   selectedKey,
   onSelect,
+  valueFormatter = formatNumber,
 }: {
   segments: DonutSegment[]
   centerLabel?: string
   selectedKey?: string | null
   onSelect?: (key: string) => void
+  /** Formats each segment's value in the legend and the hover title — e.g.
+   *  `formatINRCompact` for a money-valued donut. Defaults to `formatNumber`
+   *  so every existing call site (count-valued donuts) renders unchanged. */
+  valueFormatter?: (value: number) => string
 }) {
   const total = segments.reduce((sum, s) => sum + s.value, 0)
   if (segments.length === 0 || total <= 0) return null
@@ -87,7 +92,7 @@ export function DonutChart({
                 className={cn('fill-none transition-opacity', arc.colorClass, isDimmed && 'opacity-40', onSelect && 'cursor-pointer')}
                 role={onSelect ? 'button' : undefined}
                 tabIndex={onSelect ? 0 : undefined}
-                aria-label={onSelect ? `${arc.label}: ${formatNumber(arc.value)}` : undefined}
+                aria-label={onSelect ? `${arc.label}: ${valueFormatter(arc.value)}` : undefined}
                 onClick={onSelect ? () => select(arc.key) : undefined}
                 onKeyDown={
                   onSelect
@@ -100,7 +105,7 @@ export function DonutChart({
                     : undefined
                 }
               >
-                <title>{`${arc.label}: ${formatNumber(arc.value)} (${formatPercent(arc.fraction * 100)})`}</title>
+                <title>{`${arc.label}: ${valueFormatter(arc.value)} (${formatPercent(arc.fraction * 100)})`}</title>
               </circle>
             )
           })}
@@ -133,7 +138,7 @@ export function DonutChart({
                 </svg>
                 <span className="flex-1 truncate text-foreground">{arc.label}</span>
                 <span className="shrink-0 font-mono text-muted-foreground">
-                  {formatNumber(arc.value)} · {formatPercent(arc.fraction * 100)}
+                  {valueFormatter(arc.value)} · {formatPercent(arc.fraction * 100)}
                 </span>
               </button>
             </li>

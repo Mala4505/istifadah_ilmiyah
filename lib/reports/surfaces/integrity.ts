@@ -29,6 +29,7 @@ import { createClient } from '@/lib/supabase/server'
 import type { Event } from '@/lib/events/types'
 import { friendlyDataError } from '@/lib/friendly-error'
 import type { CompareBasis } from '@/lib/reports/compare-basis'
+import { formatNumber, formatINRCompact, humanizeCode } from '@/lib/reports/format'
 import {
   ROW_CAP,
   resolvePreviousEvent,
@@ -40,6 +41,74 @@ import {
   type ExceptionHeatmapRow,
   type AmountAtRiskByStatusRow,
 } from '@/lib/reports/sections/shared'
+
+// Phase 3.4 (docs/reports-settings-workload-redesign-plan.md) -- one-sentence
+// insight per section, computed here purely from rows already fetched above,
+// so the overview pages (which don't hold row-level data) can show the same
+// takeaway the full section's own sentence helper renders. Returns null when
+// there's nothing worth saying rather than forcing a sentence out of nothing.
+
+function hubAgeingInsight(rows: HubAgeingRow[], buckets: { '0-2': number; '3-7': number; '8+': number }): string | null {
+  if (rows.length === 0) return null
+  if (buckets['8+'] === 0) return `${formatNumber(rows.length)} entries are awaiting review, none older than 7 days.`
+  const share8Plus = (buckets['8+'] / rows.length) * 100
+  return `${formatNumber(buckets['8+'])} entries (${Math.round(share8Plus)}% of the queue) have been waiting 8+ days.`
+}
+
+function openIssuesInsight(rows: OpenIssueRow[]): string | null {
+  if (rows.length === 0) return null
+  const highSeverity = rows.filter((r) => r.severity === 'high').length
+  const largest = [...rows].sort((a, b) => (b.amount_at_risk ?? 0) - (a.amount_at_risk ?? 0))[0]!
+  return highSeverity > 0
+    ? `${formatNumber(rows.length)} open issues, ${formatNumber(highSeverity)} high severity; the largest carries ${formatINRCompact(largest.amount_at_risk)} at risk.`
+    : `${formatNumber(rows.length)} open issues; the largest carries ${formatINRCompact(largest.amount_at_risk)} at risk.`
+}
+
+function complianceInsight(rows: ComplianceRow[], byType: [string, number][], totalAtRisk: number): string | null {
+  if (rows.length === 0) return null
+  const [topType, topCount] = byType[0]!
+  return `${formatNumber(rows.length)} open flags carrying ${formatINRCompact(totalAtRisk)} at risk; ${humanizeCode(topType).toLowerCase()} is the most common, at ${formatNumber(topCount)}.`
+}
+
+function exceptionHeatmapInsight(rows: ExceptionHeatmapRow[]): string | null {
+  if (rows.length === 0) return null
+  const types = new Set(rows.map((r) => r.issue_type))
+  const departments = new Set(rows.map((r) => r.department_name ?? 'No department'))
+  const cellTotals = new Map<string, { amount: number; type: string; dept: string }>()
+  for (const r of rows) {
+    const dept = r.department_name ?? 'No department'
+    const key = `${r.issue_type}||${dept}`
+    const existing = cellTotals.get(key)
+    if (existing) existing.amount += r.amount_at_risk
+    else cellTotals.set(key, { amount: r.amount_at_risk, type: r.issue_type, dept })
+  }
+  const top = [...cellTotals.values()].sort((a, b) => b.amount - a.amount)[0]!
+  const base = `${formatNumber(types.size)} open issue ${types.size === 1 ? 'type' : 'types'} across ${formatNumber(
+    departments.size
+  )} ${departments.size === 1 ? 'department' : 'departments'}`
+  if (top.amount <= 0) return `${base}; none carries a rupee figure yet.`
+  return `${base}; ${humanizeCode(top.type).toLowerCase()} in ${top.dept} carries the most at ${formatINRCompact(top.amount)}.`
+}
+
+function amountAtRiskInsight(rows: AmountAtRiskByStatusRow[], totalSpend: number): string | null {
+  const sum = (pred: (r: AmountAtRiskByStatusRow) => boolean) =>
+    rows.filter(pred).reduce((s, r) => s + r.amount_at_risk, 0)
+  const isUpheld = (r: AmountAtRiskByStatusRow) =>
+    (r.source_table === 'flags' && r.status === 'confirmed') ||
+    (r.source_table === 'reconciliation_exception' && r.status === 'resolved')
+  const isCleared = (r: AmountAtRiskByStatusRow) => r.status === 'dismissed'
+  const isOpen = (r: AmountAtRiskByStatusRow) => r.status === 'open'
+  const flagged = sum(() => true)
+  if (flagged <= 0) return totalSpend > 0 ? `Of ${formatINRCompact(totalSpend)} total spend, nothing is currently flagged.` : null
+  const upheld = sum(isUpheld)
+  const cleared = sum(isCleared)
+  const open = sum(isOpen)
+  return `Of ${formatINRCompact(totalSpend)} total spend, ${formatINRCompact(
+    flagged
+  )} was ever flagged; the review function has closed ${formatINRCompact(upheld + cleared)} of that (${formatINRCompact(
+    upheld
+  )} upheld, ${formatINRCompact(cleared)} cleared), with ${formatINRCompact(open)} still open.`
+}
 
 export type IntegritySurfaceData = {
   eventName: string | null
@@ -53,6 +122,7 @@ export type IntegritySurfaceData = {
     buckets: { '0-2': number; '3-7': number; '8+': number }
     series: number[]
     previousCount: number | null
+    insight: string | null
   }
   openIssues: {
     rows: OpenIssueRow[]
@@ -60,6 +130,7 @@ export type IntegritySurfaceData = {
     series: number[]
     atRiskTotal: number
     previousAtRisk: number | null
+    insight: string | null
   }
   compliance: {
     rows: ComplianceRow[]
@@ -68,6 +139,7 @@ export type IntegritySurfaceData = {
     atRiskTotal: number
     byType: [string, number][]
     previousAtRisk: number | null
+    insight: string | null
   }
   /** D-01 exception heat map (v_exception_heatmap). Same `.or(event_id.eq.X,
    *  event_id.is.null)` scoping as v_open_issues — the view carries
@@ -77,6 +149,7 @@ export type IntegritySurfaceData = {
     rows: ExceptionHeatmapRow[]
     error: string | null
     previousTotalAtRisk: number | null
+    insight: string | null
   }
   /** D-02 amount-at-risk waterfall (v_amount_at_risk_by_status across ALL
    *  statuses) plus the event's total non-void spend for the top stage. */
@@ -84,6 +157,7 @@ export type IntegritySurfaceData = {
     rows: AmountAtRiskByStatusRow[]
     totalSpend: number
     error: string | null
+    insight: string | null
   }
 }
 
@@ -298,6 +372,7 @@ export async function loadIntegritySurface(
       buckets: ageingBuckets,
       series: ageingSeries,
       previousCount: ageingPrevious,
+      insight: hubAgeingInsight(ageingRows, ageingBuckets),
     },
     openIssues: {
       rows: issueRows,
@@ -305,6 +380,7 @@ export async function loadIntegritySurface(
       series: issuesSeries,
       atRiskTotal: openIssuesAtRiskTotal,
       previousAtRisk: issuesPrevious,
+      insight: openIssuesInsight(issueRows),
     },
     compliance: {
       rows: complianceRows,
@@ -313,16 +389,19 @@ export async function loadIntegritySurface(
       atRiskTotal: complianceTotalAtRisk,
       byType: complianceByType,
       previousAtRisk: compliancePrevious,
+      insight: complianceInsight(complianceRows, complianceByType, complianceTotalAtRisk),
     },
     exceptionHeatmap: {
       rows: heatmapRows,
       error: friendlyDataError(heatmapRes.error, 'reports:integrity:heatmap'),
       previousTotalAtRisk: compareBasis === 'prior_event' ? prior.heatmapAtRisk : null,
+      insight: exceptionHeatmapInsight(heatmapRows),
     },
     amountAtRiskWaterfall: {
       rows: atRiskRows,
       totalSpend,
       error: friendlyDataError(atRiskRes.error, 'reports:integrity:atRiskByStatus'),
+      insight: amountAtRiskInsight(atRiskRows, totalSpend),
     },
   }
 }

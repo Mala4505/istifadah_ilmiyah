@@ -58,11 +58,13 @@ export function AdminHeadAccountabilitySection({
   error,
   compareBasis,
   previousSpendTotal,
+  insight,
 }: {
   rows: AdminHeadAccountabilityRow[]
   error: string | null
   compareBasis: CompareBasis
   previousSpendTotal: number | null
+  insight?: string | null
 }) {
   const spendThroughHeads = rows.reduce((sum, r) => sum + r.totalAmount, 0)
   const previous = compareBasis === 'prior_event' ? previousSpendTotal : null
@@ -175,7 +177,7 @@ export function AdminHeadAccountabilitySection({
             deltaTone="neutral"
           />
           <BarList items={barItems} valueFormatter={formatINRCompact} />
-          <p className="text-sm text-muted-foreground">{adminHeadAccountabilitySentence(rows)}</p>
+          <p className="text-sm text-muted-foreground">{insight ?? adminHeadAccountabilitySentence(rows)}</p>
           {anyOverBudget && (
             <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
               <span className="h-2 w-2 rounded-full bg-red-600 dark:bg-red-500" />

@@ -4,7 +4,7 @@ import { EmptyState } from '@/components/reports/empty-state'
 import { ExportCsvButton } from '@/components/reports/export-csv-button'
 import { toCsv } from '@/lib/reports/csv'
 import { formatINR, formatINRCompact } from '@/lib/reports/format'
-import type { WeeklyDigestCategory, WeeklyDigestItem } from '@/lib/reports/weekly-digest'
+import { CATEGORY_LABEL, type WeeklyDigestCategory, type WeeklyDigestItem } from '@/lib/reports/weekly-digest'
 
 // reporting-blueprint.md §3 E-04 -- "The ten things most worth attention this
 // week, ranked by rupees, each written as a plain sentence with an owner. The
@@ -12,15 +12,6 @@ import type { WeeklyDigestCategory, WeeklyDigestItem } from '@/lib/reports/weekl
 // list where the whole row links to the entries / report behind the line, plus
 // one CSV button and a computed one-line summary. No chart, no interactive
 // client component -- the sentence IS the visualisation here (§6 fix #3).
-
-const CATEGORY_LABEL: Record<WeeklyDigestCategory, string> = {
-  compliance_flag: 'compliance flags',
-  reconciliation: 'reconciliation gaps',
-  budget_pace: 'budget pace',
-  overpayment: 'overpayment',
-  rate_drift: 'rate drift',
-  new_vendor: 'new vendors',
-}
 
 function ageLabel(ageDays: number | null): string {
   if (ageDays == null) return 'as of today'
@@ -47,10 +38,15 @@ export function WeeklyDigestSection({
   items,
   hasError,
   errorText,
+  insight,
 }: {
   items: WeeklyDigestItem[]
   hasError: boolean
   errorText: string | null
+  /** Phase 3.4 insight slot, loader-computed (`weeklyDigestInsight`). Falls
+   *  back to the local `weeklyDigestSummary(items)` when a caller doesn't yet
+   *  pass it, so existing pages keep their sentence unchanged. */
+  insight?: string | null
 }) {
   const csv = toCsv(items, [
     { header: 'Rank', value: (r) => r.rank },
@@ -78,7 +74,7 @@ export function WeeklyDigestSection({
         />
       ) : (
         <div className="flex flex-col gap-3">
-          <p className="text-sm text-muted-foreground">{weeklyDigestSummary(items)}</p>
+          <p className="text-sm text-muted-foreground">{insight ?? weeklyDigestSummary(items)}</p>
           {errorText && (
             <p className="text-xs text-amber-700 dark:text-amber-400">
               Some sources could not be loaded — this list may be incomplete. {errorText}

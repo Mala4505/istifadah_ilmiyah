@@ -134,6 +134,12 @@ export type RupeeProvenanceSurfaceData = {
   /** Resolved chain for `traceEntryId`, or null when no id is selected or the
    *  id matched no visible entry. */
   chain: RupeeProvenanceChain | null
+  /** Phase 3.4 insight slot. Always null here: this surface is a single
+   *  user-picked rupee trace, not an aggregate, and the section already
+   *  renders its own one-sentence takeaway of the selected chain
+   *  (`rupeeProvenanceSentence` in the component, computed from `chain`) --
+   *  a second sentence over the unrelated candidate list would be hollow. */
+  insight: string | null
 }
 
 const ENTRY_SELECT =
@@ -232,5 +238,6 @@ export async function loadRupeeProvenance(
     candidates,
     candidatesError,
     chain,
+    insight: null,
   }
 }

@@ -78,6 +78,7 @@ export function EntriesWithoutBillSection({
   undocumentedPctOfSpend,
   compareBasis,
   previousTotalUndocumented,
+  insight,
 }: {
   rows: EntryWithoutBillRow[]
   error: string | null
@@ -88,6 +89,7 @@ export function EntriesWithoutBillSection({
   undocumentedPctOfSpend: number | null
   compareBasis: CompareBasis
   previousTotalUndocumented: number | null
+  insight?: string | null
 }) {
   const previous = compareBasis === 'prior_event' ? previousTotalUndocumented : null
   const entryCount = byDepartment.reduce((s, r) => s + r.entry_count, 0)
@@ -180,13 +182,14 @@ export function EntriesWithoutBillSection({
             <KpiTile label="Share of event spend" value={formatPercent(undocumentedPctOfSpend)} />
           )}
           <p className="text-sm text-muted-foreground">
-            {entriesWithoutBillSentence({
-              totalUndocumented,
-              pctOfSpend: undocumentedPctOfSpend,
-              entryCount,
-              noDocumentCount,
-              topDepartment,
-            })}
+            {insight ??
+              entriesWithoutBillSentence({
+                totalUndocumented,
+                pctOfSpend: undocumentedPctOfSpend,
+                entryCount,
+                noDocumentCount,
+                topDepartment,
+              })}
           </p>
           <div className="grid gap-6 sm:grid-cols-2">
             <div className="flex flex-col gap-2">

@@ -69,9 +69,11 @@ export function zoneCategoryMatrixSentence(rows: ZoneCategoryMatrixRow[]): strin
 export function ZoneCategoryMatrixSection({
   rows,
   error,
+  insight,
 }: {
   rows: ZoneCategoryMatrixRow[]
   error: string | null
+  insight?: string | null
 }) {
   // Axis ordering: both axes by total spend descending, so the densest corner
   // sits top-left.
@@ -174,7 +176,7 @@ export function ZoneCategoryMatrixSection({
               full matrix is in the table and CSV.
             </p>
           )}
-          <p className="text-sm text-muted-foreground">{zoneCategoryMatrixSentence(rows)}</p>
+          <p className="text-sm text-muted-foreground">{insight ?? zoneCategoryMatrixSentence(rows)}</p>
           <DataTable
             columns={columns}
             rows={tableRows}

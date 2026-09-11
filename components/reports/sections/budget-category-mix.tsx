@@ -63,9 +63,11 @@ export function budgetCategoryMixSentence(rows: BudgetCategoryMixRow[]): string 
 export function BudgetCategoryMixSection({
   rows,
   error,
+  insight,
 }: {
   rows: BudgetCategoryMixRow[]
   error: string | null
+  insight?: string | null
 }) {
   const { ranked, total } = rank(rows)
 
@@ -144,7 +146,7 @@ export function BudgetCategoryMixSection({
           )}
           <DonutChart segments={donutSegments} centerLabel={formatINRCompact(total)} />
           <BarList items={barItems} valueFormatter={formatINRCompact} />
-          <p className="text-sm text-muted-foreground">{budgetCategoryMixSentence(rows)}</p>
+          <p className="text-sm text-muted-foreground">{insight ?? budgetCategoryMixSentence(rows)}</p>
           <DataTable columns={columns} rows={ranked} getRowKey={(r) => r.key} />
         </>
       )}

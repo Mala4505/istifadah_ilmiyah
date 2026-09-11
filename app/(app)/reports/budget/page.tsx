@@ -12,6 +12,7 @@ import { loadEventComparison } from '@/lib/reports/surfaces/event-comparison'
 import { BudgetByHeadSection } from '@/components/reports/sections/budget-by-head'
 import { DepartmentBudgetSection } from '@/components/reports/sections/department-budget'
 import { SubDepartmentBudgetSection } from '@/components/reports/sections/sub-department-budget'
+import { DepartmentBudgetExplorerSection } from '@/components/reports/sections/department-budget-explorer'
 import { ZoneSpendSection } from '@/components/reports/sections/zone-spend'
 import { AdminHeadAccountabilitySection } from '@/components/reports/sections/admin-head-accountability'
 import { BudgetRevisionHistorySection } from '@/components/reports/sections/budget-revision-history'
@@ -135,7 +136,15 @@ export default async function BudgetSurfacePage({
 }
 
 async function BudgetByHeadGroup({ only, compareBasis, selectedEvent }: { only: string | null; compareBasis: CompareBasis; selectedEvent: Event | null }) {
-  if (groupHiddenInPane(only, ['budget-vs-actual', 'department-budget-vs-actual', 'sub-department-budget-vs-actual'])) return null
+  if (
+    groupHiddenInPane(only, [
+      'budget-vs-actual',
+      'department-budget-vs-actual',
+      'sub-department-budget-vs-actual',
+      'department-budget-explorer',
+    ])
+  )
+    return null
   const data = await getBudgetSurface(compareBasis, selectedEvent)
   return (
     <>
@@ -146,6 +155,7 @@ async function BudgetByHeadGroup({ only, compareBasis, selectedEvent }: { only: 
           error={data.byHead.error}
           compareBasis={compareBasis}
           previousActualTotal={data.byHead.previousActualTotal}
+          insight={data.byHead.insight}
         />
       )}
       {isSectionInPane(only, 'department-budget-vs-actual') && (
@@ -154,6 +164,8 @@ async function BudgetByHeadGroup({ only, compareBasis, selectedEvent }: { only: 
           error={data.byDepartment.error}
           compareBasis={compareBasis}
           previousActualTotal={data.byDepartment.previousActualTotal}
+          insight={data.byDepartment.insight}
+          eventName={selectedEvent?.name ?? null}
         />
       )}
       {isSectionInPane(only, 'sub-department-budget-vs-actual') && (
@@ -163,6 +175,18 @@ async function BudgetByHeadGroup({ only, compareBasis, selectedEvent }: { only: 
           error={data.bySubDepartment.error}
           compareBasis={compareBasis}
           previousActualTotal={data.bySubDepartment.previousActualTotal}
+          insight={data.bySubDepartment.insight}
+        />
+      )}
+      {isSectionInPane(only, 'department-budget-explorer') && (
+        <DepartmentBudgetExplorerSection
+          deptRows={data.byDepartment.rows}
+          subDeptRows={data.bySubDepartment.rows}
+          deptError={data.byDepartment.error}
+          subDeptError={data.bySubDepartment.error}
+          compareBasis={compareBasis}
+          previousDeptActualTotal={data.byDepartment.previousActualTotal}
+          eventName={selectedEvent?.name ?? null}
         />
       )}
     </>
@@ -177,6 +201,7 @@ async function RevisionHistoryGroup({ only, compareBasis, revisionHeadId }: { on
       rows={structure.revisionHistory.rows}
       error={structure.revisionHistory.error}
       selectedHeadId={structure.revisionHeadId}
+      insight={structure.revisionHistory.insight}
     />
   )
 }
@@ -190,6 +215,7 @@ async function AdminHeadGroup({ only, compareBasis }: { only: string | null; com
       error={adminHead.accountability.error}
       compareBasis={compareBasis}
       previousSpendTotal={adminHead.accountability.previousSpendTotal}
+      insight={adminHead.accountability.insight}
     />
   )
 }
@@ -203,6 +229,7 @@ async function ZoneSpendGroup({ only, compareBasis, selectedEvent }: { only: str
       error={data.byZone.error}
       compareBasis={compareBasis}
       previousTotal={data.byZone.previousTotal}
+      insight={data.byZone.insight}
     />
   )
 }
@@ -213,10 +240,18 @@ async function ZoneCategoryGroup({ only, compareBasis, revisionHeadId }: { only:
   return (
     <>
       {isSectionInPane(only, 'zone-category-matrix') && (
-        <ZoneCategoryMatrixSection rows={structure.zoneCategoryMatrix.rows} error={structure.zoneCategoryMatrix.error} />
+        <ZoneCategoryMatrixSection
+          rows={structure.zoneCategoryMatrix.rows}
+          error={structure.zoneCategoryMatrix.error}
+          insight={structure.zoneCategoryMatrix.insight}
+        />
       )}
       {isSectionInPane(only, 'budget-category-mix') && (
-        <BudgetCategoryMixSection rows={structure.budgetCategoryMix.rows} error={structure.budgetCategoryMix.error} />
+        <BudgetCategoryMixSection
+          rows={structure.budgetCategoryMix.rows}
+          error={structure.budgetCategoryMix.error}
+          insight={structure.budgetCategoryMix.insight}
+        />
       )}
     </>
   )
@@ -233,6 +268,7 @@ async function EntryTypeFlowGroup({ only, compareBasis }: { only: string | null;
           error={entryTypeFlow.entryTypeSplit.error}
           compareBasis={compareBasis}
           previousReimbursementSharePct={entryTypeFlow.entryTypeSplit.previousReimbursementSharePct}
+          insight={entryTypeFlow.entryTypeSplit.insight}
         />
       )}
       {isSectionInPane(only, 'outstanding-advance-ageing') && (
@@ -242,6 +278,7 @@ async function EntryTypeFlowGroup({ only, compareBasis }: { only: string | null;
           compareBasis={compareBasis}
           previousOutstandingCount={entryTypeFlow.outstandingAdvanceAgeing.previousOutstandingCount}
           previousOutstandingAmount={entryTypeFlow.outstandingAdvanceAgeing.previousOutstandingAmount}
+          insight={entryTypeFlow.outstandingAdvanceAgeing.insight}
         />
       )}
       {isSectionInPane(only, 'reimbursement-profile') && (
@@ -253,6 +290,7 @@ async function EntryTypeFlowGroup({ only, compareBasis }: { only: string | null;
           compareBasis={compareBasis}
           previousTotalReimbursed={entryTypeFlow.reimbursementProfile.previousTotalReimbursed}
           previousReimburseeCount={entryTypeFlow.reimbursementProfile.previousReimburseeCount}
+          insight={entryTypeFlow.reimbursementProfile.insight}
         />
       )}
     </>
@@ -274,6 +312,7 @@ async function SpendCurveGroup({ only, compareBasis }: { only: string | null; co
       meanWeeklyAmount={spendCurve.spendCurve.meanWeeklyAmount}
       peakMultipleOfMean={spendCurve.spendCurve.peakMultipleOfMean}
       previousPeakWeekAmount={spendCurve.spendCurve.previousPeakWeekAmount}
+      insight={spendCurve.spendCurve.insight}
     />
   )
 }
@@ -290,6 +329,7 @@ async function EventComparisonGroup({ only }: { only: string | null }) {
       error={eventComparison.error}
       currentTotal={eventComparison.currentTotal}
       baseTotal={eventComparison.baseTotal}
+      insight={eventComparison.insight}
     />
   )
 }

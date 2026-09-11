@@ -28,11 +28,13 @@ export function RateBenchmarkSection({
   error,
   compareBasis,
   previousReliableCount,
+  insight,
 }: {
   rows: RateBenchmarkRow[]
   error: string | null
   compareBasis: CompareBasis
   previousReliableCount: number | null
+  insight?: string | null
 }) {
   const columns: DataTableColumn<RateBenchmarkRow>[] = [
     { key: 'family', header: 'Item Family', render: (r) => r.family_label },
@@ -101,7 +103,7 @@ export function RateBenchmarkSection({
             delta={formatDeltaVs(compareBasis, reliableTotal, previous, 'count')}
             deltaTone={deltaToneHigherIsGood(reliableTotal, previous)}
           />
-          <p className="text-sm text-muted-foreground">{rateBenchmarkSentence(rows, reliableTotal)}</p>
+          <p className="text-sm text-muted-foreground">{insight ?? rateBenchmarkSentence(rows, reliableTotal)}</p>
           {reliableRows.length === 0 && (
             <p className="rounded-md border border-dashed border-border px-3 py-2 text-xs text-muted-foreground">
               No family/unit pair yet has {RATE_BENCHMARK_MIN_VENDORS}+ vendors and {RATE_BENCHMARK_MIN_OBSERVATIONS}+

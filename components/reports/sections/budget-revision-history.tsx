@@ -123,10 +123,12 @@ export function BudgetRevisionHistorySection({
   rows,
   error,
   selectedHeadId,
+  insight,
 }: {
   rows: BudgetRevisionHistoryRow[]
   error: string | null
   selectedHeadId: number | null
+  insight?: string | null
 }) {
   const summaries = summarise(rows)
   const revised = revisedHeads(summaries)
@@ -216,7 +218,7 @@ export function BudgetRevisionHistorySection({
               <WaterfallChart stages={toStages(selected)} />
             </div>
           )}
-          <p className="text-sm text-muted-foreground">{budgetRevisionHistorySentence(rows)}</p>
+          <p className="text-sm text-muted-foreground">{insight ?? budgetRevisionHistorySentence(rows)}</p>
           <DataTable columns={columns} rows={revised} getRowKey={(s) => s.headId} />
         </>
       )}

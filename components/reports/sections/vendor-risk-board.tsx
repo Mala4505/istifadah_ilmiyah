@@ -76,11 +76,13 @@ export function VendorRiskBoardSection({
   error,
   compareBasis,
   previousElevatedCount,
+  insight,
 }: {
   rows: VendorRiskBoardRow[]
   error: string | null
   compareBasis: CompareBasis
   previousElevatedCount: number | null
+  insight?: string | null
 }) {
   const elevated = elevatedCount(rows)
   const previous = compareBasis === 'prior_event' ? previousElevatedCount : null
@@ -183,7 +185,7 @@ export function VendorRiskBoardSection({
             delta={formatDeltaVs(compareBasis, elevated, previous, 'count')}
             deltaTone={deltaToneHigherIsBad(elevated, previous)}
           />
-          <p className="text-sm text-muted-foreground">{vendorRiskBoardSentence(rows)}</p>
+          <p className="text-sm text-muted-foreground">{insight ?? vendorRiskBoardSentence(rows)}</p>
           <DataTable
             columns={columns}
             rows={rows}

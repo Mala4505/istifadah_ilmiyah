@@ -179,6 +179,7 @@ async function HubAgeingAndOpenIssuesGroup({
           buckets={data.hubAgeing.buckets}
           series={data.hubAgeing.series}
           previousCount={data.hubAgeing.previousCount}
+          insight={data.hubAgeing.insight}
         />
       )}
       {isSectionInPane(only, 'open-issues') && (
@@ -189,6 +190,7 @@ async function HubAgeingAndOpenIssuesGroup({
           series={data.openIssues.series}
           atRiskTotal={data.openIssues.atRiskTotal}
           previousAtRisk={data.openIssues.previousAtRisk}
+          insight={data.openIssues.insight}
         />
       )}
     </>

@@ -32,6 +32,7 @@ import { createClient } from '@/lib/supabase/server'
 import { getSelectedEvent } from '@/lib/events/current'
 import { friendlyDataError } from '@/lib/friendly-error'
 import { ROW_CAP, round2Local } from '@/lib/reports/sections/shared'
+import { formatNumber, formatINRCompact } from '@/lib/reports/format'
 
 // A generous cap: the corpus is a single event's worth of bills (hundreds),
 // well under this. Bumped above ROW_CAP because this is a raw-amount scan, not
@@ -154,6 +155,32 @@ export function resolveActiveThresholds(
     .sort((a, b) => a.minAmount - b.minAmount)
 }
 
+/**
+ * Phase 3.4 insight sentence -- one-line takeaway based on splittingFlags,
+ * this section's headline finding, computed purely from rows already
+ * fetched above. Null when there's nothing worth saying.
+ */
+function thresholdSplittingInsight(
+  entryCount: number,
+  activeThresholds: ActiveThreshold[],
+  splittingFlags: SplittingFlagRow[]
+): string | null {
+  if (entryCount === 0) return null
+  if (splittingFlags.length === 0) {
+    return activeThresholds.length > 0
+      ? `${formatNumber(activeThresholds.length)} approval limit${
+          activeThresholds.length === 1 ? '' : 's'
+        } recorded; no vendor-splitting flags are currently open.`
+      : 'No vendor-splitting flags are currently open.'
+  }
+  const totalAtRisk = splittingFlags.reduce((s, f) => s + (f.amount_at_risk ?? 0), 0)
+  const top = [...splittingFlags].sort((a, b) => (b.amount_at_risk ?? 0) - (a.amount_at_risk ?? 0))[0]!
+  const who = top.vendor_display_name ?? 'an unnamed vendor'
+  return `${formatNumber(splittingFlags.length)} vendor-splitting flag${
+    splittingFlags.length === 1 ? '' : 's'
+  } open, carrying ${formatINRCompact(totalAtRisk)} at risk — the largest is ${who}.`
+}
+
 export type ThresholdSplittingSurfaceData = {
   eventName: string | null
   thresholdRows: ApprovalThresholdRow[]
@@ -164,6 +191,7 @@ export type ThresholdSplittingSurfaceData = {
   entriesError: string | null
   splittingFlags: SplittingFlagRow[]
   splittingFlagsError: string | null
+  insight: string | null
 }
 
 const THRESHOLD_SELECT = 'id, department_id, min_amount, escalates_to, effective_from, note'
@@ -229,5 +257,6 @@ export async function loadThresholdSplitting(): Promise<ThresholdSplittingSurfac
       friendlyDataError(deptRes.error, 'reports:threshold-splitting:departments'),
     splittingFlags: splittingRes.data ?? [],
     splittingFlagsError: friendlyDataError(splittingRes.error, 'reports:threshold-splitting:flags'),
+    insight: thresholdSplittingInsight(amounts.length, activeThresholds, splittingRes.data ?? []),
   }
 }

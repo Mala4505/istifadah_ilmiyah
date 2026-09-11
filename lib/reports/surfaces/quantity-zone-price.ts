@@ -21,6 +21,7 @@ import type { Event } from '@/lib/events/types'
 import { friendlyDataError } from '@/lib/friendly-error'
 import type { CompareBasis } from '@/lib/reports/compare-basis'
 import { RATE_BENCHMARK_MIN_VENDORS } from '@/lib/analytics/thresholds'
+import { formatINR, formatNumber } from '@/lib/reports/format'
 import {
   resolvePreviousEvent,
   type QuantityByUnitRow,
@@ -98,11 +99,85 @@ export type QuantityZonePriceData = {
   eventName: string | null
   previousEventName: string | null
   /** C-07 */
-  quantityByUnit: { rows: QuantityByUnitRow[]; error: string | null; previousPairCount: number | null }
+  quantityByUnit: { rows: QuantityByUnitRow[]; error: string | null; previousPairCount: number | null; insight: string | null }
   /** C-08 */
-  zoneUnitEconomics: { rows: ZoneUnitEconomicsRow[]; error: string | null; previousWideSpreadCount: number | null }
+  zoneUnitEconomics: {
+    rows: ZoneUnitEconomicsRow[]
+    error: string | null
+    previousWideSpreadCount: number | null
+    insight: string | null
+  }
   /** B-06 */
-  vendorPriceByFamily: { rows: VendorPriceByFamilyRow[]; error: string | null; previousMultiVendorCount: number | null }
+  vendorPriceByFamily: {
+    rows: VendorPriceByFamilyRow[]
+    error: string | null
+    previousMultiVendorCount: number | null
+    insight: string | null
+  }
+}
+
+/** "Tracked across N units of measure, {family} leads {unit} at {qty} purchased this event." */
+function quantityByUnitInsight(rows: QuantityByUnitRow[]): string | null {
+  if (rows.length === 0) return null
+  const units = new Set(rows.map((r) => r.unit_normalized ?? '')).size
+  const top = [...rows].sort((a, b) => b.total_quantity - a.total_quantity)[0]!
+  return `Tracked across ${formatNumber(units)} unit${units === 1 ? '' : 's'} of measure, ${top.family_label} leads ${
+    top.unit_normalized || 'its unit'
+  } at ${formatNumber(top.total_quantity)} purchased this event.`
+}
+
+/** "{family} shows the widest cross-zone spread — {zone} pays X against {zone}'s Y." */
+function zoneUnitEconomicsInsight(rows: ZoneUnitEconomicsRow[]): string | null {
+  if (rows.length === 0) return null
+  const byGroup = new Map<string, ZoneUnitEconomicsRow[]>()
+  for (const r of rows) {
+    if (r.median_rate == null) continue
+    const key = familyUnitKey(r.item_family_id, r.unit_normalized)
+    const list = byGroup.get(key) ?? []
+    list.push(r)
+    byGroup.set(key, list)
+  }
+  let best: { label: string; spreadPct: number; cheap: ZoneUnitEconomicsRow; pricey: ZoneUnitEconomicsRow } | null = null
+  for (const list of byGroup.values()) {
+    const familyMedian = list[0]!.family_median_rate
+    if (familyMedian == null || familyMedian <= 0) continue
+    const sorted = [...list].sort((a, b) => a.median_rate! - b.median_rate!)
+    const cheap = sorted[0]!
+    const pricey = sorted[sorted.length - 1]!
+    const spreadPct = ((pricey.median_rate! - cheap.median_rate!) / familyMedian) * 100
+    if (!best || spreadPct > best.spreadPct) best = { label: list[0]!.family_label, spreadPct, cheap, pricey }
+  }
+  if (!best) return null
+  const zoneLabel = (r: ZoneUnitEconomicsRow) => (r.zone_number != null ? `Z${r.zone_number} ${r.zone_name}` : r.zone_name)
+  return `${best.label} shows the widest cross-zone spread — ${zoneLabel(best.pricey)} pays ${formatINR(
+    best.pricey.median_rate
+  )} against ${zoneLabel(best.cheap)}'s ${formatINR(best.cheap.median_rate)}.`
+}
+
+/** "{family}'s widest vendor gap: {vendor} charges Nx what {vendor} does." */
+function vendorPriceByFamilyInsight(rows: VendorPriceByFamilyRow[]): string | null {
+  if (rows.length === 0) return null
+  const byFamily = new Map<string, VendorPriceByFamilyRow[]>()
+  for (const r of rows) {
+    if (r.median_rate == null || r.vendor_count < RATE_BENCHMARK_MIN_VENDORS) continue
+    const key = familyUnitKey(r.item_family_id, r.unit_normalized)
+    const list = byFamily.get(key) ?? []
+    list.push(r)
+    byFamily.set(key, list)
+  }
+  let best: { label: string; ratio: number; cheap: VendorPriceByFamilyRow; pricey: VendorPriceByFamilyRow } | null = null
+  for (const list of byFamily.values()) {
+    const sorted = [...list].sort((a, b) => a.median_rate! - b.median_rate!)
+    const cheap = sorted[0]!
+    const pricey = sorted[sorted.length - 1]!
+    if (cheap.median_rate! <= 0) continue
+    const ratio = pricey.median_rate! / cheap.median_rate!
+    if (!best || ratio > best.ratio) best = { label: list[0]!.family_label, ratio, cheap, pricey }
+  }
+  if (!best) return null
+  return `${best.label}'s widest vendor gap: ${best.pricey.vendor_display_name ?? 'a vendor'} charges ${best.ratio.toFixed(1)}× what ${
+    best.cheap.vendor_display_name ?? 'the cheapest vendor'
+  } does.`
 }
 
 /**
@@ -172,16 +247,19 @@ export async function loadQuantityZonePrice(compareBasis: CompareBasis, selected
       rows: quantityRes.data ?? [],
       error: friendlyDataError(quantityRes.error, 'reports:quantity-zone-price:quantity'),
       previousPairCount: prior.pairCount,
+      insight: quantityByUnitInsight(quantityRes.data ?? []),
     },
     zoneUnitEconomics: {
       rows: zoneEconomicsRes.data ?? [],
       error: friendlyDataError(zoneEconomicsRes.error, 'reports:quantity-zone-price:zone-economics'),
       previousWideSpreadCount: prior.wideSpreadCount,
+      insight: zoneUnitEconomicsInsight(zoneEconomicsRes.data ?? []),
     },
     vendorPriceByFamily: {
       rows: vendorPriceRes.data ?? [],
       error: friendlyDataError(vendorPriceRes.error, 'reports:quantity-zone-price:vendor-price'),
       previousMultiVendorCount: prior.multiVendorCount,
+      insight: vendorPriceByFamilyInsight(vendorPriceRes.data ?? []),
     },
   }
 }

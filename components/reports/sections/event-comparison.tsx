@@ -55,6 +55,7 @@ export function EventComparisonSection({
   error,
   currentTotal,
   baseTotal,
+  insight,
 }: {
   hasComparison: boolean
   currentEventName: string | null
@@ -63,6 +64,7 @@ export function EventComparisonSection({
   error: string | null
   currentTotal: number
   baseTotal: number
+  insight?: string | null
 }) {
   if (!hasComparison) {
     return (
@@ -173,7 +175,7 @@ export function EventComparisonSection({
             deltaTone={overallIndex == null ? 'neutral' : overallIndex > 100 ? 'bad' : 'good'}
           />
           <p className="text-sm text-muted-foreground">
-            {eventComparisonSentence(rows, base, current, baseTotal, currentTotal)}
+            {insight ?? eventComparisonSentence(rows, base, current, baseTotal, currentTotal)}
             {newDepartments > 0
               ? ` ${formatNumber(newDepartments)} department${newDepartments === 1 ? '' : 's'} new in ${current} (no ${base} base to index).`
               : ''}

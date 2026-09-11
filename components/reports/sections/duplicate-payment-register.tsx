@@ -65,11 +65,13 @@ export function DuplicatePaymentRegisterSection({
   error,
   compareBasis,
   previousPreventedAmount,
+  insight,
 }: {
   rows: DuplicatePaymentClusterRow[]
   error: string | null
   compareBasis: CompareBasis
   previousPreventedAmount: number | null
+  insight?: string | null
 }) {
   const prevented = preventedAmount(rows)
   const clusters = preventedClusterCount(rows)
@@ -186,7 +188,7 @@ export function DuplicatePaymentRegisterSection({
               delta={`${formatINRCompact(b.dismissedAmount)} cleared`}
             />
           </div>
-          <p className="text-sm text-muted-foreground">{duplicatePaymentRegisterSentence(rows)}</p>
+          <p className="text-sm text-muted-foreground">{insight ?? duplicatePaymentRegisterSentence(rows)}</p>
           <DataTable
             columns={columns}
             rows={rows}

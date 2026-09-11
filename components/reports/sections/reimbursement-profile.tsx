@@ -75,6 +75,7 @@ export function ReimbursementProfileSection({
   compareBasis,
   previousTotalReimbursed,
   previousReimburseeCount,
+  insight,
 }: {
   rows: ReimbursementProfileRow[]
   byType: ReimbursementByTypeRow[]
@@ -83,6 +84,7 @@ export function ReimbursementProfileSection({
   compareBasis: CompareBasis
   previousTotalReimbursed: number | null
   previousReimburseeCount: number | null
+  insight?: string | null
 }) {
   const total = rows.reduce((s, r) => s + (r.total_amount ?? 0), 0)
   const prevTotal = compareBasis === 'prior_event' ? previousTotalReimbursed : null
@@ -180,7 +182,7 @@ export function ReimbursementProfileSection({
               deltaTone={deltaToneHigherIsBad(rows.length, prevCount)}
             />
           </div>
-          <p className="text-sm text-muted-foreground">{reimbursementProfileSentence(rows, byType)}</p>
+          <p className="text-sm text-muted-foreground">{insight ?? reimbursementProfileSentence(rows, byType)}</p>
           <BarList items={barItems} valueFormatter={formatINRCompact} />
           {byTypeError ? (
             <p className="text-xs text-muted-foreground">Reimbursement-type mix unavailable: {byTypeError}</p>

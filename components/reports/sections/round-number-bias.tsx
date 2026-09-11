@@ -65,6 +65,7 @@ export function RoundNumberBiasSection({
   overallSharePct,
   compareBasis,
   previousOverallSharePct,
+  insight,
 }: {
   rows: RoundNumberBiasRow[]
   error: string | null
@@ -75,6 +76,7 @@ export function RoundNumberBiasSection({
   overallSharePct: number
   compareBasis: CompareBasis
   previousOverallSharePct: number | null
+  insight?: string | null
 }) {
   const previous = compareBasis === 'prior_event' ? previousOverallSharePct : null
 
@@ -150,7 +152,7 @@ export function RoundNumberBiasSection({
             deltaTone={deltaToneHigherIsBad(overallSharePct, previous)}
           />
           <p className="text-sm text-muted-foreground">
-            {roundNumberSentence(overallRoundCount, overallEntryCount, overallSharePct, byDepartment, byVendor)}
+            {insight ?? roundNumberSentence(overallRoundCount, overallEntryCount, overallSharePct, byDepartment, byVendor)}
           </p>
           <div className="grid gap-6 sm:grid-cols-2">
             <div className="flex flex-col gap-2">

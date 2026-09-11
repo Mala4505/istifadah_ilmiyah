@@ -24,6 +24,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { getSelectedEvent } from '@/lib/events/current'
 import { friendlyDataError } from '@/lib/friendly-error'
+import { formatINRCompact, formatNumber, formatPercent, humanizeCode } from '@/lib/reports/format'
 import type { CompareBasis } from '@/lib/reports/compare-basis'
 import { ROW_CAP, resolvePreviousEvent } from '@/lib/reports/sections/shared'
 
@@ -178,12 +179,14 @@ export type EntryTypeFlowSurfaceData = {
     rows: EntryTypeByDepartmentRow[]
     error: string | null
     previousReimbursementSharePct: number | null
+    insight: string | null
   }
   outstandingAdvanceAgeing: {
     rows: OutstandingAdvanceAgeingRow[]
     error: string | null
     previousOutstandingCount: number | null
     previousOutstandingAmount: number | null
+    insight: string | null
   }
   reimbursementProfile: {
     rows: ReimbursementProfileRow[]
@@ -192,7 +195,57 @@ export type EntryTypeFlowSurfaceData = {
     byTypeError: string | null
     previousTotalReimbursed: number | null
     previousReimburseeCount: number | null
+    insight: string | null
   }
+}
+
+/** Mirrors entry-type-split.tsx's entryTypeSplitSentence. */
+function entryTypeSplitInsight(rows: EntryTypeByDepartmentRow[]): string | null {
+  if (rows.length === 0) return null
+  const share = reimbursementShare(rows)
+  const top = topReimbursementDepartment(rows)
+  if (!top) {
+    return `Reimbursements are ${formatPercent(share.reimbursementSharePct)} of ${formatINRCompact(
+      share.totalSpend
+    )} total spend this event — no department leans on them materially.`
+  }
+  return `Reimbursements are ${formatPercent(share.reimbursementSharePct)} of ${formatINRCompact(
+    share.totalSpend
+  )} total spend this event; ${top.departmentName} leans on them most at ${formatPercent(
+    top.sharePct
+  )} of its own spend (${formatINRCompact(top.reimbursementSpend)}).`
+}
+
+/** Mirrors outstanding-advance-ageing.tsx's outstandingAdvanceSentence. */
+function outstandingAdvanceInsight(rows: OutstandingAdvanceAgeingRow[]): string | null {
+  if (rows.length === 0) return null
+  const total = rows.reduce((s, r) => s + (r.advance_amount ?? 0), 0)
+  const over90 = rows.filter((r) => r.age_bucket === '90+').reduce((s, r) => s + (r.advance_amount ?? 0), 0)
+  const oldest = [...rows].sort((a, b) => (b.days_outstanding ?? -1) - (a.days_outstanding ?? -1))[0]!
+  const owner =
+    oldest.admin_head_name ?? oldest.department_name ?? oldest.vendor_display_name ?? 'an unassigned advance'
+  return `${formatINRCompact(total)} across ${formatNumber(rows.length)} advance${
+    rows.length === 1 ? '' : 's'
+  } is unsettled this event, ${formatINRCompact(over90)} of it over 90 days — the oldest sits ${formatNumber(
+    oldest.days_outstanding ?? 0
+  )} days out, owned by ${owner}.`
+}
+
+/** Mirrors reimbursement-profile.tsx's reimbursementProfileSentence. */
+function reimbursementProfileInsight(
+  rows: ReimbursementProfileRow[],
+  byType: ReimbursementByTypeRow[]
+): string | null {
+  if (rows.length === 0) return null
+  const total = rows.reduce((s, r) => s + (r.total_amount ?? 0), 0)
+  const lead = [...rows].sort((a, b) => (b.total_amount ?? 0) - (a.total_amount ?? 0))[0]!
+  const topType = [...byType].sort((a, b) => (b.total_amount ?? 0) - (a.total_amount ?? 0))[0]
+  const typeBit = topType
+    ? ` — ${humanizeCode(topType.reimbursement_type)} is the dominant type at ${formatINRCompact(topType.total_amount)}`
+    : ''
+  return `${formatNumber(rows.length)} reimbursee${rows.length === 1 ? '' : 's'} drew ${formatINRCompact(
+    total
+  )} this event; ${lead.reimbursee_name} is the largest at ${formatINRCompact(lead.total_amount)}${typeBit}.`
 }
 
 export async function loadEntryTypeFlow(compareBasis: CompareBasis): Promise<EntryTypeFlowSurfaceData> {
@@ -282,12 +335,14 @@ export async function loadEntryTypeFlow(compareBasis: CompareBasis): Promise<Ent
       rows: splitRows,
       error: friendlyDataError(splitRes.error, 'reports:budget:entry-type-split'),
       previousReimbursementSharePct,
+      insight: entryTypeSplitInsight(splitRows),
     },
     outstandingAdvanceAgeing: {
       rows: advanceRows,
       error: friendlyDataError(advanceRes.error, 'reports:budget:outstanding-advance-ageing'),
       previousOutstandingCount,
       previousOutstandingAmount,
+      insight: outstandingAdvanceInsight(advanceRows),
     },
     reimbursementProfile: {
       rows: reimbRows,
@@ -296,6 +351,7 @@ export async function loadEntryTypeFlow(compareBasis: CompareBasis): Promise<Ent
       byTypeError: friendlyDataError(reimbTypeRes.error, 'reports:budget:reimbursement-by-type'),
       previousTotalReimbursed,
       previousReimburseeCount,
+      insight: reimbursementProfileInsight(reimbRows, reimbTypeRows),
     },
   }
 }

@@ -44,6 +44,7 @@ export function SpendCurveSection({
   meanWeeklyAmount,
   peakMultipleOfMean,
   previousPeakWeekAmount,
+  insight,
 }: {
   rows: WeeklySpendCurveRow[]
   error: string | null
@@ -55,6 +56,7 @@ export function SpendCurveSection({
   meanWeeklyAmount: number
   peakMultipleOfMean: number | null
   previousPeakWeekAmount: number | null
+  insight?: string | null
 }) {
   const points: SpendCurvePoint[] = rows.map((r) => ({
     weekStart: r.week_start,
@@ -114,7 +116,8 @@ export function SpendCurveSection({
             </div>
           </div>
           <p className="text-sm text-muted-foreground">
-            {spendCurveSentence(rows, peakWeekStart, peakWeekAmount, meanWeeklyAmount, peakMultipleOfMean, totalSpend)}
+            {insight ??
+              spendCurveSentence(rows, peakWeekStart, peakWeekAmount, meanWeeklyAmount, peakMultipleOfMean, totalSpend)}
           </p>
           <SpendCurveChart points={points} meanAmount={meanWeeklyAmount} />
         </>

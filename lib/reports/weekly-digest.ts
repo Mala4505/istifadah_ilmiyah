@@ -86,6 +86,17 @@ export type WeeklyDigestCategory =
   | 'rate_drift'
   | 'new_vendor'
 
+/** Display label per category -- shared by the loader's own insight sentence
+ *  and the section component's list/CSV labelling, so there is one spelling. */
+export const CATEGORY_LABEL: Record<WeeklyDigestCategory, string> = {
+  compliance_flag: 'compliance flags',
+  reconciliation: 'reconciliation gaps',
+  budget_pace: 'budget pace',
+  overpayment: 'overpayment',
+  rate_drift: 'rate drift',
+  new_vendor: 'new vendors',
+}
+
 export type WeeklyDigestItem = {
   /** Stable unique key across a refresh -- `${category}:${sourceId}`. */
   key: string
@@ -110,6 +121,11 @@ export type WeeklyDigestItem = {
 export type WeeklyDigestData = {
   eventName: string | null
   items: WeeklyDigestItem[]
+  /** "Ten items, ₹4.2 L in total, led by overpayment." -- one sentence over
+   *  the ranked items, for the Brief's insight slot. Null when nothing
+   *  crossed the threshold this week (the section's own empty state already
+   *  says so). */
+  insight: string | null
   errors: {
     compliance: string | null
     reconciliation: string | null
@@ -172,6 +188,21 @@ function modal(rows: VendorOwnerRow[], key: 'department_id' | 'admin_head_id'): 
     }
   }
   return best
+}
+
+/** "Ten items, ₹4.2 L in total, led by overpayment." -- pure function of the
+ *  ranked items (Phase 3.4 insight slot). Mirrors the section component's own
+ *  display summary but returns null (nothing) on an empty digest instead of a
+ *  placeholder sentence, since the empty state already covers that. */
+function weeklyDigestInsight(items: WeeklyDigestItem[]): string | null {
+  if (items.length === 0) return null
+  const total = items.reduce((sum, i) => sum + (i.amount ?? 0), 0)
+  const byCategory = new Map<WeeklyDigestCategory, number>()
+  for (const i of items) byCategory.set(i.category, (byCategory.get(i.category) ?? 0) + (i.amount ?? 0))
+  const lead = [...byCategory.entries()].sort((a, b) => b[1] - a[1])[0]
+  const countWord = items.length === 1 ? '1 item' : `${items.length} items`
+  const leadClause = lead ? `, led by ${CATEGORY_LABEL[lead[0]]}` : ''
+  return `${countWord}, ${formatINRCompact(total)} in total${leadClause}.`
 }
 
 function ageLabelDays(iso: string | null): number | null {
@@ -490,6 +521,7 @@ export async function loadWeeklyDigest(
   return {
     eventName: eventRes.data?.name ?? null,
     items: ranked,
+    insight: weeklyDigestInsight(ranked),
     errors: {
       compliance: complianceErr,
       reconciliation: reconciliationErr,

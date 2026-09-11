@@ -50,6 +50,7 @@ export function VendorActivitySpanSection({
   previousMaterialCount,
   eventStartsOn,
   eventEndsOn,
+  insight,
 }: {
   rows: VendorActivitySpanRow[]
   error: string | null
@@ -57,6 +58,7 @@ export function VendorActivitySpanSection({
   previousMaterialCount: number | null
   eventStartsOn: string | null
   eventEndsOn: string | null
+  insight?: string | null
 }) {
   const material = rows.filter(isMaterialSingleAppearance)
   const previous = compareBasis === 'prior_event' ? previousMaterialCount : null
@@ -155,7 +157,7 @@ export function VendorActivitySpanSection({
             delta={formatDeltaVs(compareBasis, material.length, previous, 'count')}
             deltaTone={deltaToneHigherIsBad(material.length, previous)}
           />
-          <p className="text-sm text-muted-foreground">{vendorActivitySpanSentence(rows)}</p>
+          <p className="text-sm text-muted-foreground">{insight ?? vendorActivitySpanSentence(rows)}</p>
           {domainStart && domainEnd ? (
             <VendorActivityTimelineChart vendors={laneVendors} domainStart={domainStart} domainEnd={domainEnd} />
           ) : (

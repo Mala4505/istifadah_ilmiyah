@@ -29,6 +29,7 @@ import { getSelectedEvent } from '@/lib/events/current'
 import { friendlyDataError } from '@/lib/friendly-error'
 import type { CompareBasis } from '@/lib/reports/compare-basis'
 import { ROW_CAP, resolvePreviousEvent, round2Local } from '@/lib/reports/sections/shared'
+import { formatNumber, formatPercent } from '@/lib/reports/format'
 
 /** One row of v_hsn_gst_anomaly -- one bill. `entry_id` / vendor / department
  *  / `event_id` are null for a bill whose entry is outside the caller's RLS
@@ -89,6 +90,27 @@ export type HsnGstAnomalySurfaceData = {
   anomalyCount: number
   billsWithBothRates: number
   billedSpendTotal: number
+  insight: string | null
+}
+
+/** "X% of billed spend carries an HSN/SAC code; of N comparable bills, M depart from the code-implied GST rate." */
+function hsnGstAnomalyInsight(
+  rows: HsnGstAnomalyRow[],
+  coveragePct: number | null,
+  billsWithBothRates: number,
+  anomalyCount: number,
+  hsnRateTableEmpty: boolean
+): string | null {
+  if (rows.length === 0) return null
+  const coverageBit =
+    coveragePct == null
+      ? 'No billed spend to measure HSN/SAC coverage against yet'
+      : `${formatPercent(coveragePct)} of billed spend carries an HSN or SAC code`
+  if (hsnRateTableEmpty) return `${coverageBit}.`
+  if (billsWithBothRates === 0) return `${coverageBit}, with no bill yet comparable for a GST anomaly check.`
+  return `${coverageBit}; of ${formatNumber(billsWithBothRates)} bill${
+    billsWithBothRates === 1 ? '' : 's'
+  } comparable for GST, ${formatNumber(anomalyCount)} depart${anomalyCount === 1 ? 's' : ''} from the code-implied rate.`
 }
 
 export async function loadHsnGstAnomaly(compareBasis: CompareBasis): Promise<HsnGstAnomalySurfaceData> {
@@ -139,5 +161,6 @@ export async function loadHsnGstAnomaly(compareBasis: CompareBasis): Promise<Hsn
     anomalyCount,
     billsWithBothRates,
     billedSpendTotal,
+    insight: hsnGstAnomalyInsight(rows, coveragePct, billsWithBothRates, anomalyCount, (rateCountRes.count ?? 0) === 0),
   }
 }

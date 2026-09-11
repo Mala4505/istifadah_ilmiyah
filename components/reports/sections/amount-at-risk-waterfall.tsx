@@ -86,10 +86,12 @@ export function AmountAtRiskWaterfallSection({
   rows,
   totalSpend,
   error,
+  insight,
 }: {
   rows: AmountAtRiskByStatusRow[]
   totalSpend: number
   error: string | null
+  insight?: string | null
 }) {
   const stages = buildAmountAtRiskStages(rows, totalSpend)
   const resolved = stageAmount(stages, 'upheld') + stageAmount(stages, 'cleared')
@@ -165,7 +167,7 @@ export function AmountAtRiskWaterfallSection({
             }
             deltaTone="neutral"
           />
-          <p className="text-sm text-muted-foreground">{amountAtRiskWaterfallSentence(stages)}</p>
+          <p className="text-sm text-muted-foreground">{insight ?? amountAtRiskWaterfallSentence(stages)}</p>
           <WaterfallChart stages={stages} />
           <DataTable columns={tableColumns} rows={tableRows} getRowKey={(s) => s.key} />
         </>

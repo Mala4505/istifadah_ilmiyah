@@ -55,12 +55,14 @@ export function DiscountConsistencySection({
   compareBasis,
   previousInconsistentCount,
   coverage,
+  insight,
 }: {
   groups: DiscountConsistencyGroup[]
   error: string | null
   compareBasis: CompareBasis
   previousInconsistentCount: number | null
   coverage: { observed: number; total: number }
+  insight?: string | null
 }) {
   const multiDept = groups.filter((g) => g.departments.length >= 2)
   const flagged = inconsistent(multiDept)
@@ -173,7 +175,7 @@ export function DiscountConsistencySection({
             captured discount{coveragePct != null ? ` (${formatPercent(coveragePct)})` : ''} — the comparison below is only as
             complete as that number.
           </p>
-          <p className="text-sm text-muted-foreground">{discountConsistencySentence(groups, coverage)}</p>
+          <p className="text-sm text-muted-foreground">{insight ?? discountConsistencySentence(groups, coverage)}</p>
           {chartGroups.length > 0 && <DiscountSpreadChart groups={chartGroups} />}
           <DataTable
             columns={columns}

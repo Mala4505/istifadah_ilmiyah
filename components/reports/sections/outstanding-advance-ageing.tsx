@@ -73,12 +73,14 @@ export function OutstandingAdvanceAgeingSection({
   compareBasis,
   previousOutstandingCount,
   previousOutstandingAmount,
+  insight,
 }: {
   rows: OutstandingAdvanceAgeingRow[]
   error: string | null
   compareBasis: CompareBasis
   previousOutstandingCount: number | null
   previousOutstandingAmount: number | null
+  insight?: string | null
 }) {
   const total = rows.reduce((s, r) => s + (r.advance_amount ?? 0), 0)
   const amounts = bucketAmounts(rows)
@@ -189,7 +191,7 @@ export function OutstandingAdvanceAgeingSection({
               deltaTone={deltaToneHigherIsBad(rows.length, prevCount)}
             />
           </div>
-          <p className="text-sm text-muted-foreground">{outstandingAdvanceSentence(rows)}</p>
+          <p className="text-sm text-muted-foreground">{insight ?? outstandingAdvanceSentence(rows)}</p>
           {barItems.length > 0 && <BarList items={barItems} max={maxBucket} valueFormatter={formatINRCompact} />}
           <DataTable columns={columns} rows={tableRows} getRowKey={(r) => r.entry_id} />
         </>

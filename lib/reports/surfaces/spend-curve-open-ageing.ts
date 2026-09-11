@@ -31,6 +31,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { getSelectedEvent } from '@/lib/events/current'
 import { friendlyDataError } from '@/lib/friendly-error'
+import { formatDate, formatINR, formatNumber } from '@/lib/reports/format'
 import type { CompareBasis } from '@/lib/reports/compare-basis'
 import { ROW_CAP, resolvePreviousEvent, round2Local } from '@/lib/reports/sections/shared'
 
@@ -96,6 +97,7 @@ export type SpendCurveOpenAgeingData = {
     peakMultipleOfMean: number | null
     /** prior_event only: that event's peak_week_amount. */
     previousPeakWeekAmount: number | null
+    insight: string | null
   }
   openItemAgeing: {
     rows: OpenItemAgeingRow[]
@@ -106,7 +108,56 @@ export type SpendCurveOpenAgeingData = {
     agedAmountAtRisk: number
     /** prior_event only: that event's aged-open count. */
     previousAgedOpenCount: number | null
+    insight: string | null
   }
+}
+
+/** Mirrors spend-curve.tsx's spendCurveSentence. */
+function spendCurveInsight(
+  rows: WeeklySpendCurveRow[],
+  peakWeekStart: string | null,
+  peakWeekAmount: number,
+  meanWeeklyAmount: number,
+  peakMultipleOfMean: number | null,
+  totalSpend: number
+): string | null {
+  if (rows.length === 0) return null
+  if (!peakWeekStart || peakWeekAmount <= 0) return null
+  const multiple =
+    peakMultipleOfMean != null ? `${peakMultipleOfMean.toFixed(1)}× the ${formatINR(meanWeeklyAmount)} weekly mean` : null
+  const share = totalSpend > 0 ? `${Math.round((peakWeekAmount / totalSpend) * 100)}% of the event's total spend` : null
+  const tail = [multiple, share].filter(Boolean).join(', and ')
+  return `The busiest week was the week of ${formatDate(peakWeekStart)} at ${formatINR(peakWeekAmount)}${
+    tail ? ` — ${tail}` : ''
+  }.`
+}
+
+/** Mirrors open-item-ageing.tsx's openItemAgeingSentence + buildDepartmentRanking
+ *  (self-contained here rather than imported, so this data loader doesn't take
+ *  on a dependency on the UI layer). */
+function openItemAgeingInsight(rows: OpenItemAgeingRow[], agedCount: number, agedAtRisk: number): string | null {
+  if (rows.length === 0) return null
+  if (agedCount === 0) return `${formatNumber(rows.length)} items open, none older than 30 days.`
+  const byDept = new Map<string, { name: string; agedAtRisk: number; agedCount: number }>()
+  for (const r of rows) {
+    if (r.age_bucket !== '31-60' && r.age_bucket !== '60+') continue
+    const key = r.department_id != null ? String(r.department_id) : 'Unassigned'
+    const name = r.department_name ?? 'Unassigned'
+    const existing = byDept.get(key) ?? { name, agedAtRisk: 0, agedCount: 0 }
+    existing.agedAtRisk += r.amount_at_risk ?? 0
+    existing.agedCount += 1
+    byDept.set(key, existing)
+  }
+  const lead = [...byDept.values()].sort((a, b) => b.agedAtRisk - a.agedAtRisk)[0]
+  const leadDetail =
+    lead && lead.agedAtRisk > 0
+      ? ` — ${lead.name} is sitting on the most (${formatNumber(lead.agedCount)} aged item${
+          lead.agedCount === 1 ? '' : 's'
+        }, ${formatINR(lead.agedAtRisk)} at risk)`
+      : ''
+  return `${formatNumber(agedCount)} item${agedCount === 1 ? '' : 's'} open past 30 days, ${formatINR(
+    agedAtRisk
+  )} at risk in ${agedCount === 1 ? 'it' : 'them'}${leadDetail}.`
 }
 
 export async function loadSpendCurveOpenAgeing(compareBasis: CompareBasis): Promise<SpendCurveOpenAgeingData> {
@@ -189,6 +240,14 @@ export async function loadSpendCurveOpenAgeing(compareBasis: CompareBasis): Prom
       meanWeeklyAmount,
       peakMultipleOfMean,
       previousPeakWeekAmount,
+      insight: spendCurveInsight(
+        curveRows,
+        first?.peak_week_start ?? null,
+        peakWeekAmount,
+        meanWeeklyAmount,
+        peakMultipleOfMean,
+        totalSpend
+      ),
     },
     openItemAgeing: {
       rows: ageingRows,
@@ -196,6 +255,7 @@ export async function loadSpendCurveOpenAgeing(compareBasis: CompareBasis): Prom
       agedOpenCount,
       agedAmountAtRisk,
       previousAgedOpenCount,
+      insight: openItemAgeingInsight(ageingRows, agedOpenCount, agedAmountAtRisk),
     },
   }
 }

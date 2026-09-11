@@ -54,6 +54,7 @@ import { getSelectedEvent } from '@/lib/events/current'
 import { friendlyDataError } from '@/lib/friendly-error'
 import type { CompareBasis } from '@/lib/reports/compare-basis'
 import { RATE_ABOVE_BENCHMARK_PCT } from '@/lib/analytics/thresholds'
+import { formatINRCompact, formatNumber } from '@/lib/reports/format'
 import { ROW_CAP, resolvePreviousEvent } from '@/lib/reports/sections/shared'
 import { PRICE_POSITION_TOLERANCE } from '@/lib/reports/surfaces/vendor-scorecard'
 
@@ -137,6 +138,27 @@ export function statusBreakdown(rows: DuplicatePaymentClusterRow[]): DuplicateRe
     }
   }
   return b
+}
+
+/** "₹X across N duplicate clusters has been prevented this event — ₹Y
+ *  confirmed by a reviewer, ₹Z still open. {lead vendor} accounts for the
+ *  largest single cluster at ₹W." */
+export function duplicateRegisterInsight(rows: DuplicatePaymentClusterRow[]): string | null {
+  if (rows.length === 0) return null
+  const prevented = preventedAmount(rows)
+  const clusters = preventedClusterCount(rows)
+  const b = statusBreakdown(rows)
+  const lead = [...rows].sort((a, z) => (z.duplicate_amount ?? 0) - (a.duplicate_amount ?? 0))[0]!
+  const leadText =
+    lead.vendor_display_name != null
+      ? ` ${lead.vendor_display_name} accounts for the largest single cluster at ${formatINRCompact(lead.duplicate_amount)}.`
+      : ''
+  return (
+    `${formatINRCompact(prevented)} across ${formatNumber(clusters)} duplicate ` +
+    `cluster${clusters === 1 ? '' : 's'} has been prevented this event — ` +
+    `${formatINRCompact(b.confirmedAmount)} confirmed by a reviewer, ${formatINRCompact(b.openAmount)} still open.` +
+    leadText
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -266,6 +288,28 @@ export function elevatedCount(rows: VendorRiskBoardRow[]): number {
   return rows.filter((r) => r.risk_band === 'elevated').length
 }
 
+/** "N of the top M vendors by spend sit in the elevated-risk band —
+ *  {lead} highest at a risk score of {score}, on {reasons}." */
+export function vendorRiskBoardInsight(rows: VendorRiskBoardRow[]): string | null {
+  if (rows.length === 0) return null
+  const elevated = rows.filter((r) => r.risk_band === 'elevated')
+  if (elevated.length === 0) {
+    return `None of the top ${formatNumber(rows.length)} vendors by spend reach the elevated-risk band this event — no vendor combines an above-benchmark price, open flags, weak document coverage and a flagged GSTIN.`
+  }
+  const lead = [...elevated].sort((a, z) => z.risk_score - a.risk_score)[0]!
+  const reasons: string[] = []
+  if (lead.risk_breakdown.price > 0) reasons.push('priced above our benchmark')
+  if (lead.risk_breakdown.flags > 0)
+    reasons.push(`${formatNumber(lead.open_flag_count)} open flag${lead.open_flag_count === 1 ? '' : 's'}`)
+  if (lead.risk_breakdown.docs > 0) reasons.push('weak document coverage')
+  if (lead.risk_breakdown.gstin > 0) reasons.push(lead.gstin_status === 'flagged' ? 'a flagged GSTIN' : 'no GSTIN on file')
+  return `${formatNumber(elevated.length)} of the top ${formatNumber(
+    rows.length
+  )} vendors by spend sit in the elevated-risk band this event — ${lead.vendor_display_name} highest at a risk score of ${formatNumber(
+    lead.risk_score
+  )}, on ${reasons.join(', ')}.`
+}
+
 // ---------------------------------------------------------------------------
 
 export type DuplicateVendorRiskData = {
@@ -276,11 +320,13 @@ export type DuplicateVendorRiskData = {
     error: string | null
     previousPreventedAmount: number | null
     previousPreventedClusterCount: number | null
+    insight: string | null
   }
   vendorRiskBoard: {
     rows: VendorRiskBoardRow[]
     error: string | null
     previousElevatedCount: number | null
+    insight: string | null
   }
 }
 
@@ -353,11 +399,13 @@ export async function loadDuplicateVendorRisk(compareBasis: CompareBasis): Promi
       error: friendlyDataError(registerRes.error, 'reports:duplicate-register'),
       previousPreventedAmount,
       previousPreventedClusterCount,
+      insight: duplicateRegisterInsight(registerRows),
     },
     vendorRiskBoard: {
       rows: riskBoardRows,
       error: friendlyDataError(scorecardRes.error, 'reports:vendor-risk-board'),
       previousElevatedCount,
+      insight: vendorRiskBoardInsight(riskBoardRows),
     },
   }
 }

@@ -732,12 +732,20 @@ export function ReviewWorkspace({
   >(null)
 
   // event-scoping-and-review-fixes-plan.md §2.4: "stop the vendor overwrite."
-  // Selecting a vendor from the `/` picker no longer overwrites the on-screen
-  // OCR vendor name -- it only links vendorId (see handleVendorSelect below).
-  // When the OCR spelling differs from the selected vendor's own spelling,
-  // this prompt offers to record the OCR spelling as a vendor_alias instead,
-  // via the new confirmVendorAlias server action. Declining or accepting
-  // either way never touches `header` -- only this dialog's own state.
+  // Selecting a vendor from the `/` picker never overwrites the on-screen OCR
+  // vendor name BY ITSELF -- it only links vendorId (see handleVendorSelect
+  // below). When the OCR spelling differs from the selected vendor's own
+  // spelling, this prompt surfaces the mismatch and offers two explicit,
+  // reviewer-chosen paths (2026-09-11 follow-up -- §2.4 removed the silent
+  // overwrite but left no way to deliberately ask for the master spelling
+  // either): "Use '<vendor>'" calls handleUseVendorSpelling, which sets
+  // `vendorName` exactly as if the reviewer had retyped it -- a real edit,
+  // saved on the next document save. "Keep '<OCR text>' & record it as
+  // another spelling" calls handleConfirmVendorAlias (the original §2.4
+  // path), which writes a vendor_alias via the confirmVendorAlias server
+  // action so a future bill with this same OCR misspelling matches faster,
+  // and never touches `header`. Dismissing the dialog either way (Cancel)
+  // does neither.
   const [vendorAliasPrompt, setVendorAliasPrompt] = useState<{
     vendorId: number
     vendorDisplayName: string
@@ -1370,6 +1378,23 @@ export function ReviewWorkspace({
     }
   }
 
+  // The dialog's other option (2026-09-11 follow-up to §2.4's "stop the
+  // vendor overwrite"): §2.4 was right that linking a vendor must never
+  // *silently* overwrite the OCR text, but it left no way to explicitly ask
+  // for the master spelling either -- a reviewer who knows the OCR read is
+  // the wrong one had to select-all and retype it by hand. This is that
+  // explicit path: it does exactly what typing the correction in by hand
+  // would do (setVendorName, nothing more), just pre-filled from the linked
+  // vendor's own display_name rather than keystroke by keystroke. Unlike
+  // handleConfirmVendorAlias, this never touches vendor_alias -- the OCR
+  // spelling being replaced isn't being taught to the matcher, it's being
+  // discarded for this bill.
+  function handleUseVendorSpelling() {
+    if (!vendorAliasPrompt) return
+    setVendorName(vendorAliasPrompt.vendorDisplayName)
+    setVendorAliasPrompt(null)
+  }
+
   function openHubStatus() {
     if (!detail.canSetHubStatus || detail.entryId === null) {
       toast.error(
@@ -1957,18 +1982,26 @@ export function ReviewWorkspace({
         <DialogContent>
           <DialogHeader>
             <DialogTitle>
-              Record &lsquo;{vendorAliasPrompt?.rawName}&rsquo; as another spelling of {vendorAliasPrompt?.vendorDisplayName}?
+              &lsquo;{vendorAliasPrompt?.rawName}&rsquo; doesn&rsquo;t match {vendorAliasPrompt?.vendorDisplayName}&rsquo;s saved spelling
             </DialogTitle>
             <DialogDescription>
-              This only teaches future bills to match this vendor faster. The vendor name on this bill stays exactly as OCR read it.
+              Pick which one is right for this bill. Either way, nothing is saved until you save the whole document.
             </DialogDescription>
           </DialogHeader>
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setVendorAliasPrompt(null)} disabled={confirmingVendorAlias}>
-              No
+          <DialogFooter className="flex-col items-stretch gap-2 sm:flex-col sm:items-stretch sm:space-x-0">
+            <Button type="button" onClick={handleUseVendorSpelling} disabled={confirmingVendorAlias}>
+              Use &lsquo;{vendorAliasPrompt?.vendorDisplayName}&rsquo; on this bill
             </Button>
-            <Button type="button" onClick={handleConfirmVendorAlias} disabled={confirmingVendorAlias}>
-              Yes, record it
+            <Button type="button" variant="outline" onClick={handleConfirmVendorAlias} disabled={confirmingVendorAlias}>
+              Keep &lsquo;{vendorAliasPrompt?.rawName}&rsquo; &amp; record it as another spelling
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => setVendorAliasPrompt(null)}
+              disabled={confirmingVendorAlias}
+            >
+              Cancel
             </Button>
           </DialogFooter>
         </DialogContent>

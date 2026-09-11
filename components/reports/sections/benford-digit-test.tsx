@@ -60,6 +60,7 @@ export function BenfordDigitTestSection({
   totalCount,
   compareBasis,
   previousMad,
+  insight,
 }: {
   rows: BenfordDigitRow[]
   error: string | null
@@ -68,6 +69,7 @@ export function BenfordDigitTestSection({
   totalCount: number
   compareBasis: CompareBasis
   previousMad: number | null
+  insight?: string | null
 }) {
   const chartData: BenfordDigitDatum[] = [...rows]
     .sort((a, b) => a.leading_digit - b.leading_digit)
@@ -143,7 +145,7 @@ export function BenfordDigitTestSection({
               marginal, above 0.015 nonconformity.
             </p>
           </div>
-          <p className="text-sm text-muted-foreground">{benfordSentence(rows, mad)}</p>
+          <p className="text-sm text-muted-foreground">{insight ?? benfordSentence(rows, mad)}</p>
           <BenfordChart data={chartData} />
         </>
       )}
