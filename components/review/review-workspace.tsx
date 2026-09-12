@@ -111,6 +111,13 @@ function numToStr(v: string | number | null): string {
   return v === null || v === undefined ? '' : String(v)
 }
 
+// Support request 2026-09-12: rounds a computed money value (quantity x rate,
+// a line-item sum, subtotal + tax) to paise without the float noise
+// multiplication/addition leaves behind (e.g. 0.1 * 3 -> 0.30000000000000004).
+function roundMoney(n: number): string {
+  return String(Math.round((n + Number.EPSILON) * 100) / 100)
+}
+
 // 5.14 (checklist Phase 5, plan §13): accepts the two shapes real invoices
 // print amounts in that `Number(...)` chokes on -- a leading rupee sign and
 // thousands-separator commas. Stripped before parsing, not after -- there is
@@ -295,6 +302,16 @@ export function ReviewWorkspace({
   // full remount (a genuinely different document or a fresh extraction run).
   const hasEditedRef = useRef(false)
 
+  // Support request 2026-09-12: Subtotal/Total auto-fill from the live line
+  // items once the reviewer edits one (see the effects near lineItemSum
+  // below), but freeze the moment the reviewer types into that header field
+  // directly -- a bill's printed total can legitimately include an
+  // unitemized charge or rounding the line items don't capture, so a manual
+  // correction there must stick rather than get overwritten on the next
+  // keystroke elsewhere.
+  const subtotalManualRef = useRef(false)
+  const totalAmountManualRef = useRef(false)
+
   // 5.1 (perf remediation, Phase 5): twelve independent state slices instead
   // of one HeaderFormState object -- typing into one field used to replace
   // the whole object's identity every keystroke, which is what forced every
@@ -399,12 +416,14 @@ export function ReviewWorkspace({
         setInvoiceDate(value)
         break
       case 'subtotal':
+        subtotalManualRef.current = true
         setSubtotal(value)
         break
       case 'taxAmount':
         setTaxAmount(value)
         break
       case 'totalAmount':
+        totalAmountManualRef.current = true
         setTotalAmount(value)
         break
       case 'notes':
@@ -472,7 +491,25 @@ export function ReviewWorkspace({
         })
         return
       }
-      setLineItems((items) => items.map((li) => (li.id === id ? { ...li, [field]: value } : li)))
+      // Support request 2026-09-12: recompute this row's amount the moment
+      // quantity or rate changes, so the reviewer never has to do that
+      // multiplication by hand. Only fires once both sides parse as numbers
+      // -- a row still mid-edit (blank qty, a rate typo) leaves `amount`
+      // alone rather than clobbering a manually typed figure with NaN math.
+      setLineItems((items) =>
+        items.map((li) => {
+          if (li.id !== id) return li
+          const updated = { ...li, [field]: value }
+          if (field === 'quantity' || field === 'rate') {
+            const qty = parseNum(field === 'quantity' ? value : li.quantity)
+            const rate = parseNum(field === 'rate' ? value : li.rate)
+            if (qty !== null && rate !== null) {
+              updated.amount = roundMoney(qty * rate)
+            }
+          }
+          return updated
+        })
+      )
     },
     []
   )
@@ -577,6 +614,8 @@ export function ReviewWorkspace({
     setLinkedVendorName(detail.linkedVendorName)
     setUncertainStepIndex(null)
     hasEditedRef.current = false
+    subtotalManualRef.current = false
+    totalAmountManualRef.current = false
     didInitialFocusRef.current = false
     // A: drop the previous bill's live match list and re-baseline against
     // this bill's server-ranked inputs, so re-matching only re-fires once
@@ -1642,6 +1681,30 @@ export function ReviewWorkspace({
     [lineItems]
   )
   const documentTotal = parseNum(totalAmount)
+
+  // Support request 2026-09-12: keep Subtotal/Total live off the line items
+  // instead of leaving them frozen at whatever OCR read, once the reviewer
+  // actually edits something -- `hasEditedRef.current` alone (rather than
+  // this effect's own state) is what gates that, so the initial mount (where
+  // lineItemSum already matches the freshly loaded OCR subtotal) never fires
+  // this and clobbers a real read before the reviewer has touched anything.
+  // subtotalManualRef short-circuits it permanently once the reviewer types
+  // into Subtotal directly (see onHeaderChange above).
+  useEffect(() => {
+    if (!hasEditedRef.current || subtotalManualRef.current) return
+    setSubtotal(lineItemSum === null ? '' : roundMoney(lineItemSum))
+  }, [lineItemSum])
+
+  // Same idea for Total = Subtotal + Tax -- chains off the effect above
+  // (subtotal changing re-fires this one too) and off a direct Tax amount
+  // edit, but leaves Total alone until Subtotal actually parses to a number
+  // and until the reviewer hasn't typed into Total directly.
+  useEffect(() => {
+    if (!hasEditedRef.current || totalAmountManualRef.current) return
+    const subtotalNum = parseNum(subtotal)
+    if (subtotalNum === null) return
+    setTotalAmount(roundMoney(subtotalNum + (parseNum(taxAmount) ?? 0)))
+  }, [subtotal, taxAmount])
 
   // Redesign point 2: confidence/model/legibility/edited-count/bill-position
   // used to be five-plus separately-colored pills competing for attention.
