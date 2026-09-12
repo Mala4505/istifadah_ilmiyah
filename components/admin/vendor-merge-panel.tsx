@@ -1,7 +1,7 @@
 'use client'
 
-import { useEffect, useMemo, useState, useTransition } from 'react'
-import { Check, Pencil, X } from 'lucide-react'
+import { Fragment, useEffect, useMemo, useState, useTransition } from 'react'
+import { Check, ChevronDown, ChevronRight, Pencil, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { toastError } from '@/components/ui/error-toast'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
@@ -11,6 +11,7 @@ import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { mergeVendor, renameVendor, setVendorConfirmed, unmergeVendor } from '@/lib/actions/admin'
+import { VendorLineItemTemplate } from './vendor-line-item-template'
 
 export type VendorRow = {
   id: number
@@ -19,6 +20,7 @@ export type VendorRow = {
   gstin: string | null
   clusterGroupId: number | null
   isConfirmed: boolean
+  useLineItemTemplate: boolean
 }
 
 function matchesQuery(vendor: VendorRow, query: string): boolean {
@@ -37,6 +39,7 @@ export function VendorMergePanel({ vendors }: { vendors: VendorRow[] }) {
   const [editingId, setEditingId] = useState<number | null>(null)
   const [draftName, setDraftName] = useState('')
   const [isRenaming, startRename] = useTransition()
+  const [expandedId, setExpandedId] = useState<number | null>(null)
 
   useEffect(() => {
     setVendorList(vendors)
@@ -106,6 +109,10 @@ export function VendorMergePanel({ vendors }: { vendors: VendorRow[] }) {
     })
   }
 
+  function handleTemplateEnabledChange(vendorId: number, useLineItemTemplate: boolean) {
+    setVendorList((current) => current.map((v) => (v.id === vendorId ? { ...v, useLineItemTemplate } : v)))
+  }
+
   function handleUnmerge(vendor: VendorRow) {
     void (async () => {
       const result = await unmergeVendor({ vendorId: vendor.id })
@@ -128,6 +135,7 @@ export function VendorMergePanel({ vendors }: { vendors: VendorRow[] }) {
       <Table>
         <TableHeader>
           <TableRow>
+            <TableHead className="w-8" />
             <TableHead>Vendor</TableHead>
             <TableHead>GSTIN</TableHead>
             <TableHead>Confirmed</TableHead>
@@ -138,7 +146,7 @@ export function VendorMergePanel({ vendors }: { vendors: VendorRow[] }) {
         <TableBody>
           {filteredVendors.length === 0 ? (
             <TableRow>
-              <TableCell colSpan={5} className="text-center text-muted-foreground">
+              <TableCell colSpan={6} className="text-center text-muted-foreground">
                 No vendors match &quot;{query}&quot;.
               </TableCell>
             </TableRow>
@@ -146,8 +154,21 @@ export function VendorMergePanel({ vendors }: { vendors: VendorRow[] }) {
             filteredVendors.map((vendor) => {
               const root = vendor.clusterGroupId !== null ? vendorsById.get(vendor.clusterGroupId) : undefined
               const mergedCount = childCountByRootId.get(vendor.id) ?? 0
+              const isExpanded = expandedId === vendor.id
               return (
-                <TableRow key={vendor.id}>
+                <Fragment key={vendor.id}>
+                <TableRow>
+                  <TableCell>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7"
+                      onClick={() => setExpandedId(isExpanded ? null : vendor.id)}
+                      aria-label={isExpanded ? `Collapse ${vendor.displayName}` : `Expand ${vendor.displayName}`}
+                    >
+                      {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                    </Button>
+                  </TableCell>
                   <TableCell>
                     {editingId === vendor.id ? (
                       <div className="flex items-center gap-1">
@@ -229,6 +250,19 @@ export function VendorMergePanel({ vendors }: { vendors: VendorRow[] }) {
                     )}
                   </TableCell>
                 </TableRow>
+                {isExpanded ? (
+                  <TableRow>
+                    <TableCell colSpan={6} className="p-0">
+                      <div className="p-3">
+                        <VendorLineItemTemplate
+                          vendor={vendor}
+                          onEnabledChange={(enabled) => handleTemplateEnabledChange(vendor.id, enabled)}
+                        />
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ) : null}
+                </Fragment>
               )
             })
           )}

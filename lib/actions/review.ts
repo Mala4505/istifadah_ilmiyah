@@ -981,6 +981,106 @@ export async function searchReviewVendors(query: string): Promise<VendorSearchRe
   }))
 }
 
+export interface VendorLineItemTemplateRow {
+  lineOrder: number
+  description: string
+}
+
+export interface VendorLineItemTemplateResult {
+  enabled: boolean
+  rows: VendorLineItemTemplateRow[]
+}
+
+/**
+ * Reads a vendor's line-item template (20260912000001) -- used both by the
+ * Settings panel (components/admin/vendor-line-item-template.tsx, initial
+ * load) and by ReviewWorkspace.applyLineItemTemplate, which calls this the
+ * moment a vendor is linked to the current bill. Session client: the
+ * vendor_line_item_template_select RLS policy is staff-wide read, same as
+ * vendor itself, so any signed-in reviewer can see (though only an admin can
+ * edit) a vendor's saved template.
+ */
+export async function getVendorLineItemTemplate(vendorId: number): Promise<VendorLineItemTemplateResult> {
+  const supabase = await createClient()
+
+  const [{ data: vendorRow }, { data: templateRows }] = await Promise.all([
+    supabase.from('vendor').select('use_line_item_template').eq('id', vendorId).maybeSingle(),
+    supabase
+      .from('vendor_line_item_template')
+      .select('line_order, description')
+      .eq('vendor_id', vendorId)
+      .order('line_order'),
+  ])
+
+  return {
+    enabled: (vendorRow?.use_line_item_template as boolean | undefined) ?? false,
+    rows: (templateRows ?? []).map((r) => ({
+      lineOrder: r.line_order as number,
+      description: r.description as string,
+    })),
+  }
+}
+
+export interface VerifiedBillSummary {
+  documentExtractionId: number
+  invoiceNumber: string | null
+  entryDate: string | null
+  billTotal: number | null
+  billVerifiedAt: string
+}
+
+/**
+ * Lists a vendor's already-verified bills, newest first, for the "seed from a
+ * reviewed bill" picker (components/admin/vendor-line-item-template.tsx).
+ * Reuses v_rupee_provenance_entry (20260903000012) rather than a new query --
+ * it already joins entries to their primary document_extraction and exposes
+ * bill_verified_at, so "verified" here means the same thing it means
+ * everywhere else in the app.
+ */
+export async function listVerifiedBillsForVendor(vendorId: number): Promise<VerifiedBillSummary[]> {
+  const supabase = await createClient()
+
+  const { data, error } = await supabase
+    .from('v_rupee_provenance_entry')
+    .select('document_extraction_id, invoice_number, entry_date, bill_total_verified, bill_verified_at')
+    .eq('vendor_id', vendorId)
+    .not('document_extraction_id', 'is', null)
+    .not('bill_verified_at', 'is', null)
+    .order('bill_verified_at', { ascending: false })
+    .limit(20)
+
+  if (error || !data) return []
+  return data.map((row) => ({
+    documentExtractionId: row.document_extraction_id as number,
+    invoiceNumber: row.invoice_number as string | null,
+    entryDate: row.entry_date as string | null,
+    billTotal: row.bill_total_verified as number | null,
+    billVerifiedAt: row.bill_verified_at as string,
+  }))
+}
+
+export interface SeedBillLineItem {
+  lineNumber: number
+  description: string | null
+}
+
+/** Lines of one bill for the seed picker's checklist step (step 2 of "seed from a reviewed bill"). */
+export async function getBillLineItemsForSeeding(documentExtractionId: number): Promise<SeedBillLineItem[]> {
+  const supabase = await createClient()
+
+  const { data, error } = await supabase
+    .from('v_rupee_provenance_line')
+    .select('line_number, description')
+    .eq('document_extraction_id', documentExtractionId)
+    .order('line_number')
+
+  if (error || !data) return []
+  return data.map((row) => ({
+    lineNumber: row.line_number as number,
+    description: row.description as string | null,
+  }))
+}
+
 /**
  * event-scoping-and-review-fixes-plan.md §2.4: "stop the vendor overwrite."
  * Selecting a vendor from the `/` picker (handleVendorSelect in

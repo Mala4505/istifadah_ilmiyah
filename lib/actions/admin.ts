@@ -504,3 +504,94 @@ export async function setVendorConfirmed(input: {
   revalidatePath('/settings')
   return { ok: true }
 }
+
+/**
+ * Turns a vendor's line-item template on/off (20260912000001). Independent of
+ * whether any template rows exist -- the UI (vendor-line-item-template.tsx)
+ * disables the checkbox until at least one row is saved, but the column
+ * itself has no such constraint, so an empty-template enable is harmless
+ * (applyLineItemTemplate in review-workspace.tsx no-ops when there are no
+ * rows to apply).
+ */
+export async function setVendorTemplateEnabled(input: {
+  vendorId: number
+  enabled: boolean
+}): Promise<ActionResult> {
+  const gate = await requireAdminOrAbove()
+  if (!gate.ok) {
+    return { ok: false, error: 'Managing a vendor line-item template is an admin-only action.' }
+  }
+
+  const supabase = await createClient()
+
+  const { error } = await supabase
+    .from('vendor')
+    .update({ use_line_item_template: input.enabled })
+    .eq('id', input.vendorId)
+
+  if (error) return { ok: false, error: logRawError('admin.setVendorTemplateEnabled', error.message) }
+
+  revalidatePath('/settings')
+  return { ok: true }
+}
+
+const saveVendorLineItemTemplateSchema = z.object({
+  vendorId: z.number().int().positive(),
+  descriptions: z
+    .array(z.string().trim().min(1, 'A line-item description cannot be blank.').max(300, 'Description is too long.'))
+    .max(50, 'A template cannot hold more than 50 lines.'),
+})
+
+/**
+ * Replaces a vendor's whole line-item template in one go (seed, reorder, add,
+ * remove and rename all funnel through this -- the caller always sends the
+ * complete ordered list rather than a per-row diff, same "replace-all"
+ * simplicity as a small settings list). `line_order` is the array index, so
+ * reordering in the UI and re-saving is enough to persist a new order.
+ *
+ * Delete-then-insert rather than upsert: an empty array is a valid save (it
+ * clears the template), and row count can shrink between saves, which upsert
+ * alone wouldn't reconcile.
+ */
+export async function saveVendorLineItemTemplate(input: {
+  vendorId: number
+  descriptions: string[]
+}): Promise<ActionResult> {
+  const gate = await requireAdminOrAbove()
+  if (!gate.ok) {
+    return { ok: false, error: 'Managing a vendor line-item template is an admin-only action.' }
+  }
+
+  const parsed = saveVendorLineItemTemplateSchema.safeParse(input)
+  if (!parsed.success) {
+    return { ok: false, error: parsed.error.issues[0]!.message }
+  }
+  const { vendorId, descriptions } = parsed.data
+
+  const supabase = await createClient()
+
+  const { error: deleteError } = await supabase
+    .from('vendor_line_item_template')
+    .delete()
+    .eq('vendor_id', vendorId)
+
+  if (deleteError) {
+    return { ok: false, error: logRawError('admin.saveVendorLineItemTemplate:clear', deleteError.message) }
+  }
+
+  if (descriptions.length > 0) {
+    const { error: insertError } = await supabase.from('vendor_line_item_template').insert(
+      descriptions.map((description, index) => ({
+        vendor_id: vendorId,
+        line_order: index,
+        description,
+      })),
+    )
+    if (insertError) {
+      return { ok: false, error: logRawError('admin.saveVendorLineItemTemplate:insert', insertError.message) }
+    }
+  }
+
+  revalidatePath('/settings')
+  return { ok: true }
+}

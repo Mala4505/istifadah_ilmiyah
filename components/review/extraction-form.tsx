@@ -86,6 +86,17 @@ const UNCERTAIN_OFF_PAGE_CLASS = 'ring-1 ring-orange-300 opacity-60 dark:ring-or
  * ERROR_RING_CLASS in priority. */
 const EDITED_RING_CLASS = 'ring-2 ring-blue-500 ring-offset-1 dark:ring-offset-background'
 
+/** 20260912000001: a line-item description filled from the linked vendor's
+ *  saved line-item template (components/admin/vendor-line-item-template.tsx).
+ *  Distinct from EDITED_RING_CLASS because it explains *why* the value
+ *  differs from OCR — outranks "edited" for the same reason UNCERTAIN_RING_CLASS
+ *  does, but a real validation error or model uncertainty still wins. Cleared
+ *  the moment the reviewer types over the field (review-workspace.tsx's
+ *  onLineItemChange), at which point it becomes a plain edit. */
+const TEMPLATE_RING_CLASS = 'ring-2 ring-purple-500 ring-offset-1 dark:ring-offset-background'
+
+const EMPTY_TEMPLATE_FILLED: Set<number> = new Set()
+
 /** Checklist 5.15 (plan §13 V1): the validation-error state 3.3's comment
  * called out as "not built yet" -- an amount-shaped field whose text can't be
  * parsed as a number, which today saves as a silent null. Outranks both
@@ -242,6 +253,8 @@ export const ExtractionForm = memo(forwardRef(function ExtractionForm(
     onFieldEnter,
     uncertainFields = [],
     editedFields = EMPTY_EDITED_FIELDS,
+    templateFilledLineOrders = EMPTY_TEMPLATE_FILLED,
+    templateVendorName = null,
     validationErrors = EMPTY_VALIDATION_ERRORS,
     invoiceDateWarning = null,
     onAddLineItem,
@@ -267,6 +280,14 @@ export const ExtractionForm = memo(forwardRef(function ExtractionForm(
     /** Fields whose live value differs from its OCR baseline — drives the blue
      *  ring when a field isn't also flagged uncertain. */
     editedFields?: EditedFieldSets
+    /** 20260912000001: lineOrders whose `description` currently shows a
+     *  vendor-template fill rather than OCR/reviewer text — drives the purple
+     *  ring, outranking "edited" (it explains *why* the value differs from
+     *  OCR) but not "uncertain"/"error". */
+    templateFilledLineOrders?: Set<number>
+    /** The linked vendor's display name, shown in the template summary line
+     *  below the table. Null hides the line entirely (no vendor linked yet). */
+    templateVendorName?: string | null
     /** Checklist 5.15: amount-shaped fields that couldn't be parsed as a
      *  number — drives the red ring (highest priority) and Save is blocked
      *  while this is non-empty. */
@@ -612,24 +633,32 @@ export const ExtractionForm = memo(forwardRef(function ExtractionForm(
                 // 5.15: error outranks uncertain outranks edited -- a field
                 // that's both model-uncertain and unparseable still shows
                 // red, since it will silently fail to save either way.
-                const ringClass = (uncertain: UncertainField | undefined, editedKey: string, error = false) =>
+                // 20260912000001: templateFilled slots in between uncertain
+                // and edited -- it explains *why* the value differs from OCR,
+                // same rationale as uncertain outranking a plain edit.
+                const descTemplateFilled = templateFilledLineOrders.has(item.lineOrder)
+                const ringClass = (uncertain: UncertainField | undefined, editedKey: string, error = false, templateFilled = false) =>
                   error
                     ? ERROR_RING_CLASS
                     : uncertain
                       ? (isOnCurrentPage(uncertain) ? UNCERTAIN_RING_CLASS : UNCERTAIN_OFF_PAGE_CLASS)
-                      : lineItemEdited(item.lineOrder, editedKey)
-                        ? EDITED_RING_CLASS
-                        : ''
-                const titleFor = (uncertain: UncertainField | undefined, editedKey: string, error = false) =>
+                      : templateFilled
+                        ? TEMPLATE_RING_CLASS
+                        : lineItemEdited(item.lineOrder, editedKey)
+                          ? EDITED_RING_CLASS
+                          : ''
+                const titleFor = (uncertain: UncertainField | undefined, editedKey: string, error = false, templateFilled = false) =>
                   error
                     ? 'This value could not be read as a number and will not be saved -- fix or clear it'
                     : uncertain
                       ? isOnCurrentPage(uncertain)
                         ? `Model was uncertain about this value — click to jump to page ${uncertain.pageNumber}`
                         : `Model was uncertain about this value on page ${uncertain.pageNumber} — click to jump there`
-                      : lineItemEdited(item.lineOrder, editedKey)
-                        ? 'Edited from the original OCR value'
-                        : undefined
+                      : templateFilled
+                        ? "Filled from this vendor's saved line-item template — edit to override"
+                        : lineItemEdited(item.lineOrder, editedKey)
+                          ? 'Edited from the original OCR value'
+                          : undefined
                 const expanded = expandedRows.has(item.id)
                 const rowFocusProps = {
                   'data-row-id': item.id,
@@ -662,8 +691,8 @@ export const ExtractionForm = memo(forwardRef(function ExtractionForm(
                           data-line-jump-index={jumpIndex ?? undefined}
                           data-uncertain-index={descUncertainIndex}
                           disabled={disabled}
-                          className={ringClass(descUncertain, 'description')}
-                          title={titleFor(descUncertain, 'description')}
+                          className={ringClass(descUncertain, 'description', false, descTemplateFilled)}
+                          title={titleFor(descUncertain, 'description', false, descTemplateFilled)}
                           onFocus={() => descUncertain && onJumpToPage?.(descUncertain.pageNumber)}
                           value={item.description}
                           onChange={(e) => onLineItemChange(item.id, 'description', e.target.value)}
@@ -794,6 +823,17 @@ export const ExtractionForm = memo(forwardRef(function ExtractionForm(
           {currentPageUncertainFields.length > 0
             ? `This page has ${currentPageUncertainFields.length} flagged field${currentPageUncertainFields.length === 1 ? '' : 's'}: ${currentPageUncertainFields.map(describeUncertainField).join(', ')}.`
             : 'No flagged fields on this page.'}
+        </p>
+      ) : null}
+      {/* 20260912000001: mirrors the uncertain-fields clarification line above
+          -- a template fill is never silent, so this always says which lines
+          it touched and reminds the reviewer that the rest of the row stayed
+          live from OCR. */}
+      {templateFilledLineOrders.size > 0 ? (
+        <p className="rounded-md bg-purple-50 p-2 text-xs text-purple-700 dark:bg-purple-950/40 dark:text-purple-300">
+          {templateFilledLineOrders.size} description{templateFilledLineOrders.size === 1 ? '' : 's'} filled from
+          {templateVendorName ? ` ${templateVendorName}'s` : " this vendor's"} saved template. Quantity, rate and
+          amount were read from this bill.
         </p>
       ) : null}
     </div>

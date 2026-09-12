@@ -376,6 +376,15 @@ export function DocumentInbox({
   }
 
   const selectedCount = selected.size
+  // Assignment context (request: "show total bills and pgs selected so its
+  // easier for assignment") -- lets whoever's assigning gauge how much work
+  // a batch actually represents before handing it off, not just doc count.
+  // Bills only count documents already extracted; pageCount is null until
+  // the PDF's page count is known, so both sums quietly skip what isn't
+  // there yet rather than treating it as zero work.
+  const selectedDocs = documents.filter((d) => selected.has(d.id))
+  const selectedBillCount = selectedDocs.reduce((sum, d) => sum + d.extraction.length, 0)
+  const selectedPageCount = selectedDocs.reduce((sum, d) => sum + (d.pageCount ?? 0), 0)
 
   function handleBulkAttach() {
     const pairs = [...selected]
@@ -532,6 +541,13 @@ export function DocumentInbox({
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border bg-muted/30 px-4 py-2.5">
           <p className="text-sm">
             {selectedCount} document{selectedCount === 1 ? '' : 's'} selected
+            {(selectedBillCount > 0 || selectedPageCount > 0) && (
+              <span className="text-muted-foreground">
+                {' '}
+                &middot; {selectedBillCount} bill{selectedBillCount === 1 ? '' : 's'} &middot; {selectedPageCount}{' '}
+                page{selectedPageCount === 1 ? '' : 's'}
+              </span>
+            )}
           </p>
           <div className="flex items-center gap-2">
             <Button variant="ghost" size="sm" onClick={() => setSelected(new Set())} disabled={anyPending}>
@@ -618,6 +634,12 @@ export function DocumentInbox({
               Assign {selectedCount} {selectedCount === 1 ? 'document' : 'documents'}
             </DialogTitle>
             <DialogDescription>
+              {(selectedBillCount > 0 || selectedPageCount > 0) && (
+                <>
+                  {selectedBillCount} bill{selectedBillCount === 1 ? '' : 's'} &middot; {selectedPageCount} page
+                  {selectedPageCount === 1 ? '' : 's'} total.{' '}
+                </>
+              )}
               Pick one or more admins, or leave unassigned to send these back to the shared pool. This replaces
               the current assignment.
             </DialogDescription>

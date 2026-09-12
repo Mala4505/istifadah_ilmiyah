@@ -27,12 +27,14 @@ import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
-import { exceptionTypeLabel, severityBadgeVariant } from '@/components/exceptions/labels'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { exceptionTypeLabel, severityBadgeVariant, severityRank } from '@/components/exceptions/labels'
 import { normalizeUnit, normalizeVendorName } from '@/lib/normalize'
 import {
   addLineItem,
   claimReviewDocument,
   confirmVendorAlias,
+  getVendorLineItemTemplate,
   reExtractField,
   refreshMatchCandidates,
   releaseReviewDocument,
@@ -422,6 +424,14 @@ export function ReviewWorkspace({
   const [linkedVendorName, setLinkedVendorName] = useState<string | null>(detail.linkedVendorName)
   const [vendorAutocompleteOpen, setVendorAutocompleteOpen] = useState(false)
 
+  // Vendor line-item template (20260912000001): lineOrders whose `description`
+  // currently shows a vendor-template fill rather than OCR/reviewer text --
+  // drives the purple "Template" ring in ExtractionForm. Populated by
+  // applyLineItemTemplate (defined below, after editedFields), cleared
+  // per-row the moment the reviewer types over that description
+  // (onLineItemChange).
+  const [templateFilledLineOrders, setTemplateFilledLineOrders] = useState<Set<number>>(new Set())
+
   // A (2026-09-07): re-tally the Connect step's suggestions live from the
   // Verify-step vendor + the bill's total / date / invoice number. The page
   // load ranks them once (detail.matchCandidates); this recomputes whenever
@@ -447,6 +457,21 @@ export function ReviewWorkspace({
   const onLineItemChange = useCallback(
     (id: number, field: keyof Omit<LineItemFormState, 'id'>, value: string) => {
       hasEditedRef.current = true
+      if (field === 'description') {
+        setLineItems((items) => {
+          const target = items.find((li) => li.id === id)
+          if (target) {
+            setTemplateFilledLineOrders((current) => {
+              if (!current.has(target.lineOrder)) return current
+              const next = new Set(current)
+              next.delete(target.lineOrder)
+              return next
+            })
+          }
+          return items.map((li) => (li.id === id ? { ...li, [field]: value } : li))
+        })
+        return
+      }
       setLineItems((items) => items.map((li) => (li.id === id ? { ...li, [field]: value } : li)))
     },
     []
@@ -712,6 +737,56 @@ export function ReviewWorkspace({
 
   const editedFieldCount =
     editedFields.header.size + [...editedFields.lineItems.values()].reduce((sum, s) => sum + s.size, 0)
+
+  // Vendor line-item template (20260912000001): fills empty/OCR line-item
+  // descriptions from a vendor's saved template, matching by array position
+  // (template row i -> the i-th line item on this bill). Quantity/rate/amount
+  // are never touched -- only `description`. Skips any row the reviewer
+  // already hand-edited (editedFields), so this can safely re-run (e.g. on
+  // mount for a bill that's already linked) without clobbering a correction.
+  const applyLineItemTemplate = useCallback(
+    async (targetVendorId: number) => {
+      const template = await getVendorLineItemTemplate(targetVendorId)
+      if (!template.enabled || template.rows.length === 0) return
+
+      setLineItems((items) => {
+        const filled = new Set<number>()
+        const next = items.map((item, index) => {
+          const templateRow = template.rows[index]
+          if (!templateRow) return item
+          if (editedFields.lineItems.get(item.lineOrder)?.has('description')) return item
+          filled.add(item.lineOrder)
+          return { ...item, description: templateRow.description }
+        })
+        if (filled.size === 0) return items
+        hasEditedRef.current = true
+        setTemplateFilledLineOrders((current) => new Set([...current, ...filled]))
+        return next
+      })
+    },
+    [editedFields]
+  )
+
+  // Ref indirection so the bill-switch effect below can call the latest
+  // applyLineItemTemplate without depending on it directly -- its own
+  // identity changes with `editedFields` on every keystroke, which would
+  // otherwise refire this effect (and re-apply the template) on every edit.
+  const applyLineItemTemplateRef = useRef(applyLineItemTemplate)
+  useEffect(() => {
+    applyLineItemTemplateRef.current = applyLineItemTemplate
+  }, [applyLineItemTemplate])
+
+  // Re-baselines templateFilledLineOrders on every bill switch (mirrors the
+  // "adjust state when a prop changes" reset block above for header/lineItems)
+  // and, when the bill loads already linked to a vendor (detail.entryVendorId),
+  // applies that vendor's template immediately -- not just when the reviewer
+  // explicitly picks one via handleVendorSelect.
+  useEffect(() => {
+    setTemplateFilledLineOrders(new Set())
+    if (detail.entryVendorId !== null) {
+      void applyLineItemTemplateRef.current(detail.entryVendorId)
+    }
+  }, [detail.documentExtractionId, detail.currentExtractionRunId, detail.entryVendorId])
 
   // 5.16: advisory only -- a future invoice date is unusual, not invalid, so
   // this never blocks Save the way validationErrors does. No event-window
@@ -1356,6 +1431,7 @@ export function ReviewWorkspace({
     // "Linked vendor" trigger label follows the pick.
     setVendorId(vendor.id)
     setLinkedVendorName(vendor.displayName)
+    void applyLineItemTemplate(vendor.id)
 
     const rawName = header.vendorName.trim()
     if (!rawName) return // nothing to learn from an empty OCR field
@@ -1592,6 +1668,23 @@ export function ReviewWorkspace({
     toolbarInfoParts.push(`Hub: ${hubStatusLabel}`)
   }
   const toolbarInfoText = toolbarInfoParts.join(' · ')
+
+  // 2026-09-12 (overwhelm fix): a single messy scan can trip several
+  // low-severity advisories at once (GSTIN checksum, OCR glitches, page-count
+  // mismatch...) on top of anything that actually needs attention -- shown as
+  // one full badge each, in raw insertion order, they used to bury the
+  // exception that matters under a wall of jargon pills. Worst-first
+  // (severityRank, shared with the Exceptions screen's own sort) plus only
+  // the top 2 rendered as full badges keeps the toolbar row scannable; the
+  // rest collapse into one "+N more" pill (below) that opens on demand rather
+  // than always taking up space.
+  const VISIBLE_EXCEPTION_BADGES = 2
+  const sortedOpenExceptions = useMemo(
+    () => [...detail.openExceptions].sort((a, b) => severityRank(b.severity) - severityRank(a.severity)),
+    [detail.openExceptions]
+  )
+  const visibleExceptions = sortedOpenExceptions.slice(0, VISIBLE_EXCEPTION_BADGES)
+  const collapsedExceptions = sortedOpenExceptions.slice(VISIBLE_EXCEPTION_BADGES)
   // 5.19: 'checking' was missing here -- the ClaimBanner visually gates the
   // form while "Checking claim…" is in flight, but the inputs themselves
   // stayed live underneath it, so a fast typist could get edits in before the
@@ -1776,17 +1869,59 @@ export function ReviewWorkspace({
             Hub cert 2.5: severity now drives the badge colour (shared
             severityBadgeVariant, same as the Exceptions screen) instead of a
             single amber for all three, and each carries an aria-label so a
-            screen reader announces the severity and what the exception is. */}
-        {detail.openExceptions.map((ex) => (
+            screen reader announces the severity and what the exception is.
+            2026-09-12: the visible label now goes through exceptionTypeLabel
+            (it used to print the raw wire name with underscores swapped for
+            spaces, e.g. "vendor gstin invalid checksum") -- every other
+            screen that shows exception types already used the friendly
+            label; this was the one spot that didn't. Worst-first, capped at
+            VISIBLE_EXCEPTION_BADGES, with the rest behind "+N more" -- see
+            sortedOpenExceptions' comment above for why. */}
+        {visibleExceptions.map((ex) => (
           <Badge
             key={ex.id}
             variant={severityBadgeVariant(ex.severity)}
             title={ex.description ?? undefined}
             aria-label={`${ex.severity} severity: ${exceptionTypeLabel(ex.exceptionType)}`}
           >
-            {ex.severity.toUpperCase()} · {ex.exceptionType.replace(/_/g, ' ')}
+            {ex.severity.toUpperCase()} · {exceptionTypeLabel(ex.exceptionType)}
           </Badge>
         ))}
+        {collapsedExceptions.length > 0 ? (
+          <Popover>
+            {/* Badge itself isn't forwardRef (components/ui/badge.tsx) --
+                every other PopoverTrigger asChild in this codebase wraps a
+                real ref-forwarding element (Button, or a plain <button>
+                here), never Badge directly. */}
+            <PopoverTrigger asChild>
+              <button
+                type="button"
+                aria-label={`${collapsedExceptions.length} more open exception${collapsedExceptions.length === 1 ? '' : 's'}`}
+              >
+                <Badge variant="secondary" className="cursor-pointer">
+                  +{collapsedExceptions.length} more
+                </Badge>
+              </button>
+            </PopoverTrigger>
+            <PopoverContent align="start" className="w-80">
+              <div className="flex flex-col gap-2">
+                {collapsedExceptions.map((ex) => (
+                  <div key={ex.id} className="flex items-start gap-2">
+                    <Badge variant={severityBadgeVariant(ex.severity)} className="shrink-0">
+                      {ex.severity.toUpperCase()}
+                    </Badge>
+                    <div className="min-w-0">
+                      <div className="text-sm font-medium">{exceptionTypeLabel(ex.exceptionType)}</div>
+                      {ex.description ? (
+                        <div className="text-xs text-muted-foreground">{ex.description}</div>
+                      ) : null}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </PopoverContent>
+          </Popover>
+        ) : null}
 
         {/* The verified state now reads solely off step 1 ("Verify") in the
             status line below -- its circle goes green with a check once the
@@ -1917,6 +2052,8 @@ export function ReviewWorkspace({
             onFieldEnter={handleFieldEnter}
             uncertainFields={detail.uncertainFields}
             editedFields={editedFields}
+            templateFilledLineOrders={templateFilledLineOrders}
+            templateVendorName={linkedVendorName}
             validationErrors={validationErrors}
             invoiceDateWarning={invoiceDateWarning}
             onAddLineItem={handleAddLineItem}
