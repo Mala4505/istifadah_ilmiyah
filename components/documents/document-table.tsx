@@ -572,7 +572,7 @@ export function DocumentTable({
                           title="Match this document to a ledger entry, park it, re-run extraction, or see why it failed."
                         >
                           <Search className="h-3.5 w-3.5" aria-hidden="true" />
-                          <span className="ml-1.5">Match</span>
+                          {/* <span className="ml-1.5">Match</span> */}
                         </Button>
                         <Button variant="outline" size="sm" disabled={reviewTargetBillId === null} asChild={reviewTargetBillId !== null}>
                           {reviewTargetBillId !== null ? (

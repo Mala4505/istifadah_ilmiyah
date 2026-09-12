@@ -1219,6 +1219,26 @@ export async function setPageSkipOverride(input: {
     // a multi-page bill's other pages are still real, so this page's own
     // skip toggle is applied (below) without touching that shared bill.
     if (containingBill && containingBill.page_number_start === containingBill.page_number_end) {
+      // entry_bill_link (2026-09-08, entries<->bills many-to-many) has no
+      // DELETE policy of its own -- every normal write to it goes through a
+      // security-definer RPC (set_bill_entry_links / remove_bill_entry_link)
+      // gated by private.assert_entry_bill_link_allowed, not a raw table
+      // DELETE. document_extraction's ON DELETE CASCADE into entry_bill_link
+      // still runs as the calling (authenticated) role under RLS, so if this
+      // bill was ever linked to an entry the cascade below would fail with a
+      // bare "permission denied for table entry_bill_link" -- read by
+      // friendly-error.ts's RLS rule as a role problem even for a superadmin,
+      // when it was really just a missing policy for this one indirect path.
+      // Clearing the link through the sanctioned RPC first (empty entry list
+      // = unlink everything for this bill) avoids ever hitting that cascade.
+      const { error: unlinkError } = await supabase.rpc('set_bill_entry_links', {
+        p_document_extraction_id: containingBill.id,
+        p_entry_ids: [],
+      })
+      if (unlinkError) {
+        return { ok: false, error: logRawError('review.setPageSkipOverride', unlinkError.message) }
+      }
+
       const { error: deleteError } = await supabase.from('document_extraction').delete().eq('id', containingBill.id)
 
       if (deleteError) {
