@@ -65,13 +65,15 @@ export function VendorLineItemTemplate({
 
   function persist(nextRows: string[]) {
     setRows(nextRows)
+    const descriptions = nextRows.map((d) => d.trim()).filter((d) => d.length > 0)
     startSaving(async () => {
-      const result = await saveVendorLineItemTemplate({
-        vendorId: vendor.id,
-        descriptions: nextRows.map((d) => d.trim()).filter((d) => d.length > 0),
-      })
+      const result = await saveVendorLineItemTemplate({ vendorId: vendor.id, descriptions })
       if (result.ok) {
-        setSavedRows(nextRows)
+        // Tracks what's actually persisted (blanks filtered out), not the raw
+        // editable rows -- a just-added blank row must stay visible in `rows`
+        // for the reviewer to type into, but shouldn't count toward hasRows
+        // or be what a failed save later reverts to.
+        setSavedRows(descriptions)
       } else {
         toastError(result.error, { context: 'vendor-line-item-template' })
         setRows(savedRows)

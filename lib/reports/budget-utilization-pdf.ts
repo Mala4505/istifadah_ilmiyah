@@ -12,6 +12,13 @@
  * value-driven colour would misrepresent the export as carrying the same
  * manual judgement calls.
  *
+ * Single page, always: row height and font size scale down from their ideal
+ * values so the whole department list -- however long -- lands on one A4
+ * sheet rather than spilling onto a second (the point of a printable
+ * one-pager). Department names are a single truncated line rather than
+ * wrapped, so every row's height is identical and that scaling math is exact
+ * instead of a wrap-dependent estimate.
+ *
  * `buildBudgetUtilizationPdf(rows, opts)` -> the PDF as bytes. Pure: no I/O.
  * pdf-lib is dynamically imported, same pattern as lib/reports/board-pack/pdf.ts.
  */
@@ -35,12 +42,17 @@ function pdfSafe(text: string): string {
     .replace(/[^\x20-\xFF]/g, '?')
 }
 
+/** Truncates `text` with a trailing "..." if it doesn't fit `maxW` at `size`. */
+function truncateToWidth(text: string, font: import('pdf-lib').PDFFont, size: number, maxW: number): string {
+  if (font.widthOfTextAtSize(text, size) <= maxW) return text
+  let end = text.length
+  while (end > 0 && font.widthOfTextAtSize(text.slice(0, end) + '...', size) > maxW) end -= 1
+  return text.slice(0, end) + '...'
+}
+
 const PAGE_W = 595.28 // A4 pt, portrait
 const PAGE_H = 841.89
-const MARGIN = 40
-const HEADER_ROW_H = 24
-const BASE_ROW_H = 18
-const LINE_H = 10 // per wrapped line inside a taller row
+const MARGIN = 36
 
 type Col = {
   header: string
@@ -49,30 +61,23 @@ type Col = {
 }
 
 const COLUMNS: Col[] = [
-  { header: 'SR. NO', width: 40, align: 'left' },
-  { header: 'DEPARTMENT', width: 190, align: 'left' },
+  { header: 'SR. NO', width: 38, align: 'left' },
+  { header: 'DEPARTMENT', width: 192, align: 'left' },
   { header: 'BUDGET', width: 85, align: 'right' },
   { header: 'ACTUAL', width: 85, align: 'right' },
   { header: '% OF BUDGET USED', width: 115, align: 'right' },
 ]
 
-/** Wraps `text` to `maxW` at `size`, returning the lines (at least one). */
-function wrapText(text: string, font: import('pdf-lib').PDFFont, size: number, maxW: number): string[] {
-  const words = text.split(/\s+/).filter(Boolean)
-  const lines: string[] = []
-  let cur = ''
-  for (const w of words) {
-    const trial = cur ? `${cur} ${w}` : w
-    if (font.widthOfTextAtSize(trial, size) > maxW && cur) {
-      lines.push(cur)
-      cur = w
-    } else {
-      cur = trial
-    }
-  }
-  if (cur) lines.push(cur)
-  return lines.length > 0 ? lines : ['']
-}
+// Ideal (uncompressed) sizing -- used as-is whenever the row count comfortably
+// fits; scaled down together, with floors, only when it wouldn't.
+const IDEAL_HEADER_H = 22
+const IDEAL_ROW_H = 16
+const IDEAL_ROW_FONT = 9
+const IDEAL_HEADER_FONT = 8.5
+const MIN_ROW_H = 8
+const MIN_HEADER_H = 12
+const MIN_ROW_FONT = 5
+const MIN_HEADER_FONT = 5.5
 
 export async function buildBudgetUtilizationPdf(
   rows: DepartmentBudgetVsActualRow[],
@@ -85,6 +90,7 @@ export async function buildBudgetUtilizationPdf(
 
   const tableW = COLUMNS.reduce((s, c) => s + c.width, 0)
   const tableX = MARGIN
+  const page = doc.addPage([PAGE_W, PAGE_H])
 
   // A restrained, uniform palette -- no colour is ever chosen by a row's
   // values, only by its position (header vs. body, even vs. odd row).
@@ -94,98 +100,89 @@ export async function buildBudgetUtilizationPdf(
   const stripeBg = rgb(0.94, 0.95, 0.97)
   const gridColor = rgb(0.72, 0.73, 0.76)
   const titleColor = rgb(0.08, 0.09, 0.11)
-  const subtitleColor = rgb(0.42, 0.44, 0.48)
+  const reportNameColor = rgb(0.28, 0.3, 0.34)
+  const subtitleColor = rgb(0.48, 0.5, 0.54)
   const accentColor = headerBg
 
-  let page = doc.addPage([PAGE_W, PAGE_H])
   let y = PAGE_H - MARGIN
-  // Tracks each page's own header-top y, so its vertical borders (drawn once
-  // the page is complete) span exactly that page's rows -- not some other
-  // page's coordinates, which a single trailing draw-verticals-at-the-end
-  // pass would get wrong the moment the table spans more than one page.
-  let pageHeaderTop = 0
 
-  // ---- Title + generated stamp (first page only) -------------------------
-  page.drawText(pdfSafe('Budget Utilization Report'), { x: MARGIN, y, size: 20, font: bold, color: titleColor })
-  y -= 18
+  // ---- Header block --------------------------------------------------------
+  // Event name leads (the reader's "which event is this") with the report
+  // name as the secondary line underneath -- swapped from the report name
+  // leading, since the event is what distinguishes one export from the next.
+  if (opts.eventName) {
+    page.drawText(pdfSafe(opts.eventName), { x: MARGIN, y, size: 19, font: bold, color: titleColor })
+    y -= 18
+    page.drawText(pdfSafe('Budget Utilization Report'), { x: MARGIN, y, size: 12, font: bold, color: reportNameColor })
+    y -= 15
+  } else {
+    page.drawText(pdfSafe('Budget Utilization Report'), { x: MARGIN, y, size: 19, font: bold, color: titleColor })
+    y -= 18
+  }
   const generatedLabel = `Generated ${opts.generatedAt.toLocaleString('en-IN', {
     year: 'numeric',
     month: 'short',
     day: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
-  })}${opts.eventName ? `   ·   ${opts.eventName}` : ''}`
+  })}`
   page.drawText(pdfSafe(generatedLabel), { x: MARGIN, y, size: 9, font, color: subtitleColor })
-  y -= 10
+  y -= 9
   page.drawLine({ start: { x: MARGIN, y }, end: { x: MARGIN + tableW, y }, thickness: 1.5, color: accentColor })
-  y -= 14
+  y -= 12
 
-  function drawVerticalBorders(headerTop: number, bottom: number): void {
-    let vx = tableX
-    for (const col of COLUMNS) {
-      page.drawLine({ start: { x: vx, y: headerTop }, end: { x: vx, y: bottom }, thickness: 0.5, color: gridColor })
-      vx += col.width
-    }
-    page.drawLine({ start: { x: vx, y: headerTop }, end: { x: vx, y: bottom }, thickness: 0.5, color: gridColor })
-  }
+  const headerTop = y
+  const availableH = headerTop - MARGIN
+  const n = Math.max(rows.length, 1)
 
-  function drawHeaderRow(): void {
-    const rowTop = y
-    page.drawRectangle({ x: tableX, y: rowTop - HEADER_ROW_H, width: tableW, height: HEADER_ROW_H, color: headerBg })
+  // Scale header + row sizing down together so `n` rows always land on this
+  // one page, however long the department list gets.
+  const idealTotal = IDEAL_HEADER_H + n * IDEAL_ROW_H
+  const scale = idealTotal > availableH ? Math.max(availableH / idealTotal, 0) : 1
+  const headerH = Math.max(MIN_HEADER_H, IDEAL_HEADER_H * scale)
+  const rowH = Math.max(MIN_ROW_H, IDEAL_ROW_H * scale)
+  const headerFontSize = Math.max(MIN_HEADER_FONT, IDEAL_HEADER_FONT * scale)
+  const rowFontSize = Math.max(MIN_ROW_FONT, IDEAL_ROW_FONT * scale)
+
+  // ---- Header row ------------------------------------------------------
+  page.drawRectangle({ x: tableX, y: headerTop - headerH, width: tableW, height: headerH, color: headerBg })
+  {
     let x = tableX
     for (const col of COLUMNS) {
-      const textY = rowTop - HEADER_ROW_H + 8
+      const textY = headerTop - headerH / 2 - headerFontSize * 0.36
       const label = pdfSafe(col.header)
       const textX =
-        col.align === 'right' ? x + col.width - 6 - bold.widthOfTextAtSize(label, 8.5) : x + 6
-      page.drawText(label, { x: textX, y: textY, size: 8.5, font: bold, color: headerText })
+        col.align === 'right' ? x + col.width - 6 - bold.widthOfTextAtSize(label, headerFontSize) : x + 6
+      page.drawText(label, { x: textX, y: textY, size: headerFontSize, font: bold, color: headerText })
       x += col.width
     }
-    pageHeaderTop = rowTop
-    y = rowTop - HEADER_ROW_H
   }
+  y = headerTop - headerH
 
-  function newPage(): void {
-    drawVerticalBorders(pageHeaderTop, y) // close out the page being left
-    page = doc.addPage([PAGE_W, PAGE_H])
-    y = PAGE_H - MARGIN
-    drawHeaderRow()
-  }
-
-  drawHeaderRow()
-
+  // ---- Body rows ---------------------------------------------------------
   for (let i = 0; i < rows.length; i += 1) {
     const r = rows[i]!
-    const deptLines = wrapText(pdfSafe(r.department_name), font, 9, COLUMNS[1]!.width - 10)
-    const rowH = Math.max(BASE_ROW_H, deptLines.length * LINE_H + 8)
-
-    if (y - rowH < MARGIN) newPage()
-
     const rowTop = y
     if (i % 2 === 1) {
       page.drawRectangle({ x: tableX, y: rowTop - rowH, width: tableW, height: rowH, color: stripeBg })
     }
 
+    const deptLabel = truncateToWidth(pdfSafe(r.department_name), font, rowFontSize, COLUMNS[1]!.width - 12)
     const cells = [
       String(i + 1),
-      null, // department drawn separately (may wrap)
+      deptLabel,
       formatINR(r.budget_amount),
       formatINR(r.actual_amount),
       r.budget_status_note ?? formatPercent(r.pct_of_budget),
     ]
 
+    const textY = rowTop - rowH / 2 - rowFontSize * 0.36
     let x = tableX
     for (let c = 0; c < COLUMNS.length; c += 1) {
       const col = COLUMNS[c]!
-      if (c === 1) {
-        deptLines.forEach((line, li) => {
-          page.drawText(line, { x: x + 6, y: rowTop - 13 - li * LINE_H, size: 9, font, color: ink })
-        })
-      } else {
-        const label = pdfSafe(cells[c] as string)
-        const textX = col.align === 'right' ? x + col.width - 6 - font.widthOfTextAtSize(label, 9) : x + 6
-        page.drawText(label, { x: textX, y: rowTop - 13, size: 9, font, color: ink })
-      }
+      const label = pdfSafe(cells[c]!)
+      const textX = col.align === 'right' ? x + col.width - 6 - font.widthOfTextAtSize(label, rowFontSize) : x + 6
+      page.drawText(label, { x: textX, y: textY, size: rowFontSize, font, color: ink })
       x += col.width
     }
 
@@ -193,7 +190,13 @@ export async function buildBudgetUtilizationPdf(
     page.drawLine({ start: { x: tableX, y }, end: { x: tableX + tableW, y }, thickness: 0.5, color: gridColor })
   }
 
-  drawVerticalBorders(pageHeaderTop, y) // close out the final page
+  // ---- Table borders -----------------------------------------------------
+  let vx = tableX
+  for (const col of COLUMNS) {
+    page.drawLine({ start: { x: vx, y: headerTop }, end: { x: vx, y }, thickness: 0.5, color: gridColor })
+    vx += col.width
+  }
+  page.drawLine({ start: { x: vx, y: headerTop }, end: { x: vx, y }, thickness: 0.5, color: gridColor })
 
   return doc.save()
 }
