@@ -2,7 +2,7 @@
 
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { usePathname, useSearchParams } from 'next/navigation'
-import { ChevronDown, ChevronUp, Eye, PenLine, X } from 'lucide-react'
+import { ChevronDown, ChevronUp, PenLine, Search, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Dialog, DialogContent, DialogFooter, DialogTitle } from '@/components/ui/dialog'
@@ -465,6 +465,19 @@ export function DocumentTable({
               const isMultiBill = bills.length > 1
               const isExpanded = expandedDocumentIds.has(doc.id)
               const colSpan = 6 + (canAct ? 1 : 0)
+              // Review button (right side of the row): jumps straight to the
+              // field-by-field /review screen instead of the match/attach
+              // modal below -- reviewers kept landing in the modal expecting
+              // OCR correction (user, 2026-09-12). Picks whichever bill still
+              // has Review work outstanding (billReviewStatus, document-card.tsx)
+              // so re-opening an already-reviewed document doesn't dump you
+              // back on bill 1; falls back to the first bill once every bill
+              // is done. `null` only when extraction hasn't produced a bill
+              // yet -- there is nothing to review, so the button is disabled
+              // and the Match modal (still useful for status/retry) is the
+              // only action.
+              const reviewTargetBillId =
+                bills.find((b) => billReviewStatus(b) !== 'done')?.id ?? bills[0]?.id ?? null
 
               return (
                 <Fragment key={doc.id}>
@@ -551,10 +564,31 @@ export function DocumentTable({
                       <span className="text-xs text-muted-foreground">{formatDateTime(doc.uploadedAt)}</span>
                     </TableCell>
                     <TableCell className="text-right">
-                      <Button variant="outline" size="sm" onClick={() => setOpenDocumentId(doc.id)}>
-                        <Eye className="h-3.5 w-3.5" aria-hidden="true" />
-                        <span className="ml-1.5">Review</span>
-                      </Button>
+                      <div className="flex justify-end gap-1.5">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setOpenDocumentId(doc.id)}
+                          title="Match this document to a ledger entry, park it, re-run extraction, or see why it failed."
+                        >
+                          <Search className="h-3.5 w-3.5" aria-hidden="true" />
+                          <span className="ml-1.5">Match</span>
+                        </Button>
+                        <Button variant="outline" size="sm" disabled={reviewTargetBillId === null} asChild={reviewTargetBillId !== null}>
+                          {reviewTargetBillId !== null ? (
+                            <a
+                              href={`/review?id=${reviewTargetBillId}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              title="Opens the field-by-field review screen in a new tab."
+                            >
+                              Review
+                            </a>
+                          ) : (
+                            'Review'
+                          )}
+                        </Button>
+                      </div>
                     </TableCell>
                   </TableRow>
                   {isMultiBill && isExpanded && (
