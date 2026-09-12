@@ -88,8 +88,26 @@ const NONE = '__none__'
 const PANE_MODE_KEY = 'review-pdf-pane-mode'
 const PANE_SPLIT_KEY = 'review-pdf-pane-split'
 const SPLIT_PERCENT_BOUNDS = { min: 15, max: 85 }
-const PANE_MODE_DEFAULT_SPLIT: Record<'split' | 'document', number> = { split: 50, document: 75 }
 const COLLAPSED_PANE_WIDTH_PX = 120
+
+// 13" laptops (commonly 1280-1440px logical width) split 50/50 into two
+// ~550-650px panes -- too cramped to read the invoice at a glance (user,
+// 2026-09-12). Below this width, Split mode's default ratio favors the PDF
+// pane instead of the flat 50/50 wide-screen default; a reviewer who has
+// already dragged the divider (readStoredSplitPercent below) always keeps
+// their own choice regardless of viewport width.
+const NARROW_VIEWPORT_WIDTH_PX = 1440
+const SPLIT_DEFAULT_STANDARD = 50
+const SPLIT_DEFAULT_NARROW = 62
+
+function isNarrowViewport(): boolean {
+  return typeof window !== 'undefined' && window.innerWidth <= NARROW_VIEWPORT_WIDTH_PX
+}
+
+function paneModeDefaultSplit(mode: 'split' | 'document'): number {
+  if (mode === 'document') return 75
+  return isNarrowViewport() ? SPLIT_DEFAULT_NARROW : SPLIT_DEFAULT_STANDARD
+}
 
 type PdfPaneMode = 'split' | 'collapsed' | 'document'
 
@@ -100,11 +118,11 @@ function readStoredPaneMode(): PdfPaneMode {
 }
 
 function readStoredSplitPercent(): number {
-  if (typeof window === 'undefined') return PANE_MODE_DEFAULT_SPLIT.split
+  if (typeof window === 'undefined') return SPLIT_DEFAULT_STANDARD
   const stored = Number(window.localStorage.getItem(PANE_SPLIT_KEY))
   return Number.isFinite(stored) && stored >= SPLIT_PERCENT_BOUNDS.min && stored <= SPLIT_PERCENT_BOUNDS.max
     ? stored
-    : PANE_MODE_DEFAULT_SPLIT.split
+    : paneModeDefaultSplit('split')
 }
 
 function numToStr(v: string | number | null): string {
@@ -941,7 +959,7 @@ export function ReviewWorkspace({
     const next: PdfPaneMode = paneMode === 'split' ? 'collapsed' : paneMode === 'collapsed' ? 'document' : 'split'
     setPaneMode(next)
     if (next === 'split' || next === 'document') {
-      setSplitPercent(PANE_MODE_DEFAULT_SPLIT[next])
+      setSplitPercent(paneModeDefaultSplit(next))
     }
   }
 
@@ -954,7 +972,7 @@ export function ReviewWorkspace({
     // jumped to -- expand so the reviewer can see it.
     setPaneMode((current) => {
       if (current !== 'collapsed') return current
-      setSplitPercent(PANE_MODE_DEFAULT_SPLIT.split)
+      setSplitPercent(paneModeDefaultSplit('split'))
       return 'split'
     })
   }, [])

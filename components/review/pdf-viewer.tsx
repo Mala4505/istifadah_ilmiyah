@@ -101,6 +101,26 @@ const SCROLLBAR_ALLOWANCE_PX = 17
 // width when the rail is on screen (numPages > 1 && !collapsed).
 const RAIL_WIDTH_PX = 81
 
+// 13" laptops (user, 2026-09-12): fit-width zoom (1) fills the whole pane
+// width, which on a short laptop screen often makes a full A4 page taller
+// than the viewport, forcing a vertical scroll to see the bottom of the
+// invoice. review-workspace.tsx now also gives this pane a wider default
+// share of a narrow screen's width, which only makes a fit-width page
+// taller still -- so these screens default a touch more zoomed out instead,
+// trading a little horizontal whitespace for the whole page fitting on
+// screen at once. Independent of review-workspace.tsx's split-ratio
+// default; matches its own breakpoint by coincidence of both targeting the
+// same class of device, not a shared constant.
+const NARROW_VIEWPORT_WIDTH_PX = 1440
+const DEFAULT_ZOOM_NARROW = 0.88
+const DEFAULT_ZOOM_STANDARD = 1
+
+function getDefaultZoom(): number {
+  return typeof window !== 'undefined' && window.innerWidth <= NARROW_VIEWPORT_WIDTH_PX
+    ? DEFAULT_ZOOM_NARROW
+    : DEFAULT_ZOOM_STANDARD
+}
+
 // Minimal shape of what this component actually calls, so it doesn't need to
 // import pdfjs-dist's full type surface (imported dynamically below anyway).
 interface PdfPageProxy {
@@ -195,8 +215,9 @@ export const PdfViewer = memo(forwardRef<
   const [pageNumber, setPageNumber] = useState(initialPageOverride ?? pageNumberStart ?? 1)
   // Manual zoom multiplier on top of the fit-width base scale computed below
   // -- 1 means "exactly fit the pane," not "no zoom applied at a fixed pixel
-  // size" like the old fixed-scale render did.
-  const [zoom, setZoom] = useState(1)
+  // size" like the old fixed-scale render did. Starts a bit below 1 on
+  // narrow (13") screens -- see getDefaultZoom's comment.
+  const [zoom, setZoom] = useState(getDefaultZoom)
   const [rotation, setRotation] = useState(0)
   // Tracks the canvas's own rendered pixel size so the highlight-box overlay
   // below (a sibling, absolutely positioned) can size itself to match exactly
