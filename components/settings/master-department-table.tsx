@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useTransition } from 'react'
+import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { toastError } from '@/components/ui/error-toast'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
@@ -33,6 +34,7 @@ export function MasterDepartmentTable({ departments }: { departments: MasterDepa
 }
 
 function DepartmentRowItem({ department }: { department: MasterDepartmentRow }) {
+  const router = useRouter()
   const [name, setName] = useState(department.name)
   const [isActive, setIsActive] = useState(department.isActive)
   const [isPending, startTransition] = useTransition()
@@ -46,6 +48,7 @@ function DepartmentRowItem({ department }: { department: MasterDepartmentRow }) 
       const result = await updateDepartment({ id: department.id, name: trimmed, isActive })
       if (result.ok) {
         toast.success('Department updated.')
+        router.refresh()
       } else {
         toastError(result.error, { context: 'master-department-table' })
       }
@@ -70,6 +73,7 @@ function DepartmentRowItem({ department }: { department: MasterDepartmentRow }) 
 }
 
 function NewDepartmentRow() {
+  const router = useRouter()
   const [name, setName] = useState('')
   const [isPending, startTransition] = useTransition()
 
@@ -81,6 +85,7 @@ function NewDepartmentRow() {
       if (result.ok) {
         toast.success('Department added.')
         setName('')
+        router.refresh()
       } else {
         toastError(result.error, { context: 'master-department-table:add' })
       }

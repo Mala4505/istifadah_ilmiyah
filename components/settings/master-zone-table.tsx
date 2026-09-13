@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useTransition } from 'react'
+import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { toastError } from '@/components/ui/error-toast'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
@@ -32,6 +33,7 @@ export function MasterZoneTable({ zones }: { zones: ZoneRow[] }) {
 }
 
 function ZoneRowItem({ zone }: { zone: ZoneRow }) {
+  const router = useRouter()
   const [zoneNumber, setZoneNumber] = useState(String(zone.zoneNumber))
   const [name, setName] = useState(zone.name)
   const [isActive, setIsActive] = useState(zone.isActive)
@@ -48,6 +50,7 @@ function ZoneRowItem({ zone }: { zone: ZoneRow }) {
       const result = await updateZone({ id: zone.id, zoneNumber: parsedNumber, name: name.trim(), isActive })
       if (result.ok) {
         toast.success('Zone updated.')
+        router.refresh()
       } else {
         toastError(result.error, { context: 'master-zone-table' })
       }
@@ -83,6 +86,7 @@ function ZoneRowItem({ zone }: { zone: ZoneRow }) {
 }
 
 function NewZoneRow() {
+  const router = useRouter()
   const [zoneNumber, setZoneNumber] = useState('')
   const [name, setName] = useState('')
   const [isPending, startTransition] = useTransition()
@@ -99,6 +103,7 @@ function NewZoneRow() {
         toast.success('Zone added.')
         setZoneNumber('')
         setName('')
+        router.refresh()
       } else {
         toastError(result.error, { context: 'master-zone-table:add' })
       }

@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useTransition } from 'react'
+import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { toastError } from '@/components/ui/error-toast'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
@@ -32,6 +33,7 @@ export function MasterAdminHeadTable({ heads }: { heads: HeadRow[] }) {
 }
 
 function AdminHeadRowItem({ head }: { head: HeadRow }) {
+  const router = useRouter()
   const [headNumber, setHeadNumber] = useState(String(head.headNumber))
   const [name, setName] = useState(head.name)
   const [isActive, setIsActive] = useState(head.isActive)
@@ -48,6 +50,7 @@ function AdminHeadRowItem({ head }: { head: HeadRow }) {
       const result = await updateAdminHead({ id: head.id, headNumber: parsedNumber, name: name.trim(), isActive })
       if (result.ok) {
         toast.success('Admin head updated.')
+        router.refresh()
       } else {
         toastError(result.error, { context: 'master-admin-head-table' })
       }
@@ -83,6 +86,7 @@ function AdminHeadRowItem({ head }: { head: HeadRow }) {
 }
 
 function NewAdminHeadRow() {
+  const router = useRouter()
   const [headNumber, setHeadNumber] = useState('')
   const [name, setName] = useState('')
   const [isPending, startTransition] = useTransition()
@@ -99,6 +103,7 @@ function NewAdminHeadRow() {
         toast.success('Admin head added.')
         setHeadNumber('')
         setName('')
+        router.refresh()
       } else {
         toastError(result.error, { context: 'master-admin-head-table:add' })
       }
