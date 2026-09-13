@@ -624,6 +624,35 @@ function friendlyMasterDataError(context: string, error: { code?: string; messag
   return logRawError(context, error.message)
 }
 
+/**
+ * A freshly created department/sub_department/zone/admin_head is invisible
+ * everywhere until it's also a member of the currently selected event --
+ * every dropdown (entries, review, documents, the entries filter bar, this
+ * same Settings area) filters options through event_department/
+ * event_sub_department/event_zone/event_admin_head, not just the master
+ * table itself (see loadMasterData.ts, app/(app)/entries/[id]/page.tsx,
+ * etc.). None of those four junction tables has an insert policy for
+ * `authenticated` (rows are meant to come from createEvent's raw-SQL insert
+ * or the one-time backfill in 20260822000005_event_scoping.sql /
+ * 20260825000003_event_sub_department.sql), so this writes through the
+ * service-role admin client -- safe here because every caller already ran
+ * requireSuperadmin() first. No-ops when there's no resolvable selected
+ * event, matching every loader's "no event -> no filtering" fallback
+ * (an unscoped app just shows every row regardless of membership).
+ */
+async function addToSelectedEventMembership(
+  table: 'event_department' | 'event_sub_department' | 'event_zone' | 'event_admin_head',
+  column: 'department_id' | 'sub_department_id' | 'zone_id' | 'admin_head_id',
+  id: number,
+): Promise<void> {
+  const selectedEvent = await getSelectedEvent()
+  if (!selectedEvent) return
+
+  const admin = createAdminClient()
+  const { error } = await admin.from(table).insert({ event_id: selectedEvent.id, [column]: id })
+  if (error) logRawError(`admin.addToSelectedEventMembership:${table}`, error.message)
+}
+
 const createDepartmentSchema = z.object({
   name: z.string().trim().min(1, 'Give the department a name.'),
 })
@@ -636,8 +665,14 @@ export async function createDepartment(input: { name: string }): Promise<ActionR
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0]!.message }
 
   const supabase = await createClient()
-  const { error } = await supabase.from('department').insert({ name: parsed.data.name })
+  const { data, error } = await supabase
+    .from('department')
+    .insert({ name: parsed.data.name })
+    .select('id')
+    .single()
   if (error) return { ok: false, error: friendlyMasterDataError('admin.createDepartment', error) }
+
+  await addToSelectedEventMembership('event_department', 'department_id', data.id)
 
   revalidatePath('/settings')
   revalidateTag(REFERENCE_DATA_TAGS.department)
@@ -689,10 +724,14 @@ export async function createSubDepartment(input: {
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0]!.message }
 
   const supabase = await createClient()
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from('sub_department')
     .insert({ department_id: parsed.data.departmentId, name: parsed.data.name })
+    .select('id')
+    .single()
   if (error) return { ok: false, error: friendlyMasterDataError('admin.createSubDepartment', error) }
+
+  await addToSelectedEventMembership('event_sub_department', 'sub_department_id', data.id)
 
   revalidatePath('/settings')
   return { ok: true }
@@ -745,10 +784,14 @@ export async function createZone(input: { zoneNumber: number; name: string }): P
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0]!.message }
 
   const supabase = await createClient()
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from('zone')
     .insert({ zone_number: parsed.data.zoneNumber, name: parsed.data.name })
+    .select('id')
+    .single()
   if (error) return { ok: false, error: friendlyMasterDataError('admin.createZone', error) }
+
+  await addToSelectedEventMembership('event_zone', 'zone_id', data.id)
 
   revalidatePath('/settings')
   revalidateTag(REFERENCE_DATA_TAGS.zone)
@@ -799,10 +842,14 @@ export async function createAdminHead(input: { headNumber: number; name: string 
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0]!.message }
 
   const supabase = await createClient()
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from('admin_head')
     .insert({ head_number: parsed.data.headNumber, name: parsed.data.name })
+    .select('id')
+    .single()
   if (error) return { ok: false, error: friendlyMasterDataError('admin.createAdminHead', error) }
+
+  await addToSelectedEventMembership('event_admin_head', 'admin_head_id', data.id)
 
   revalidatePath('/settings')
   revalidateTag(REFERENCE_DATA_TAGS.adminHead)
