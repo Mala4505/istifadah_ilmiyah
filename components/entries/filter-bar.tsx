@@ -64,12 +64,13 @@ export function FilterBar({
 }) {
   const [expanded, setExpanded] = useState(false)
 
-  const adminHeadOptions = filters.department
-    ? options.adminHeads.filter((h) => h.department_id == null || String(h.department_id) === filters.department)
-    : options.adminHeads
-  const zoneOptions = filters.department
-    ? options.zones.filter((z) => z.department_id == null || String(z.department_id) === filters.department)
-    : options.zones
+  // admin_head/zone are org-wide reference data (20260913000001 dropped
+  // their department_id), so the Department filter no longer narrows these
+  // two lists -- previously filtered by department_id match, which silently
+  // emptied both dropdowns whenever a department other than "Venue Setup"
+  // was selected.
+  const adminHeadOptions = options.adminHeads
+  const zoneOptions = options.zones
 
   const activeCount = countActiveFilters(filters)
   const chips = buildFilterSummary(filters, options)

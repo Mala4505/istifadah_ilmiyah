@@ -7,13 +7,13 @@
  * only for its own.
  */
 
-export type DepartmentOption = { id: number; name: string }
+export type DepartmentOption = { id: number; name: string; isActive?: boolean }
 
 export type ZoneRow = {
   id: number
-  departmentId: number
   zoneNumber: number
   name: string
+  isActive: boolean
 }
 
 export type SubDepartmentRow = {

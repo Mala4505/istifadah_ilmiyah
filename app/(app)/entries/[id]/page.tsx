@@ -162,24 +162,16 @@ export default async function EntryDetailPage({
   // silently emptying every dropdown.
   const adminHeadMemberIds = new Set((adminHeadMembershipResult.data ?? []).map((r) => r.admin_head_id as number))
   const zoneMemberIds = new Set((zoneMembershipResult.data ?? []).map((r) => r.zone_id as number))
-  // The cached fetchers return the full org-wide table (every department,
-  // active and inactive) — reproduce this page's original per-department,
-  // active-only query semantics as JS filters, same as before caching
-  // (lib/cache/reference-data.ts). department_id === null (entry not tied to
-  // a department) still yields an empty array, matching the old
-  // Promise.resolve({ data: [], error: null }) short-circuit.
-  const scopedAdminHeads =
-    entry.department_id === null
-      ? []
-      : cachedAdminHeads
-          .filter((h) => h.is_active && h.department_id === entry.department_id)
-          .sort((a, b) => a.head_number - b.head_number)
-  const scopedZones =
-    entry.department_id === null
-      ? []
-      : cachedZones
-          .filter((z) => z.is_active && z.department_id === entry.department_id)
-          .sort((a, b) => a.zone_number - b.zone_number)
+  // The cached fetchers return the full org-wide table (active and
+  // inactive) — filter to active here, same as before caching (see
+  // lib/cache/reference-data.ts). admin_head/zone stopped being
+  // department-scoped in 20260913000001 (they were seeded under
+  // department_id=1 'Venue Setup' from day one, which silently emptied both
+  // dropdowns for any entry classified into a different department) — every
+  // active, event-member admin head/zone is offered here regardless of
+  // entry.department_id.
+  const scopedAdminHeads = cachedAdminHeads.filter((h) => h.is_active).sort((a, b) => a.head_number - b.head_number)
+  const scopedZones = cachedZones.filter((z) => z.is_active).sort((a, b) => a.zone_number - b.zone_number)
   const adminHeadOptions = scopedAdminHeads
     .filter((h) => selectedEventId === null || adminHeadMemberIds.has(h.id))
     .map((h): AdminHeadOption => ({ id: h.id, head_number: h.head_number, name: h.name }))
@@ -495,7 +487,6 @@ export default async function EntryDetailPage({
             initialZoneId={entry.zone_id}
             initialCostCenterId={entry.cost_center_id}
             initialRemark={entry.remark}
-            hasDepartment={entry.department_id !== null}
           />
           {entry.type === 'invoice' && (
             <AdvanceSettlementPicker

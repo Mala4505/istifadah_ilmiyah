@@ -397,7 +397,6 @@ export default async function DocumentsPage({
     .map((h) => ({
       id: h.id,
       label: `${h.head_number}. ${h.name}`,
-      department_id: h.department_id,
     }))
   const zoneOptions: LookupOption[] = zoneLookupData
     .filter((z) => z.is_active && activeZoneIds.includes(z.id))
@@ -405,7 +404,6 @@ export default async function DocumentsPage({
     .map((z) => ({
       id: z.id,
       label: `${z.zone_number}. ${z.name}`,
-      department_id: z.department_id,
     }))
   const costCenterOptions: LookupOption[] = costCenterLookupData.map((c) => ({
     id: c.id,

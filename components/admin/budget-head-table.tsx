@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState, useTransition } from 'react'
+import { useState, useTransition } from 'react'
 import { toast } from 'sonner'
 import { toastError } from '@/components/ui/error-toast'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
@@ -19,7 +19,6 @@ export type BudgetHeadRow = {
 
 export type HeadOption = {
   id: number
-  departmentId: number
   headNumber: number
   name: string
 }
@@ -67,10 +66,10 @@ function BudgetHeadRowItem({ budgetHead, heads }: { budgetHead: BudgetHeadRow; h
 
   const isDirty = headId !== budgetHead.headId
 
-  const options = useMemo(() => {
-    if (budgetHead.departmentId === null) return heads
-    return heads.filter((head) => head.departmentId === budgetHead.departmentId)
-  }, [heads, budgetHead.departmentId])
+  // Admin heads stopped being department-scoped (20260913000001) -- they're
+  // org-wide now, so every budget head can map to any of them regardless of
+  // its own department_id.
+  const options = heads
 
   function handleSave() {
     startTransition(async () => {

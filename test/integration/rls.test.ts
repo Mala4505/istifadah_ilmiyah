@@ -71,6 +71,7 @@ const LEDGER = {
   entries: [] as number[],
   departments: [] as number[],
   zones: [] as number[],
+  heads: [] as number[],
   vendors: [] as number[],
   jobs: [] as number[],
   users: [] as string[],
@@ -1110,24 +1111,43 @@ describe('RLS as three users (superadmin / admin / dept)', () => {
     })
   })
 
-  it('scopes zone by department but keeps the department list readable to all staff', async () => {
+  it('exposes zone and admin_head org-wide to all staff, independent of department', async () => {
+    // 20260913000001_admin_head_zone_drop_department.sql dropped
+    // department_id from both tables entirely -- they'd been seeded under
+    // department_id=1 ('Venue Setup') for every row since day one, which
+    // this same RLS gate had made a real visibility bug (a dept-role
+    // account not assigned to department 1 saw zero admin_head/zone rows).
+    // Replaces the old "scopes zone by department" test, which no longer
+    // applies -- zone_select/admin_head_select are now staff-wide, same
+    // shape as department_select.
     await withFixture({}, async (fx) => {
-      const rows = [
-        { department_id: fx.deptA, zone_number: 1, name: `${TAG}-zone-a-${fx.suffix}` },
-        { department_id: fx.deptB, zone_number: 1, name: `${TAG}-zone-b-${fx.suffix}` },
-      ]
-      const { data: zones, error: zErr } = await svc.from('zone').insert(rows).select('id,department_id')
+      const zoneNumber = 900000 + Math.floor(Math.random() * 90000)
+      const headNumber = 900000 + Math.floor(Math.random() * 90000)
+      const { data: zones, error: zErr } = await svc
+        .from('zone')
+        .insert([{ zone_number: zoneNumber, name: `${TAG}-zone-${fx.suffix}` }])
+        .select('id')
       if (zErr || !zones) throw new Error(`fixture zone: ${zErr?.message}`)
       LEDGER.zones.push(...zones.map((z) => z.id))
-      const zoneA = zones.find((z) => z.department_id === fx.deptA)!.id
+
+      const { data: heads, error: hErr } = await svc
+        .from('admin_head')
+        .insert([{ head_number: headNumber, name: `${TAG}-head-${fx.suffix}` }])
+        .select('id')
+      if (hErr || !heads) throw new Error(`fixture admin_head: ${hErr?.message}`)
+      LEDGER.heads.push(...heads.map((h) => h.id))
 
       try {
-        const seen = await fx.deptUser.client
-          .from('zone')
-          .select('id,department_id')
-          .in('department_id', [fx.deptA, fx.deptB])
-        expect(seen.error).toBeNull()
-        expect(ids(seen.data)).toEqual([zoneA])
+        // fx.deptUser is assigned only to deptA (not any special "zone
+        // department") -- seeing these rows anyway is exactly what "org-wide"
+        // means now.
+        const seenZone = await fx.deptUser.client.from('zone').select('id').eq('id', zones[0]!.id)
+        expect(seenZone.error).toBeNull()
+        expect(ids(seenZone.data)).toEqual([zones[0]!.id])
+
+        const seenHead = await fx.deptUser.client.from('admin_head').select('id').eq('id', heads[0]!.id)
+        expect(seenHead.error).toBeNull()
+        expect(ids(seenHead.data)).toEqual([heads[0]!.id])
 
         // department itself is a deliberate exception (documented JUDGEMENT CALL in
         // 20260808000026): all active staff read the full department list, because
@@ -1141,6 +1161,8 @@ describe('RLS as three users (superadmin / admin / dept)', () => {
       } finally {
         await del('zone', zones.map((z) => z.id))
         LEDGER.zones = LEDGER.zones.filter((z) => !zones.some((x) => x.id === z))
+        await del('admin_head', heads.map((h) => h.id))
+        LEDGER.heads = LEDGER.heads.filter((h) => !heads.some((x) => x.id === h))
       }
     })
   })
@@ -1467,6 +1489,7 @@ afterAll(async () => {
   await sweep('source_document', LEDGER.sourceDocuments)
   await sweep('entries', LEDGER.entries)
   await sweep('zone', LEDGER.zones)
+  await sweep('admin_head', LEDGER.heads)
   await sweep('vendor', LEDGER.vendors)
   await sweep('job_queue', LEDGER.jobs)
   await sweep('staff_profile', LEDGER.users)
@@ -1504,12 +1527,13 @@ afterAll(async () => {
 
   // eslint-disable-next-line no-console
   console.log(
-    '\n[rls cleanup] run=%s | ledger: %d entries, %d departments, %d users, %d zones, %d vendors, %d jobs, %d objects, %d source_documents',
+    '\n[rls cleanup] run=%s | ledger: %d entries, %d departments, %d users, %d zones, %d heads, %d vendors, %d jobs, %d objects, %d source_documents',
     RUN_ID,
     LEDGER.entries.length,
     LEDGER.departments.length,
     LEDGER.users.length,
     LEDGER.zones.length,
+    LEDGER.heads.length,
     LEDGER.vendors.length,
     LEDGER.jobs.length,
     LEDGER.objects.length,

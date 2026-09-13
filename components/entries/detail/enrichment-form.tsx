@@ -29,7 +29,6 @@ export function EnrichmentForm({
   initialZoneId,
   initialCostCenterId,
   initialRemark,
-  hasDepartment,
 }: {
   entryId: number
   adminHeadOptions: AdminHeadOption[]
@@ -39,7 +38,6 @@ export function EnrichmentForm({
   initialZoneId: number | null
   initialCostCenterId: number | null
   initialRemark: string | null
-  hasDepartment: boolean
 }) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
@@ -74,17 +72,10 @@ export function EnrichmentForm({
         <CardTitle className="text-base">Enrichment</CardTitle>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
-        {!hasDepartment && (
-          <p className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
-            This entry has no department assigned from import, so admin head and zone options
-            can&apos;t be looked up yet.
-          </p>
-        )}
-
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="admin-head-select">Admin head</Label>
-            <Select value={adminHeadId} onValueChange={setAdminHeadId} disabled={!hasDepartment}>
+            <Select value={adminHeadId} onValueChange={setAdminHeadId}>
               <SelectTrigger id="admin-head-select">
                 <SelectValue placeholder="Not set" />
               </SelectTrigger>
@@ -101,7 +92,7 @@ export function EnrichmentForm({
 
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="zone-select">Zone</Label>
-            <Select value={zoneId} onValueChange={setZoneId} disabled={!hasDepartment}>
+            <Select value={zoneId} onValueChange={setZoneId}>
               <SelectTrigger id="zone-select">
                 <SelectValue placeholder="Not set" />
               </SelectTrigger>

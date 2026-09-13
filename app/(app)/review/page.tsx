@@ -675,36 +675,59 @@ async function loadDocumentDetail(
     linkedVendorName = (linkedVendor?.display_name as string | undefined) ?? null
   }
 
-  // Stage 3 (Classify, §8) options, scoped to the matched entry's
-  // department -- same pattern as app/(app)/entries/[id]/page.tsx. Also
-  // scoped to the selected event's membership (event-scoping-and-review-
-  // fixes-plan.md §1.1): master admin_head/zone rows are shared across
-  // events, only membership (event_admin_head/event_zone) is per-event, so a
-  // reviewer viewing 1449 H should only see 1449 H's heads/zones, not every
-  // head/zone that ever existed. Two-step lookup (membership ids, then
-  // `.in()`) rather than an embedded-resource join, to not depend on
-  // PostgREST inferring the right relationship direction.
-  let adminHeadOptions: { id: number; head_number: number; name: string }[] = []
-  let zoneOptions: { id: number; zone_number: number; name: string }[] = []
+  // Stage 3 (Classify, §8) options. admin_head/zone are org-wide reference
+  // data (20260913000001 dropped their department_id -- they were seeded
+  // under department_id=1 'Venue Setup' from day one, which silently
+  // emptied both dropdowns for any entry not in that department), so they're
+  // scoped only to the selected event's membership, not the matched entry's
+  // department. sub_department still belongs to exactly one department, so
+  // it alone stays gated on entry.department_id, same as before
+  // (event-scoping-and-review-fixes-plan.md §1.1: master rows are shared
+  // across events, only membership -- event_admin_head/event_zone/
+  // event_sub_department -- is per-event, so a reviewer viewing 1449 H
+  // should only see 1449 H's heads/zones/sub-departments, not every one that
+  // ever existed. Two-step lookup, membership ids then `.in()`, rather than
+  // an embedded-resource join, to not depend on PostgREST inferring the
+  // right relationship direction).
+  const [activeAdminHeadIdsRes, activeZoneIdsRes] = await Promise.all([
+    selectedEventId !== null
+      ? supabase.from('event_admin_head').select('admin_head_id').eq('event_id', selectedEventId)
+      : Promise.resolve({ data: null }),
+    selectedEventId !== null
+      ? supabase.from('event_zone').select('zone_id').eq('event_id', selectedEventId)
+      : Promise.resolve({ data: null }),
+  ])
+  const activeAdminHeadIds = activeAdminHeadIdsRes.data
+    ? (activeAdminHeadIdsRes.data as { admin_head_id: number }[]).map((r) => r.admin_head_id)
+    : null
+  const activeZoneIds = activeZoneIdsRes.data
+    ? (activeZoneIdsRes.data as { zone_id: number }[]).map((r) => r.zone_id)
+    : null
+
+  // Perf audit Phase 2: admin_head/zone come from the per-user cache
+  // (kept its userId cache key even though the RLS gate it existed for is
+  // gone -- see lib/cache/reference-data.ts's doc comment). `user` is
+  // already resolved via getCachedUser() at the top of this function, so
+  // it's reused here rather than fetching it again.
+  const [cachedAdminHeads, cachedZones] = await Promise.all([
+    getCachedAdminHeads(supabase, user.id),
+    getCachedZones(supabase, user.id),
+  ])
+  const adminHeadOptions = cachedAdminHeads
+    .filter((h) => h.is_active && (activeAdminHeadIds === null || activeAdminHeadIds.includes(h.id)))
+    .sort((a, b) => a.head_number - b.head_number)
+    .map((h) => ({ id: h.id, head_number: h.head_number, name: h.name }))
+  const zoneOptions = cachedZones
+    .filter((z) => z.is_active && (activeZoneIds === null || activeZoneIds.includes(z.id)))
+    .sort((a, b) => a.zone_number - b.zone_number)
+    .map((z) => ({ id: z.id, zone_number: z.zone_number, name: z.name }))
+
   let subDepartmentOptions: { id: number; name: string }[] = []
   if (entry?.department_id) {
-    const [activeAdminHeadIdsRes, activeZoneIdsRes, activeSubDepartmentIdsRes] = await Promise.all([
+    const activeSubDepartmentIdsRes =
       selectedEventId !== null
-        ? supabase.from('event_admin_head').select('admin_head_id').eq('event_id', selectedEventId)
-        : Promise.resolve({ data: null }),
-      selectedEventId !== null
-        ? supabase.from('event_zone').select('zone_id').eq('event_id', selectedEventId)
-        : Promise.resolve({ data: null }),
-      selectedEventId !== null
-        ? supabase.from('event_sub_department').select('sub_department_id').eq('event_id', selectedEventId)
-        : Promise.resolve({ data: null }),
-    ])
-    const activeAdminHeadIds = activeAdminHeadIdsRes.data
-      ? (activeAdminHeadIdsRes.data as { admin_head_id: number }[]).map((r) => r.admin_head_id)
-      : null
-    const activeZoneIds = activeZoneIdsRes.data
-      ? (activeZoneIdsRes.data as { zone_id: number }[]).map((r) => r.zone_id)
-      : null
+        ? await supabase.from('event_sub_department').select('sub_department_id').eq('event_id', selectedEventId)
+        : { data: null }
     const activeSubDepartmentIds = activeSubDepartmentIdsRes.data
       ? (activeSubDepartmentIdsRes.data as { sub_department_id: number }[]).map((r) => r.sub_department_id)
       : null
@@ -716,35 +739,7 @@ async function loadDocumentDetail(
       .eq('is_active', true)
     if (activeSubDepartmentIds !== null) subDepartmentQuery = subDepartmentQuery.in('id', activeSubDepartmentIds)
 
-    // Perf audit Phase 2: admin_head/zone come from the per-user cache
-    // (RLS on these two is can_see_department()-gated, hence the userId
-    // cache key -- see lib/cache/reference-data.ts's doc comment). `user` is
-    // already resolved via getCachedUser() at the top of this function, so
-    // it's reused here rather than fetching it again. sub_department stays a
-    // live query -- out of scope for this cache pass.
-    const [cachedAdminHeads, cachedZones, subDepartmentsRes] = await Promise.all([
-      getCachedAdminHeads(supabase, user.id),
-      getCachedZones(supabase, user.id),
-      subDepartmentQuery.order('name'),
-    ])
-    adminHeadOptions = cachedAdminHeads
-      .filter(
-        (h) =>
-          h.department_id === entry.department_id &&
-          h.is_active &&
-          (activeAdminHeadIds === null || activeAdminHeadIds.includes(h.id))
-      )
-      .sort((a, b) => a.head_number - b.head_number)
-      .map((h) => ({ id: h.id, head_number: h.head_number, name: h.name }))
-    zoneOptions = cachedZones
-      .filter(
-        (z) =>
-          z.department_id === entry.department_id &&
-          z.is_active &&
-          (activeZoneIds === null || activeZoneIds.includes(z.id))
-      )
-      .sort((a, b) => a.zone_number - b.zone_number)
-      .map((z) => ({ id: z.id, zone_number: z.zone_number, name: z.name }))
+    const subDepartmentsRes = await subDepartmentQuery.order('name')
     subDepartmentOptions = (subDepartmentsRes.data ?? []).map((s) => ({
       id: s.id as number,
       name: s.name as string,

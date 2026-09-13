@@ -503,12 +503,13 @@ export function DocumentCard({
   // dropdown pair implying it's still fully unclassified.
   const needsClassification =
     chosenEntryInfo !== null && chosenEntryInfo.adminHeadId === null && chosenEntryInfo.zoneId === null
-  const departmentScopedAdminHeadOptions = chosenEntryInfo
-    ? adminHeadOptions.filter((o) => o.department_id === chosenEntryInfo.entryDepartmentId)
-    : []
-  const departmentScopedZoneOptions = chosenEntryInfo
-    ? zoneOptions.filter((o) => o.department_id === chosenEntryInfo.entryDepartmentId)
-    : []
+  // admin_head/zone are org-wide reference data (20260913000001 dropped
+  // their department_id), so every option is offered regardless of the
+  // chosen entry's department -- previously filtered by
+  // o.department_id === chosenEntryInfo.entryDepartmentId, which silently
+  // emptied both dropdowns for any entry outside department 1.
+  const departmentScopedAdminHeadOptions = chosenEntryInfo ? adminHeadOptions : []
+  const departmentScopedZoneOptions = chosenEntryInfo ? zoneOptions : []
 
   // Runs once per chosen-entry change (not debounced — unlike the search
   // input above, this fires on a selection change, not a keystroke).

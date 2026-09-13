@@ -25,11 +25,7 @@ export async function loadBudgetHeads(
         .from('budget_head')
         .select('id, raw_label, short_label, department_id, head_id, department:department_id(name)')
         .order('raw_label'),
-      supabase
-        .from('admin_head')
-        .select('id, department_id, head_number, name')
-        .order('department_id')
-        .order('head_number'),
+      supabase.from('admin_head').select('id, head_number, name').order('head_number'),
       selectedEventId === null
         ? Promise.resolve({ data: [] as { admin_head_id: number }[] })
         : supabase.from('event_admin_head').select('admin_head_id').eq('event_id', selectedEventId),
@@ -50,7 +46,6 @@ export async function loadBudgetHeads(
     .filter((row) => selectedEventId === null || headMemberIds.has(row.id as number))
     .map((row) => ({
       id: row.id as number,
-      departmentId: row.department_id as number,
       headNumber: row.head_number as number,
       name: row.name as string,
     }))

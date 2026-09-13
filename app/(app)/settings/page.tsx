@@ -132,9 +132,9 @@ export default async function SettingsPage() {
         },
         {
           label: 'Master data',
-          sublabel: 'read-only reference',
+          sublabel: 'departments, zones, admin heads',
           description:
-            'Departments, sub-departments, zones, admin heads and the Hub status lifecycle. Shown read-only by design -- editing these is a migration, not an admin action.',
+            'Departments, sub-departments, zones, admin heads and the Hub status lifecycle. Rename, deactivate, or add a row directly here -- zones and admin heads are org-wide reference data, not tied to any department.',
           href: '/settings/master-data',
         },
       ],

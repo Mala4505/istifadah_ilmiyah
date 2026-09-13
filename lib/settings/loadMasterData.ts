@@ -8,9 +8,9 @@ import {
 
 export interface HeadRow {
   id: number
-  departmentId: number
   headNumber: number
   name: string
+  isActive: boolean
 }
 
 export interface MasterData {
@@ -22,12 +22,16 @@ export interface MasterData {
 }
 
 /**
- * Master-data area loader (Phase 2 Settings redesign). Departments,
- * admin heads, zones and sub-departments are filtered through the
- * selected event's membership tables, exactly as the former
- * `loadSuperadminData` did (with the same "no event resolves -> no
- * filtering" fallback). Hub statuses are global. Sub-department budget
- * amounts come from v_sub_department_budget_vs_actual so the compacted
+ * Master-data area loader (Phase 2 Settings redesign). Departments and
+ * sub-departments are filtered through the selected event's membership
+ * tables, exactly as the former `loadSuperadminData` did (with the same "no
+ * event resolves -> no filtering" fallback). admin_head/zone stopped being
+ * department-scoped in 20260913000001 (they're org-wide reference data now,
+ * like vendor/department), so they're membership-filtered but no longer
+ * grouped or scoped by department at all -- see app/(app)/settings/master-data
+ * /page.tsx, which renders them as their own flat, editable tables rather
+ * than nested under each department. Hub statuses are global. Sub-department
+ * budget amounts come from v_sub_department_budget_vs_actual so the
  * per-department view can still show them.
  */
 export async function loadMasterData(
@@ -48,17 +52,9 @@ export async function loadMasterData(
     { data: subDepartmentMembershipData },
     { data: subDepartmentBudgetData },
   ] = await Promise.all([
-    supabase.from('department').select('id, name').order('name'),
-    supabase
-      .from('admin_head')
-      .select('id, department_id, head_number, name')
-      .order('department_id')
-      .order('head_number'),
-    supabase
-      .from('zone')
-      .select('id, department_id, zone_number, name')
-      .order('department_id')
-      .order('zone_number'),
+    supabase.from('department').select('id, name, is_active').order('name'),
+    supabase.from('admin_head').select('id, head_number, name, is_active').order('head_number'),
+    supabase.from('zone').select('id, zone_number, name, is_active').order('zone_number'),
     supabase.from('sub_department').select('id, department_id, name, is_active').order('name'),
     supabase
       .from('hub_status')
@@ -100,24 +96,24 @@ export async function loadMasterData(
 
   const departments: DepartmentOption[] = (departmentsData ?? [])
     .filter((d) => selectedEventId === null || departmentMemberIds.has(d.id as number))
-    .map((d) => ({ id: d.id as number, name: d.name as string }))
+    .map((d) => ({ id: d.id as number, name: d.name as string, isActive: d.is_active as boolean }))
 
   const heads: HeadRow[] = (headsData ?? [])
     .filter((row) => selectedEventId === null || headMemberIds.has(row.id as number))
     .map((row) => ({
       id: row.id as number,
-      departmentId: row.department_id as number,
       headNumber: row.head_number as number,
       name: row.name as string,
+      isActive: row.is_active as boolean,
     }))
 
   const zones: ZoneRow[] = (zonesData ?? [])
     .filter((row) => selectedEventId === null || zoneMemberIds.has(row.id as number))
     .map((row) => ({
       id: row.id as number,
-      departmentId: row.department_id as number,
       zoneNumber: row.zone_number as number,
       name: row.name as string,
+      isActive: row.is_active as boolean,
     }))
 
   const subDepartments: SubDepartmentRow[] = (subDepartmentsData ?? [])

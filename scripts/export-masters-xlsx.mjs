@@ -24,8 +24,11 @@ const supabase = createClient(url, key, { auth: { persistSession: false } })
 const [{ data: departments, error: e1 }, { data: adminHeads, error: e2 }, { data: zones, error: e3 }, { data: subDepartments, error: e4 }] =
   await Promise.all([
     supabase.from('department').select('id, name').order('name'),
-    supabase.from('admin_head').select('id, department_id, head_number, name').order('department_id').order('head_number'),
-    supabase.from('zone').select('id, department_id, zone_number, name').order('department_id').order('zone_number'),
+    // admin_head/zone stopped being department-scoped in
+    // 20260913000001_admin_head_zone_drop_department.sql -- they're org-wide
+    // reference data now, no department_id column left to select or sort by.
+    supabase.from('admin_head').select('id, head_number, name').order('head_number'),
+    supabase.from('zone').select('id, zone_number, name').order('zone_number'),
     supabase.from('sub_department').select('id, department_id, name, is_active').order('department_id').order('name'),
   ])
 
@@ -66,14 +69,14 @@ addSheet(
 
 addSheet(
   'Admin Heads',
-  ['Department', 'Head No.', 'Admin Head'],
-  (adminHeads ?? []).map((r) => [deptNameById.get(r.department_id) ?? '', r.head_number, r.name]),
+  ['Head No.', 'Admin Head'],
+  (adminHeads ?? []).map((r) => [r.head_number, r.name]),
 )
 
 addSheet(
   'Zones',
-  ['Department', 'Zone No.', 'Zone'],
-  (zones ?? []).map((r) => [deptNameById.get(r.department_id) ?? '', r.zone_number, r.name]),
+  ['Zone No.', 'Zone'],
+  (zones ?? []).map((r) => [r.zone_number, r.name]),
 )
 
 const outPath = process.argv[2] || 'Masters-Reference.xlsx'

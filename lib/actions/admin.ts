@@ -595,3 +595,247 @@ export async function saveVendorLineItemTemplate(input: {
   revalidatePath('/settings')
   return { ok: true }
 }
+
+// ============================================================================
+// Master data CRUD (Settings -> Master data, 2026-09-13): department,
+// sub_department, zone, and admin_head were previously seeded/read-only --
+// "editing them is a migration, not an admin action" per the old master-data
+// page copy, with no insert/update RLS policy for `authenticated` at all
+// (20260808000026_rls_policies.sql's own comment). The
+// 20260913000001_admin_head_zone_drop_department migration adds
+// superadmin-scoped insert/update policies on all four tables (and drops
+// admin_head/zone's department_id entirely -- see that migration's header),
+// so these actions write through the normal session client and rely on RLS
+// as the real gate, with the same app-level requireSuperadmin() floor
+// updateSubDepartmentBudget/updateStaffProfile already use as a stricter,
+// explicit check ahead of the database's own.
+//
+// No delete action: every one of these tables has an is_active flag
+// (deactivate, not delete) precisely so a retired row still resolves a name
+// for any entry/budget-head/event-membership row that already points at it,
+// instead of going blank -- same reasoning department_select's "no delete
+// policy at all" note gives for entries.
+// ============================================================================
+
+function friendlyMasterDataError(context: string, error: { code?: string; message: string }): string {
+  if (error.code === '23505') {
+    return 'That name or number is already in use -- pick a different one.'
+  }
+  return logRawError(context, error.message)
+}
+
+const createDepartmentSchema = z.object({
+  name: z.string().trim().min(1, 'Give the department a name.'),
+})
+
+export async function createDepartment(input: { name: string }): Promise<ActionResult> {
+  const gate = await requireSuperadmin()
+  if (!gate.ok) return { ok: false, error: 'Editing master data is a superadmin-only action.' }
+
+  const parsed = createDepartmentSchema.safeParse(input)
+  if (!parsed.success) return { ok: false, error: parsed.error.issues[0]!.message }
+
+  const supabase = await createClient()
+  const { error } = await supabase.from('department').insert({ name: parsed.data.name })
+  if (error) return { ok: false, error: friendlyMasterDataError('admin.createDepartment', error) }
+
+  revalidatePath('/settings')
+  revalidateTag(REFERENCE_DATA_TAGS.department)
+  return { ok: true }
+}
+
+const updateDepartmentSchema = z.object({
+  id: z.number().int().positive(),
+  name: z.string().trim().min(1, 'Give the department a name.'),
+  isActive: z.boolean(),
+})
+
+export async function updateDepartment(input: {
+  id: number
+  name: string
+  isActive: boolean
+}): Promise<ActionResult> {
+  const gate = await requireSuperadmin()
+  if (!gate.ok) return { ok: false, error: 'Editing master data is a superadmin-only action.' }
+
+  const parsed = updateDepartmentSchema.safeParse(input)
+  if (!parsed.success) return { ok: false, error: parsed.error.issues[0]!.message }
+
+  const supabase = await createClient()
+  const { error } = await supabase
+    .from('department')
+    .update({ name: parsed.data.name, is_active: parsed.data.isActive })
+    .eq('id', parsed.data.id)
+  if (error) return { ok: false, error: friendlyMasterDataError('admin.updateDepartment', error) }
+
+  revalidatePath('/settings')
+  revalidateTag(REFERENCE_DATA_TAGS.department)
+  return { ok: true }
+}
+
+const createSubDepartmentSchema = z.object({
+  departmentId: z.number().int().positive(),
+  name: z.string().trim().min(1, 'Give the sub-department a name.'),
+})
+
+export async function createSubDepartment(input: {
+  departmentId: number
+  name: string
+}): Promise<ActionResult> {
+  const gate = await requireSuperadmin()
+  if (!gate.ok) return { ok: false, error: 'Editing master data is a superadmin-only action.' }
+
+  const parsed = createSubDepartmentSchema.safeParse(input)
+  if (!parsed.success) return { ok: false, error: parsed.error.issues[0]!.message }
+
+  const supabase = await createClient()
+  const { error } = await supabase
+    .from('sub_department')
+    .insert({ department_id: parsed.data.departmentId, name: parsed.data.name })
+  if (error) return { ok: false, error: friendlyMasterDataError('admin.createSubDepartment', error) }
+
+  revalidatePath('/settings')
+  return { ok: true }
+}
+
+const updateSubDepartmentSchema = z.object({
+  id: z.number().int().positive(),
+  departmentId: z.number().int().positive(),
+  name: z.string().trim().min(1, 'Give the sub-department a name.'),
+  isActive: z.boolean(),
+})
+
+export async function updateSubDepartment(input: {
+  id: number
+  departmentId: number
+  name: string
+  isActive: boolean
+}): Promise<ActionResult> {
+  const gate = await requireSuperadmin()
+  if (!gate.ok) return { ok: false, error: 'Editing master data is a superadmin-only action.' }
+
+  const parsed = updateSubDepartmentSchema.safeParse(input)
+  if (!parsed.success) return { ok: false, error: parsed.error.issues[0]!.message }
+
+  const supabase = await createClient()
+  const { error } = await supabase
+    .from('sub_department')
+    .update({
+      department_id: parsed.data.departmentId,
+      name: parsed.data.name,
+      is_active: parsed.data.isActive,
+    })
+    .eq('id', parsed.data.id)
+  if (error) return { ok: false, error: friendlyMasterDataError('admin.updateSubDepartment', error) }
+
+  revalidatePath('/settings')
+  return { ok: true }
+}
+
+const createZoneSchema = z.object({
+  zoneNumber: z.number().int().positive(),
+  name: z.string().trim().min(1, 'Give the zone a name.'),
+})
+
+export async function createZone(input: { zoneNumber: number; name: string }): Promise<ActionResult> {
+  const gate = await requireSuperadmin()
+  if (!gate.ok) return { ok: false, error: 'Editing master data is a superadmin-only action.' }
+
+  const parsed = createZoneSchema.safeParse(input)
+  if (!parsed.success) return { ok: false, error: parsed.error.issues[0]!.message }
+
+  const supabase = await createClient()
+  const { error } = await supabase
+    .from('zone')
+    .insert({ zone_number: parsed.data.zoneNumber, name: parsed.data.name })
+  if (error) return { ok: false, error: friendlyMasterDataError('admin.createZone', error) }
+
+  revalidatePath('/settings')
+  revalidateTag(REFERENCE_DATA_TAGS.zone)
+  return { ok: true }
+}
+
+const updateZoneSchema = z.object({
+  id: z.number().int().positive(),
+  zoneNumber: z.number().int().positive(),
+  name: z.string().trim().min(1, 'Give the zone a name.'),
+  isActive: z.boolean(),
+})
+
+export async function updateZone(input: {
+  id: number
+  zoneNumber: number
+  name: string
+  isActive: boolean
+}): Promise<ActionResult> {
+  const gate = await requireSuperadmin()
+  if (!gate.ok) return { ok: false, error: 'Editing master data is a superadmin-only action.' }
+
+  const parsed = updateZoneSchema.safeParse(input)
+  if (!parsed.success) return { ok: false, error: parsed.error.issues[0]!.message }
+
+  const supabase = await createClient()
+  const { error } = await supabase
+    .from('zone')
+    .update({ zone_number: parsed.data.zoneNumber, name: parsed.data.name, is_active: parsed.data.isActive })
+    .eq('id', parsed.data.id)
+  if (error) return { ok: false, error: friendlyMasterDataError('admin.updateZone', error) }
+
+  revalidatePath('/settings')
+  revalidateTag(REFERENCE_DATA_TAGS.zone)
+  return { ok: true }
+}
+
+const createAdminHeadSchema = z.object({
+  headNumber: z.number().int().positive(),
+  name: z.string().trim().min(1, 'Give the admin head a name.'),
+})
+
+export async function createAdminHead(input: { headNumber: number; name: string }): Promise<ActionResult> {
+  const gate = await requireSuperadmin()
+  if (!gate.ok) return { ok: false, error: 'Editing master data is a superadmin-only action.' }
+
+  const parsed = createAdminHeadSchema.safeParse(input)
+  if (!parsed.success) return { ok: false, error: parsed.error.issues[0]!.message }
+
+  const supabase = await createClient()
+  const { error } = await supabase
+    .from('admin_head')
+    .insert({ head_number: parsed.data.headNumber, name: parsed.data.name })
+  if (error) return { ok: false, error: friendlyMasterDataError('admin.createAdminHead', error) }
+
+  revalidatePath('/settings')
+  revalidateTag(REFERENCE_DATA_TAGS.adminHead)
+  return { ok: true }
+}
+
+const updateAdminHeadSchema = z.object({
+  id: z.number().int().positive(),
+  headNumber: z.number().int().positive(),
+  name: z.string().trim().min(1, 'Give the admin head a name.'),
+  isActive: z.boolean(),
+})
+
+export async function updateAdminHead(input: {
+  id: number
+  headNumber: number
+  name: string
+  isActive: boolean
+}): Promise<ActionResult> {
+  const gate = await requireSuperadmin()
+  if (!gate.ok) return { ok: false, error: 'Editing master data is a superadmin-only action.' }
+
+  const parsed = updateAdminHeadSchema.safeParse(input)
+  if (!parsed.success) return { ok: false, error: parsed.error.issues[0]!.message }
+
+  const supabase = await createClient()
+  const { error } = await supabase
+    .from('admin_head')
+    .update({ head_number: parsed.data.headNumber, name: parsed.data.name, is_active: parsed.data.isActive })
+    .eq('id', parsed.data.id)
+  if (error) return { ok: false, error: friendlyMasterDataError('admin.updateAdminHead', error) }
+
+  revalidatePath('/settings')
+  revalidateTag(REFERENCE_DATA_TAGS.adminHead)
+  return { ok: true }
+}
