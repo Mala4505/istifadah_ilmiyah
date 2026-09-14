@@ -28,6 +28,19 @@ import type { ManualFlagReason } from '@/components/exceptions/labels'
 
 const CLAIM_STALE_AFTER_MS = 15 * 60 * 1000 // §7: "Claims expire after 15 minutes of inactivity"
 
+/** Shared between the auto_recheck_note stamp below and the note actually
+ *  written when the reviewer confirms from the post-save toast (2026-09-14
+ *  "resolved when saved" follow-up) -- one string, so the two can never drift. */
+const TALLY_RECHECK_CLEAR_NOTE = 'Rechecked after this bill was saved — the figures no longer show this mismatch.'
+
+export interface ClearedAmtException {
+  id: number
+  exceptionType: string
+  /** Same text as auto_recheck_note -- passed back so the confirm action can
+   *  resolve with it directly, no second fetch. */
+  note: string
+}
+
 export interface VerifiedHeaderInput {
   vendor_name: string | null
   vendor_gstin: string | null
@@ -84,6 +97,13 @@ export type SaveVerificationResult =
        *  without a reload. Null when a vendor was already linked or the name
        *  was blank. */
       resolvedVendor: { id: number; displayName: string } | null
+      /** Amt-issue exceptions (§ the "amt issue" bucket) whose recheck came
+       *  back clean on this save. Empty in the overwhelmingly common case.
+       *  The review workspace surfaces these as a post-save toast with a
+       *  "Resolve" action -- confirming calls resolveExceptions with these
+       *  ids and notes, so the click still happens, just folded into the
+       *  same save flow instead of a separate visit to the queue. */
+      clearedAmtExceptions: ClearedAmtException[]
     }
   | { ok: false; error: string; conflict?: true }
 
@@ -287,6 +307,8 @@ export async function saveVerification(input: SaveVerificationInput): Promise<Sa
   // so ResolveExceptionDialog can pre-fill the reason, but status stays
   // 'open' until a human clicks Resolve. Scoped to this one
   // document_extraction_id, same as the GSTIN closes above.
+  const clearedAmtExceptions: ClearedAmtException[] = []
+
   const { data: openTallyExceptions } = await supabase
     .from('reconciliation_exception')
     .select('id, exception_type')
@@ -320,19 +342,24 @@ export async function saveVerification(input: SaveVerificationInput): Promise<Sa
       linkedEntryAmount,
     })
 
-    const clearedIds = openTallyExceptions
-      .filter((e) => recheck[e.exception_type as keyof typeof recheck] === false)
-      .map((e) => e.id)
+    const cleared = openTallyExceptions.filter((e) => recheck[e.exception_type as keyof typeof recheck] === false)
 
-    if (clearedIds.length > 0) {
+    if (cleared.length > 0) {
       await supabase
         .from('reconciliation_exception')
         .update({
-          auto_recheck_note: 'Rechecked after this bill was saved — the figures no longer show this mismatch.',
+          auto_recheck_note: TALLY_RECHECK_CLEAR_NOTE,
           auto_recheck_cleared_at: new Date().toISOString(),
         })
-        .in('id', clearedIds)
+        .in(
+          'id',
+          cleared.map((e) => e.id)
+        )
         .eq('status', 'open')
+
+      cleared.forEach((e) => {
+        clearedAmtExceptions.push({ id: e.id, exceptionType: e.exception_type, note: TALLY_RECHECK_CLEAR_NOTE })
+      })
     }
   }
 
@@ -348,6 +375,7 @@ export async function saveVerification(input: SaveVerificationInput): Promise<Sa
     lineItemsUpdated: result?.line_items_updated ?? 0,
     rateReferenceRowsInserted: result?.rate_reference_rows_inserted ?? 0,
     resolvedVendor,
+    clearedAmtExceptions,
   }
 }
 
@@ -1233,14 +1261,19 @@ export async function setReviewQueueAssignee(value: string | null): Promise<{ ok
  * go with it automatically. The one thing that does NOT cascade is
  * rate_reference.line_item_id (`on delete no action`, by design -- it is a
  * persistent rate-benchmark table, not meant to silently lose history) --
- * if this bill was already verified and saved once, a rate_reference row
- * may already reference one of its line items, and the delete below fails
- * with a foreign-key violation. Treated as a real "can't do this" case, not
- * a bug: caught specifically so the reviewer gets a plain-English reason
- * instead of a raw Postgres error, and the page's own skip flag is
- * deliberately NOT applied when this happens -- a visual-only skip with the
- * bill still live underneath is exactly the bug this fix exists to close,
- * so failing the whole action here is more honest than a partial one.
+ * if this bill was already verified and saved once, a rate_reference row may
+ * already reference one of its line items, and the delete below used to fail
+ * outright with a foreign-key violation.
+ *
+ * Product decision (2026-09-14): a reviewer catching bad OCR shouldn't have
+ * to file an admin ticket to get the page unstuck. On that FK violation this
+ * now calls `clear_bill_rate_reference_links` (20260914000002, security
+ * definer -- rate_reference has no write policy for `authenticated`) to null
+ * out just the dangling `line_item_id` on this bill's rate_reference rows
+ * (net_rate/vendor/item history itself is untouched, so nothing is lost --
+ * only the reference to the line item about to be deleted) and retries the
+ * delete once. If that retry still fails, this falls back to the old
+ * plain-English "ask an admin" error rather than a raw Postgres one.
  */
 export async function setPageSkipOverride(input: {
   sourceDocumentId: number
@@ -1297,7 +1330,17 @@ export async function setPageSkipOverride(input: {
         return { ok: false, error: logRawError('review.setPageSkipOverride', unlinkError.message) }
       }
 
-      const { error: deleteError } = await supabase.from('document_extraction').delete().eq('id', containingBill.id)
+      let { error: deleteError } = await supabase.from('document_extraction').delete().eq('id', containingBill.id)
+
+      if (deleteError && deleteError.code === '23503') {
+        const { error: unlinkRateRefError } = await supabase.rpc('clear_bill_rate_reference_links', {
+          p_document_extraction_id: containingBill.id,
+        })
+        if (unlinkRateRefError) {
+          return { ok: false, error: logRawError('review.setPageSkipOverride', unlinkRateRefError.message) }
+        }
+        ;({ error: deleteError } = await supabase.from('document_extraction').delete().eq('id', containingBill.id))
+      }
 
       if (deleteError) {
         if (deleteError.code === '23503') {

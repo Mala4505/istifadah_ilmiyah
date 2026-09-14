@@ -44,6 +44,7 @@ import {
   type SaveVerificationInput,
   type VendorSearchResult,
 } from '@/lib/actions/review'
+import { resolveExceptions } from '@/lib/actions/exceptions'
 import { type MatchCandidate, type ReviewDocumentDetail } from '@/lib/review/types'
 import { type Keymap, formatBinding, isSafeShortcutTarget, matchLineDigit, matchesBinding } from '@/lib/shortcuts/config'
 import type { PdfViewerHandle } from './pdf-viewer'
@@ -1363,6 +1364,57 @@ export function ReviewWorkspace({
       } else {
         toast.success(savedNote)
       }
+
+      // "Resolved when saved" (2026-09-14 follow-up): an amt-issue exception
+      // whose recheck came back clean does NOT auto-resolve (money-shaped
+      // findings still need a human decision), but the reviewer shouldn't
+      // have to leave this bill to make it -- one click, right in the same
+      // save flow. The Toaster is mounted at the app layout (app/layout.tsx),
+      // so this toast survives the router.push below to the next bill.
+      //
+      // duration: Infinity (2026-09-14, second follow-up: "it should resolve
+      // ... until the user says [otherwise]") -- a timed toast that expires
+      // unclicked would silently leave a money-shaped exception in limbo
+      // with nobody having made a decision. It stays up until the reviewer
+      // either clicks Resolve or dismisses it via the Toaster's closeButton
+      // (app/layout.tsx) -- dismissing just means "later, from the queue",
+      // same as it always could.
+      if (result.clearedAmtExceptions.length > 0) {
+        const cleared = result.clearedAmtExceptions
+        const count = cleared.length
+        toast.message(
+          count === 1
+            ? `1 exception on this bill is no longer an issue.`
+            : `${count} exceptions on this bill are no longer an issue.`,
+          {
+            description: `The recheck came back clean (${cleared.map((e) => exceptionTypeLabel(e.exceptionType)).join(', ')}). Resolve now, or dismiss and handle it later from the queue.`,
+            duration: Infinity,
+            action: {
+              label: count === 1 ? 'Resolve' : 'Resolve all',
+              onClick: () => {
+                void (async () => {
+                  // resolveExceptions writes one note to every id in the batch --
+                  // safe today because TALLY_RECHECK_CLEAR_NOTE (lib/actions/review.ts)
+                  // is the same string for all three amt-issue types. If a future
+                  // type gets its own note text, this needs per-id resolveException
+                  // calls instead of one bulk call.
+                  const res = await resolveExceptions({
+                    exceptionIds: cleared.map((e) => e.id),
+                    outcome: 'resolved',
+                    note: cleared[0]!.note,
+                  })
+                  if (res.ok) {
+                    toast.success(`Resolved ${res.updated} exception${res.updated === 1 ? '' : 's'}.`)
+                  } else {
+                    toastError(res.error, { context: 'review-workspace' })
+                  }
+                })()
+              },
+            },
+          }
+        )
+      }
+
       // 2.3: prefer the next unverified bill in THIS document over whatever
       // the severity-ordered global queue would send us to next -- the
       // queue's own nextId (used by the manual "Next bill" nav button

@@ -10,7 +10,6 @@ import { listAssignableStaff, type AssignableStaff } from '@/lib/assignment/quer
 import type {
   AttachedEntryView,
   LineItemDetail,
-  MatchCandidate,
   OpenExceptionSummary,
   PageStatus,
   QueueEntry,
@@ -474,7 +473,38 @@ async function loadDocumentDetail(
   const user = await getCachedUser()
   if (!user) return null
 
-  const [sourceDocRes, extractionRes, lineItemsRes, pagesRes, siblingBillsRes, entryLinksRes] = await Promise.all([
+  // Perf (docs/performance-remediation-plan.md's phases never touched this
+  // function's own internal sequencing): this used to be ~7 round trips fired
+  // one at a time, most of them depending on nothing but this function's own
+  // parameters (sourceDocumentId/documentExtractionId/selectedEventId/user.id)
+  // rather than on each other's results. Collapsed to 3 tiers, each a single
+  // Promise.all, ordered strictly by real data dependency:
+  //
+  // Tier 0 -- needs only this function's parameters.
+  // Tier 1 -- needs Tier 0's entryLinksRes/extractionRes output.
+  // Tier 2 -- needs Tier 1's linkedEntriesRes output (the resolved `entry`).
+  //
+  // activeSubDepartmentIdsRes and the full `departments` cache read are now
+  // fetched unconditionally in Tier 0 even on the (common) request where they
+  // turn out unused -- both are cheap once warm (getCachedDepartments has no
+  // id filter to apply later, and event_sub_department is a tiny per-event
+  // membership table), and firing them here removes a real sequential hop.
+  const [
+    sourceDocRes,
+    extractionRes,
+    lineItemsRes,
+    pagesRes,
+    siblingBillsRes,
+    entryLinksRes,
+    billEntryVarianceRow,
+    hubStatuses,
+    cachedAdminHeads,
+    cachedZones,
+    departments,
+    activeAdminHeadIdsRes,
+    activeZoneIdsRes,
+    activeSubDepartmentIdsRes,
+  ] = await Promise.all([
     supabase
       .from('source_document')
       .select('id, original_filename, match_status, claimed_by, claimed_at')
@@ -516,11 +546,81 @@ async function loadDocumentDetail(
       .from('entry_bill_link')
       .select('document_extraction_id, entry_id')
       .eq('source_document_id', sourceDocumentId),
+    getBillEntryVariance(supabase, documentExtractionId),
+    // Perf audit Phase 2: cached hub_status list (lib/cache/reference-data.ts)
+    // instead of a live query. Fetched unconditionally (cheap once warm) and
+    // reused below both for hubStatusOptions and the entry's hub-status code
+    // lookup -- one fetch instead of two.
+    getCachedHubStatuses(supabase),
+    // Perf audit Phase 2: admin_head/zone come from the per-user cache (kept
+    // its userId cache key even though the RLS gate it existed for is gone --
+    // see lib/cache/reference-data.ts's doc comment).
+    getCachedAdminHeads(supabase, user.id),
+    getCachedZones(supabase, user.id),
+    // Perf audit Phase 2: one cached departments list, looked up by id in JS.
+    // Shared by the primary entry's label AND every entryLinks row. No id
+    // filter to apply, so unlike the queries below it never needed to wait.
+    getCachedDepartments(supabase),
+    // Stage 3 (Classify, §8) options. admin_head/zone are org-wide reference
+    // data (20260913000001 dropped their department_id -- they were seeded
+    // under department_id=1 'Venue Setup' from day one, which silently
+    // emptied both dropdowns for any entry not in that department), so
+    // they're scoped only to the selected event's membership, not the
+    // matched entry's department. sub_department still belongs to exactly
+    // one department, so it alone stays gated on entry.department_id, same
+    // as before (event-scoping-and-review-fixes-plan.md §1.1: master rows
+    // are shared across events, only membership --
+    // event_admin_head/event_zone/event_sub_department -- is per-event, so a
+    // reviewer viewing 1449 H should only see 1449 H's heads/zones/
+    // sub-departments, not every one that ever existed. Two-step lookup,
+    // membership ids then `.in()`, rather than an embedded-resource join, to
+    // not depend on PostgREST inferring the right relationship direction).
+    selectedEventId !== null
+      ? supabase.from('event_admin_head').select('admin_head_id').eq('event_id', selectedEventId)
+      : Promise.resolve({ data: null }),
+    selectedEventId !== null
+      ? supabase.from('event_zone').select('zone_id').eq('event_id', selectedEventId)
+      : Promise.resolve({ data: null }),
+    selectedEventId !== null
+      ? supabase.from('event_sub_department').select('sub_department_id').eq('event_id', selectedEventId)
+      : Promise.resolve({ data: null }),
   ])
 
   const sourceDoc = sourceDocRes.data
   const extraction = extractionRes.data
   if (!sourceDoc || !extraction) return null
+
+  const departmentNameById = (id: number | null): string | null =>
+    id === null ? null : departments.find((d) => d.id === id)?.name ?? null
+
+  const billEntryVariance = billEntryVarianceRow
+    ? {
+        billTotal: billEntryVarianceRow.billTotal,
+        linkedEntryTotal: billEntryVarianceRow.linkedEntryTotal,
+        varianceAmount: billEntryVarianceRow.varianceAmount,
+        withinTolerance: billEntryVarianceRow.withinTolerance,
+        entryLinkCount: billEntryVarianceRow.entryLinkCount,
+      }
+    : null
+
+  const activeAdminHeadIds = activeAdminHeadIdsRes.data
+    ? (activeAdminHeadIdsRes.data as { admin_head_id: number }[]).map((r) => r.admin_head_id)
+    : null
+  const activeZoneIds = activeZoneIdsRes.data
+    ? (activeZoneIdsRes.data as { zone_id: number }[]).map((r) => r.zone_id)
+    : null
+  const activeSubDepartmentIds = activeSubDepartmentIdsRes.data
+    ? (activeSubDepartmentIdsRes.data as { sub_department_id: number }[]).map((r) => r.sub_department_id)
+    : null
+
+  const adminHeadOptions = cachedAdminHeads
+    .filter((h) => h.is_active && (activeAdminHeadIds === null || activeAdminHeadIds.includes(h.id)))
+    .sort((a, b) => a.head_number - b.head_number)
+    .map((h) => ({ id: h.id, head_number: h.head_number, name: h.name }))
+  const zoneOptions = cachedZones
+    .filter((z) => z.is_active && (activeZoneIds === null || activeZoneIds.includes(z.id)))
+    .sort((a, b) => a.zone_number - b.zone_number)
+    .map((z) => ({ id: z.id, zone_number: z.zone_number, name: z.name }))
 
   // entries<->bills M:N: the bill's linked entries come from entry_bill_link
   // (the scalar entry_id columns are gone -- 20260908000004). `entryId` below
@@ -562,7 +662,12 @@ async function loadDocumentDetail(
     sub_department_id: number | null
   }
 
-  const [linkedEntriesRes, billEntryVarianceRow] = await Promise.all([
+  // Tier 1 -- everything derivable from Tier 0's own entryLinksRes/extractionRes
+  // output, with no cross-dependency on each other. matchCandidates used to
+  // fire only after every one of Tier 2's queries below had already resolved
+  // sequentially; its own inputs (extraction's fields, linkedEntryIds) are
+  // all Tier-0 output, so it belongs here instead.
+  const [linkedEntriesRes, runRes, siblingEntryClassRes, matchCandidates] = await Promise.all([
     linkedEntryIds.length > 0
       ? supabase
           .from('entries')
@@ -571,19 +676,6 @@ async function loadDocumentDetail(
           )
           .in('id', linkedEntryIds)
       : Promise.resolve({ data: [] as LinkedEntryRow[] }),
-    getBillEntryVariance(supabase, documentExtractionId),
-  ])
-
-  const linkedEntryRows = (linkedEntriesRes.data ?? []) as LinkedEntryRow[]
-  const primaryEntryRow =
-    linkedEntryRows.length > 0
-      ? [...linkedEntryRows].sort((a, b) => (b.amount ?? 0) - (a.amount ?? 0) || a.id - b.id)[0]!
-      : null
-  const entryId = primaryEntryRow?.id ?? null
-  const entry = primaryEntryRow
-
-  const [runRes, exceptionsRes, hubStatuses, siblingEntryClassRes] =
-    await Promise.all([
     extraction.current_extraction_run_id
       ? supabase
           .from('ocr_extraction_run')
@@ -591,21 +683,6 @@ async function loadDocumentDetail(
           .eq('id', extraction.current_extraction_run_id as number)
           .maybeSingle()
       : Promise.resolve({ data: null }),
-    supabase
-      .from('reconciliation_exception')
-      .select('id, exception_type, severity, description, created_at, document_extraction_id, entry_id')
-      .eq('status', 'open')
-      .or(
-        entryId
-          ? `document_extraction_id.eq.${documentExtractionId},entry_id.eq.${entryId}`
-          : `document_extraction_id.eq.${documentExtractionId}`
-      ),
-    // Perf audit Phase 2: cached hub_status list (lib/cache/reference-data.ts)
-    // instead of a live query. Fetched unconditionally (cheap once warm) and
-    // reused below both for hubStatusOptions (still gated on entryId, same
-    // as before) and the entry's hub-status code lookup just past this
-    // Promise.all -- one fetch instead of two.
-    getCachedHubStatuses(supabase),
     // Page-rail "done" indicator: a page is only fully done once every bill
     // covering it has cleared all three Review stages, the same predicate
     // v_review_queue uses to keep/drop a bill (20260907000002) -- not just
@@ -618,20 +695,43 @@ async function loadDocumentDetail(
         ? supabase.from('entries').select('id, admin_head_id, zone_id, sub_department_id').in('id', ids)
         : Promise.resolve({ data: [] })
     })(),
+    // Match-strip "suggested" state (§7): tally this bill's vendor / total /
+    // date / invoice number against the ledger and rank the hits. Shared with
+    // the live re-match server action (lib/actions/review.ts's
+    // refreshMatchCandidates) via computeMatchCandidates so the page load and
+    // an in-session vendor/total/date edit run the identical pipeline
+    // (pre-filter RPC + lib/matching.ts's rankCandidates). Uses verified
+    // values over OCR where a reviewer has already corrected a field.
+    // Entry-bill links (Phase 4): computed even once the bill has a linked entry
+    // — a bill may cover several entries, so "already attached" no longer means
+    // "nothing left to suggest". The entries already on this bill are excluded.
+    computeMatchCandidates(
+      supabase,
+      {
+        vendorId: null,
+        vendorName:
+          (extraction.vendor_name_verified as string | null) ?? (extraction.vendor_name_ocr as string | null),
+        totalAmount:
+          (extraction.total_amount_verified as number | null) ?? (extraction.total_amount_ocr as number | null),
+        invoiceDate:
+          (extraction.invoice_date_verified as string | null) ?? (extraction.invoice_date_ocr as string | null),
+        invoiceNumber:
+          (extraction.invoice_number_verified as string | null) ?? (extraction.invoice_number_ocr as string | null),
+        excludeEntryIds: linkedEntryIds,
+      },
+      selectedEventId,
+    ),
   ])
 
   const run = runRes.data as { extraction_confidence: number | null; legibility: 'clear' | 'partial' | 'poor' | null; model: string | null } | null
 
-  // Perf audit Phase 2: one cached departments list, looked up by id in JS.
-  // Shared by the primary entry's label AND every entryLinks row.
-  const linkDepartmentIds = [
-    ...new Set(
-      linkedEntryRows.map((e) => e.department_id).filter((x): x is number => x !== null)
-    ),
-  ]
-  const departments = linkDepartmentIds.length > 0 ? await getCachedDepartments(supabase) : []
-  const departmentNameById = (id: number | null): string | null =>
-    id === null ? null : departments.find((d) => d.id === id)?.name ?? null
+  const linkedEntryRows = (linkedEntriesRes.data ?? []) as LinkedEntryRow[]
+  const primaryEntryRow =
+    linkedEntryRows.length > 0
+      ? [...linkedEntryRows].sort((a, b) => (b.amount ?? 0) - (a.amount ?? 0) || a.id - b.id)[0]!
+      : null
+  const entryId = primaryEntryRow?.id ?? null
+  const entry = primaryEntryRow
 
   const entryLinks: AttachedEntryView[] = linkedEntryRows
     .map((e) => ({
@@ -643,135 +743,52 @@ async function loadDocumentDetail(
     }))
     .sort((a, b) => (b.amount ?? 0) - (a.amount ?? 0) || a.entryId - b.entryId)
 
-  const billEntryVariance = billEntryVarianceRow
-    ? {
-        billTotal: billEntryVarianceRow.billTotal,
-        linkedEntryTotal: billEntryVarianceRow.linkedEntryTotal,
-        varianceAmount: billEntryVarianceRow.varianceAmount,
-        withinTolerance: billEntryVarianceRow.withinTolerance,
-        entryLinkCount: billEntryVarianceRow.entryLinkCount,
-      }
-    : null
-
   let entryHubStatusCode: string | null = null
   const entryDepartmentName: string | null = departmentNameById(entry?.department_id ?? null)
   if (entry?.hub_status_id) {
-    // hubStatuses already resolved above (same fetch as hubStatusOptions) --
-    // no second hub_status round trip needed here.
+    // hubStatuses already resolved in Tier 0 -- no second hub_status round
+    // trip needed here.
     entryHubStatusCode = hubStatuses.find((h) => h.id === entry.hub_status_id)?.code ?? null
   }
 
-  // Split vendor UI (2026-09-07): the review form edits vendor_name (the
-  // transcription) and vendor_id (the linked entity) as two separate controls.
-  // The link picker's trigger shows the linked vendor's own name, which isn't
-  // on the entry row -- one lookup here, only when something is actually linked.
-  let linkedVendorName: string | null = null
-  if (entry?.vendor_id != null) {
-    const { data: linkedVendor } = await supabase
-      .from('vendor')
-      .select('display_name')
-      .eq('id', entry.vendor_id)
-      .maybeSingle()
-    linkedVendorName = (linkedVendor?.display_name as string | undefined) ?? null
-  }
-
-  // Stage 3 (Classify, §8) options. admin_head/zone are org-wide reference
-  // data (20260913000001 dropped their department_id -- they were seeded
-  // under department_id=1 'Venue Setup' from day one, which silently
-  // emptied both dropdowns for any entry not in that department), so they're
-  // scoped only to the selected event's membership, not the matched entry's
-  // department. sub_department still belongs to exactly one department, so
-  // it alone stays gated on entry.department_id, same as before
-  // (event-scoping-and-review-fixes-plan.md §1.1: master rows are shared
-  // across events, only membership -- event_admin_head/event_zone/
-  // event_sub_department -- is per-event, so a reviewer viewing 1449 H
-  // should only see 1449 H's heads/zones/sub-departments, not every one that
-  // ever existed. Two-step lookup, membership ids then `.in()`, rather than
-  // an embedded-resource join, to not depend on PostgREST inferring the
-  // right relationship direction).
-  const [activeAdminHeadIdsRes, activeZoneIdsRes] = await Promise.all([
-    selectedEventId !== null
-      ? supabase.from('event_admin_head').select('admin_head_id').eq('event_id', selectedEventId)
+  // Tier 2 -- needs Tier 1's resolved `entry` (the primary linked entry).
+  const [exceptionsRes, linkedVendorRes, subDepartmentsRes] = await Promise.all([
+    supabase
+      .from('reconciliation_exception')
+      .select('id, exception_type, severity, description, created_at, document_extraction_id, entry_id')
+      .eq('status', 'open')
+      .or(
+        entryId
+          ? `document_extraction_id.eq.${documentExtractionId},entry_id.eq.${entryId}`
+          : `document_extraction_id.eq.${documentExtractionId}`
+      ),
+    // Split vendor UI (2026-09-07): the review form edits vendor_name (the
+    // transcription) and vendor_id (the linked entity) as two separate
+    // controls. The link picker's trigger shows the linked vendor's own name,
+    // which isn't on the entry row -- one lookup here, only when something is
+    // actually linked.
+    entry?.vendor_id != null
+      ? supabase.from('vendor').select('display_name').eq('id', entry.vendor_id).maybeSingle()
       : Promise.resolve({ data: null }),
-    selectedEventId !== null
-      ? supabase.from('event_zone').select('zone_id').eq('event_id', selectedEventId)
-      : Promise.resolve({ data: null }),
+    entry?.department_id
+      ? (() => {
+          let subDepartmentQuery = supabase
+            .from('sub_department')
+            .select('id, name')
+            .eq('department_id', entry.department_id)
+            .eq('is_active', true)
+          if (activeSubDepartmentIds !== null) subDepartmentQuery = subDepartmentQuery.in('id', activeSubDepartmentIds)
+          return subDepartmentQuery.order('name')
+        })()
+      : Promise.resolve({ data: [] }),
   ])
-  const activeAdminHeadIds = activeAdminHeadIdsRes.data
-    ? (activeAdminHeadIdsRes.data as { admin_head_id: number }[]).map((r) => r.admin_head_id)
-    : null
-  const activeZoneIds = activeZoneIdsRes.data
-    ? (activeZoneIdsRes.data as { zone_id: number }[]).map((r) => r.zone_id)
-    : null
 
-  // Perf audit Phase 2: admin_head/zone come from the per-user cache
-  // (kept its userId cache key even though the RLS gate it existed for is
-  // gone -- see lib/cache/reference-data.ts's doc comment). `user` is
-  // already resolved via getCachedUser() at the top of this function, so
-  // it's reused here rather than fetching it again.
-  const [cachedAdminHeads, cachedZones] = await Promise.all([
-    getCachedAdminHeads(supabase, user.id),
-    getCachedZones(supabase, user.id),
-  ])
-  const adminHeadOptions = cachedAdminHeads
-    .filter((h) => h.is_active && (activeAdminHeadIds === null || activeAdminHeadIds.includes(h.id)))
-    .sort((a, b) => a.head_number - b.head_number)
-    .map((h) => ({ id: h.id, head_number: h.head_number, name: h.name }))
-  const zoneOptions = cachedZones
-    .filter((z) => z.is_active && (activeZoneIds === null || activeZoneIds.includes(z.id)))
-    .sort((a, b) => a.zone_number - b.zone_number)
-    .map((z) => ({ id: z.id, zone_number: z.zone_number, name: z.name }))
-
-  let subDepartmentOptions: { id: number; name: string }[] = []
-  if (entry?.department_id) {
-    const activeSubDepartmentIdsRes =
-      selectedEventId !== null
-        ? await supabase.from('event_sub_department').select('sub_department_id').eq('event_id', selectedEventId)
-        : { data: null }
-    const activeSubDepartmentIds = activeSubDepartmentIdsRes.data
-      ? (activeSubDepartmentIdsRes.data as { sub_department_id: number }[]).map((r) => r.sub_department_id)
-      : null
-
-    let subDepartmentQuery = supabase
-      .from('sub_department')
-      .select('id, name')
-      .eq('department_id', entry.department_id)
-      .eq('is_active', true)
-    if (activeSubDepartmentIds !== null) subDepartmentQuery = subDepartmentQuery.in('id', activeSubDepartmentIds)
-
-    const subDepartmentsRes = await subDepartmentQuery.order('name')
-    subDepartmentOptions = (subDepartmentsRes.data ?? []).map((s) => ({
-      id: s.id as number,
-      name: s.name as string,
-    }))
-  }
-
-  // Match-strip "suggested" state (§7): tally this bill's vendor / total /
-  // date / invoice number against the ledger and rank the hits. Shared with
-  // the live re-match server action (lib/actions/review.ts's
-  // refreshMatchCandidates) via computeMatchCandidates so the page load and
-  // an in-session vendor/total/date edit run the identical pipeline
-  // (pre-filter RPC + lib/matching.ts's rankCandidates). Uses verified
-  // values over OCR where a reviewer has already corrected a field.
-  // Entry-bill links (Phase 4): computed even once the bill has a linked entry
-  // — a bill may cover several entries, so "already attached" no longer means
-  // "nothing left to suggest". The entries already on this bill are excluded.
-  const matchCandidates: MatchCandidate[] = await computeMatchCandidates(
-    supabase,
-    {
-      vendorId: null,
-      vendorName:
-        (extraction.vendor_name_verified as string | null) ?? (extraction.vendor_name_ocr as string | null),
-      totalAmount:
-        (extraction.total_amount_verified as number | null) ?? (extraction.total_amount_ocr as number | null),
-      invoiceDate:
-        (extraction.invoice_date_verified as string | null) ?? (extraction.invoice_date_ocr as string | null),
-      invoiceNumber:
-        (extraction.invoice_number_verified as string | null) ?? (extraction.invoice_number_ocr as string | null),
-      excludeEntryIds: linkedEntryIds,
-    },
-    selectedEventId,
-  )
+  const linkedVendorName: string | null =
+    (linkedVendorRes.data?.display_name as string | undefined) ?? null
+  const subDepartmentOptions: { id: number; name: string }[] = (subDepartmentsRes.data ?? []).map((s) => ({
+    id: s.id as number,
+    name: s.name as string,
+  }))
 
   const siblingBills: SiblingBill[] = (siblingBillsRes.data ?? [])
     .map((b) => ({

@@ -1,5 +1,5 @@
 import { staffInitials } from '@/lib/assignment/queries'
-import type { AssignmentWorkload } from '@/lib/assignment/workload'
+import type { AssignmentWorkload, StaffWorkload } from '@/lib/assignment/workload'
 
 /**
  * Superadmin workload board (document assignment, design §06 "Direction C").
@@ -7,10 +7,12 @@ import type { AssignmentWorkload } from '@/lib/assignment/workload'
  * numbers `getAssignmentWorkload` produced. Reassignment itself happens from
  * the inbox (Direction B), not here.
  *
- * "Oldest unactioned" is the real SLA signal: it turns a warning colour once
- * an admin's oldest outstanding document passes STALE_DAYS.
+ * Redesigned 2026-09-14: the original board packed four different numbers
+ * (in progress / verified today / oldest unactioned / a load-comparison bar)
+ * onto each card and testers couldn't tell what any of them meant. Replaced
+ * with one segmented status bar (not started / in progress / verified) plus
+ * a single "last reviewed" recency line.
  */
-const STALE_DAYS = 7
 
 // Small deterministic avatar tint so columns are visually distinct without
 // pulling in another component. Fixed hex values (not theme tokens) because
@@ -29,6 +31,20 @@ function ageLabel(days: number | null): string {
   return `${days}d`
 }
 
+/** Coarse "how long ago" for the last-reviewed line -- doesn't need day-level precision. */
+function timeAgo(iso: string | null): string {
+  if (!iso) return 'never'
+  const ms = Date.now() - new Date(iso).getTime()
+  if (Number.isNaN(ms) || ms < 0) return '—'
+  const minutes = Math.floor(ms / 60_000)
+  if (minutes < 1) return 'just now'
+  if (minutes < 60) return `${minutes}m ago`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours}h ago`
+  const days = Math.floor(hours / 24)
+  return `${days}d ago`
+}
+
 function Avatar({ name, id }: { name: string; id: string }) {
   return (
     <span
@@ -41,25 +57,52 @@ function Avatar({ name, id }: { name: string; id: string }) {
   )
 }
 
-function StatLine({ label, value, alert }: { label: string; value: string; alert?: boolean }) {
+const STATUS_ROWS = [
+  { key: 'notStartedCount', label: 'not started', dot: 'bg-border' },
+  { key: 'inProgressCount', label: 'in progress', dot: 'bg-primary' },
+  { key: 'verifiedCount', label: 'verified', dot: 'bg-emerald-600' },
+] as const
+
+/** One segmented bar: not-started (muted) / in-progress (primary) / verified (green),
+ *  with a one-status-per-line breakdown underneath so labels never wrap or crowd. */
+function StatusBar({ s }: { s: StaffWorkload }) {
+  const total = Math.max(1, s.assignedCount)
+  const pct = (n: number) => `${(n / total) * 100}%`
+
   return (
-    <div
-      className={`flex items-center justify-between font-mono text-xs ${
-        alert ? 'text-destructive' : 'text-muted-foreground'
-      }`}
-    >
-      <span>{label}</span>
-      <span className="tabular-nums">{value}</span>
+    <div className="flex flex-col gap-2">
+      <div className="flex h-2 overflow-hidden rounded-full bg-muted">
+        {s.notStartedCount > 0 && (
+          <div className="h-full bg-border" style={{ width: pct(s.notStartedCount) }} />
+        )}
+        {s.inProgressCount > 0 && (
+          <div className="h-full bg-primary" style={{ width: pct(s.inProgressCount) }} />
+        )}
+        {s.verifiedCount > 0 && (
+          <div className="h-full bg-emerald-600" style={{ width: pct(s.verifiedCount) }} />
+        )}
+      </div>
+      <div className="flex flex-col gap-1">
+        {STATUS_ROWS.map(({ key, label, dot }) => (
+          <div key={key} className="flex items-center justify-between text-xs text-muted-foreground">
+            <span className="inline-flex items-center gap-1.5">
+              <span className={`h-2 w-2 shrink-0 rounded-full ${dot}`} aria-hidden="true" />
+              {label}
+            </span>
+            <span className="font-mono tabular-nums">{s[key]}</span>
+          </div>
+        ))}
+      </div>
     </div>
   )
 }
 
 export function WorkloadBoard({ pool, perStaff }: AssignmentWorkload) {
-  const maxAssigned = Math.max(1, ...perStaff.map((s) => s.assignedCount))
+  const assignedStaff = perStaff.filter((s) => s.assignedCount > 0)
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(190px,1fr))]">
+      <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(220px,1fr))]">
         {/* Pool column */}
         <div className="overflow-hidden rounded-lg border border-secondary bg-card">
           <div className="flex items-center gap-2 border-b border-border bg-muted/60 px-3 py-2.5">
@@ -69,57 +112,36 @@ export function WorkloadBoard({ pool, perStaff }: AssignmentWorkload) {
             <span className="ml-auto font-mono text-sm font-medium tabular-nums">{pool.count}</span>
           </div>
           <div className="flex flex-col gap-2 px-3 py-3">
-            <StatLine
-              label="oldest"
-              value={ageLabel(pool.oldestDays)}
-              alert={pool.oldestDays !== null && pool.oldestDays > STALE_DAYS}
-            />
+            <div className="flex items-center justify-between font-mono text-xs text-muted-foreground">
+              <span>oldest</span>
+              <span className="tabular-nums">{ageLabel(pool.oldestDays)}</span>
+            </div>
             <p className="text-xs text-muted-foreground">Unassigned — reassign from the inbox.</p>
           </div>
         </div>
 
-        {perStaff.length === 0 ? (
+        {assignedStaff.length === 0 ? (
           <div className="col-span-full rounded-lg border border-border bg-card px-3 py-6 text-sm text-muted-foreground">
-            No active admins to show.
+            No documents assigned yet.
           </div>
         ) : (
-          perStaff.map((s) => {
-            const stale = s.oldestUnactionedDays !== null && s.oldestUnactionedDays > STALE_DAYS
-            const barPct = Math.round((s.assignedCount / maxAssigned) * 100)
-            return (
-              <div key={s.staffId} className="overflow-hidden rounded-lg border border-border bg-card">
-                <div className="flex items-center gap-2 border-b border-border bg-muted/60 px-3 py-2.5">
-                  <Avatar name={s.displayName} id={s.staffId} />
-                  <span className="truncate text-sm">{s.displayName}</span>
-                  <span className="ml-auto font-mono text-sm font-medium tabular-nums">{s.assignedCount}</span>
-                </div>
-                <div className="flex flex-col gap-1.5 px-3 py-3">
-                  <StatLine label="in progress" value={String(s.inProgressCount)} />
-                  <StatLine label="verified today" value={String(s.verifiedTodayCount)} />
-                  <StatLine label="oldest unactioned" value={ageLabel(s.oldestUnactionedDays)} alert={stale} />
-                  <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-muted">
-                    <div
-                      className={`h-full ${stale ? 'bg-destructive' : 'bg-primary'}`}
-                      style={{ width: `${Math.max(barPct, s.assignedCount > 0 ? 6 : 0)}%` }}
-                    />
-                  </div>
+          assignedStaff.map((s) => (
+            <div key={s.staffId} className="overflow-hidden rounded-lg border border-border bg-card">
+              <div className="flex items-center gap-2 border-b border-border bg-muted/60 px-3 py-2.5">
+                <Avatar name={s.displayName} id={s.staffId} />
+                <span className="truncate text-sm">{s.displayName}</span>
+                <span className="ml-auto font-mono text-sm font-medium tabular-nums">{s.assignedCount}</span>
+              </div>
+              <div className="flex flex-col gap-2.5 px-3 py-3">
+                <StatusBar s={s} />
+                <div className="flex items-center justify-between font-mono text-xs text-muted-foreground">
+                  <span>last reviewed</span>
+                  <span className="tabular-nums">{timeAgo(s.lastReviewedAt)}</span>
                 </div>
               </div>
-            )
-          })
+            </div>
+          ))
         )}
-      </div>
-
-      <div className="flex flex-wrap gap-4 text-xs text-muted-foreground">
-        <span className="inline-flex items-center gap-1.5">
-          <span className="h-3 w-3 rounded-sm bg-primary" aria-hidden="true" /> assigned load
-        </span>
-        <span className="inline-flex items-center gap-1.5">
-          <span className="h-3 w-3 rounded-sm bg-destructive" aria-hidden="true" /> stale — oldest &gt; {STALE_DAYS} days
-        </span>
-        <span className="inline-flex items-center gap-1.5">
-          <span className="h-3 w-3 rounded-sm border border-secondary bg-transparent" aria-hidden="true" /> unassigned pool
-        </span>
       </div>
     </div>
   )
