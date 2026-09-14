@@ -710,16 +710,20 @@ export function detectDepartmentalTableKind(
  * path in lib/module-mapping.ts. Expressed here in portal vocabulary so the
  * scrape path applies the identical rule.
  *
- * The real UBBL prefix for reimbursement is `RG-`, confirmed against real
- * screenshots (earlier `RB` was wrong). Checked in this exact order so
- * `ADP_` never falls into the reimbursement branch.
+ * The real UBBL prefix for reimbursement is a leading `R` — `RG-` was the
+ * first form confirmed against real screenshots (earlier `RB` was wrong),
+ * but batch #114 (2026-09-14) showed genuine reimbursements also arrive as
+ * `RRECURR-`/`RTRAVEL-` (category-specific codes, still reimbursements per
+ * the tab they were scraped from), so the rule matches on the shared `R`
+ * lead rather than the single `RG-` literal. Checked in this exact order so
+ * `ADP_`/`IAU_` never fall into the reimbursement branch.
  */
 export function deriveEntryType(
   entryNumber: string
 ): 'advance_payment' | 'reimbursement' | 'invoice' | 'invoice_against_uplaq' {
-  // IAU_ before ADP_ before RG-, so no prefix can fall into another's branch.
+  // IAU_ before ADP_ before a bare leading R, so no prefix can fall into another's branch.
   if (entryNumber.startsWith('IAU_')) return 'invoice_against_uplaq'
   if (entryNumber.startsWith('ADP_')) return 'advance_payment'
-  if (entryNumber.startsWith('RG-')) return 'reimbursement'
+  if (entryNumber.startsWith('R')) return 'reimbursement'
   return 'invoice'
 }

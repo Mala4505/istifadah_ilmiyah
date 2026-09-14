@@ -40,6 +40,7 @@ export function ResolveExceptionDialog({
   entryId = null,
   documentExtractionId = null,
   sourceDocumentId = null,
+  autoRecheckNote = null,
 }: {
   exceptionId: number
   amountAtRisk: number | null
@@ -56,6 +57,15 @@ export function ResolveExceptionDialog({
   entryId?: number | null
   documentExtractionId?: number | null
   sourceDocumentId?: number | null
+  /**
+   * Set when `reconciliation_exception.auto_recheck_note` is non-null —
+   * lib/actions/review.ts's saveVerification recomputed this exception
+   * against the just-saved bill and it no longer holds (2026-09-14). Pre-fills
+   * the note and defaults to Resolved so confirming this is a single click,
+   * while still requiring that click — these are the "amt issue" bucket, an
+   * exception about money is never auto-closed.
+   */
+  autoRecheckNote?: string | null
 }) {
   const action = getExceptionAction({
     exception_type: exceptionType,
@@ -65,7 +75,7 @@ export function ResolveExceptionDialog({
   })
   const router = useRouter()
   const [open, setOpen] = React.useState(false)
-  const [note, setNote] = React.useState('')
+  const [note, setNote] = React.useState(autoRecheckNote ?? '')
   const [outcome, setOutcome] = React.useState<ResolveExceptionOutcome>('resolved')
   const [isSubmitting, setIsSubmitting] = React.useState(false)
   // §4.8: guard against silently discarding a typed note, and confirm a
@@ -73,7 +83,7 @@ export function ResolveExceptionDialog({
   const [confirmStep, setConfirmStep] = React.useState<null | 'discard' | 'dismiss'>(null)
 
   function reset() {
-    setNote('')
+    setNote(autoRecheckNote ?? '')
     setOutcome('resolved')
     setConfirmStep(null)
   }
@@ -122,8 +132,8 @@ export function ResolveExceptionDialog({
   return (
     <Dialog open={open} onOpenChange={requestOpenChange}>
       <DialogTrigger asChild>
-        <Button size="sm" variant="outline">
-          Resolve
+        <Button size="sm" variant={autoRecheckNote ? 'default' : 'outline'}>
+          {autoRecheckNote ? 'Resolve — recheck clear' : 'Resolve'}
         </Button>
       </DialogTrigger>
       <DialogContent>
@@ -180,6 +190,14 @@ export function ResolveExceptionDialog({
               )}
             </DialogDescription>
           </DialogHeader>
+
+          {autoRecheckNote && (
+            <div className="rounded-md border border-emerald-600/30 bg-emerald-600/10 p-3 text-sm text-emerald-700 dark:text-emerald-400">
+              <span className="font-medium">Recheck: </span>
+              this mismatch was recomputed against the latest saved values and is no longer present. The note below
+              is pre-filled — review it and confirm.
+            </div>
+          )}
 
           <div className="flex flex-col gap-2 rounded-md border border-border bg-muted/30 p-3">
             <p className="text-sm">

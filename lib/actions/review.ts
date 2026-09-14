@@ -22,6 +22,7 @@ import { isAdminOrAbove } from '@/lib/auth/roles'
 import { reExtractFieldScoped, reExtractPageScoped } from '@/lib/jobs/handlers/rescope-extract'
 import { getSelectedEvent, isEventMutable } from '@/lib/events/current'
 import { computeMatchCandidates } from '@/lib/review/match-candidates'
+import { recheckTallyExceptions } from '@/lib/analytics/tally-recheck'
 import type { MatchCandidate } from '@/lib/review/types'
 import type { ManualFlagReason } from '@/components/exceptions/labels'
 
@@ -276,6 +277,63 @@ export async function saveVerification(input: SaveVerificationInput): Promise<Sa
       .eq('document_extraction_id', input.documentExtractionId)
       .eq('status', 'open')
       .eq('exception_type', 'buyer_gstin_invalid_checksum')
+  }
+
+  // Recalculate-on-save (2026-09-14): "can it recalculate that flag on that
+  // bill and see if it's still flagged or not?" -- for the three amount-math
+  // exception types, recompute against what was just saved. These are the
+  // "amt issue" bucket (same date, follow-up decision): a passing recheck
+  // never auto-resolves -- it stamps auto_recheck_note/auto_recheck_cleared_at
+  // so ResolveExceptionDialog can pre-fill the reason, but status stays
+  // 'open' until a human clicks Resolve. Scoped to this one
+  // document_extraction_id, same as the GSTIN closes above.
+  const { data: openTallyExceptions } = await supabase
+    .from('reconciliation_exception')
+    .select('id, exception_type')
+    .eq('document_extraction_id', input.documentExtractionId)
+    .eq('status', 'open')
+    .in('exception_type', ['line_item_tally_mismatch', 'line_item_row_math_mismatch', 'ocr_total_vs_amount'])
+
+  if (openTallyExceptions && openTallyExceptions.length > 0) {
+    // ocr_total_vs_amount only makes sense against exactly one linked entry
+    // -- same entry_bill_link resolution rule as extract.ts's singleEntryId.
+    let linkedEntryAmount: number | null = null
+    const { data: billLinkRows } = await supabase
+      .from('entry_bill_link')
+      .select('entry_id')
+      .eq('document_extraction_id', input.documentExtractionId)
+    const linkedEntryIds = [...new Set((billLinkRows ?? []).map((r) => r.entry_id as number))]
+    if (linkedEntryIds.length === 1) {
+      const { data: linkedEntry } = await supabase
+        .from('entries')
+        .select('amount')
+        .eq('id', linkedEntryIds[0]!)
+        .maybeSingle()
+      linkedEntryAmount = linkedEntry?.amount == null ? null : Number(linkedEntry.amount)
+    }
+
+    const recheck = recheckTallyExceptions({
+      subtotal: input.header.subtotal,
+      taxAmount: input.header.tax_amount,
+      totalAmount: input.header.total_amount,
+      lineItems: input.lineItems,
+      linkedEntryAmount,
+    })
+
+    const clearedIds = openTallyExceptions
+      .filter((e) => recheck[e.exception_type as keyof typeof recheck] === false)
+      .map((e) => e.id)
+
+    if (clearedIds.length > 0) {
+      await supabase
+        .from('reconciliation_exception')
+        .update({
+          auto_recheck_note: 'Rechecked after this bill was saved — the figures no longer show this mismatch.',
+          auto_recheck_cleared_at: new Date().toISOString(),
+        })
+        .in('id', clearedIds)
+        .eq('status', 'open')
+    }
   }
 
   revalidatePath('/review')

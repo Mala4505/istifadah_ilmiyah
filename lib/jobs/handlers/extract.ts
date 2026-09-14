@@ -675,7 +675,7 @@ export async function persistExtractionPipelineResult(
       subtotal: bill.subtotal,
       taxAmount: bill.tax_amount,
       lineTotal: lineItemTotal(bill),
-      rowMathMismatches: lineItemRowMathMismatches(bill),
+      rowMathMismatches: lineItemRowMathMismatches(bill.line_items),
       legibility: extraction.legibility,
       containsNonLatinScript: extraction.contains_non_latin_script,
     })

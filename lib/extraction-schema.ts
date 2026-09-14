@@ -823,6 +823,18 @@ function discountPercent(raw: string | null): number | null {
   return n > 0 && n < 100 ? n : null
 }
 
+/** The fields `lineItemRowMathMismatches` reads — satisfied by both
+ *  `ExtractionLineItem` (extraction time) and the review form's verified
+ *  line-item shape (save time), so the same check runs against either. */
+export interface LineItemMathInput {
+  line_order?: number | null
+  description: string | null
+  quantity: number | null
+  rate: number | null
+  discount: string | null
+  amount: number | null
+}
+
 /**
  * Per-row arithmetic sanity check: for every line item that carries a
  * quantity, a rate AND an amount, does `amount` reconcile with
@@ -847,9 +859,9 @@ function discountPercent(raw: string | null): number | null {
  *     total as printed when that differs from the arithmetic", so a hit here
  *     is advisory (low severity), never blocking.
  */
-export function lineItemRowMathMismatches(bill: ExtractionBill): LineItemRowMathMismatch[] {
+export function lineItemRowMathMismatches(lineItems: LineItemMathInput[]): LineItemRowMathMismatch[] {
   const out: LineItemRowMathMismatch[] = []
-  bill.line_items.forEach((item, index) => {
+  lineItems.forEach((item, index) => {
     const { quantity, rate, amount } = item
     if (quantity === null || rate === null || amount === null) return
 

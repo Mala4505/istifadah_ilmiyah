@@ -33,6 +33,10 @@ export interface ExceptionRow {
   resolution_note: string | null
   resolved_at: string | null
   created_at: string
+  /** Set when a save-time recheck (lib/actions/review.ts, 2026-09-14) found
+   *  this open exception's condition no longer holds. Still requires a human
+   *  click to actually resolve — see ResolveExceptionDialog's autoRecheckNote. */
+  auto_recheck_note: string | null
 }
 
 function formatINR(amount: number | null): string {
@@ -294,7 +298,17 @@ export function ExceptionsTable({
                       </TableCell>
                       <TableCell>
                         {exception.status === 'open' ? (
-                          <Badge variant="secondary">open</Badge>
+                          <div className="flex flex-col gap-0.5">
+                            <Badge variant="secondary">open</Badge>
+                            {exception.auto_recheck_note && (
+                              <span
+                                className="text-xs font-medium text-emerald-600 dark:text-emerald-400"
+                                title={exception.auto_recheck_note}
+                              >
+                                recheck clear
+                              </span>
+                            )}
+                          </div>
                         ) : (
                           <div className="flex flex-col gap-0.5">
                             <Badge variant={exception.status === 'resolved' ? 'success' : 'outline'}>
@@ -324,6 +338,7 @@ export function ExceptionsTable({
                             entryId={exception.entry_id}
                             documentExtractionId={exception.document_extraction_id}
                             sourceDocumentId={exception.source_document_id}
+                            autoRecheckNote={exception.auto_recheck_note}
                           />
                         )}
                       </TableCell>

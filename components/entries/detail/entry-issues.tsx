@@ -44,6 +44,9 @@ export interface EntryExceptionIssueRow {
   // (source_document_id, Phase 0 §0.3) rather than entry_id directly — shown
   // so it's clear which document the issue is actually about.
   sourceDocumentFilename: string | null
+  /** Set when a save-time recheck found this exception's condition no longer
+   *  holds (2026-09-14) — see ResolveExceptionDialog's autoRecheckNote. */
+  autoRecheckNote: string | null
 }
 
 export interface EntryFlagIssueRow {
@@ -107,6 +110,14 @@ export function EntryIssues({
                   {e.sourceDocumentFilename && (
                     <span className="text-xs text-muted-foreground">on {e.sourceDocumentFilename}</span>
                   )}
+                  {e.autoRecheckNote && (
+                    <span
+                      className="text-xs font-medium text-emerald-600 dark:text-emerald-400"
+                      title={e.autoRecheckNote}
+                    >
+                      recheck clear
+                    </span>
+                  )}
                 </div>
                 {e.description && <p className="mt-1 text-sm text-muted-foreground">{e.description}</p>}
                 {e.amountAtRisk !== null && (
@@ -123,6 +134,7 @@ export function EntryIssues({
                     entryId={e.entryId}
                     documentExtractionId={e.documentExtractionId}
                     sourceDocumentId={e.sourceDocumentId}
+                    autoRecheckNote={e.autoRecheckNote}
                   />
                 </div>
               )}

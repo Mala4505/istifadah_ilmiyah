@@ -46,6 +46,11 @@ export async function resolveException(input: {
       resolution_note: trimmedNote,
       resolved_by: user.id,
       resolved_at: new Date().toISOString(),
+      // Clear the save-time recheck stamp (2026-09-14) -- once resolved/dismissed
+      // the row is no longer "open, recheck pending confirmation", and a
+      // lingering note would be confusing on a closed audit-trail row.
+      auto_recheck_note: null,
+      auto_recheck_cleared_at: null,
     })
     .eq('id', exceptionId)
     .eq('status', 'open')
@@ -109,6 +114,8 @@ export async function resolveExceptions(input: {
       resolution_note: trimmedNote,
       resolved_by: user.id,
       resolved_at: new Date().toISOString(),
+      auto_recheck_note: null,
+      auto_recheck_cleared_at: null,
     })
     .in('id', ids)
     .eq('status', 'open')

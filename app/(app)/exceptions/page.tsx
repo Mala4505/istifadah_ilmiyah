@@ -154,7 +154,7 @@ async function fetchExceptionBuckets(
     let q = supabase
       .from('reconciliation_exception')
       .select(
-        'id, entry_id, document_extraction_id, import_batch_id, source_document_id, exception_type, severity, amount_at_risk, description, status, resolution_note, resolved_at, created_at'
+        'id, entry_id, document_extraction_id, import_batch_id, source_document_id, exception_type, severity, amount_at_risk, description, status, resolution_note, resolved_at, created_at, auto_recheck_note'
       )
     if (filters.status !== 'all') {
       q = q.eq('status', filters.status)

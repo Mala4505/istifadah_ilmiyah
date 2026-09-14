@@ -159,12 +159,16 @@ function hasValue(value: unknown): boolean {
  *    is left as-is — it is a real value (an advance against a quotation).
  * 6. `type` is derived from the normalized UBBL number's prefix (RESOLVED
  *    2026-08-12, MASTER-PLAN §18 Phase 3): `ADP_` -> `'advance_payment'`,
- *    `RG-` -> `'reimbursement'`, no matching prefix -> `'invoice'`. Checked in
- *    that order so `ADP_`-prefixed values never fall through to the `RG-`
- *    branch. This replaces the earlier "prefix isn't reliable, wait for
- *    Sheet 2's own Type column" placeholder — you supplied this rule
- *    directly instead, so the isolation into one branch just paid off as
- *    "swap is a one-line change" without needing Sheet 2 at all.
+ *    a leading `R` -> `'reimbursement'`, no matching prefix -> `'invoice'`.
+ *    Checked in that order so `ADP_`-prefixed values never fall through to
+ *    the reimbursement branch. Widened from the literal `RG-` to any
+ *    leading `R` on 2026-09-14 (see lib/import/portal-mapping.ts's
+ *    deriveEntryType) once `RRECURR-`/`RTRAVEL-` turned up as further
+ *    genuine reimbursement codes. This replaces the earlier "prefix isn't
+ *    reliable, wait for Sheet 2's own Type column" placeholder — you
+ *    supplied this rule directly instead, so the isolation into one branch
+ *    just paid off as "swap is a one-line change" without needing Sheet 2
+ *    at all.
  *
  * Status-code mapping (Status/Main Status -> `entry_status`) and the
  * tally-vs-allocation assertion are caller concerns (they need the
@@ -220,7 +224,7 @@ export function parseDepartmentalRow(
       // Rule 6: prefix rule, isolated here per §3.6.
       type: ubblNumber.startsWith('ADP_')
         ? 'advance_payment'
-        : ubblNumber.startsWith('RG-')
+        : ubblNumber.startsWith('R')
           ? 'reimbursement'
           : 'invoice',
       ubblNumber,

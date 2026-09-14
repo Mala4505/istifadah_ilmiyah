@@ -680,13 +680,13 @@ describe('lineItemRowMathMismatches', () => {
   }
 
   it('accepts a row where quantity × rate equals amount', () => {
-    expect(lineItemRowMathMismatches(billWith([lineItem()]))).toEqual([])
+    expect(lineItemRowMathMismatches(billWith([lineItem()]).line_items)).toEqual([])
   })
 
   it('accepts a row where a bare-number discount is read as a percentage', () => {
     // 10 × 32.50 = 325, less 50% = 162.50
     const bill = billWith([lineItem({ quantity: 10, rate: 32.5, discount: '50', amount: 162.5 })])
-    expect(lineItemRowMathMismatches(bill)).toEqual([])
+    expect(lineItemRowMathMismatches(bill.line_items)).toEqual([])
   })
 
   it('flags a row whose amount is off by more than the tolerance', () => {
@@ -694,7 +694,7 @@ describe('lineItemRowMathMismatches', () => {
     const bill = billWith([
       lineItem({ description: 'ASTRAL SOLUTION 237ML', quantity: 2, rate: 248, discount: '30', amount: 348.8 }),
     ])
-    const hits = lineItemRowMathMismatches(bill)
+    const hits = lineItemRowMathMismatches(bill.line_items)
     expect(hits).toHaveLength(1)
     expect(hits[0]).toMatchObject({ lineOrder: 0, description: 'ASTRAL SOLUTION 237ML', amount: 348.8, gross: 496 })
   })
@@ -705,22 +705,22 @@ describe('lineItemRowMathMismatches', () => {
       lineItem({ rate: null, amount: 999 }),
       lineItem({ amount: null }),
     ])
-    expect(lineItemRowMathMismatches(bill)).toEqual([])
+    expect(lineItemRowMathMismatches(bill.line_items)).toEqual([])
   })
 
   it('ignores a non-numeric discount note rather than treating it as a mismatch', () => {
     // discount text is unusable → checked against gross (200) only, which matches
     const bill = billWith([lineItem({ discount: 'Trade discount as agreed', amount: 200 })])
-    expect(lineItemRowMathMismatches(bill)).toEqual([])
+    expect(lineItemRowMathMismatches(bill.line_items)).toEqual([])
   })
 
   it('tolerates paise-level rounding (within max(₹1, 0.2%))', () => {
     const bill = billWith([lineItem({ quantity: 3, rate: 33.33, amount: 100 })]) // 99.99 vs 100
-    expect(lineItemRowMathMismatches(bill)).toEqual([])
+    expect(lineItemRowMathMismatches(bill.line_items)).toEqual([])
   })
 
   it('uses line_order, not array index, to name the row', () => {
     const bill = billWith([lineItem({ line_order: 7, quantity: 1, rate: 10, amount: 999 })])
-    expect(lineItemRowMathMismatches(bill)[0]!.lineOrder).toBe(7)
+    expect(lineItemRowMathMismatches(bill.line_items)[0]!.lineOrder).toBe(7)
   })
 })

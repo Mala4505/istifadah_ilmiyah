@@ -281,6 +281,13 @@ describe('deriveEntryType', () => {
     expect(deriveEntryType('ADP_RG-123')).toBe('advance_payment')
   })
 
+  it('recognises other R-prefixed reimbursement category codes', () => {
+    // Batch #114 (2026-09-14): genuine reimbursements scraped under
+    // category-specific codes, not just the original RG- form.
+    expect(deriveEntryType('RRECURR-260910001')).toBe('reimbursement')
+    expect(deriveEntryType('RTRAVEL-260911001')).toBe('reimbursement')
+  })
+
   it('recognises the Invoice-Against-Uplaq prefix', () => {
     expect(deriveEntryType('IAU_202608272')).toBe('invoice_against_uplaq')
   })

@@ -5,6 +5,7 @@ import { createClient, getCachedUser } from '@/lib/supabase/server'
 import { getCachedStaffProfile } from '@/lib/export/auth'
 import { getSelectedEventId } from '@/lib/events/current'
 import { StatTile } from '@/components/dashboard/stat-tile'
+import { DashboardSection } from '@/components/dashboard/dashboard-section'
 import { StatusCountCard, dashboardStatusBadgeVariant, type StatusCount } from '@/components/dashboard/status-count-card'
 import { ImportWorkspace } from '@/components/import/import-workspace'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -171,96 +172,111 @@ export default async function DashboardPage() {
           <h1 className="text-xl font-semibold tracking-tight">Dashboard</h1>
         </div>
         <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-          Review queue depth, open exceptions by ₹ at risk, budget burn, today&apos;s imports, and
-          documents waiting to be matched.
+          What needs your attention right now, how the budget is tracking, and where entries
+          currently stand.
         </p>
       </div>
 
-      <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 xl:grid-cols-5">
-        <StatTile
-          label="Review queue depth"
-          value={formatNumber(data.reviewQueueDepth)}
-          hint={
-            data.reviewQueueDepth === 0
-              ? 'Nothing waiting on review yet'
-              : 'Bills still to verify, connect or classify'
-          }
-          href="/review"
-          icon={ScanLine}
-          error={data.reviewQueueError}
-        />
-        <StatTile
-          label="Open exceptions — ₹ at risk"
-          value={formatINRCompact(data.openIssuesAtRisk)}
-          hint={
-            data.openIssuesCount === 0
-              ? 'No open exceptions'
-              : `${formatNumber(data.openIssuesCount)} open, sorted by severity`
-          }
-          href="/exceptions"
-          icon={TriangleAlert}
-          tone={data.openIssuesCount > 0 ? 'critical' : 'default'}
-          error={data.openIssuesError}
-        />
-        <StatTile
-          label={allHeadsLackApprovedBudget ? 'Spend to date' : 'Budget burn'}
-          value={formatINRCompact(data.totalActualSpend)}
-          hint={
-            data.totalHeads === 0
-              ? 'No budget heads allocated yet'
-              : allHeadsLackApprovedBudget
-                ? `No approved budget on any of ${data.totalHeads} heads yet — spend so far, not a burn rate`
-                : data.headsWithoutApprovedBudget > 0
-                  ? `${data.headsWithoutApprovedBudget} of ${data.totalHeads} heads have no approved budget`
-                  : `Across ${data.totalHeads} budget heads`
-          }
-          href="/reports#budget-vs-actual"
-          icon={Wallet}
-          tone={!allHeadsLackApprovedBudget && data.headsWithoutApprovedBudget > 0 ? 'warning' : 'default'}
-          error={data.budgetError}
-        />
-        {/* Running an import is admin-only (§4.4c), and /import refuses
-            everyone else server-side — a department account was being shown a
-            tile whose only destination is a permission-denied page. */}
-        {data.isAdmin && (
+      <DashboardSection
+        icon={TriangleAlert}
+        title="Needs your attention"
+        description="Work sitting in a queue — nothing here moves forward until someone acts on it."
+      >
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <StatTile
-            label="Today's imports"
-            value={formatNumber(data.importBatchCount)}
+            label="Bills to review"
+            value={formatNumber(data.reviewQueueDepth)}
             hint={
-              data.importBatchCount === 0
-                ? 'No import batches started today'
-                : `${formatNumber(data.importRowCount)} rows across ${data.importBatchCount} batch${data.importBatchCount === 1 ? '' : 'es'}`
+              data.reviewQueueDepth === 0
+                ? 'Nothing waiting on review yet'
+                : 'Bills still to verify, connect or classify'
             }
-            href="/import"
-            icon={UploadCloud}
-            error={data.importsError}
+            href="/review"
+            icon={ScanLine}
+            tone={data.reviewQueueDepth > 0 ? 'warning' : 'default'}
+            error={data.reviewQueueError}
           />
-        )}
-        <StatTile
-          label="Documents to match"
-          value={formatNumber(data.unmatchedDocsCount)}
-          hint={
-            data.unmatchedDocsCount === 0
-              ? 'Inbox is clear'
-              : 'Waiting to be attached to an entry'
-          }
-          href="/documents"
-          icon={FileScan}
-          tone={data.unmatchedDocsCount > 0 ? 'warning' : 'default'}
-          error={data.unmatchedDocsError}
-        />
-      </div>
-
-      <div className="flex flex-col gap-3">
-        <div>
-          <h2 className="text-sm font-semibold text-muted-foreground">Status breakdown</h2>
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            Every entry carries three independent status fields — Status and Audit status are
-            read-only, copied in from the Departmental import and Audit-portal scrape; Hub status
-            is the only one this app writes, and the only thing ever exported back out. Every
-            count below links to the matching filter on Entries.
-          </p>
+          <StatTile
+            label="Bills to link"
+            value={formatNumber(data.unmatchedDocsCount)}
+            hint={
+              data.unmatchedDocsCount === 0
+                ? 'Inbox is clear'
+                : 'Waiting to be linked to a ledger entry'
+            }
+            href="/documents"
+            icon={FileScan}
+            tone={data.unmatchedDocsCount > 0 ? 'warning' : 'default'}
+            error={data.unmatchedDocsError}
+          />
+          <StatTile
+            label="Issues found — ₹ at risk"
+            value={formatINRCompact(data.openIssuesAtRisk)}
+            hint={
+              data.openIssuesCount === 0
+                ? 'No open issues'
+                : `${formatNumber(data.openIssuesCount)} open, sorted by severity`
+            }
+            href="/exceptions"
+            icon={TriangleAlert}
+            tone={data.openIssuesCount > 0 ? 'critical' : 'default'}
+            error={data.openIssuesError}
+          />
         </div>
+      </DashboardSection>
+
+      <DashboardSection
+        icon={Wallet}
+        title="Budget"
+        description="Spend against this event's approved budget."
+      >
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <StatTile
+            label={allHeadsLackApprovedBudget ? 'Spend to date' : 'Budget burn'}
+            value={formatINRCompact(data.totalActualSpend)}
+            hint={
+              data.totalHeads === 0
+                ? 'No budget heads allocated yet'
+                : allHeadsLackApprovedBudget
+                  ? `No approved budget on any of ${data.totalHeads} heads yet — spend so far, not a burn rate`
+                  : data.headsWithoutApprovedBudget > 0
+                    ? `${data.headsWithoutApprovedBudget} of ${data.totalHeads} heads have no approved budget`
+                    : `Across ${data.totalHeads} budget heads`
+            }
+            href="/reports#budget-vs-actual"
+            icon={Wallet}
+            tone={!allHeadsLackApprovedBudget && data.headsWithoutApprovedBudget > 0 ? 'warning' : 'default'}
+            error={data.budgetError}
+          />
+        </div>
+      </DashboardSection>
+
+      <DashboardSection
+        icon={ListChecks}
+        title="Entries overview"
+        description="Original status comes straight from the Departmental import and Audit-portal scrape, and can't be changed here. Current status is the one this app updates — and the only thing ever exported back out. Every count links to the matching filter on Entries."
+        aside={
+          // Running an import is admin-only (§4.4c), and /import refuses
+          // everyone else server-side — a department account would only ever
+          // hit a permission-denied page here, so this is admin-only, and
+          // demoted to a supporting fact next to the pipeline rather than a
+          // peer KPI tile: it's context for "where things stand today", not
+          // its own queue to act on.
+          data.isAdmin ? (
+            <Link
+              href="/import"
+              className="inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:border-foreground/25 hover:bg-accent/40 hover:text-foreground"
+            >
+              <UploadCloud className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden="true" />
+              {data.importsError
+                ? "Couldn't load today's imports"
+                : data.importBatchCount === 0
+                  ? 'No imports today'
+                  : `${formatNumber(data.importRowCount)} rows imported today`}
+            </Link>
+          ) : undefined
+        }
+      >
         {data.statusCountsError ? (
           <Card>
             <CardContent className="py-4">
@@ -270,7 +286,7 @@ export default async function DashboardPage() {
         ) : (
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
             <StatusCountCard
-              title="Status"
+              title="Original status"
               icon={ListChecks}
               rows={data.statusCounts}
               paramKey="st"
@@ -278,7 +294,7 @@ export default async function DashboardPage() {
               emptyHint="No entries imported yet."
             />
             <StatusCountCard
-              title="Hub status"
+              title="Current status"
               icon={Tag}
               rows={data.hubStatusCounts}
               paramKey="hs"
@@ -288,7 +304,7 @@ export default async function DashboardPage() {
             />
           </div>
         )}
-      </div>
+      </DashboardSection>
 
       <div className="flex flex-col gap-3">
         <h2 className="text-sm font-semibold text-muted-foreground">Getting data in — two steps</h2>

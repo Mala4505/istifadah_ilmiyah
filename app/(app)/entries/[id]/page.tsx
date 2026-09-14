@@ -377,9 +377,10 @@ export default async function EntryDetailPage({
     entry_id: number | null
     document_extraction_id: number | null
     source_document_id: number | null
+    auto_recheck_note: string | null
   }
   const EXCEPTION_ROW_SELECT =
-    'id, exception_type, severity, description, amount_at_risk, entry_id, document_extraction_id, source_document_id'
+    'id, exception_type, severity, description, amount_at_risk, entry_id, document_extraction_id, source_document_id, auto_recheck_note'
   const [entryExceptionsResult, docExceptionsResult, entryFlagsResult] = await Promise.all([
     supabase
       .from('reconciliation_exception')
@@ -418,6 +419,7 @@ export default async function EntryDetailPage({
       documentExtractionId: row.document_extraction_id,
       sourceDocumentId: row.source_document_id,
       sourceDocumentFilename: row.source_document_id !== null ? filenameByDocId.get(row.source_document_id) ?? null : null,
+      autoRecheckNote: row.auto_recheck_note,
     })
   }
   const entryIssueFlags: EntryFlagIssueRow[] = (entryFlagsResult.data ?? []).map((row) => ({
