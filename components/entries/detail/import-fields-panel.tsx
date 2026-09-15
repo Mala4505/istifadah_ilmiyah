@@ -61,7 +61,6 @@ export function ImportFieldsPanel({
         <Field label="Date">{formatDate(entry.date)}</Field>
 
         <Field label="Amount">{formatMoney(entry.amount)}</Field>
-        <Field label="Variance reason">{entry.variance_reason ?? '—'}</Field>
         <Field label="Status">
           {entry.status_label ?? '—'}
           {entry.status_raw && (

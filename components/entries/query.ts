@@ -113,7 +113,7 @@ export const ENTRIES_SELECT = ENTRIES_LIST_SELECT_COLUMNS.join(', ')
 // (app/(app)/entries/[id]/page.tsx) and its child components
 // (components/entries/detail/{import-fields-panel,reimbursement-detail-section,
 // advance-payment-detail-section}.tsx) render several fields the list/CSV
-// column chooser never surfaces -- e.g. `variance_reason`, the
+// column chooser never surfaces -- e.g. the
 // `reimbursement_*`/`advance_invoice_amount` type-detail fields, and the raw
 // ids (`vendor_id`, `department_id`, ...) needed to cross-reference other
 // tables. Verified by reading every one of those files for every `entry.*`
@@ -129,12 +129,17 @@ export const ENTRIES_SELECT = ENTRIES_LIST_SELECT_COLUMNS.join(', ')
 // are equally unused here but still end up selected anyway, since they ride
 // in via the shared list-select base above; kept that way for the simplicity
 // of one base to extend rather than a second, near-duplicate minimal set.
+// `variance_reason` was dropped from `entries`/`v_entry_enriched` by
+// 20260828000001_unify_entry_status.sql (never populated, leftover from the
+// abandoned two-amount model) but stayed selected here, breaking every
+// entry-detail load with "column v_entry_enriched.variance_reason does not
+// exist" -- removed below along with its display in format.ts,
+// import-fields-panel.tsx and its type in detail/types.ts.
 const ENTRY_DETAIL_EXTRA_COLUMNS = [
   'department_id',
   'budget_head_raw_label',
   'vendor_id',
   'vendor_raw',
-  'variance_reason',
   'status_raw',
   'admin_head_id',
   'zone_id',

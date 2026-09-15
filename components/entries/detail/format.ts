@@ -52,7 +52,6 @@ const FIELD_LABELS: Record<string, string> = {
   vendor_raw: 'Vendor (raw)',
   date: 'Date',
   amount: 'Amount',
-  variance_reason: 'Variance reason',
   status_id: 'Status',
   status_raw: 'Status (raw)',
   admin_head_id: 'Admin head',
@@ -83,6 +82,10 @@ const FIELD_LABELS: Record<string, string> = {
   void_reason: 'Void reason (dropped 2026-08-11)',
   // Pre-2026-08-11 field name: budget_category_id -> cost_center_id (§3.1/§17).
   budget_category_id: 'Cost center (pre-rename)',
+  // Never populated; dropped from `entries`/`v_entry_enriched` by
+  // 20260828000001_unify_entry_status.sql. Kept so change-log rows written
+  // before that date still render with a readable label.
+  variance_reason: 'Variance reason (dropped 2026-08-28)',
 }
 
 export function humanizeFieldName(field: string): string {

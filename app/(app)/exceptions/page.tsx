@@ -397,7 +397,6 @@ type VarianceRow = {
   vendor_id: number | null
   date: string | null
   amount: number | null
-  variance_reason: string | null
   variance_type: 'main_number_missing'
 }
 
@@ -452,7 +451,7 @@ async function loadReconciliationReportData() {
         // below has actually truncated the result, mirroring 1.5's fix for
         // the review queue's capped query.
         .select(
-          'entry_id, ubbl_number, main_number, department_id, budget_head_id, vendor_id, date, amount, variance_reason, variance_type',
+          'entry_id, ubbl_number, main_number, department_id, budget_head_id, vendor_id, date, amount, variance_type',
           { count: 'exact' }
         )
         .order('date', { ascending: false, nullsFirst: false })

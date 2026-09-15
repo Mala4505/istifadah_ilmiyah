@@ -30,7 +30,7 @@ export function HubStatusSection({
   hubStatusExportedAt,
   hubStatusOptions,
   timelineRows,
-  resolveChangedBy,
+  changedByLabels,
 }: {
   entryId: number
   hubStatusCode: string
@@ -38,7 +38,8 @@ export function HubStatusSection({
   hubStatusExportedAt: string | null
   hubStatusOptions: HubStatusOption[]
   timelineRows: ChangeLogRow[]
-  resolveChangedBy: (userId: string | null) => string
+  /** row.id -> resolved "changed by" display name, resolved server-side. */
+  changedByLabels: Record<number, string>
 }) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
@@ -133,7 +134,7 @@ export function HubStatusSection({
           <HubStatusTimeline
             rows={timelineRows}
             hubStatusById={hubStatusById}
-            resolveChangedBy={resolveChangedBy}
+            changedByLabels={changedByLabels}
           />
         </div>
       </CardContent>

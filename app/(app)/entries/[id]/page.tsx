@@ -223,6 +223,13 @@ export default async function EntryDetailPage({
   }
 
   const hubStatusTimelineRows = changeLogRows.filter((r) => 'hub_status_id' in r.changes)
+  // HubStatusSection is a Client Component, so `resolveChangedBy` (a server
+  // closure over `user`/`staffNames`) can't be passed to it directly — Next
+  // errors "Functions cannot be passed directly to Client Components".
+  // Resolved here instead, into a plain serializable row.id -> label map.
+  const hubStatusChangedByLabels: Record<number, string> = Object.fromEntries(
+    hubStatusTimelineRows.map((r) => [r.id, resolveChangedBy(r.changed_by)])
+  )
 
   // Answers "how does this PDF connect to this entry line": the actual
   // attached documents, plus the OCR'd values the match was made on — not
@@ -470,7 +477,7 @@ export default async function EntryDetailPage({
         hubStatusExportedAt={entry.hub_status_exported_at}
         hubStatusOptions={hubStatusOptions}
         timelineRows={hubStatusTimelineRows}
-        resolveChangedBy={resolveChangedBy}
+        changedByLabels={hubStatusChangedByLabels}
       />
 
       <Tabs defaultValue="enrichment">

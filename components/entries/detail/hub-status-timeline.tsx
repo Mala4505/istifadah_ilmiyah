@@ -12,11 +12,14 @@ import type { ChangeLogRow, HubStatusOption } from './types'
 export function HubStatusTimeline({
   rows,
   hubStatusById,
-  resolveChangedBy,
+  changedByLabels,
 }: {
   rows: ChangeLogRow[]
   hubStatusById: Map<number, HubStatusOption>
-  resolveChangedBy: (userId: string | null) => string
+  /** row.id -> resolved "changed by" display name, resolved server-side
+   *  (see page.tsx) since this component is a Client Component and a
+   *  server closure can't be passed as a prop across that boundary. */
+  changedByLabels: Record<number, string>
 }) {
   if (rows.length === 0) {
     return (
@@ -45,7 +48,7 @@ export function HubStatusTimeline({
               <Badge>{toLabel}</Badge>
             </div>
             <div className="mt-1.5 text-xs text-muted-foreground">
-              {resolveChangedBy(row.changed_by)} · {formatDateTime(row.changed_at)}
+              {changedByLabels[row.id] ?? 'Unknown'} · {formatDateTime(row.changed_at)}
             </div>
             {noteText && <p className="mt-1.5 text-sm">{noteText}</p>}
           </li>

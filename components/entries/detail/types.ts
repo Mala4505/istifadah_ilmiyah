@@ -23,7 +23,6 @@ export interface EntryEnriched {
   vendor_raw: string | null
   date: string | null
   amount: number | null
-  variance_reason: string | null
   status_id: number | null
   status_code: string | null
   status_label: string | null
