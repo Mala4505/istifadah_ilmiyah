@@ -1415,18 +1415,20 @@ export function ReviewWorkspace({
         )
       }
 
-      // 2.3: prefer the next unverified bill in THIS document over whatever
-      // the severity-ordered global queue would send us to next -- the
-      // queue's own nextId (used by the manual "Next bill" nav button
-      // above) can point at an entirely different PDF, which fought the
-      // "work one PDF to completion" workflow. Only fall back to the queue
-      // once this document has nothing left to verify.
-      if (nextSiblingId !== null) {
-        router.push(`/review?id=${nextSiblingId}`)
-      } else {
+      // Stay put after save (2026-09-15 fix): this used to auto-navigate --
+      // to the next unverified sibling bill, or (once nothing was left in
+      // this PDF) to bare `/review`, which app/(app)/review/page.tsx turns
+      // into a redirect to the top of the whole queue, or an empty-queue
+      // card if that was the reviewer's last assigned item. Either way the
+      // reviewer lost their place and the bill they just saved vanished from
+      // view with no easy way back to double-check it. Refresh in place
+      // instead -- same bill stays on screen, now showing as saved -- and
+      // let the reviewer choose when to move on via Next bill/Next document
+      // (PgDn / the buttons above) or the Reviewed/Needs work queue toggle.
+      if (nextSiblingId === null) {
         toast.success('Every bill in this PDF has been verified. Check the inbox for any that still need connecting or classifying.')
-        router.push('/review')
       }
+      router.refresh()
     })
   }
 

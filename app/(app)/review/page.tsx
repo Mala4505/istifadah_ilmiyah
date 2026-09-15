@@ -98,17 +98,26 @@ export default async function ReviewPage({
   // so ReviewWorkspace's shortcut handler never has to guess at defaults.
   const { keymap, shortcutsEnabled } = await loadStaffKeymapPreferences(supabase, staff.userId)
 
-  // Unverified/All toggle (review-page-layout-redesign-plan.md §1): the
-  // position counter and Prev/Next used to silently span the whole document
-  // set. `v_review_queue` is the "still needs work" view -- unverified bills,
-  // plus (since 20260907000002) bills whose extraction is verified but which
-  // aren't yet connected to a ledger entry and classified. Default to it; the
-  // cookie (not a `?scope=` param, see setReviewQueueScope's doc comment) lets
-  // a reviewer opt into v_review_queue_all, the superset view with verified_at
-  // added, without review-workspace.tsx's Prev/Next needing to carry a scope
-  // param through.
+  // Needs work / Reviewed / All toggle (review-page-layout-redesign-plan.md
+  // §1; "Reviewed" added 2026-09-15). `v_review_queue` is the "still needs
+  // work" view -- unverified bills, plus (since 20260907000002) bills whose
+  // extraction is verified but which aren't yet connected to a ledger entry
+  // and classified. Default to it; the cookie (not a `?scope=` param, see
+  // setReviewQueueScope's doc comment) lets a reviewer opt into
+  // v_review_queue_all, the superset view with verified_at (and, since
+  // 20260915000001, admin_head_id/zone_id/sub_department_id) added, without
+  // review-workspace.tsx's Prev/Next needing to carry a scope param through.
+  // "Reviewed" reads the same superset view, filtered (below, at the query
+  // site) to just the bills that are fully done -- the mirror image of
+  // v_review_queue's own WHERE clause, and the same three-stage "done"
+  // definition components/documents/document-card.tsx's badge uses. It exists
+  // so a bill a reviewer just saved (review-workspace.tsx's handleSave no
+  // longer auto-navigates away from it) stays easy to find again for a check
+  // or a correction, without scrolling "All" by hand.
   const cookieStore = await cookies()
-  const scope = cookieStore.get('review_queue_scope')?.value === 'all' ? 'all' : 'pending'
+  const scopeCookie = cookieStore.get('review_queue_scope')?.value
+  const scope: 'pending' | 'reviewed' | 'all' =
+    scopeCookie === 'all' ? 'all' : scopeCookie === 'reviewed' ? 'reviewed' : 'pending'
 
   // Document-assignment (2026-08-29): the reviewer filter, like the scope
   // toggle above, is a cookie rather than a `?assignee=` param so
@@ -128,11 +137,25 @@ export default async function ReviewPage({
   // 20260822000006_review_queue_event_scoping.sql's doc comment for why.
   const selectedEventId = await getSelectedEventId()
 
+  // "Reviewed" is the mirror image of v_review_queue's own WHERE clause
+  // (20260907000002): verified, and either the document needs no entry at
+  // all or the entry it resolves to has admin_head_id/zone_id/
+  // sub_department_id all set. Applied as real PostgREST filters (not a
+  // post-fetch JS filter) so it composes correctly with the QUEUE_ROW_CAP
+  // .limit() below -- filtering after a severity-ordered 500-row cap would
+  // silently starve this scope, since reviewed bills have no reason to sort
+  // into the first 500 rows of a queue ordered by open-issue severity.
+  const REVIEWED_ONLY_OR =
+    'match_status.eq.no_entry_expected,and(admin_head_id.not.is.null,zone_id.not.is.null,sub_department_id.not.is.null)'
+
   let queueQuery = supabase
-    .from(scope === 'all' ? 'v_review_queue_all' : 'v_review_queue')
+    .from(scope === 'pending' ? 'v_review_queue' : 'v_review_queue_all')
     .select(
       'document_extraction_id, source_document_id, original_filename, extraction_confidence, max_open_severity_rank, open_issue_count, queue_amount, bill_index, page_number_start, page_number_end, bill_count'
     )
+  if (scope === 'reviewed') {
+    queueQuery = queueQuery.not('verified_at', 'is', null).or(REVIEWED_ONLY_OR)
+  }
   // Item 1.5 (of the earlier perf-ux-audit-checklist.md pass): the capped
   // query above can silently truncate the queue, so a second, uncapped
   // count-only query runs alongside it to surface the true pending total in
@@ -148,13 +171,24 @@ export default async function ReviewPage({
   // count must come from v_review_queue itself to stay in step with the list.
   // The view is set-based now -- no correlated lateral (20260904000001) -- and
   // app/(app)/page.tsx already head-counts it exactly this way.
+  //
+  // 'reviewed' scope (2026-09-15): count v_review_queue_all itself with the
+  // same reviewedOnlyFilter applied, rather than the raw document_extraction
+  // table -- the predicate needs the view's match_status/admin_head_id/
+  // zone_id/sub_department_id columns, which don't exist on the base table.
   const queueCountBase =
-    scope === 'all'
-      ? supabase
-          .from('document_extraction')
-          .select('id, source_document!inner(event_id)', { count: 'exact', head: true })
-          .gt('created_at', queueAllBoundIso())
-      : supabase.from('v_review_queue').select('document_extraction_id', { count: 'exact', head: true })
+    scope === 'pending'
+      ? supabase.from('v_review_queue').select('document_extraction_id', { count: 'exact', head: true })
+      : scope === 'reviewed'
+        ? supabase
+            .from('v_review_queue_all')
+            .select('document_extraction_id', { count: 'exact', head: true })
+            .not('verified_at', 'is', null)
+            .or(REVIEWED_ONLY_OR)
+        : supabase
+            .from('document_extraction')
+            .select('id, source_document!inner(event_id)', { count: 'exact', head: true })
+            .gt('created_at', queueAllBoundIso())
   const queueCountQuery =
     selectedEventId === null
       ? queueCountBase
@@ -243,21 +277,29 @@ export default async function ReviewPage({
               <>
                 <p className="text-sm font-medium">No documents for this reviewer</p>
                 <p className="text-sm text-muted-foreground">
-                  Nothing in the {scope === 'all' ? 'full' : 'pending'} queue is currently assigned to
-                  the selected reviewer. Switch back to &ldquo;All reviewers&rdquo; to see the whole
-                  queue.
+                  Nothing in the {scope === 'all' ? 'full' : scope === 'reviewed' ? 'reviewed' : 'pending'} queue
+                  is currently assigned to the selected reviewer. Switch back to &ldquo;All reviewers&rdquo; to
+                  see the whole queue.
                 </p>
               </>
             ) : (
               <>
-                <p className="text-sm font-medium">Queue is empty</p>
+                <p className="text-sm font-medium">
+                  {scope === 'reviewed' ? 'Nothing reviewed yet' : 'Queue is empty'}
+                </p>
                 <p className="text-sm text-muted-foreground">
                   {scope === 'all'
                     ? // v_review_queue_all has no verified_at filter, so this can
                       // basically only happen when no document has ever been
                       // extracted at all -- still worth a correct, non-assuming message.
                       'There are no extracted documents yet. A document joins this queue as soon as its extraction finishes.'
-                    : 'Every extracted document has been verified. A new document joins this queue as soon as its extraction finishes -- nothing to do here right now.'}
+                    : scope === 'reviewed'
+                      ? // 2026-09-15: mirrors v_review_queue's own empty-pending message
+                        // below -- a bill only counts as "Reviewed" once it's verified,
+                        // connected to a ledger entry, and classified (or marked "no
+                        // entry expected"), same definition document-card.tsx's badge uses.
+                        'A bill shows up here once it’s been verified, connected to a ledger entry, and classified -- nothing finished yet.'
+                      : 'Every extracted document has been verified. A new document joins this queue as soon as its extraction finishes -- nothing to do here right now.'}
                 </p>
               </>
             )}
@@ -333,7 +375,15 @@ export default async function ReviewPage({
           queue={queue.map((q) => ({ documentExtractionId: q.documentExtractionId, sourceDocumentId: q.sourceDocumentId }))}
           currentIndex={-1}
           prevId={null}
-          nextId={null}
+          // 2026-09-15: this bill isn't in the current scope's queue at all
+          // (most commonly: it was just saved and, under the default
+          // "Needs work" scope, that finished it right off the list) -- so
+          // there's no natural "next by position" here. Point Next at the
+          // top of whatever's still in this scope's queue instead of
+          // disabling it outright, so a reviewer who stays on a just-saved
+          // bill (review-workspace.tsx's handleSave no longer auto-navigates)
+          // still has a one-click way to move on.
+          nextId={queue.length > 0 ? queue[0]!.documentExtractionId : null}
           keymap={keymap}
           shortcutsEnabled={shortcutsEnabled}
           initialPageOverride={initialPageOverride}
@@ -406,7 +456,7 @@ function PageHeader({
 }: {
   position?: number
   total?: number
-  scope?: 'pending' | 'all'
+  scope?: 'pending' | 'reviewed' | 'all'
   // Item 1.5: the true row count across the whole (uncapped) queue, only
   // passed by the normal render branch. Rendered only when it exceeds
   // `total` -- i.e. only when QUEUE_ROW_CAP actually truncated the queue --

@@ -1202,13 +1202,14 @@ export async function confirmVendorAlias(input: {
 }
 
 /**
- * Unverified/All toggle (review-page-layout-redesign-plan.md §1). Persisted as
- * a cookie rather than a `?scope=` query param: review-workspace.tsx's
- * Prev/Next navigation does `router.push('/review?id=${id}')` with no scope
- * param, so a URL-only toggle would silently reset to "pending" on every
- * click. A cookie survives that without touching review-workspace.tsx.
+ * Needs work / Reviewed / All toggle (review-page-layout-redesign-plan.md
+ * §1; "Reviewed" added 2026-09-15). Persisted as a cookie rather than a
+ * `?scope=` query param: review-workspace.tsx's Prev/Next navigation does
+ * `router.push('/review?id=${id}')` with no scope param, so a URL-only
+ * toggle would silently reset to "pending" on every click. A cookie
+ * survives that without touching review-workspace.tsx.
  */
-export async function setReviewQueueScope(scope: 'pending' | 'all'): Promise<{ ok: true }> {
+export async function setReviewQueueScope(scope: 'pending' | 'reviewed' | 'all'): Promise<{ ok: true }> {
   ;(await cookies()).set('review_queue_scope', scope, { path: '/', maxAge: 60 * 60 * 24 * 365 })
   return { ok: true }
 }
