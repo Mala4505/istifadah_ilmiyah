@@ -26,6 +26,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '
 import { logRawError } from '@/lib/friendly-error'
 import { toastError } from '@/components/ui/error-toast'
 import { getReviewDocumentUrl, reExtractPage, setPageSkipOverride } from '@/lib/actions/review'
+import { ensurePromiseWithResolversPolyfill } from '@/lib/polyfills/promise-with-resolvers'
 import type { PageStatus, UncertainField } from '@/lib/review/types'
 
 /** "bank_cheque" -> "Bank cheque", for the skipped-page tooltip/label. */
@@ -409,6 +410,10 @@ export const PdfViewer = memo(forwardRef<
         return
       }
 
+      // pdfjs-dist >=4.9 calls Promise.withResolvers() itself -- must be
+      // patched in before the dynamic import below runs any of its module
+      // init code, not just before getDocument().
+      ensurePromiseWithResolversPolyfill()
       const pdfjsLib = await import('pdfjs-dist')
       pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs'
 
