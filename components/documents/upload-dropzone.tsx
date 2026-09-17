@@ -30,11 +30,21 @@ import type { InboxDocumentView } from './types'
 /**
  * Upload UI for the document inbox (MASTER-PLAN §5 row 6, §5 "upload and
  * the document inbox are explicitly designed for phone use — staff
- * photograph bills on site", §11.2 Day 3). Posts straight to the existing
- * `app/api/documents/ingest/route.ts` — no client-side pdf.js rasterization
- * here, per that route's own header comment: it reads the raw PDF
- * server-side, so this component's only job is picking files and reporting
- * per-file progress while they upload.
+ * photograph bills on site", §11.2 Day 3). No client-side pdf.js
+ * rasterization here, per the ingest route's own header comment: it reads
+ * the raw PDF server-side, so this component's only job is picking files and
+ * reporting per-file progress while they upload.
+ *
+ * The actual upload (see `uploadOne` below) is three small requests, not one
+ * big one: get a signed URL from `/api/documents/upload-url`, PUT the file
+ * straight to Supabase Storage with it, then tell `/api/documents/ingest`
+ * the path so it can pick the bytes back up and do everything it always did
+ * (hash, page-count, DB rows, queue extraction). Vercel hard-caps a
+ * Serverless Function's own request body at 4.5MB — this used to be one
+ * multipart POST carrying the whole PDF straight into that ceiling, which a
+ * handful of phone-scanned (full-resolution JPEG) pages blows past even well
+ * under the page-count limit. The PUT in the middle never touches a Vercel
+ * function at all, so it isn't subject to that cap.
  *
  * "Staff photograph bills on site" in practice means a phone scan-to-PDF
  * app (Camera apps that output a raw JPEG are not handled — the ingest
@@ -48,8 +58,10 @@ import type { InboxDocumentView } from './types'
  * rest of the backlog — see that route's header comment). A staged or
  * in-flight file can also be pulled back at any point: staged files are just
  * removed from the list before anything is sent, and an in-flight upload is
- * aborted via the same XMLHttpRequest the progress bar reads from (stored in
- * `xhrsRef`, keyed by item — nothing else in this component needs it).
+ * aborted via whichever network step is currently running (an `AbortController`
+ * for the two small JSON requests, the same underlying `XMLHttpRequest` the
+ * progress bar reads from for the PUT itself — stored uniformly in
+ * `xhrsRef`, keyed by item, as a `{ abort }` handle).
  *
  * Once the ingest request resolves with a `documentId`, the item stops
  * showing a percentage (there is nothing left to measure — extraction is a
@@ -102,67 +114,157 @@ interface UploadItem {
  *  never completed. */
 class UploadNetworkError extends Error {}
 
-function uploadOne(
+/** Anything cancelable — either step of uploadOne below can be mid-flight
+ *  when the user hits Cancel, so removeItem just needs a uniform `.abort()`
+ *  regardless of which one it is. */
+interface CancelHandle {
+  abort: () => void
+}
+
+function isAbortError(err: unknown): boolean {
+  return err instanceof DOMException && err.name === 'AbortError'
+}
+
+/** PUTs `file` straight to a Supabase Storage signed upload URL — this is
+ *  the one step in the whole upload that actually carries the PDF's bytes,
+ *  and it goes browser-to-storage directly, never through a Vercel function
+ *  (see the ingest route's header comment for why that distinction matters:
+ *  a Vercel Serverless Function caps its own request body at 4.5MB, which a
+ *  handful of phone-scanned pages can easily exceed even well under the
+ *  page-count limit). Plain XHR rather than fetch so upload progress keeps
+ *  working — fetch has no reliable cross-browser upload-progress event. */
+function putToSignedUrl(
+  signedUrl: string,
   file: File,
   onProgress: (pct: number) => void,
-  onXhr: (xhr: XMLHttpRequest) => void,
-  /** Comma-joined staff uuids to assign this document to on the way in, or '' for the shared pool ("dividing the document inbox", 2026-08-29). */
-  assignedTo: string
-): Promise<{ documentId: number; inconclusive?: boolean }> {
+  onHandle: (handle: CancelHandle) => void
+): Promise<void> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest()
-    xhr.open('POST', '/api/documents/ingest')
-    onXhr(xhr)
+    xhr.open('PUT', signedUrl)
+    xhr.setRequestHeader('content-type', 'application/pdf')
+    xhr.setRequestHeader('x-upsert', 'false')
+    onHandle({ abort: () => xhr.abort() })
 
     xhr.upload.onprogress = (event) => {
-      if (event.lengthComputable) {
-        onProgress(Math.round((event.loaded / event.total) * 100))
-      }
+      if (event.lengthComputable) onProgress(Math.round((event.loaded / event.total) * 100))
     }
-
     xhr.onload = () => {
-      let body: unknown = null
-      try {
-        body = JSON.parse(xhr.responseText)
-      } catch {
-        // Non-JSON error body (e.g. a platform 502) — status check below still fires.
-      }
-      const hasDocumentId = !!body && typeof body === 'object' && 'documentId' in (body as Record<string, unknown>)
-      if (hasDocumentId) {
-        const documentId = (body as { documentId: number }).documentId
-        const ok = xhr.status >= 200 && xhr.status < 300
-        // Even on a non-2xx response, the `source_document` row (and its
-        // extraction job) can already exist server-side — the ingest route's
-        // job_queue-insert-failure path returns `{ error, documentId }` with
-        // a 500. That document is genuinely still possibly in flight, so
-        // this resolves (not rejects) and lets the caller track it through
-        // the same stage poller as a clean upload, instead of reporting a
-        // hard error for a document that may well be extracting right now.
-        resolve({ documentId, inconclusive: !ok })
-        return
-      }
-      const message =
-        body && typeof body === 'object' && 'error' in (body as Record<string, unknown>)
-          ? String((body as { error: unknown }).error)
-          : `Upload failed (HTTP ${xhr.status}).`
-      reject(new Error(message))
+      if (xhr.status >= 200 && xhr.status < 300) resolve()
+      else reject(new Error(`Could not upload to storage (HTTP ${xhr.status}).`))
     }
-
-    // True network failures: the request never got far enough to learn
-    // anything, so there is no documentId to fall back on — different from
-    // xhr.onload's non-2xx-with-a-body case above, and handled distinctly by
-    // the caller (UploadNetworkError vs. a plain validation Error).
     xhr.onerror = () => reject(new UploadNetworkError('Network error during upload.'))
     xhr.ontimeout = () => reject(new UploadNetworkError('Upload timed out.'))
     xhr.onabort = () => reject(new Error('Canceled.'))
-
-    const form = new FormData()
-    form.append('file', file)
-    // Optional — the ingest route treats an absent/empty value as "leave in
-    // the shared pool" (contract: comma-separated active-admin uuids).
-    if (assignedTo) form.append('assignedTo', assignedTo)
-    xhr.send(form)
+    xhr.send(file)
   })
+}
+
+/**
+ * Three-step upload (2026-09-17: Vercel's 4.5MB request-body ceiling was
+ * rejecting scanned PDFs well under the page-count limit, since a few
+ * full-resolution photographed pages routinely exceed that in bytes):
+ *
+ *   1. POST /api/documents/upload-url — tiny JSON, gets a storage path and a
+ *      one-time signed URL.
+ *   2. PUT the file itself straight to that signed URL (browser → Supabase
+ *      Storage directly — never touches a Vercel function, so the 4.5MB cap
+ *      doesn't apply).
+ *   3. POST /api/documents/ingest — tiny JSON again, just the path + a few
+ *      strings, telling the server to download those bytes back out, hash
+ *      them, count pages, write the DB rows and queue extraction, exactly as
+ *      it always has.
+ *
+ * `onHandle` is called fresh at the start of each network step so Cancel
+ * always aborts whichever one is currently in flight.
+ */
+async function uploadOne(
+  file: File,
+  onProgress: (pct: number) => void,
+  onHandle: (handle: CancelHandle) => void,
+  /** Comma-joined staff uuids to assign this document to on the way in, or '' for the shared pool ("dividing the document inbox", 2026-08-29). */
+  assignedTo: string
+): Promise<{ documentId: number; inconclusive?: boolean }> {
+  const prepareController = new AbortController()
+  onHandle({ abort: () => prepareController.abort() })
+
+  let path: string
+  let signedUrl: string
+  try {
+    const res = await fetch('/api/documents/upload-url', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ filename: file.name }),
+      signal: prepareController.signal,
+    })
+    let resBody: unknown = null
+    try {
+      resBody = await res.json()
+    } catch {
+      // Non-JSON error body — the !res.ok fallback message below still fires.
+    }
+    const record = resBody && typeof resBody === 'object' ? (resBody as Record<string, unknown>) : {}
+    if (!res.ok || typeof record.path !== 'string' || typeof record.signedUrl !== 'string') {
+      throw new Error(typeof record.error === 'string' ? record.error : `Could not prepare upload (HTTP ${res.status}).`)
+    }
+    path = record.path
+    signedUrl = record.signedUrl
+  } catch (err) {
+    if (isAbortError(err)) throw new Error('Canceled.')
+    if (err instanceof TypeError) throw new UploadNetworkError('Network error preparing upload.')
+    throw err
+  }
+
+  await putToSignedUrl(signedUrl, file, onProgress, onHandle)
+
+  const finalizeController = new AbortController()
+  onHandle({ abort: () => finalizeController.abort() })
+  let res: Response
+  try {
+    res = await fetch('/api/documents/ingest', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        path,
+        filename: file.name,
+        // Optional — the ingest route treats an absent/empty value as "leave
+        // in the shared pool" (contract: comma-separated active-admin uuids).
+        assignedTo: assignedTo || undefined,
+      }),
+      signal: finalizeController.signal,
+    })
+  } catch (err) {
+    if (isAbortError(err)) throw new Error('Canceled.')
+    // The file is already durably in storage by this point (step 2 above
+    // completed) — a network failure here is the same "inconclusive, don't
+    // say failed" situation the caller's UploadNetworkError branch already
+    // handles for the old single-request flow.
+    throw new UploadNetworkError('Network error finalizing upload.')
+  }
+
+  let body: unknown = null
+  try {
+    body = await res.json()
+  } catch {
+    // Non-JSON error body (e.g. a platform 502) — the fallback message below still fires.
+  }
+  const hasDocumentId = !!body && typeof body === 'object' && 'documentId' in (body as Record<string, unknown>)
+  if (hasDocumentId) {
+    const documentId = (body as { documentId: number }).documentId
+    // Even on a non-2xx response, the `source_document` row (and its
+    // extraction job) can already exist server-side — the ingest route's
+    // job_queue-insert-failure path returns `{ error, documentId }` with a
+    // 500. That document is genuinely still possibly in flight, so this
+    // resolves (not rejects) and lets the caller track it through the same
+    // stage poller as a clean upload, instead of reporting a hard error for
+    // a document that may well be extracting right now.
+    return { documentId, inconclusive: !res.ok }
+  }
+  const message =
+    body && typeof body === 'object' && 'error' in (body as Record<string, unknown>)
+      ? String((body as { error: unknown }).error)
+      : `Upload failed (HTTP ${res.status}).`
+  throw new Error(message)
 }
 
 function isPdf(file: File): boolean {
@@ -350,10 +452,11 @@ export function UploadDropzone({
    *  click-to-browse both keep working identically; only the layout/size of
    *  the target itself changes. */
   compact?: boolean
-  /** Normalized (trimmed, lowercased) filenames already sitting in the inbox
-   *  — flags a staged item as a likely duplicate before it's sent, so a
-   *  reader unsure which of a lost/interrupted batch already went through
-   *  isn't guessing. */
+  /** Normalized (trimmed, lowercased) filenames already uploaded TODAY —
+   *  flags a staged item as a likely duplicate before it's sent, so a reader
+   *  unsure which of a lost/interrupted batch already went through isn't
+   *  guessing. Deliberately not all-time: see document-inbox.tsx's comment
+   *  on why this only looks at today's uploads. */
   existingFilenames?: Set<string>
 }) {
   const inputRef = useRef<HTMLInputElement>(null)
@@ -375,7 +478,7 @@ export function UploadDropzone({
   // XMLHttpRequest and poll timers are only ever reached from event handlers
   // or interval callbacks (never rendered directly).
   const filesRef = useRef<Map<string, File>>(new Map())
-  const xhrsRef = useRef<Map<string, XMLHttpRequest>>(new Map())
+  const xhrsRef = useRef<Map<string, CancelHandle>>(new Map())
   const pollTimersRef = useRef<Map<string, ReturnType<typeof setInterval>>>(new Map())
 
   // Poll timers are tied to the component's lifetime, not any single item's
@@ -539,8 +642,8 @@ export function UploadDropzone({
         (pct) => {
           setItems((current) => current.map((c) => (c.key === item.key ? { ...c, progress: pct } : c)))
         },
-        (xhr) => {
-          xhrsRef.current.set(item.key, xhr)
+        (handle) => {
+          xhrsRef.current.set(item.key, handle)
         },
         assignSelectionRef.current.join(',')
       )
@@ -661,8 +764,8 @@ export function UploadDropzone({
   }
 
   function removeItem(key: string) {
-    const xhr = xhrsRef.current.get(key)
-    if (xhr) xhr.abort()
+    const handle = xhrsRef.current.get(key)
+    if (handle) handle.abort()
     xhrsRef.current.delete(key)
     filesRef.current.delete(key)
     stopTracking(key)
@@ -825,7 +928,7 @@ export function UploadDropzone({
               {dupReason && (
                 <span className="flex flex-shrink-0 items-center gap-1.5 text-xs font-medium text-destructive">
                   <Copy className="h-3.5 w-3.5" aria-hidden="true" />
-                  {dupReason === 'inbox' ? 'Already in inbox' : 'Duplicate in this batch'}
+                  {dupReason === 'inbox' ? 'Already uploaded today' : 'Duplicate in this batch'}
                 </span>
               )}
               {dupReason && (

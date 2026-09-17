@@ -64,6 +64,38 @@ export async function getSignedUrl(path: string, expiresInSeconds = 300): Promis
   return data.signedUrl
 }
 
+/**
+ * Returns a one-time signed URL the browser can PUT a file's bytes to
+ * directly — used by /api/documents/upload-url so the ingest route never
+ * has to receive the raw PDF itself. Vercel Serverless Functions hard-cap a
+ * request body at 4.5MB regardless of this app's own limits; a PUT straight
+ * to Supabase Storage never passes through a Vercel function at all, so it
+ * isn't subject to that ceiling.
+ */
+export async function createUploadUrl(path: string): Promise<string> {
+  const client = getStorageClient()
+  const { data, error } = await client.storage.from(BUCKET).createSignedUploadUrl(path)
+  if (error || !data) {
+    throw new Error(`createUploadUrl("${path}") failed: ${error?.message ?? 'no signed URL returned'}`)
+  }
+  return data.signedUrl
+}
+
+/**
+ * Downloads a document's raw bytes back out of storage — used by the ingest
+ * route to run its existing hash/page-count/PDF-sniff validation once the
+ * browser has already PUT the file directly via `createUploadUrl` above,
+ * rather than receiving those bytes as part of the ingest request itself.
+ */
+export async function getDocumentBytes(path: string): Promise<Uint8Array> {
+  const client = getStorageClient()
+  const { data, error } = await client.storage.from(BUCKET).download(path)
+  if (error || !data) {
+    throw new Error(`getDocumentBytes("${path}") failed: ${error?.message ?? 'no data returned'}`)
+  }
+  return new Uint8Array(await data.arrayBuffer())
+}
+
 /** Deletes a document at `path`. */
 export async function deleteDocument(path: string): Promise<void> {
   const client = getStorageClient()

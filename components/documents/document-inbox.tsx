@@ -157,13 +157,25 @@ export function DocumentInbox({
     }
   }, [])
 
-  // Filenames already sitting in the inbox, normalized for a case/whitespace
-  // -insensitive compare — lets the dropzone flag "you already uploaded
-  // this" before a reader re-drops files they're unsure went through after a
-  // lost batch, instead of silently creating a second document.
+  // Filenames already uploaded TODAY (local time), normalized for a
+  // case/whitespace-insensitive compare — lets the dropzone flag "you
+  // already uploaded this" before a reader re-drops files they're unsure
+  // went through after a lost batch. Scoped to today on purpose: the same
+  // bill legitimately gets re-scanned across different days (a corrected
+  // re-upload, a vendor re-sending it later), and the inbox already has a
+  // separate soft "duplicate_document_hash" exception for a true re-scan
+  // (see the ingest route) — this check is only meant to catch the
+  // same-session "did that one already go through" confusion, not to flag
+  // every historical re-scan as if it were today's mistake.
+  const todayKey = new Date().toDateString()
   const existingFilenames = useMemo(
-    () => new Set(documents.map((d) => d.originalFilename.trim().toLowerCase())),
-    [documents]
+    () =>
+      new Set(
+        documents
+          .filter((d) => new Date(d.uploadedAt).toDateString() === todayKey)
+          .map((d) => d.originalFilename.trim().toLowerCase())
+      ),
+    [documents, todayKey]
   )
 
   // Checklist 2.9 (D6): ranking candidates against the full entries pool

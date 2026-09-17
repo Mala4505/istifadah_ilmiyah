@@ -3,7 +3,7 @@ import * as Sentry from '@sentry/nextjs'
 import { withApiLogging } from '@/lib/api-log'
 import { getStaffContext } from '@/lib/export/auth'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { putDocument } from '@/lib/storage'
+import { deleteDocument, getDocumentBytes } from '@/lib/storage'
 import { getPdfPageCount, looksLikePdf, sha256Hex } from '@/lib/pdf'
 import { runJobById } from '@/lib/jobs/drain'
 import { triggerRemoteWorker } from '@/lib/jobs/trigger-worker'
@@ -14,8 +14,13 @@ import { getMaxUploadPages } from '@/lib/upload-limits'
 /**
  * `documents-ingest` (MASTER-PLAN §8 point 2, §3.8, §11.2 Day 1).
  *
- * POST multipart/form-data:
- *   file        (required)  the PDF itself
+ * Finalize step of a two-step upload — POST JSON:
+ *   path        (required)  storage path from /api/documents/upload-url,
+ *                           where the browser has already PUT the file's raw
+ *                           bytes directly (a Supabase Storage signed upload
+ *                           URL, never routed through this or any other
+ *                           Vercel function)
+ *   filename    (required)  original filename, for `source_document.original_filename`
  *   pageCount   (optional)  client-declared page count — used only as a
  *                           fallback when the server can't parse the PDF
  *   entryId     (optional)  attach straight to an entry; normally null,
@@ -30,8 +35,19 @@ import { getMaxUploadPages } from '@/lib/upload-limits'
  *                           failure there is logged but never fails the upload
  *                           (the document already exists by that point).
  *
- * Creates `source_document` + one `document_page` per page, stores the
- * original in the private `invoice-documents` bucket, and queues an
+ * This used to receive the raw PDF itself as multipart form data in one
+ * request. That hit a platform wall in production: a Vercel Serverless
+ * Function's request body is hard-capped at 4.5MB, independent of anything
+ * this app enforces — so a phone-photographed PDF of even a handful of
+ * full-resolution-JPEG pages reliably got a 413 this route's own code never
+ * ran to see, regardless of page count. The upload is now two requests: the
+ * browser gets a signed URL from /api/documents/upload-url and PUTs the file
+ * straight to storage (bypassing any Vercel function for the large part
+ * entirely), then calls this route — whose own request body is now just a
+ * path and a few strings — to download those bytes back out and run the same
+ * hash/page-count/validation/DB-write logic this route always has.
+ *
+ * Creates `source_document` + one `document_page` per page and queues an
  * `extract_document` job. Before responding, this route also runs THIS
  * document's own job to completion itself (see the awaited runJobById call
  * below), so extraction is attempted on upload rather than waiting for the
@@ -50,8 +66,8 @@ import { getMaxUploadPages } from '@/lib/upload-limits'
  * has pdf.js rasterising client-side, but that exists for the review viewer,
  * not for ingest: the extraction handler sends the PDF straight to Claude
  * (see lib/pdf.ts for why nothing rasterises server-side). So the upload UI
- * only needs to POST the file — it does not have to render anything first,
- * and `pageCount` is optional because the server derives it.
+ * only needs to hand this route a storage path — it does not have to render
+ * anything first, and `pageCount` is optional because the server derives it.
  */
 
 export const runtime = 'nodejs'
@@ -62,15 +78,6 @@ const MAX_UPLOAD_BYTES = 32 * 1024 * 1024 // Claude's document-block ceiling (§
 function safeFilename(name: string): string {
   const base = name.split(/[\\/]/).pop() ?? 'document.pdf'
   return base.replace(/[^A-Za-z0-9._-]+/g, '_').slice(0, 120) || 'document.pdf'
-}
-
-/** `2026/08/<hash12>-<epoch>-<name>.pdf` — unique per upload, so re-scanning the
- *  same bill never collides on `source_document.storage_path`'s unique index. */
-function buildStoragePath(hash: string, filename: string): string {
-  const now = new Date()
-  const yyyy = String(now.getUTCFullYear())
-  const mm = String(now.getUTCMonth() + 1).padStart(2, '0')
-  return `${yyyy}/${mm}/${hash.slice(0, 12)}-${now.getTime()}-${safeFilename(filename)}`
 }
 
 async function handlePOST(request: NextRequest) {
@@ -109,32 +116,47 @@ async function handlePOST(request: NextRequest) {
   // the request's critical path.
   const maxUploadPagesPromise = getMaxUploadPages(admin)
 
-  let form: FormData
+  let body: unknown
   try {
-    form = await request.formData()
+    body = await request.json()
   } catch {
-    return NextResponse.json({ error: 'Request must be multipart/form-data.' }, { status: 400 })
+    return NextResponse.json({ error: 'Request body must be JSON.' }, { status: 400 })
+  }
+  const bodyRecord = body && typeof body === 'object' ? (body as Record<string, unknown>) : {}
+  const storagePath = typeof bodyRecord.path === 'string' ? bodyRecord.path : ''
+  const filename = typeof bodyRecord.filename === 'string' && bodyRecord.filename.trim() ? bodyRecord.filename : 'document.pdf'
+  if (!storagePath) {
+    return NextResponse.json({ error: 'A "path" is required — call /api/documents/upload-url first.' }, { status: 400 })
   }
 
-  const file = form.get('file')
-  if (!(file instanceof File)) {
-    return NextResponse.json({ error: 'A "file" part is required.' }, { status: 400 })
+  // The browser already PUT the file straight to storage via the signed URL
+  // from /api/documents/upload-url — this downloads it back out so the rest
+  // of this route's validation (hash, page count, PDF sniff) runs exactly as
+  // it always has, just off storage instead of the request body.
+  let bytes: Uint8Array
+  try {
+    bytes = await getDocumentBytes(storagePath)
+  } catch (err) {
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : 'Could not read the uploaded file back from storage.' },
+      { status: 502 }
+    )
   }
-  if (file.size === 0) {
+  if (bytes.byteLength === 0) {
+    await deleteDocument(storagePath).catch(() => {})
     return NextResponse.json({ error: 'The uploaded file is empty.' }, { status: 400 })
   }
-  if (file.size > MAX_UPLOAD_BYTES) {
+  if (bytes.byteLength > MAX_UPLOAD_BYTES) {
+    await deleteDocument(storagePath).catch(() => {})
     return NextResponse.json(
       {
-        error:
-          `File is ${file.size} bytes, which exceeds the file size limit of ${MAX_UPLOAD_BYTES} bytes.`,
+        error: `File is ${bytes.byteLength} bytes, which exceeds the file size limit of ${MAX_UPLOAD_BYTES} bytes.`,
       },
       { status: 413 }
     )
   }
-
-  const bytes = new Uint8Array(await file.arrayBuffer())
   if (!looksLikePdf(bytes)) {
+    await deleteDocument(storagePath).catch(() => {})
     return NextResponse.json({ error: 'Only PDF uploads are supported.' }, { status: 415 })
   }
 
@@ -158,14 +180,14 @@ async function handlePOST(request: NextRequest) {
     // exception below stays user-facing and plain-English; the technical
     // cause goes to the logs and Sentry, where it can actually be acted on.
     console.error(
-      `[ingest] getPdfPageCount failed for "${file.name}" (${bytes.byteLength} bytes):`,
+      `[ingest] getPdfPageCount failed for "${filename}" (${bytes.byteLength} bytes):`,
       err
     )
     Sentry.captureException(err, {
       tags: { route: 'documents-ingest', phase: 'get_pdf_page_count' },
-      extra: { filename: file.name, byteLength: bytes.byteLength, fileHash },
+      extra: { filename, byteLength: bytes.byteLength, fileHash },
     })
-    const declared = Number(form.get('pageCount'))
+    const declared = Number(bodyRecord.pageCount)
     pageCount = Number.isInteger(declared) && declared > 0 ? declared : null
     // Neither the server-side parse nor a client-declared count worked. No
     // document_page rows get created below, and page_count stays null until
@@ -189,6 +211,11 @@ async function handlePOST(request: NextRequest) {
   if (pageCount !== null) {
     const maxUploadPages = await maxUploadPagesPromise
     if (pageCount > maxUploadPages) {
+      // Unlike the checks above, the file is already sitting in storage by
+      // this point (the browser PUT it directly before this route ever ran)
+      // rather than about to be written — clean it up rather than leaving a
+      // rejected upload as permanent storage cruft.
+      await deleteDocument(storagePath).catch(() => {})
       return NextResponse.json(
         {
           error:
@@ -200,9 +227,10 @@ async function handlePOST(request: NextRequest) {
     }
   }
 
-  const entryIdRaw = form.get('entryId')
+  const entryIdRaw = bodyRecord.entryId
   const entryId =
-    typeof entryIdRaw === 'string' && entryIdRaw.trim() !== '' && Number.isInteger(Number(entryIdRaw))
+    (typeof entryIdRaw === 'string' && entryIdRaw.trim() !== '' && Number.isInteger(Number(entryIdRaw))) ||
+    (typeof entryIdRaw === 'number' && Number.isInteger(entryIdRaw))
       ? Number(entryIdRaw)
       : null
 
@@ -210,7 +238,7 @@ async function handlePOST(request: NextRequest) {
   // comma-separated list of staff uuids. Parsed here; validated and written
   // only after the source_document row exists (below), so an absent/empty
   // value is a no-op that leaves current behaviour untouched.
-  const assignedToRaw = form.get('assignedTo')
+  const assignedToRaw = bodyRecord.assignedTo
   const assignedToIds =
     typeof assignedToRaw === 'string'
       ? Array.from(
@@ -234,21 +262,14 @@ async function handlePOST(request: NextRequest) {
 
   const duplicateOf: number | null = priorDocs?.[0]?.id ?? null
 
-  const storagePath = buildStoragePath(fileHash, file.name)
-  try {
-    await putDocument(storagePath, bytes, 'application/pdf')
-  } catch (err) {
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Upload to storage failed.' },
-      { status: 502 }
-    )
-  }
-
+  // storagePath already points at the bytes just downloaded and validated
+  // above — the browser PUT them there directly via the signed URL from
+  // /api/documents/upload-url before this route ever ran.
   const { data: inserted, error: insertError } = await admin
     .from('source_document')
     .insert({
       storage_path: storagePath,
-      original_filename: safeFilename(file.name),
+      original_filename: safeFilename(filename),
       file_hash_sha256: fileHash,
       mime_type: 'application/pdf',
       page_count: pageCount,
