@@ -91,7 +91,8 @@ async function handlePOST(request: NextRequest) {
       importedBy: user.id,
     })
 
-    return NextResponse.json(result, { status: result.status === 'failed' ? 500 : 200 })
+    // Always 200 -- see the identical comment in app/api/import/route.ts.
+    return NextResponse.json(result, { status: 200 })
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     return NextResponse.json({ error: `Import failed: ${message}` }, { status: 500 })

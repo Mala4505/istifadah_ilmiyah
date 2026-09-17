@@ -353,6 +353,16 @@
       })
       .join('')
 
+    // A `status: 'failed'` result is a normal, well-formed response (the
+    // request reached the Hub and ran; something in the DATA stopped it —
+    // e.g. two rows fighting over the same Main Number) rather than a
+    // connectivity problem. Surfacing `errorMessage` here is what tells the
+    // operator that, instead of leaving them looking at an otherwise-empty
+    // summary table for a batch that saved nothing.
+    var failureNote = result.errorMessage
+      ? '<div style="color:#b91c1c;margin-bottom:6px">' + esc(result.errorMessage) + '</div>'
+      : ''
+
     return (
       '<div style="margin-bottom:6px">Batch <strong>#' +
       esc(result.batchId) +
@@ -363,6 +373,7 @@
       ' rows, status ' +
       esc(result.status) +
       '</div>' +
+      failureNote +
       '<table style="width:100%;margin:6px 0">' +
       lines +
       '</table>' +
@@ -508,6 +519,13 @@
               'dry_run',
               function (result) {
                 stopBusy()
+                // A failed dry run means the same commit would hit the same
+                // data conflict — offering "Commit this import" here would
+                // just be a guaranteed second failure, not a real option.
+                if (result.status === 'failed') {
+                  ui(partialNote + summarise(result))
+                  return
+                }
                 ui(
                   partialNote +
                     summarise(result) +
@@ -524,7 +542,16 @@
                           'commit',
                           function (committed) {
                             stopBusy()
-                            ui(partialNote + summarise(committed) + savedMessage())
+                            // A well-formed `status: 'failed'` result (a data
+                            // conflict, not a network error) now arrives here
+                            // rather than the error callback — see summarise's
+                            // own comment. Nothing was written in that case, so
+                            // "Saved." would be a lie.
+                            ui(
+                              partialNote +
+                                summarise(committed) +
+                                (committed.status === 'failed' ? '' : savedMessage())
+                            )
                           },
                           function (error) {
                             fail('Commit failed: ' + error.message)
@@ -546,7 +573,11 @@
               'commit',
               function (committed) {
                 stopBusy()
-                ui(partialNote + summarise(committed) + savedMessage())
+                ui(
+                  partialNote +
+                    summarise(committed) +
+                    (committed.status === 'failed' ? '' : savedMessage())
+                )
               },
               onPostFailure
             )

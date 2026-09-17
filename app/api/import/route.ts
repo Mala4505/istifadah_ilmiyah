@@ -117,7 +117,15 @@ async function handlePOST(request: NextRequest) {
       importedBy: user.id,
     })
 
-    return NextResponse.json(result, { status: result.status === 'failed' ? 500 : 200 })
+    // Always 200: `result` is a well-formed ImportResult whether the batch
+    // completed or failed -- a failure here is a business outcome (a bad row,
+    // a data conflict) already explained in `result.errorMessage`/`rowLog`,
+    // not a broken request. Returning 500 for it used to make the frontend
+    // (components/import/import-workspace.tsx) treat `res.ok === false` and
+    // discard that whole body for a bare "Commit failed." toast, hiding the
+    // real reason. 5xx is reserved for the catch block below, where there
+    // really is no structured result to show.
+    return NextResponse.json(result, { status: 200 })
   } catch (error) {
     // Phase 6 Step 2 §1.6: a past/non-current event is read-only -- no new
     // imports. runImport blocks this itself (lib/import/run-import.ts's

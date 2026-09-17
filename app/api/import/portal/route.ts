@@ -179,7 +179,13 @@ async function handlePOST(request: NextRequest) {
       importedBy,
     })
 
-    return json(request, result, result.status === 'failed' ? 500 : 200)
+    // Always 200 -- see the identical comment in app/api/import/route.ts.
+    // `result` already carries `status: 'failed'` plus `errorMessage`/`rowLog`
+    // when something in the data (not the request) went wrong; forcing a 500
+    // used to make the Import page and the bookmarklet both discard that body
+    // for a generic "Commit failed." / "portal is blocking the connection"
+    // message instead of showing the operator what actually happened.
+    return json(request, result, 200)
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     return json(request, { error: `Portal import failed: ${message}` }, 500)
