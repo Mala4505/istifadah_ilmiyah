@@ -1,6 +1,6 @@
 'use client'
 
-import { Suspense, useEffect, useRef, useState } from 'react'
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { AlertTriangle } from 'lucide-react'
@@ -135,6 +135,36 @@ export function DocumentInbox({
   // ranked (performance remediation plan 4.2) -- see extractionFingerprint's
   // doc comment for why this is a fingerprint map, not a plain ranked-id set.
   const rankedFingerprintByExtractionId = useRef<Map<number, string>>(new Map())
+
+  // UploadDropzone calls onUploaded once per individual file that finishes
+  // (not once per batch), so dropping ~20 PDFs and hitting "Upload all" can
+  // fire this many times within a couple of seconds while the reader is
+  // still mid-split on the oversized ones. Each call used to go straight to
+  // router.refresh() — a burst of concurrent RSC round-trips landing right
+  // in the middle of the split flow. Debounced so a fast-finishing batch
+  // collapses into a single refresh once things settle.
+  const uploadRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const handleUploaded = useCallback(() => {
+    if (uploadRefreshTimerRef.current) clearTimeout(uploadRefreshTimerRef.current)
+    uploadRefreshTimerRef.current = setTimeout(() => {
+      uploadRefreshTimerRef.current = null
+      router.refresh()
+    }, 1000)
+  }, [router])
+  useEffect(() => {
+    return () => {
+      if (uploadRefreshTimerRef.current) clearTimeout(uploadRefreshTimerRef.current)
+    }
+  }, [])
+
+  // Filenames already sitting in the inbox, normalized for a case/whitespace
+  // -insensitive compare — lets the dropzone flag "you already uploaded
+  // this" before a reader re-drops files they're unsure went through after a
+  // lost batch, instead of silently creating a second document.
+  const existingFilenames = useMemo(
+    () => new Set(documents.map((d) => d.originalFilename.trim().toLowerCase())),
+    [documents]
+  )
 
   // Checklist 2.9 (D6): ranking candidates against the full entries pool
   // used to run inline in app/(app)/documents/page.tsx's own render, on
@@ -531,10 +561,11 @@ export function DocumentInbox({
           full-size, inviting panel is reserved for a first-time/empty inbox
           so it doesn't push the list below the fold as it grows. */}
       <UploadDropzone
-        onUploaded={() => router.refresh()}
+        onUploaded={handleUploaded}
         compact={documents.length > 0}
         assignableStaff={canAct ? assignableStaff : []}
         maxUploadPages={maxUploadPages}
+        existingFilenames={existingFilenames}
       />
 
       {canAct && selectedCount > 0 && (

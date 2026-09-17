@@ -1,8 +1,20 @@
 'use client'
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
-import { AlertCircle, CheckCircle2, Circle, FileText, Loader2, Scissors, UploadCloud, WifiOff, X, XCircle } from 'lucide-react'
+import {
+  AlertCircle,
+  CheckCircle2,
+  Circle,
+  Copy,
+  FileText,
+  Loader2,
+  Scissors,
+  UploadCloud,
+  WifiOff,
+  X,
+  XCircle,
+} from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { friendlyErrorMessage, logRawError } from '@/lib/friendly-error'
@@ -316,6 +328,7 @@ export function UploadDropzone({
   compact = false,
   assignableStaff = [],
   maxUploadPages,
+  existingFilenames,
 }: {
   onUploaded: () => void
   /** Admin-configured page-count ceiling for a single PDF upload
@@ -337,6 +350,11 @@ export function UploadDropzone({
    *  click-to-browse both keep working identically; only the layout/size of
    *  the target itself changes. */
   compact?: boolean
+  /** Normalized (trimmed, lowercased) filenames already sitting in the inbox
+   *  — flags a staged item as a likely duplicate before it's sent, so a
+   *  reader unsure which of a lost/interrupted batch already went through
+   *  isn't guessing. */
+  existingFilenames?: Set<string>
 }) {
   const inputRef = useRef<HTMLInputElement>(null)
   const [items, setItems] = useState<UploadItem[]>([])
@@ -370,6 +388,25 @@ export function UploadDropzone({
       timers.clear()
     }
   }, [])
+
+  // Nothing here is persisted anywhere until its POST to /api/documents/ingest
+  // resolves — a staged, oversize, splitting, or mid-upload item lives only as
+  // an in-memory File in filesRef. A refresh, tab close, or back-navigation
+  // while any of those are pending silently drops them with no way to recover
+  // (bug: multi-file upload where some of a batch needing a split vanished on
+  // an unexpected reload). Warn before that happens.
+  useEffect(() => {
+    const hasUnsentWork = items.some(
+      (i) => i.status === 'staged' || i.status === 'oversize' || i.status === 'splitting' || i.status === 'uploading'
+    )
+    if (!hasUnsentWork) return
+    const handler = (e: BeforeUnloadEvent) => {
+      e.preventDefault()
+      e.returnValue = ''
+    }
+    window.addEventListener('beforeunload', handler)
+    return () => window.removeEventListener('beforeunload', handler)
+  }, [items])
 
   // Page-count check for a freshly staged PDF, run off the critical path.
   // pdf-lib parses in the browser exactly as it does server-side; a parse
@@ -652,6 +689,27 @@ export function UploadDropzone({
     (i.status === 'tracking' && (i.docStatus === 'processed' || i.docStatus === 'failed'))
   const hasFinished = items.some(isFinishedItem)
 
+  // How many items in the current list share each normalized filename — used
+  // below to flag every item past the first as "already in this batch",
+  // independent of the inbox check. Split parts get a `__pStart-End` suffix
+  // baked into their name, so a genuine re-split of the same source file
+  // still collides here exactly as it should.
+  const batchNameCounts = useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const item of items) {
+      const key = item.filename.trim().toLowerCase()
+      counts.set(key, (counts.get(key) ?? 0) + 1)
+    }
+    return counts
+  }, [items])
+
+  function duplicateReason(item: UploadItem): 'inbox' | 'batch' | null {
+    const key = item.filename.trim().toLowerCase()
+    if (existingFilenames?.has(key)) return 'inbox'
+    if ((batchNameCounts.get(key) ?? 0) > 1) return 'batch'
+    return null
+  }
+
   return (
     <div className="flex flex-col gap-3">
       <div
@@ -736,10 +794,21 @@ export function UploadDropzone({
               </Button>
             </div>
           )}
-          {items.map((item) => (
+          {items.map((item) => {
+            // Only worth flagging while there's still an upload to stop —
+            // once it's tracking/errored/etc. the request already went out
+            // (or didn't), so "discard" no longer prevents anything.
+            const dupReason =
+              item.status === 'staged' || item.status === 'oversize' || item.status === 'splitting' || item.status === 'uploading'
+                ? duplicateReason(item)
+                : null
+            return (
             <div
               key={item.key}
-              className="flex flex-col gap-2 rounded-md border border-border bg-card px-3 py-2 text-sm"
+              className={cn(
+                'flex flex-col gap-2 rounded-md border px-3 py-2 text-sm',
+                dupReason ? 'border-destructive/50 bg-destructive/5' : 'border-border bg-card'
+              )}
             >
               <div className="flex items-center gap-2">
               <FileText className="h-4 w-4 flex-shrink-0 text-muted-foreground" aria-hidden="true" />
@@ -752,6 +821,23 @@ export function UploadDropzone({
                 <span className="flex-shrink-0 text-[11px] text-muted-foreground">
                   {item.pageCount} {item.pageCount === 1 ? 'page' : 'pages'}
                 </span>
+              )}
+              {dupReason && (
+                <span className="flex flex-shrink-0 items-center gap-1.5 text-xs font-medium text-destructive">
+                  <Copy className="h-3.5 w-3.5" aria-hidden="true" />
+                  {dupReason === 'inbox' ? 'Already in inbox' : 'Duplicate in this batch'}
+                </span>
+              )}
+              {dupReason && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="flex-shrink-0 border-destructive/50 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                  onClick={() => removeItem(item.key)}
+                >
+                  Discard
+                </Button>
               )}
               {item.status === 'staged' && (
                 <Button type="button" size="sm" variant="outline" onClick={() => startUpload(item)}>
@@ -828,7 +914,8 @@ export function UploadDropzone({
                 />
               )}
             </div>
-          ))}
+            )
+          })}
           {hasFinished && (
             <div>
               <Button type="button" variant="ghost" size="sm" onClick={clearFinished}>
