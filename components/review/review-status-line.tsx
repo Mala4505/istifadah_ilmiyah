@@ -255,25 +255,6 @@ function ReviewStatusLineImpl({
               />
             </div>
             <div className="flex flex-col gap-1">
-              <span className="text-[11px] font-medium leading-none text-muted-foreground">Admin head</span>
-              <Combobox
-                id="stage3-admin-head-select"
-                value={adminHeadId}
-                onValueChange={onAdminHeadChange}
-                placeholder={`Admin head (${formatBinding(keymap.focusAdminHead)})`}
-                searchPlaceholder="Search admin heads…"
-                className="w-36"
-                options={[
-                  { value: NONE, label: 'No admin head', searchValue: 'not set' },
-                  ...adminHeadOptions.map((h) => ({
-                    value: String(h.id),
-                    label: `${h.head_number}. ${h.name}`,
-                    searchValue: `${h.head_number}. ${h.name}`,
-                  })),
-                ]}
-              />
-            </div>
-            <div className="flex flex-col gap-1">
               <span className="text-[11px] font-medium leading-none text-muted-foreground">Zone</span>
               <Combobox
                 id="stage3-zone-select"
@@ -288,6 +269,31 @@ function ReviewStatusLineImpl({
                     value: String(z.id),
                     label: `${z.zone_number}. ${z.name}`,
                     searchValue: `${z.zone_number}. ${z.name}`,
+                  })),
+                ]}
+              />
+            </div>
+            <div className="flex flex-col gap-1">
+              {/* Optional (2026-09-18): admin head no longer gates stage3Done
+                  (review-workspace.tsx) or any "reviewed"/"finished" predicate
+                  -- a bill can be classified with just zone + sub-department.
+                  No visual distinction from the required fields above; the
+                  Combobox's own "No admin head" option already communicates
+                  that leaving it unset is a valid end state. */}
+              <span className="text-[11px] font-medium leading-none text-muted-foreground">Admin head (optional)</span>
+              <Combobox
+                id="stage3-admin-head-select"
+                value={adminHeadId}
+                onValueChange={onAdminHeadChange}
+                placeholder={`Admin head (${formatBinding(keymap.focusAdminHead)})`}
+                searchPlaceholder="Search admin heads…"
+                className="w-36"
+                options={[
+                  { value: NONE, label: 'No admin head', searchValue: 'not set' },
+                  ...adminHeadOptions.map((h) => ({
+                    value: String(h.id),
+                    label: `${h.head_number}. ${h.name}`,
+                    searchValue: `${h.head_number}. ${h.name}`,
                   })),
                 ]}
               />

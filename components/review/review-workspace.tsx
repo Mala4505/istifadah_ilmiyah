@@ -1358,7 +1358,7 @@ export function ReviewWorkspace({
           : 'Saved.'
       const pending: string[] = []
       if (!stage2Done) pending.push('connect it to a ledger entry')
-      if (stage2Done && !stage3Done) pending.push('set admin head / zone / sub-department')
+      if (stage2Done && !stage3Done) pending.push('set zone / sub-department')
       if (pending.length > 0) {
         toast.warning(savedNote, { description: `Still to do: ${pending.join('; ')}.` })
       } else {
@@ -1835,7 +1835,11 @@ export function ReviewWorkspace({
   // that's left.
   const stage1Done = detail.verifiedAt !== null
   const stage2Done = detail.entryId !== null
-  const stage3Done = stage2Done && adminHeadId !== NONE && zoneId !== NONE && subDepartmentId !== NONE
+  // Admin head is optional (2026-09-18, user request) -- a bill is Classified
+  // once zone + sub-department are set, regardless of admin head. Mirrored by
+  // the "finished"/"Reviewed" predicates in app/(app)/documents/page.tsx,
+  // app/(app)/review/page.tsx, and the v_review_queue* DB views.
+  const stage3Done = stage2Done && zoneId !== NONE && subDepartmentId !== NONE
   const verifyStatus: StageStatus = stage1Done ? 'done' : 'current'
   const connectStatus: StageStatus = stage2Done ? 'done' : 'current'
   const classifyStatus: StageStatus = !stage2Done ? 'blocked' : stage3Done ? 'done' : 'current'

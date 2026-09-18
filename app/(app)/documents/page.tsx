@@ -282,8 +282,9 @@ export default async function DocumentsPage({
   // three Review stages are done, not just stage 1 (verify). Stage 2
   // (connect) is whether the bill has any entry_bill_link (or the document is
   // marked 'no entry expected'). Stage 3 (classify) reads every linked entry's
-  // admin_head/zone/sub_department -- one bounded `.in()` over just the entry
-  // ids actually referenced here.
+  // zone/sub_department -- one bounded `.in()` over just the entry ids
+  // actually referenced here. Admin head is optional (2026-09-18) and does
+  // not gate this -- see review-workspace.tsx's stage3Done comment.
   const matchStatusByDocId = new Map<number, string>(docs.map((d) => [d.id, d.match_status as string]))
   const connectedEntryIds = Array.from(
     new Set((linkRowsData ?? []).map((r) => r.entry_id as number))
@@ -297,7 +298,7 @@ export default async function DocumentsPage({
       : { data: [] as { id: number; admin_head_id: number | null; zone_id: number | null; sub_department_id: number | null }[] }
   const classifiedEntryIds = new Set(
     (connectedEntriesData ?? [])
-      .filter((e) => e.admin_head_id !== null && e.zone_id !== null && e.sub_department_id !== null)
+      .filter((e) => e.zone_id !== null && e.sub_department_id !== null)
       .map((e) => e.id as number)
   )
 

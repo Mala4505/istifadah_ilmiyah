@@ -139,14 +139,16 @@ export default async function ReviewPage({
 
   // "Reviewed" is the mirror image of v_review_queue's own WHERE clause
   // (20260907000002): verified, and either the document needs no entry at
-  // all or the entry it resolves to has admin_head_id/zone_id/
-  // sub_department_id all set. Applied as real PostgREST filters (not a
-  // post-fetch JS filter) so it composes correctly with the QUEUE_ROW_CAP
-  // .limit() below -- filtering after a severity-ordered 500-row cap would
-  // silently starve this scope, since reviewed bills have no reason to sort
-  // into the first 500 rows of a queue ordered by open-issue severity.
+  // all or the entry it resolves to has zone_id/sub_department_id set.
+  // Admin head is optional (2026-09-18) and does not gate this -- see
+  // review-workspace.tsx's stage3Done comment. Applied as real PostgREST
+  // filters (not a post-fetch JS filter) so it composes correctly with the
+  // QUEUE_ROW_CAP .limit() below -- filtering after a severity-ordered
+  // 500-row cap would silently starve this scope, since reviewed bills have
+  // no reason to sort into the first 500 rows of a queue ordered by
+  // open-issue severity.
   const REVIEWED_ONLY_OR =
-    'match_status.eq.no_entry_expected,and(admin_head_id.not.is.null,zone_id.not.is.null,sub_department_id.not.is.null)'
+    'match_status.eq.no_entry_expected,and(zone_id.not.is.null,sub_department_id.not.is.null)'
 
   let queueQuery = supabase
     .from(scope === 'pending' ? 'v_review_queue' : 'v_review_queue_all')
@@ -869,7 +871,8 @@ async function loadDocumentDetail(
   }))
 
   // Which of this document's sibling bills' entries have the Classify stage
-  // done (admin head + zone + sub-department all set). Keyed by entry id.
+  // done (zone + sub-department set; admin head is optional, 2026-09-18).
+  // Keyed by entry id.
   const classifiedEntryIds = new Set(
     (
       (siblingEntryClassRes.data ?? []) as {
@@ -879,7 +882,7 @@ async function loadDocumentDetail(
         sub_department_id: number | null
       }[]
     )
-      .filter((e) => e.admin_head_id !== null && e.zone_id !== null && e.sub_department_id !== null)
+      .filter((e) => e.zone_id !== null && e.sub_department_id !== null)
       .map((e) => e.id)
   )
 
