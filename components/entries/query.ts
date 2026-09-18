@@ -147,6 +147,7 @@ const ENTRY_DETAIL_EXTRA_COLUMNS = [
   'remark',
   'settles_entry_id',
   'is_void',
+  'void_note',
   'source',
   'reimbursement_sr_no',
   'reimbursement_type',

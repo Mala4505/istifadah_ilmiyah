@@ -286,6 +286,61 @@ async function flushExceptions(
 }
 
 /**
+ * Flags Hub entries that were open on this tab before today but did not
+ * appear anywhere in this scrape.
+ *
+ * Deliberately does NOT void anything, and deliberately does not distinguish
+ * dry_run from commit — raiseException already buffers the finding into
+ * `exceptions` regardless of mode, which is what lets a dry-run preview show
+ * "N entries look gone" before an operator commits (see raiseException). The
+ * design call this implements: a scrape carries no signal saying whether a
+ * per-column filter was active in the browser when it was taken, so an entry
+ * missing from the scrape is only ever a candidate for a human to check, not
+ * grounds to void it here. A human votes to void it separately, through the
+ * reconciliation_exception review flow (a different file).
+ *
+ * Runs once per batch, after the row loop, so it diffs against the FULL set
+ * of ubbl_numbers this scrape actually carried, not a partial one.
+ */
+async function detectMissingDepartmentalEntries(
+  client: PoolClient,
+  eventId: number,
+  tableKind: 'invoice' | 'reimbursement' | 'advance_payment' | 'invoice_against_uplaq',
+  rows: readonly ParsedPortalRow[],
+  batchId: number,
+  exceptions: ImportExceptionSummary[],
+  pendingExceptions: PendingException[]
+): Promise<void> {
+  const scrapedUbblNumbers = new Set(
+    rows.filter((r) => !r.skipReason && r.ubblNumber).map((r) => r.ubblNumber as string)
+  )
+
+  const openEntries = await client.query<{ id: number; ubbl_number: string; amount: string | null }>(
+    `select id, ubbl_number, amount from public.entries
+      where type = $1 and event_id = $2 and is_void = false and ubbl_number is not null`,
+    [tableKind, eventId]
+  )
+
+  for (const entry of openEntries.rows) {
+    if (scrapedUbblNumbers.has(entry.ubbl_number)) continue
+
+    raiseException(pendingExceptions, exceptions, {
+      type: 'departmental_entry_missing_from_portal',
+      severity: 'medium',
+      entryId: entry.id,
+      // numeric(14,2) comes back from `pg` as a string — same conversion
+      // attemptAuditRowMatch does before handing an amount to raiseException.
+      amountAtRisk: entry.amount === null ? null : Number(entry.amount),
+      description:
+        `Entry ${entry.ubbl_number} is open on the ${tableKind} tab but no longer appears in the portal ` +
+        `scrape. Double-check the portal (with any filters cleared) before voiding — a filtered scrape ` +
+        `can make real, still-open entries outside the active filter look missing.`,
+      dedupKey: `departmental_entry_missing_from_portal:${entry.id}`,
+    })
+  }
+}
+
+/**
  * Warms every resolver cache with ONE batched query per master table, before
  * the row loop runs a single `resolve*` call.
  *
@@ -619,6 +674,22 @@ export async function runPortalImport(
           note: message,
         })
       }
+    }
+
+    if (sourceSystem === 'departmental') {
+      // tableKind is non-null whenever sourceSystem === 'departmental' — see
+      // its computation above. Must run after the row loop above, not inside
+      // it: it needs the full set of ubbl_numbers this scrape carried, which
+      // isn't known until every row has been read.
+      await detectMissingDepartmentalEntries(
+        client,
+        eventId,
+        tableKind!,
+        parsed.rows,
+        batchId,
+        exceptions,
+        pendingExceptions
+      )
     }
 
     // One INSERT each for the row log and the findings, rather than one per

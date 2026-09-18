@@ -64,6 +64,7 @@ const FIELD_LABELS: Record<string, string> = {
   hub_status_export_batch_id: 'Export batch',
   settles_entry_id: 'Settles advance',
   is_void: 'Void',
+  void_note: 'Void note',
   source: 'Source',
   import_batch_id: 'Import batch',
   // Pre-2026-08-11 field names, kept so change-log rows written before the

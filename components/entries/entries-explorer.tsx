@@ -5,7 +5,7 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { toast } from 'sonner'
 import { toastError } from '@/components/ui/error-toast'
 import { FriendlyError } from '@/components/ui/friendly-error'
-import { Building2, Download, RotateCcw, Tag } from 'lucide-react'
+import { Ban, Building2, Download, RotateCcw, Tag } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -18,6 +18,7 @@ import { EntryBillKpiBar } from './entry-bill-kpi-bar'
 import type { EntryBillKpis } from '@/lib/documents/entry-bill-kpis'
 import { BulkStatusDialog } from './bulk-status-dialog'
 import { BulkEnrichmentDialog } from './bulk-enrichment-dialog'
+import { BulkVoidDialog } from './bulk-void-dialog'
 import { exportEntriesToCsv } from './csv-export'
 import { fetchEntriesPage, fetchAllMatchingIds, type PageCursor } from './query'
 import { ALL_COLUMNS, DEFAULT_FILTERS, DEFAULT_SORT, PAGE_SIZE } from './types'
@@ -198,6 +199,7 @@ export function EntriesExplorer({
   const [visibleColumns, setVisibleColumns] = useState<Set<ColumnKey>>(() => defaultVisibleColumns())
   const [bulkDialogOpen, setBulkDialogOpen] = useState(false)
   const [bulkEnrichDialogOpen, setBulkEnrichDialogOpen] = useState(false)
+  const [bulkVoidDialogOpen, setBulkVoidDialogOpen] = useState(false)
   const [exporting, setExporting] = useState(false)
   // 7.8: running row count for the export button's label, fed by
   // exportEntriesToCsv's onProgress callback after each sequential batch.
@@ -561,6 +563,15 @@ export function EntriesExplorer({
                     <Building2 className="h-3.5 w-3.5" />
                     Assign zone / head…
                   </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="gap-1.5"
+                    onClick={() => setBulkVoidDialogOpen(true)}
+                  >
+                    <Ban className="h-3.5 w-3.5" />
+                    Void…
+                  </Button>
                 </>
               ) : (
                 <span className="text-xs text-muted-foreground">
@@ -641,6 +652,17 @@ export function EntriesExplorer({
         adminHeadOptions={options.adminHeads}
         zoneOptions={options.zones}
         costCenterOptions={options.costCenters}
+        onDone={() => {
+          clearSelection()
+          restoreTableFocus()
+          void loadFirstPage(filters, sort, pageSize)
+        }}
+      />
+
+      <BulkVoidDialog
+        open={bulkVoidDialogOpen}
+        onOpenChange={setBulkVoidDialogOpen}
+        entryIds={Array.from(selected)}
         onDone={() => {
           clearSelection()
           restoreTableFocus()

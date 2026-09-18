@@ -135,6 +135,11 @@ export function getExceptionAction(row: ExceptionActionRow): ExceptionAction {
         whatToDo: 'Two source systems reused an identifier.',
         destination: row.entry_id !== null ? { href: `/entries/${row.entry_id}`, label: 'Open entry' } : undefined,
       }
+    case 'departmental_entry_missing_from_portal':
+      return {
+        whatToDo: 'Double-check the Departmental portal for this UBBL number, with any filters cleared, before deciding to void the entry.',
+        destination: row.entry_id !== null ? { href: `/entries/${row.entry_id}`, label: 'Open entry' } : undefined,
+      }
     case 'new_vendor':
       return {
         whatToDo: 'Confirm the auto-created vendor row.',

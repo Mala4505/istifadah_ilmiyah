@@ -262,6 +262,122 @@ export async function createManualEntry(input: CreateManualEntryInput): Promise<
   }
 }
 
+export interface VoidEntriesInput {
+  entryIds: number[]
+  note: string
+}
+
+export interface VoidEntriesResult {
+  success: boolean
+  updatedCount: number
+  requestedCount: number
+  error?: string
+}
+
+/**
+ * Voids one or more entries (2026-09-19: departmental-portal-vanished-entry
+ * flow) and, as the same human action, auto-resolves any OPEN
+ * `departmental_entry_missing_from_portal` exceptions raised against those
+ * same entries — the void note doubles as the exception's resolution note,
+ * since voiding the entry IS the resolution ("Resolved with no reason is not
+ * an audit trail" applies to the void note itself, same as `resolveException`
+ * and `setHubStatus`).
+ *
+ * Modeled directly on `setHubStatus` (lib/actions/hub-status.ts): runs on the
+ * session-bound client, so `entries_update` RLS (admin-or-above,
+ * department-scoped via can_see_department — 20260819000003_role_rbac_v2.sql
+ * around L276-279) is the actual gate, not this function. This turns a silent
+ * RLS exclusion into an explicit `error` and reports partial success
+ * (`updatedCount < requestedCount`) the same way.
+ */
+export async function voidEntries({ entryIds, note }: VoidEntriesInput): Promise<VoidEntriesResult> {
+  const cleanIds = Array.from(new Set(entryIds)).filter((id) => Number.isInteger(id) && id > 0)
+  const cleanNote = note.trim()
+  const requestedCount = cleanIds.length
+
+  if (requestedCount === 0) {
+    return { success: false, updatedCount: 0, requestedCount, error: 'No entries selected.' }
+  }
+  if (!cleanNote) {
+    return { success: false, updatedCount: 0, requestedCount, error: 'A note is required to void an entry.' }
+  }
+
+  const supabase = await createClient()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+  if (!user) {
+    return { success: false, updatedCount: 0, requestedCount, error: 'You must be signed in.' }
+  }
+
+  const selectedEvent = await getSelectedEvent()
+  if (!isEventMutable(selectedEvent)) {
+    return { success: false, updatedCount: 0, requestedCount, error: EVENT_READONLY_ERROR }
+  }
+
+  const { data, error } = await supabase
+    .from('entries')
+    .update({ is_void: true, void_note: cleanNote })
+    .in('id', cleanIds)
+    .select('id')
+
+  if (error) {
+    return { success: false, updatedCount: 0, requestedCount, error: logRawError('entries.voidEntries', error.message) }
+  }
+
+  const updatedCount = data?.length ?? 0
+
+  if (updatedCount === 0) {
+    return {
+      success: false,
+      updatedCount: 0,
+      requestedCount,
+      error:
+        'No entries were voided. This usually means a dept role (admin or above is required to void entries), or the entry is outside your assigned department.',
+    }
+  }
+
+  const voidedIds = data!.map((row) => row.id as number)
+
+  // Auto-resolve: voiding the entry IS the resolution for this exception
+  // type, so it never needs a separate manual resolve step afterwards.
+  const { error: resolveError } = await supabase
+    .from('reconciliation_exception')
+    .update({
+      status: 'resolved',
+      resolution_note: cleanNote,
+      resolved_by: user.id,
+      resolved_at: new Date().toISOString(),
+      auto_recheck_note: null,
+      auto_recheck_cleared_at: null,
+    })
+    .eq('exception_type', 'departmental_entry_missing_from_portal')
+    .eq('status', 'open')
+    .in('entry_id', voidedIds)
+
+  if (resolveError) {
+    logRawError('entries.voidEntries:resolveExceptions', resolveError.message)
+  }
+
+  for (const id of cleanIds) {
+    revalidatePath(`/entries/${id}`)
+  }
+  revalidatePath('/entries')
+  // Exceptions may have just been auto-resolved above.
+  revalidatePath('/exceptions')
+
+  if (updatedCount < requestedCount) {
+    return {
+      success: true,
+      updatedCount,
+      requestedCount,
+      error: `${requestedCount - updatedCount} of ${requestedCount} selected entries could not be voided (permission or department scope).`,
+    }
+  }
+
+  return { success: true, updatedCount, requestedCount }
+}
+
 const realUbblNumberSchema = z
   .string()
   .trim()

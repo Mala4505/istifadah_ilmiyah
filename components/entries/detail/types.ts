@@ -44,6 +44,7 @@ export interface EntryEnriched {
   hub_status_exported_at: string | null
   settles_entry_id: number | null
   is_void: boolean
+  void_note: string | null
   source: EntrySource
   import_batch_id: number | null
   created_at: string

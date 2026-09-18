@@ -9,6 +9,7 @@ import { ChangeHistoryList } from '@/components/entries/detail/change-history-li
 import { EnrichmentForm } from '@/components/entries/detail/enrichment-form'
 import { EntryNotFound } from '@/components/entries/detail/entry-not-found'
 import { HubStatusSection } from '@/components/entries/detail/hub-status-section'
+import { VoidEntryControl } from '@/components/entries/detail/void-entry-control'
 import { ImportFieldsPanel } from '@/components/entries/detail/import-fields-panel'
 import { LinkedDocuments, type LinkedDocumentView } from '@/components/entries/detail/linked-documents'
 import { ReimbursementDetailSection } from '@/components/entries/detail/reimbursement-detail-section'
@@ -444,6 +445,9 @@ export default async function EntryDetailPage({
         <Badge variant="outline">{entry.type.replace('_', ' ')}</Badge>
         {entry.department_name && <Badge variant="secondary">{entry.department_name}</Badge>}
         {entry.is_void && <Badge variant="destructive">Void</Badge>}
+        {entry.is_void && entry.void_note && (
+          <span className="text-sm text-muted-foreground">{entry.void_note}</span>
+        )}
       </div>
 
       {/* Typed entries hold a provisional M-###### number until the real one
@@ -479,6 +483,8 @@ export default async function EntryDetailPage({
         timelineRows={hubStatusTimelineRows}
         changedByLabels={hubStatusChangedByLabels}
       />
+
+      {canResolveIssues && !entry.is_void && <VoidEntryControl entryId={entry.id} />}
 
       <Tabs defaultValue="enrichment">
         <TabsList>
