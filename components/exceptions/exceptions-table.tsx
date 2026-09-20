@@ -3,6 +3,7 @@
 import * as React from 'react'
 import { Fragment } from 'react'
 import Link from 'next/link'
+import { ArrowUpRight } from 'lucide-react'
 import { useRouter, useSearchParams, usePathname } from 'next/navigation'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Badge } from '@/components/ui/badge'
@@ -244,12 +245,13 @@ export function ExceptionsTable({
                 )}
                 {group.rows.map((exception) => {
                   const isSelectable = selectionEnabled && exception.status === 'open'
-                  const whatToDo = getExceptionAction({
+                  const action = getExceptionAction({
                     exception_type: exception.exception_type,
                     entry_id: exception.entry_id,
                     document_extraction_id: exception.document_extraction_id,
                     source_document_id: exception.source_document_id,
-                  }).whatToDo
+                  })
+                  const whatToDo = action.whatToDo
                   return (
                     <TableRow key={exception.id} data-state={selected.has(exception.id) ? 'selected' : undefined}>
                       {selectionEnabled && (
@@ -329,18 +331,28 @@ export function ExceptionsTable({
                         {formatDateTime(exception.created_at)}
                       </TableCell>
                       <TableCell>
-                        {exception.status === 'open' && canResolve && (
-                          <ResolveExceptionDialog
-                            exceptionId={exception.id}
-                            amountAtRisk={exception.amount_at_risk}
-                            description={exception.description}
-                            exceptionType={exception.exception_type}
-                            entryId={exception.entry_id}
-                            documentExtractionId={exception.document_extraction_id}
-                            sourceDocumentId={exception.source_document_id}
-                            autoRecheckNote={exception.auto_recheck_note}
-                          />
-                        )}
+                        <div className="flex items-center gap-2">
+                          {action.destination && (
+                            <Button asChild size="sm" variant="outline">
+                              <Link href={action.destination.href}>
+                                {action.destination.label}
+                                <ArrowUpRight className="ml-1.5 h-3.5 w-3.5" aria-hidden="true" />
+                              </Link>
+                            </Button>
+                          )}
+                          {exception.status === 'open' && canResolve && (
+                            <ResolveExceptionDialog
+                              exceptionId={exception.id}
+                              amountAtRisk={exception.amount_at_risk}
+                              description={exception.description}
+                              exceptionType={exception.exception_type}
+                              entryId={exception.entry_id}
+                              documentExtractionId={exception.document_extraction_id}
+                              sourceDocumentId={exception.source_document_id}
+                              autoRecheckNote={exception.auto_recheck_note}
+                            />
+                          )}
+                        </div>
                       </TableCell>
                     </TableRow>
                   )

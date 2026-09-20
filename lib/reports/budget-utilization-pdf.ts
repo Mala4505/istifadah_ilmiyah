@@ -1,7 +1,10 @@
 /**
  * "Budget Utilization Report" PDF -- an A4 table shaped after the
  * department's own printed budget sheet (Sr. No / Department / Budget /
- * Actuals), with a "% of Budget Used" column appended at the end.
+ * Actuals), with a "% of Budget Used" column appended at the end. Sorted by
+ * budget (highest first), independent of whatever order the caller's rows
+ * arrive in, since this is a budget sheet, not a spend leaderboard. Closes
+ * with a bolded "GRAND TOTAL" row summing the Budget and Actual columns.
  *
  * Deliberately a real bordered table (unlike board-pack/pdf.ts's monospace
  * text grid) since this PDF -- not an .xlsx alongside it -- is the
@@ -80,9 +83,14 @@ const MIN_ROW_FONT = 5
 const MIN_HEADER_FONT = 5.5
 
 export async function buildBudgetUtilizationPdf(
-  rows: DepartmentBudgetVsActualRow[],
+  inputRows: DepartmentBudgetVsActualRow[],
   opts: { eventName: string | null; generatedAt: Date }
 ): Promise<Uint8Array> {
+  // Sorted by budget (highest first) -- this is a printed budget sheet, and
+  // the department with the largest allocation belongs at the top regardless
+  // of how much of it has been spent so far.
+  const rows = [...inputRows].sort((a, b) => (b.budget_amount ?? 0) - (a.budget_amount ?? 0))
+
   const { PDFDocument, StandardFonts, rgb } = await import('pdf-lib')
   const doc = await PDFDocument.create()
   const font = await doc.embedFont(StandardFonts.Helvetica)
@@ -133,7 +141,8 @@ export async function buildBudgetUtilizationPdf(
 
   const headerTop = y
   const availableH = headerTop - MARGIN
-  const n = Math.max(rows.length, 1)
+  // +1 reserves a row for the grand-total line beneath the departments.
+  const n = Math.max(rows.length, 1) + 1
 
   // Scale header + row sizing down together so `n` rows always land on this
   // one page, however long the department list gets.
@@ -188,6 +197,32 @@ export async function buildBudgetUtilizationPdf(
 
     y = rowTop - rowH
     page.drawLine({ start: { x: tableX, y }, end: { x: tableX + tableW, y }, thickness: 0.5, color: gridColor })
+  }
+
+  // ---- Grand total row -----------------------------------------------------
+  const budgetTotal = rows.reduce((s, r) => s + (r.budget_amount ?? 0), 0)
+  const actualGrandTotal = rows.reduce((s, r) => s + (r.actual_amount ?? 0), 0)
+  const totalRowTop = y
+  page.drawRectangle({ x: tableX, y: totalRowTop - rowH, width: tableW, height: rowH, color: stripeBg })
+  {
+    const cells = [
+      '',
+      'GRAND TOTAL',
+      formatINR(budgetTotal),
+      formatINR(actualGrandTotal),
+      budgetTotal > 0 ? formatPercent((actualGrandTotal / budgetTotal) * 100) : '',
+    ]
+    const textY = totalRowTop - rowH / 2 - rowFontSize * 0.36
+    let x = tableX
+    for (let c = 0; c < COLUMNS.length; c += 1) {
+      const col = COLUMNS[c]!
+      const label = pdfSafe(cells[c]!)
+      const textX = col.align === 'right' ? x + col.width - 6 - bold.widthOfTextAtSize(label, rowFontSize) : x + 6
+      page.drawText(label, { x: textX, y: textY, size: rowFontSize, font: bold, color: ink })
+      x += col.width
+    }
+    page.drawLine({ start: { x: tableX, y: totalRowTop }, end: { x: tableX + tableW, y: totalRowTop }, thickness: 1, color: accentColor })
+    y = totalRowTop - rowH
   }
 
   // ---- Table borders -----------------------------------------------------

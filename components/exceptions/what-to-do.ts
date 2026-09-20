@@ -36,11 +36,21 @@
  * - `/import`, `/settings`: static, no params (neither route reads a query
  *   param for this — confirmed by inspection).
  *
- * Types with no destination specified by the plan (department_vs_audit_
- * variance, allocation_sum_mismatch, unknown_status_code, missing_
- * documentation, other, audit_ambiguous_match, ocr_leaked_tag_syntax,
- * ocr_meta_commentary, vendor_gstin_invalid_checksum) get a sensible
- * one-liner and no button, rather than a guessed link.
+ * - `ocr_leaked_tag_syntax`, `ocr_meta_commentary`, `vendor_gstin_invalid_
+ *   checksum`, and `other` are all raised per-bill in lib/jobs/handlers/
+ *   extract.ts (and `other` also via the manual-flag path in
+ *   lib/actions/review.ts's flagReviewException) with `document_extraction_id`
+ *   always set — same shape as `gst_recipient_compliance_missing` and
+ *   `buyer_gstin_invalid_checksum`, which already get `reviewBillLink`. They
+ *   were originally left out of this switch (bucketed as "no destination
+ *   specified by the plan") despite having a real bill to point to; fixed to
+ *   use `reviewBillLink` like their siblings.
+ *
+ * Types with no destination (department_vs_audit_variance,
+ * allocation_sum_mismatch, unknown_status_code, missing_documentation,
+ * audit_ambiguous_match) get a sensible one-liner and no button — these are
+ * genuinely batch/allocation-level with no single bill or entry to link to,
+ * rather than a guessed link.
  */
 
 export interface ExceptionActionRow {
@@ -73,12 +83,7 @@ const STATIC_WHAT_TO_DO: Record<string, string> = {
   allocation_sum_mismatch: 'Check how this budget head’s utilised amount was allocated across its entries.',
   unknown_status_code: 'A status code from the source file wasn’t recognised — check the import file directly.',
   missing_documentation: 'Attach the supporting bill or document for this entry.',
-  other: 'Read the description for details on what to check.',
   audit_ambiguous_match: 'Multiple Audit-portal rows could match this entry — confirm the right one manually.',
-  ocr_leaked_tag_syntax: 'A field was blanked because it contained stray formatting artefacts — re-check it manually.',
-  ocr_meta_commentary:
-    'A field was blanked because it looked like the model’s own commentary about the document rather than real content — re-check it manually.',
-  vendor_gstin_invalid_checksum: 'The vendor GSTIN failed its checksum — it was likely misread; correct it.',
 }
 
 export function getExceptionAction(row: ExceptionActionRow): ExceptionAction {
@@ -149,6 +154,27 @@ export function getExceptionAction(row: ExceptionActionRow): ExceptionAction {
       return {
         whatToDo: 'Confirm the auto-created budget head row.',
         destination: { href: '/settings', label: 'Open Settings' },
+      }
+    case 'ocr_leaked_tag_syntax':
+      return {
+        whatToDo: 'A field was blanked because it contained stray formatting artefacts — re-check it manually.',
+        destination: reviewBillLink(row),
+      }
+    case 'ocr_meta_commentary':
+      return {
+        whatToDo:
+          'A field was blanked because it looked like the model’s own commentary about the document rather than real content — re-check it manually.',
+        destination: reviewBillLink(row),
+      }
+    case 'vendor_gstin_invalid_checksum':
+      return {
+        whatToDo: 'The vendor GSTIN failed its checksum — it was likely misread; correct it.',
+        destination: reviewBillLink(row),
+      }
+    case 'other':
+      return {
+        whatToDo: 'Read the description for details on what to check.',
+        destination: reviewBillLink(row),
       }
     default:
       return { whatToDo: STATIC_WHAT_TO_DO[row.exception_type] ?? 'Review the description for details.' }
