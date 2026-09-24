@@ -290,6 +290,11 @@ export function FilterBar({
             checked={filters.awaitingDocument}
             onCheckedChange={(v) => onChange({ awaitingDocument: v, hasDocument: v ? false : filters.hasDocument })}
           />
+          <ToggleField
+            label="Show voided"
+            checked={filters.showVoided}
+            onCheckedChange={(v) => onChange({ showVoided: v })}
+          />
         </div>
       </div>
 
@@ -358,6 +363,7 @@ export function buildFilterSummary(filters: EntriesFilters, options: FilterOptio
   if (filters.hasVariance) parts.push({ key: 'hasVariance', label: 'Missing Main #' })
   if (filters.hasDocument) parts.push({ key: 'hasDocument', label: 'Has document' })
   if (filters.awaitingDocument) parts.push({ key: 'awaitingDocument', label: 'Awaiting bill' })
+  if (filters.showVoided) parts.push({ key: 'showVoided', label: 'Show voided' })
 
   return parts
 }

@@ -68,6 +68,10 @@ export function applyEntriesFilters<T extends EntriesQueryBuilder>(query: T, fil
   if (filters.awaitingDocument) {
     q = q.eq('document_count', 0)
   }
+  // Voided entries are hidden by default (2026-09-24) — see EntriesFilters.showVoided.
+  if (!filters.showVoided) {
+    q = q.eq('is_void', false)
+  }
 
   return q
 }
@@ -100,11 +104,13 @@ const COLUMN_KEY_SELECT_COLUMNS: Record<ColumnKey, readonly string[]> = {
 // Single source of truth for "which raw `v_entry_enriched` columns can the
 // list/CSV path ever need" — derived from `ALL_COLUMNS` rather than
 // hand-typed, so a column added there becomes selectable with no second
-// edit. `id` is added unconditionally: it drives keyset pagination
-// (`fetchEntriesPage`/`exportEntriesToCsv`'s cursor) and row identity even
-// though it isn't itself a renderable column.
+// edit. `id` and `is_void` are added unconditionally: `id` drives keyset
+// pagination (`fetchEntriesPage`/`exportEntriesToCsv`'s cursor) and row
+// identity, and `is_void` drives the table's "Void" badge (entries-table.tsx)
+// and the showVoided filter (query.ts's applyEntriesFilters) — neither is
+// itself a column the chooser lets a user hide.
 export const ENTRIES_LIST_SELECT_COLUMNS: readonly string[] = Array.from(
-  new Set<string>(['id', ...ALL_COLUMNS.flatMap((c) => COLUMN_KEY_SELECT_COLUMNS[c.key])])
+  new Set<string>(['id', 'is_void', ...ALL_COLUMNS.flatMap((c) => COLUMN_KEY_SELECT_COLUMNS[c.key])])
 )
 
 export const ENTRIES_SELECT = ENTRIES_LIST_SELECT_COLUMNS.join(', ')

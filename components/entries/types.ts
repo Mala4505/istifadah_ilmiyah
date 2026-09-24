@@ -100,6 +100,13 @@ export type EntriesFilters = {
    *  complement of `hasDocument`, surfaced as its own toggle + the
    *  "Entries awaiting a bill" KPI tile's deep link (`abill=1`). */
   awaitingDocument: boolean
+  /** Voided entries (`is_void = true`) are excluded from the list by default
+   *  (2026-09-24) — a scrape that no longer sees an entry's UBBL number now
+   *  auto-voids it (lib/import/run-portal-import.ts), so without this filter
+   *  every auto-voided entry would keep cluttering the default view forever.
+   *  Turning this on removes the `is_void = false` filter, mixing voided rows
+   *  back in (the table's own "Void" badge still marks which ones they are). */
+  showVoided: boolean
 }
 
 export const DEFAULT_FILTERS: EntriesFilters = {
@@ -119,6 +126,7 @@ export const DEFAULT_FILTERS: EntriesFilters = {
   hasVariance: false,
   hasDocument: false,
   awaitingDocument: false,
+  showVoided: false,
 }
 
 export const PAGE_SIZE = 50

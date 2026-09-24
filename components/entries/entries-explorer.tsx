@@ -44,6 +44,7 @@ function filtersToSearchParams(filters: EntriesFilters): URLSearchParams {
   if (filters.hasVariance) sp.set('var', '1')
   if (filters.hasDocument) sp.set('doc', '1')
   if (filters.awaitingDocument) sp.set('abill', '1')
+  if (filters.showVoided) sp.set('void', '1')
   return sp
 }
 
@@ -69,6 +70,7 @@ function searchParamsToFilters(sp: URLSearchParams): EntriesFilters {
     hasVariance: sp.get('var') === '1',
     hasDocument: sp.get('doc') === '1',
     awaitingDocument: sp.get('abill') === '1',
+    showVoided: sp.get('void') === '1',
   }
 }
 
