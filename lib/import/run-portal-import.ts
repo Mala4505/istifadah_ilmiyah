@@ -329,13 +329,33 @@ async function detectMissingDepartmentalEntries(
   const toVoid = openEntries.rows.filter((entry) => !scrapedUbblNumbers.has(entry.ubbl_number))
   if (toVoid.length === 0) return { voidedCount: 0 }
 
+  const voidedIds = toVoid.map((e) => e.id)
+
   await client.query(
     `update public.entries
         set is_void    = true,
             void_note  = 'Auto-voided: no longer appears in the ' || $2 || ' portal scrape (batch ' || $3 || ').',
             updated_at = now()
       where id = any($1::bigint[])`,
-    [toVoid.map((e) => e.id), tableKind, batchId]
+    [voidedIds, tableKind, batchId]
+  )
+
+  // Closes out any exception a PRE-2026-09-24 scrape already raised for one
+  // of these same entries (back when this function only flagged instead of
+  // voiding — see this function's header). Without this, an entry auto-voided
+  // here would leave its old `departmental_entry_missing_from_portal`
+  // exception sitting open forever, since nothing else ever revisits it.
+  // Mirrors voidEntries' (lib/actions/entries.ts) own auto-resolve-on-void
+  // behavior, just triggered from the scan instead of a human click.
+  await client.query(
+    `update public.reconciliation_exception
+        set status = 'resolved',
+            resolution_note = 'Auto-voided by a later ' || $2 || ' scrape (batch ' || $3 || ') before this exception was reviewed.',
+            resolved_at = now()
+      where exception_type = 'departmental_entry_missing_from_portal'
+        and status = 'open'
+        and entry_id = any($1::bigint[])`,
+    [voidedIds, tableKind, batchId]
   )
 
   return { voidedCount: toVoid.length }
