@@ -49,3 +49,4 @@ skills-lock.json
 
 # scratch data that shouldn't be versioned
 /Invoices/*.pdf
+/Departmental/

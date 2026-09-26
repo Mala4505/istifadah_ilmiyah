@@ -145,6 +145,11 @@ export function getExceptionAction(row: ExceptionActionRow): ExceptionAction {
         whatToDo: 'Double-check the Departmental portal for this UBBL number, with any filters cleared, before deciding to void the entry.',
         destination: row.entry_id !== null ? { href: `/entries/${row.entry_id}`, label: 'Open entry' } : undefined,
       }
+    case 'advance_settlement_ambiguous':
+      return {
+        whatToDo: 'This Invoice Against Uplaq entry could settle more than one candidate Advance Payment — read the description and pick the right one, then set its settlement link manually.',
+        destination: row.entry_id !== null ? { href: `/entries/${row.entry_id}`, label: 'Open entry' } : undefined,
+      }
     case 'new_vendor':
       return {
         whatToDo: 'Confirm the auto-created vendor row.',

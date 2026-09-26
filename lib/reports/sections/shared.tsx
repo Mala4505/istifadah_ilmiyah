@@ -51,8 +51,13 @@ export type DepartmentBudgetVsActualRow = {
   as_of: string | null
   budget_amount: number | null
   actual_amount: number | null
+  actual_paid_amount: number | null
+  committed_amount: number | null
+  balance_amount: number | null
   entry_count: number
   pct_of_budget: number | null
+  pct_paid_of_budget: number | null
+  pct_committed_of_budget: number | null
   budget_status_note: string | null
 }
 

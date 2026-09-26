@@ -666,6 +666,22 @@ export async function runPortalImport(
           continue
         }
 
+        // A per-row failure is meant to be isolated — logged as this row's
+        // own 'error' action, with every other row unaffected (the catch
+        // block below). Under Postgres, a plain try/catch does not actually
+        // achieve that: once any statement in a multi-statement transaction
+        // fails, the WHOLE transaction is marked aborted and every later
+        // statement fails too, with the unhelpful "current transaction is
+        // aborted" message — masking the real error and silently turning one
+        // bad row into an 'error' entry for every row after it. A SAVEPOINT
+        // per row is what makes the try/catch's already-intended isolation
+        // real: on failure, rolling back to it undoes only this row's writes
+        // and returns the outer transaction to a healthy state so the loop
+        // can continue. Found 2026-09-26 when a single real row — two
+        // unrelated bills in the Dept module sharing one MAIN NUMBER, a
+        // module-side data error, not this pipeline's — took out every row
+        // scraped after it in the same batch.
+        await client.query('SAVEPOINT row_import')
         if (sourceSystem === 'audit') {
           await importAuditRow(client, caches, batchId, row, rowLog, exceptions, pendingExceptions)
         } else {
@@ -684,7 +700,12 @@ export async function runPortalImport(
             prefetchedEntries
           )
         }
+        await client.query('RELEASE SAVEPOINT row_import')
       } catch (rowError) {
+        await client.query('ROLLBACK TO SAVEPOINT row_import').catch(() => {
+          // Only reachable if the SAVEPOINT/RELEASE statements themselves
+          // failed rather than the row's own work — nothing more to undo.
+        })
         const message = rowError instanceof Error ? rowError.message : String(rowError)
         logRow(rowLog, {
           rowNumber: row.rowNumber,
@@ -1193,10 +1214,22 @@ async function importDepartmentalRow(
     return
   }
 
+  // The Reimbursement tab has no VENDOR column — its equivalent is REIMBURSE
+  // TO (row.reimburseTo), which used to be written ONLY to
+  // reimbursement_detail.reimburse_to_raw, leaving entries.vendor_raw/
+  // vendor_id null for every reimbursement row. That made reimbursement spend
+  // invisible to anything that identifies a transaction by vendor (2026-09-26:
+  // a real vendor's ₹1.28cr+ reimbursement was wrongly read as "missing data"
+  // because entries.vendor_raw was blank, not because the money wasn't
+  // there). Reimburse To IS the vendor for this tab, so it is resolved here
+  // and written to entries exactly like every other tab's VENDOR column —
+  // upsertDetailTable below reuses this same resolution instead of resolving
+  // it a second time.
+  const effectiveVendorRaw = tableKind === 'reimbursement' ? row.reimburseTo : row.vendorRaw
   let vendorId: number | null = null
   let vendorCreated = false
-  if (row.vendorRaw) {
-    const resolved = await resolveVendor(client, caches, row.vendorRaw)
+  if (effectiveVendorRaw) {
+    const resolved = await resolveVendor(client, caches, effectiveVendorRaw)
     vendorId = resolved.id
     vendorCreated = resolved.created
   }
@@ -1294,12 +1327,23 @@ async function importDepartmentalRow(
   // advance_payment_detail.invoice_amount) — the tab's own Invoice Amount
   // column lands separately, in advance_payment_detail below, from the RAW
   // row.amount rather than this effective value.
-  // advance_payment is the one tab whose entries.amount is NOT its Invoice
-  // Amount column (it holds Uplaq Amount, per the user's decision -- see
-  // advance_payment_detail.invoice_amount). Every other tab, IAU included,
-  // stores its own Invoice Amount here; IAU's extra BALANCE PAYABLE figure
-  // lands in invoice_against_uplaq_detail below.
-  const effectiveAmount = tableKind === 'advance_payment' ? row.uplaqAmount : row.amount
+  //
+  // On the Invoice Against Uplaq tab, entries.amount holds Balance Payable,
+  // not Invoice Amount (20260925000001). Balance Payable = Invoice Amount -
+  // the advance's Uplaq Amount - 1% TDS: since settles_entry_id is never
+  // populated (invoice_against_uplaq_detail's own header — the portal gives
+  // no reliable id to link an IAU row back to the advance it settles),
+  // storing the full Invoice Amount here would double-count the advance leg
+  // against the separate Advance Payment entry that already counted it.
+  // Balance Payable is what remains after that advance, so summing the two
+  // entries nets to the true total instead. The raw Invoice Amount still
+  // lands separately, in invoice_against_uplaq_detail below.
+  const effectiveAmount =
+    tableKind === 'advance_payment'
+      ? row.uplaqAmount
+      : tableKind === 'invoice_against_uplaq'
+        ? row.balancePayable
+        : row.amount
 
   const upserted = await client.query<{ id: number }>(
     `insert into public.entries (
@@ -1328,7 +1372,7 @@ async function importDepartmentalRow(
       row.mainNumber,
       row.invoiceNumber,
       vendorId,
-      row.vendorRaw,
+      effectiveVendorRaw,
       row.date,
       effectiveAmount,
       statusId,
@@ -1398,7 +1442,7 @@ async function importDepartmentalRow(
       main_number: row.mainNumber ?? existing.main_number,
       invoice_number: row.invoiceNumber ?? existing.invoice_number,
       vendor_id: vendorId ?? existing.vendor_id,
-      vendor_raw: row.vendorRaw ?? existing.vendor_raw,
+      vendor_raw: effectiveVendorRaw ?? existing.vendor_raw,
       date: row.date ?? existing.date,
       amount: effectiveAmount ?? (existing.amount === null ? null : Number(existing.amount)),
       status_id: statusId ?? existing.status_id,
@@ -1430,7 +1474,16 @@ async function importDepartmentalRow(
   // table. Invoice rows have no extension table (every column their tab has
   // already exists on `entries`), so there is nothing to do for them.
   if (tableKind !== 'invoice') {
-    await upsertDetailTable(client, caches, batchId, entryId, tableKind, row)
+    await upsertDetailTable(client, batchId, entryId, tableKind, row, vendorId)
+  }
+
+  // An Invoice Against Uplaq row settles a specific earlier Advance Payment
+  // row -- link the two wherever that link is unambiguous, same rule the
+  // one-time backfill migration applies to the existing corpus (see
+  // linkIauSettlement's own header). Runs on every scrape, not just once, so
+  // this stays correct as new IAU/advance rows arrive going forward.
+  if (tableKind === 'invoice_against_uplaq') {
+    await linkIauSettlement(client, entryId, effectiveVendorRaw, budgetHeadId, exceptions, pendingExceptions)
   }
 
   logRow(rowLog, {
@@ -1456,19 +1509,16 @@ async function importDepartmentalRow(
  */
 async function upsertDetailTable(
   client: PoolClient,
-  caches: ResolverCaches,
   batchId: number,
   entryId: number,
   tableKind: 'reimbursement' | 'advance_payment' | 'invoice_against_uplaq',
-  row: ParsedPortalRow
+  row: ParsedPortalRow,
+  /** Already resolved by the caller from row.reimburseTo — Reimburse To IS
+   *  the vendor for this tab (see importDepartmentalRow's effectiveVendorRaw),
+   *  so this is not resolved a second time here. */
+  reimburseToVendorId: number | null
 ): Promise<void> {
   if (tableKind === 'reimbursement') {
-    let reimburseToVendorId: number | null = null
-    if (row.reimburseTo) {
-      const resolved = await resolveVendor(client, caches, row.reimburseTo)
-      reimburseToVendorId = resolved.id
-    }
-
     await client.query(
       `insert into public.reimbursement_detail
          (entry_id, sr_no, reimbursement_type, reimburse_to_raw, reimburse_to_vendor_id, import_batch_id, updated_at)
@@ -1486,15 +1536,21 @@ async function upsertDetailTable(
   }
 
   if (tableKind === 'invoice_against_uplaq') {
+    // invoice_amount is the tab's own RAW Invoice Amount column (row.amount),
+    // deliberately NOT effectiveAmount — entries.amount now holds Balance
+    // Payable for this tab (20260925000001, see the caller's comment on
+    // effectiveAmount), and confusing the two here would put the same figure
+    // in both places.
     await client.query(
       `insert into public.invoice_against_uplaq_detail
-         (entry_id, balance_payable, import_batch_id, updated_at)
-       values ($1, $2, $3, now())
+         (entry_id, balance_payable, invoice_amount, import_batch_id, updated_at)
+       values ($1, $2, $3, $4, now())
        on conflict (entry_id) do update set
          balance_payable = coalesce(excluded.balance_payable, invoice_against_uplaq_detail.balance_payable),
+         invoice_amount  = coalesce(excluded.invoice_amount, invoice_against_uplaq_detail.invoice_amount),
          import_batch_id = excluded.import_batch_id,
          updated_at      = now()`,
-      [entryId, row.balancePayable, batchId]
+      [entryId, row.balancePayable, row.amount, batchId]
     )
     return
   }
@@ -1513,4 +1569,117 @@ async function upsertDetailTable(
        updated_at      = now()`,
     [entryId, row.amount, batchId]
   )
+}
+
+/**
+ * Links a just-imported Invoice Against Uplaq (IAU) entry back to the Advance
+ * Payment entry it settles, wherever that link is unambiguous — the same rule
+ * the one-time backfill migration applies to the pre-existing corpus
+ * (supabase/migrations/20260926000002_link_advance_to_iau_settlement.sql —
+ * read that file's header for the full reasoning). Called on every scrape so
+ * the corpus stays correctly linked as new IAU/advance rows keep arriving,
+ * not just as a one-time fix.
+ *
+ * entries.settles_entry_id exists for exactly this ("this invoice settles
+ * that advance") but was left unpopulated by 20260828000002's original
+ * refusal: the only correspondence the portal offers is vendor + budget head,
+ * and a wrong guess there silently settles the wrong advance — worse than not
+ * linking at all. That refusal still holds in the genuinely ambiguous case.
+ * What changed (2026-09-26, explicit finance-admin request) is that the
+ * UNAMBIGUOUS case — exactly one open candidate on both sides — is no longer
+ * left for a human to do by hand; a human is only pulled in when there
+ * genuinely is a choice to make.
+ *
+ * THE RULE (identical to the migration's step 1 + step 2):
+ *   - Look at every OPEN Advance Payment entry (is_void = false, not already
+ *     referenced by any row's settles_entry_id) sharing this IAU row's exact
+ *     vendor_raw and budget_head_id.
+ *   - Also look at every OTHER still-unlinked IAU entry sharing that same
+ *     (vendor_raw, budget_head_id) — this is what stops two IAU rows from
+ *     both grabbing the same single advance (see the migration's header for
+ *     why the naive one-sided version of this check is unsafe: without it, a
+ *     scrape carrying two IAU rows for one vendor+head, against one advance,
+ *     would hand that same advance id to both).
+ *   - Exactly one candidate advance, and this is the only unlinked IAU row in
+ *     that group -> link.
+ *   - Zero candidate advances -> leave alone; a final invoice that never had
+ *     a tracked advance is legitimate, not a finding.
+ *   - Anything else (multiple candidate advances, or a single candidate
+ *     contested by another unlinked IAU row) -> raise
+ *     `advance_settlement_ambiguous` naming every candidate, for a human to
+ *     pick. Never guessed.
+ *
+ * A no-op when this IAU row is already linked (settles_entry_id set from an
+ * earlier import — never re-decided once made) or is missing either half of
+ * the matching key (vendor_raw/budget_head_id) — there is nothing reliable to
+ * match on in that case, same posture as findEntry's exact-identifiers-only
+ * rule elsewhere in this file.
+ */
+async function linkIauSettlement(
+  client: PoolClient,
+  iauEntryId: number,
+  vendorRaw: string | null,
+  budgetHeadId: number | null,
+  exceptions: ImportExceptionSummary[],
+  pendingExceptions: PendingException[]
+): Promise<void> {
+  if (!vendorRaw || budgetHeadId === null) return
+
+  const already = await client.query<{ settles_entry_id: number | null }>(
+    `select settles_entry_id from public.entries where id = $1`,
+    [iauEntryId]
+  )
+  if (already.rows[0]?.settles_entry_id != null) return // already linked; never re-decide
+
+  const candidateAdvances = await client.query<{ id: number; ubbl_number: string }>(
+    `select a.id, a.ubbl_number from public.entries a
+      where a.type = 'advance_payment'
+        and a.is_void = false
+        and a.vendor_raw = $1
+        and a.budget_head_id = $2
+        and not exists (select 1 from public.entries s where s.settles_entry_id = a.id)
+      order by a.ubbl_number`,
+    [vendorRaw, budgetHeadId]
+  )
+
+  if (candidateAdvances.rows.length === 0) return // legitimate: no tracked advance for this vendor+head
+
+  const contestingIau = await client.query<{ id: number }>(
+    `select id from public.entries
+      where type = 'invoice_against_uplaq'
+        and is_void = false
+        and settles_entry_id is null
+        and vendor_raw = $1
+        and budget_head_id = $2`,
+    [vendorRaw, budgetHeadId]
+  )
+  // contestingIau always includes this row itself (it is unlinked, by the
+  // early-return above), so length === 1 means "no other IAU row is chasing
+  // the same group".
+
+  if (candidateAdvances.rows.length === 1 && contestingIau.rows.length === 1) {
+    await client.query(
+      `update public.entries set settles_entry_id = $1, updated_at = now() where id = $2`,
+      [candidateAdvances.rows[0]!.id, iauEntryId]
+    )
+    return
+  }
+
+  const budgetHead = await client.query<{ raw_label: string | null }>(
+    `select raw_label from public.budget_head where id = $1`,
+    [budgetHeadId]
+  )
+  const budgetHeadLabel = budgetHead.rows[0]?.raw_label ?? `id ${budgetHeadId}`
+  const ubblList = candidateAdvances.rows.map((r) => r.ubbl_number).join(', ')
+
+  raiseException(pendingExceptions, exceptions, {
+    type: 'advance_settlement_ambiguous',
+    severity: 'medium',
+    entryId: iauEntryId,
+    description:
+      `IAU entry for vendor "${vendorRaw}", budget head "${budgetHeadLabel}" has ` +
+      `${candidateAdvances.rows.length} possible advance payment(s) it could settle: ${ubblList}. ` +
+      `Pick the correct advance manually and set settles_entry_id.`,
+    dedupKey: `advance_settlement_ambiguous:${iauEntryId}`,
+  })
 }

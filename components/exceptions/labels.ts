@@ -35,6 +35,9 @@ export const EXCEPTION_TYPE_LABELS: Record<string, string> = {
   // manual Review-page flag reasons (2026-09-11)
   not_clear: 'Not clear',
   not_visible: 'Not visible',
+  // an IAU row has zero (well, multiple) or contested candidate advances to
+  // settle against — needs a human pick (2026-09-26)
+  advance_settlement_ambiguous: 'Advance settlement ambiguous',
 }
 
 /** In CHECK-constraint order (MASTER-PLAN §3.10 migration). */

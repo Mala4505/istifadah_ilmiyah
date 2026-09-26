@@ -102,7 +102,7 @@ function zoneSpendInsight(rows: ZoneSpendRow[]): string | null {
 const HEAD_SELECT =
   'budget_head_id, raw_label, short_label, department_id, approved_amount, utilised_amount, balance_amount, actual_amount, entry_count, pct_of_approved, budget_status_note'
 const DEPT_SELECT =
-  'department_id, department_name, as_of, budget_amount, actual_amount, entry_count, pct_of_budget, budget_status_note'
+  'department_id, department_name, as_of, budget_amount, actual_amount, actual_paid_amount, committed_amount, balance_amount, entry_count, pct_of_budget, pct_paid_of_budget, pct_committed_of_budget, budget_status_note'
 const SUB_DEPT_SELECT =
   'sub_department_id, sub_department_name, department_id, department_name, as_of, budget_amount, actual_amount, entry_count, pct_of_budget, budget_status_note'
 const ZONE_SELECT = 'zone_id, zone_name, zone_number, department_id, entry_count, total_amount'

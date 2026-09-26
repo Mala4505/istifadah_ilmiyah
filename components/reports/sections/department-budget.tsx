@@ -72,6 +72,9 @@ export async function DepartmentBudgetSection({
     { key: 'asOf', header: 'As of', render: (r) => formatDate(r.as_of) },
     { key: 'budget', header: 'Budget', align: 'right', render: (r) => formatINR(r.budget_amount) },
     { key: 'actual', header: 'Actual (sum of amounts)', align: 'right', render: (r) => formatINR(r.actual_amount) },
+    { key: 'actualPaid', header: 'Actual (Paid)', align: 'right', render: (r) => formatINR(r.actual_paid_amount) },
+    { key: 'committed', header: 'Committed', align: 'right', render: (r) => formatINR(r.committed_amount) },
+    { key: 'balanceLeft', header: 'Balance Left', align: 'right', render: (r) => formatINR(r.balance_amount) },
     {
       key: 'pct',
       header: '% of Budget',
