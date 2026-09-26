@@ -68,6 +68,25 @@ export type OutstandingAdvanceAgeingRow = {
   event_id: number | null
 }
 
+/** One row per (vendor, department, event) from v_vendor_advance_position --
+ *  see that view's own header (20260926000005) for why this is a live sum,
+ *  not a link table. `settlement_count === 0` means every advance for this
+ *  vendor is still awaiting its final invoice (balance_owed reads 0 in that
+ *  case, not "fully paid" -- the section component must say so explicitly). */
+export type VendorAdvancePositionRow = {
+  event_id: number | null
+  department_id: number | null
+  department_name: string | null
+  vendor_key: string
+  vendor_id: number | null
+  vendor_display_name: string
+  advance_given: number
+  advance_count: number
+  settled_invoice_total: number
+  balance_owed: number
+  settlement_count: number
+}
+
 /** A-10 -- one row per (reimbursee, event) from v_reimbursement_profile.
  *  `department_id` is the reimbursee's modal department for the event. */
 export type ReimbursementProfileRow = {
@@ -172,6 +191,8 @@ const ADVANCE_SELECT =
 const REIMBURSEMENT_SELECT =
   'reimbursee_key, reimbursee_name, reimburse_to_vendor_id, department_id, department_name, entry_count, total_amount, first_date, last_date'
 const REIMBURSEMENT_TYPE_SELECT = 'reimbursement_type, entry_count, total_amount'
+const VENDOR_ADVANCE_POSITION_SELECT =
+  'department_id, department_name, vendor_key, vendor_id, vendor_display_name, advance_given, advance_count, settled_invoice_total, balance_owed, settlement_count'
 
 export type EntryTypeFlowSurfaceData = {
   eventName: string | null
@@ -196,6 +217,11 @@ export type EntryTypeFlowSurfaceData = {
     byTypeError: string | null
     previousTotalReimbursed: number | null
     previousReimburseeCount: number | null
+    insight: string | null
+  }
+  vendorAdvancePosition: {
+    rows: VendorAdvancePositionRow[]
+    error: string | null
     insight: string | null
   }
 }
@@ -249,12 +275,32 @@ function reimbursementProfileInsight(
   )} this event; ${lead.reimbursee_name} is the largest at ${formatINRCompact(lead.total_amount)}${typeBit}.`
 }
 
+/** "₹X given as advances to N vendors, ₹Y of it still owed once finalised
+ *  (settled with M vendors); Z vendors have no finalised invoice at all yet."
+ *  Summed straight off the view -- no per-row linking involved (see the
+ *  view's own header for why). */
+function vendorAdvancePositionInsight(rows: VendorAdvancePositionRow[]): string | null {
+  if (rows.length === 0) return null
+  const totalGiven = rows.reduce((s, r) => s + r.advance_given, 0)
+  const totalOwed = rows.reduce((s, r) => s + r.balance_owed, 0)
+  const awaitingCount = rows.filter((r) => r.advance_count > 0 && r.settlement_count === 0).length
+  const vendorCount = rows.filter((r) => r.advance_count > 0).length
+  if (vendorCount === 0) return null
+  const awaitingBit =
+    awaitingCount > 0
+      ? `, ${formatNumber(awaitingCount)} vendor${awaitingCount === 1 ? '' : 's'} with no finalised invoice yet`
+      : ''
+  return `${formatINRCompact(totalGiven)} given as advances across ${formatNumber(
+    vendorCount
+  )} vendor${vendorCount === 1 ? '' : 's'}; ${formatINRCompact(totalOwed)} still owed on finalised invoices${awaitingBit}.`
+}
+
 export async function loadEntryTypeFlow(compareBasis: CompareBasis): Promise<EntryTypeFlowSurfaceData> {
   const supabase = await createClient()
   const selectedEvent = await getSelectedEvent()
   const eventId = selectedEvent?.id ?? null
 
-  const [splitRes, advanceRes, reimbRes, reimbTypeRes] = await Promise.all([
+  const [splitRes, advanceRes, reimbRes, reimbTypeRes, vendorPositionRes] = await Promise.all([
     supabase
       .from('v_entry_type_by_department')
       .select(ENTRY_TYPE_SELECT)
@@ -283,12 +329,20 @@ export async function loadEntryTypeFlow(compareBasis: CompareBasis): Promise<Ent
       .order('total_amount', { ascending: false, nullsFirst: false })
       .limit(ROW_CAP)
       .returns<ReimbursementByTypeRow[]>(),
+    supabase
+      .from('v_vendor_advance_position')
+      .select(VENDOR_ADVANCE_POSITION_SELECT)
+      .eq('event_id', eventId)
+      .order('advance_given', { ascending: false, nullsFirst: false })
+      .limit(ROW_CAP)
+      .returns<VendorAdvancePositionRow[]>(),
   ])
 
   const splitRows = splitRes.data ?? []
   const advanceRows = advanceRes.data ?? []
   const reimbRows = reimbRes.data ?? []
   const reimbTypeRows = reimbTypeRes.data ?? []
+  const vendorPositionRows = vendorPositionRes.data ?? []
 
   const previousEvent = await resolvePreviousEvent(supabase, compareBasis, eventId)
   let previousReimbursementSharePct: number | null = null
@@ -353,6 +407,11 @@ export async function loadEntryTypeFlow(compareBasis: CompareBasis): Promise<Ent
       previousTotalReimbursed,
       previousReimburseeCount,
       insight: reimbursementProfileInsight(reimbRows, reimbTypeRows),
+    },
+    vendorAdvancePosition: {
+      rows: vendorPositionRows,
+      error: friendlyDataError(vendorPositionRes.error, 'reports:budget:vendor-advance-position'),
+      insight: vendorAdvancePositionInsight(vendorPositionRows),
     },
   }
 }

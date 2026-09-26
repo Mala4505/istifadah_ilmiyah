@@ -18,6 +18,7 @@ import { ZoneCategoryMatrixSection } from '@/components/reports/sections/zone-ca
 import { BudgetCategoryMixSection } from '@/components/reports/sections/budget-category-mix'
 import { EntryTypeSplitSection } from '@/components/reports/sections/entry-type-split'
 import { OutstandingAdvanceAgeingSection } from '@/components/reports/sections/outstanding-advance-ageing'
+import { VendorAdvancePositionSection } from '@/components/reports/sections/vendor-advance-position'
 import { ReimbursementProfileSection } from '@/components/reports/sections/reimbursement-profile'
 import { SpendCurveSection } from '@/components/reports/sections/spend-curve'
 import { EventComparisonSection } from '@/components/reports/sections/event-comparison'
@@ -228,7 +229,15 @@ async function ZoneCategoryGroup({ only, compareBasis, revisionHeadId }: { only:
 }
 
 async function EntryTypeFlowGroup({ only, compareBasis }: { only: string | null; compareBasis: CompareBasis }) {
-  if (groupHiddenInPane(only, ['entry-type-split', 'outstanding-advance-ageing', 'reimbursement-profile'])) return null
+  if (
+    groupHiddenInPane(only, [
+      'entry-type-split',
+      'outstanding-advance-ageing',
+      'vendor-advance-position',
+      'reimbursement-profile',
+    ])
+  )
+    return null
   const entryTypeFlow = await loadEntryTypeFlow(compareBasis)
   return (
     <>
@@ -249,6 +258,13 @@ async function EntryTypeFlowGroup({ only, compareBasis }: { only: string | null;
           previousOutstandingCount={entryTypeFlow.outstandingAdvanceAgeing.previousOutstandingCount}
           previousOutstandingAmount={entryTypeFlow.outstandingAdvanceAgeing.previousOutstandingAmount}
           insight={entryTypeFlow.outstandingAdvanceAgeing.insight}
+        />
+      )}
+      {isSectionInPane(only, 'vendor-advance-position') && (
+        <VendorAdvancePositionSection
+          rows={entryTypeFlow.vendorAdvancePosition.rows}
+          error={entryTypeFlow.vendorAdvancePosition.error}
+          insight={entryTypeFlow.vendorAdvancePosition.insight}
         />
       )}
       {isSectionInPane(only, 'reimbursement-profile') && (
