@@ -111,6 +111,21 @@ export interface RunPortalImportParams {
   mode: 'dry_run' | 'commit'
   /** staff_profile.id of the operator whose token submitted this. */
   importedBy: string | null
+  /**
+   * Set when the client split one large scrape into several requests to stay
+   * under a request-timeout ceiling (components/import/import-workspace.tsx).
+   * Null/undefined means this request IS the whole scrape — the pre-chunking
+   * behaviour, unchanged. See supabase/migrations/20260927000001's header for
+   * why the auto-void check has to key off this instead of running on every
+   * chunk.
+   */
+  scrapeSessionId?: string | null
+  /**
+   * Only meaningful alongside `scrapeSessionId`. True on (and only on) the
+   * last chunk of a session — the one request where enough of the scrape has
+   * arrived to safely ask "what's missing from the whole thing".
+   */
+  isFinalChunk?: boolean
 }
 
 export interface PortalImportResult extends ImportResult {
@@ -283,6 +298,46 @@ async function flushExceptions(
       values
     )
   }
+}
+
+/**
+ * Reassembles every row of a chunked scrape from storage, for the final
+ * chunk's auto-void check.
+ *
+ * Each chunk's own `scrape_payload_jsonb` was already written by the time its
+ * request reaches this point (the batch INSERT runs before the row loop), so
+ * a plain SELECT sees every chunk sharing `scrapeSessionId` — including this
+ * one, read back rather than re-used from memory, which keeps this one code
+ * path correct regardless of whether the caller is the first, middle, or
+ * last chunk of a session. Re-parsing with the same `parsePortalTable` the
+ * original request used reproduces each chunk's rows deterministically (same
+ * technique as `findPortalRowByIdentifier`'s header explains for the audit
+ * retry path) — no separate storage of "every row across every chunk" is
+ * needed beyond what `import_batch` already retains per row.
+ */
+async function gatherScrapeSessionRows(
+  client: PoolClient,
+  scrapeSessionId: string,
+  sourceSystem: SourceSystem
+): Promise<ParsedPortalRow[]> {
+  const stored = await client.query<{ scrape_payload_jsonb: ScrapePayload | null }>(
+    `select scrape_payload_jsonb from public.import_batch
+      where scrape_session_id = $1 and scrape_payload_jsonb is not null`,
+    [scrapeSessionId]
+  )
+
+  const rows: ParsedPortalRow[] = []
+  for (const { scrape_payload_jsonb: chunkPayload } of stored.rows) {
+    if (!chunkPayload) continue
+    rows.push(
+      ...parsePortalTable({
+        headers: chunkPayload.headers,
+        rows: chunkPayload.rows,
+        sourceSystem,
+      }).rows
+    )
+  }
+  return rows
 }
 
 /**
@@ -594,14 +649,15 @@ export async function runPortalImport(
   const warnings = [...parsed.warnings]
 
   const batchColumns = `(source_system, source_filename, file_hash_sha256, mode, imported_by,
-                         ingest_method, scrape_payload_jsonb, source_url, event_id, status)`
+                         ingest_method, scrape_payload_jsonb, source_url, event_id, status,
+                         scrape_session_id)`
 
   try {
     await client.query('BEGIN')
 
     const batchInsert = await client.query<{ id: number }>(
       `insert into public.import_batch ${batchColumns}
-       values ($1, $2, $3, $4, $5, 'scrape', $6, $7, $8, 'processing')
+       values ($1, $2, $3, $4, $5, 'scrape', $6, $7, $8, 'processing', $9)
        returning id`,
       [
         sourceSystem,
@@ -612,6 +668,7 @@ export async function runPortalImport(
         JSON.stringify(payload),
         payload.sourceUrl ?? null,
         eventId,
+        params.scrapeSessionId ?? null,
       ]
     )
     const batchId = batchInsert.rows[0]!.id
@@ -719,12 +776,27 @@ export async function runPortalImport(
     }
 
     let autoVoidedCount = 0
-    if (sourceSystem === 'departmental') {
+    // Runs on a non-chunked request (scrapeSessionId unset — the pre-chunking
+    // case, unchanged) or on the last chunk of a session; never on an
+    // in-progress chunk, which has only seen PART of the scrape and would
+    // otherwise auto-void entries that are simply sitting in a later chunk
+    // (supabase/migrations/20260927000001's header).
+    const isFinalChunkOfScrape = !params.scrapeSessionId || params.isFinalChunk === true
+    if (sourceSystem === 'departmental' && isFinalChunkOfScrape) {
       // tableKind is non-null whenever sourceSystem === 'departmental' — see
       // its computation above. Must run after the row loop above, not inside
       // it: it needs the full set of ubbl_numbers this scrape carried, which
       // isn't known until every row has been read.
-      const missing = await detectMissingDepartmentalEntries(client, eventId, tableKind!, parsed.rows, batchId)
+      const rowsForMissingCheck = params.scrapeSessionId
+        ? await gatherScrapeSessionRows(client, params.scrapeSessionId, sourceSystem)
+        : parsed.rows
+      const missing = await detectMissingDepartmentalEntries(
+        client,
+        eventId,
+        tableKind!,
+        rowsForMissingCheck,
+        batchId
+      )
       autoVoidedCount = missing.voidedCount
     }
 
@@ -739,8 +811,17 @@ export async function runPortalImport(
       summary[entry.action] = (summary[entry.action] ?? 0) + 1
     }
     if (autoVoidedCount > 0) summary['auto_voided_missing_from_portal'] = autoVoidedCount
+    // `exceptions` only ever gets a finding-shaped entry (new_budget_head,
+    // unknown_status_code, tenant_vs_main_variance, ...) — a row that failed
+    // outright (the per-row catch above, action:'error') never adds one, so
+    // checking exceptions alone let a batch full of real write failures still
+    // report 'completed' with a green badge while RowLogTable underneath was
+    // full of red error rows. Found 2026-09-27 from exactly that report: a
+    // 200 response an operator read as "it worked" while rows had silently
+    // failed to save.
+    const hasRowErrors = rowLog.some((entry) => entry.action === 'error')
     const status: ImportResult['status'] =
-      exceptions.length > 0 ? 'completed_with_exceptions' : 'completed'
+      exceptions.length > 0 || hasRowErrors ? 'completed_with_exceptions' : 'completed'
 
     if (params.mode === 'commit') {
       await client.query(
@@ -772,8 +853,9 @@ export async function runPortalImport(
     const finalBatch = await client.query<{ id: number }>(
       `insert into public.import_batch
          (source_system, source_filename, file_hash_sha256, mode, imported_by,
-          ingest_method, scrape_payload_jsonb, source_url, event_id, status, row_count, summary_jsonb, completed_at)
-       values ($1, $2, $3, $4, $5, 'scrape', $6, $7, $8, $9, $10, $11, now())
+          ingest_method, scrape_payload_jsonb, source_url, event_id, status, row_count, summary_jsonb,
+          completed_at, scrape_session_id)
+       values ($1, $2, $3, $4, $5, 'scrape', $6, $7, $8, $9, $10, $11, now(), $12)
        returning id`,
       [
         sourceSystem,
@@ -787,6 +869,7 @@ export async function runPortalImport(
         status,
         parsed.rows.length,
         JSON.stringify(summary),
+        params.scrapeSessionId ?? null,
       ]
     )
 
@@ -809,8 +892,8 @@ export async function runPortalImport(
     const failedBatch = await client.query<{ id: number }>(
       `insert into public.import_batch
          (source_system, source_filename, file_hash_sha256, mode, imported_by,
-          ingest_method, source_url, event_id, status, error_message, completed_at)
-       values ($1, $2, $3, $4, $5, 'scrape', $6, $7, 'failed', $8, now())
+          ingest_method, source_url, event_id, status, error_message, completed_at, scrape_session_id)
+       values ($1, $2, $3, $4, $5, 'scrape', $6, $7, 'failed', $8, now(), $9)
        returning id`,
       [
         sourceSystem,
@@ -821,6 +904,7 @@ export async function runPortalImport(
         payload.sourceUrl ?? null,
         eventId,
         message,
+        params.scrapeSessionId ?? null,
       ]
     )
 

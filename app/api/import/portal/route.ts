@@ -7,6 +7,19 @@ import { recordScrapeTokenUse, verifyScrapeToken } from '@/lib/scrape-token'
 import { isAdminOrAbove } from '@/lib/auth/roles'
 
 export const runtime = 'nodejs'
+// Missing until 2026-09-27 -- this route was falling back to the platform's
+// much shorter default, so a large scrape (this path does a SAVEPOINT +
+// RELEASE round trip per row on top of the resolver/upsert round trips
+// lib/import/route.ts's own maxDuration comment already accounts for) got
+// killed mid-request. The kill returns a non-JSON error page, which fails
+// res.json() on the client and surfaces as "Could not reach the server" --
+// indistinguishable from a real network drop, which is what actually sent us
+// looking for this. Matches the .xlsx path's own ceiling (see that file's
+// comment for why 180s is the right number under Vercel Pro's 300s cap);
+// this route's per-row cost is currently higher, not lower, so it gets no
+// less headroom. Still just a ceiling -- see the per-row SAVEPOINT comment
+// below for the real fix this route needs.
+export const maxDuration = 180
 
 /**
  * Portal-scrape ingest (MASTER-PLAN §17.23, Phase 3 item 1).
@@ -58,6 +71,12 @@ const payloadSchema = z.object({
   scraperVersion: z.string().max(100).nullish(),
   scrapedAt: z.string().max(100).nullish(),
   mode: z.enum(['dry_run', 'commit']).default('dry_run'),
+  // Chunk metadata (components/import/import-workspace.tsx), never part of
+  // ScrapePayload/canonicalPayloadHash — see run-portal-import.ts's
+  // RunPortalImportParams for what these mean and supabase/migrations/
+  // 20260927000001 for why the server needs them at all.
+  scrapeSessionId: z.string().max(100).nullish(),
+  isFinalChunk: z.boolean().nullish(),
 })
 
 function corsHeaders(request: NextRequest): Record<string, string> {
@@ -106,7 +125,7 @@ async function handlePOST(request: NextRequest) {
     )
   }
 
-  const { mode, ...payloadFields } = parsed.data
+  const { mode, scrapeSessionId, isFinalChunk, ...payloadFields } = parsed.data
   const payload: ScrapePayload = {
     sourceSystem: payloadFields.sourceSystem,
     headers: payloadFields.headers,
@@ -177,6 +196,8 @@ async function handlePOST(request: NextRequest) {
       filename: `${payload.sourceSystem}-portal-scrape`,
       mode,
       importedBy,
+      scrapeSessionId: scrapeSessionId ?? null,
+      isFinalChunk: isFinalChunk ?? undefined,
     })
 
     // Always 200 -- see the identical comment in app/api/import/route.ts.
