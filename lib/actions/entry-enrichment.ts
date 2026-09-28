@@ -164,13 +164,11 @@ export interface BulkEntryActionResult {
  * Bulk-sets the Hub-owned enrichment fields (`admin_head_id`, `zone_id`,
  * `cost_center_id`) across many entries in one action (hub-refinements-plan.md
  * §5/§6: bulk assignment "in addition to" the single-entry form above, which
- * keeps working unchanged). Mirrors `setHubStatus`'s (lib/actions/hub-status.ts)
- * bulk-update-with-count pattern: this runs on the session-bound client, so
+ * keeps working unchanged). This runs on the session-bound client, so
  * `entries_update` RLS (private.is_admin_or_above(), department-scoped via
  * can_see_department()) is the actual gate, and a row outside the caller's access silently isn't updated
  * rather than erroring. This turns that into a countable partial-success
- * result (`updatedCount < requestedCount`) for the caller to toast, exactly
- * like the bulk Hub-status action.
+ * result (`updatedCount < requestedCount`) for the caller to toast.
  *
  * Field semantics deliberately differ from `saveEntryEnrichment` above: that
  * single-entry form always writes all three columns, because "leave this

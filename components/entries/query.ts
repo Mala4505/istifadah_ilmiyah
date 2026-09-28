@@ -31,7 +31,6 @@ export function applyEntriesFilters<T extends EntriesQueryBuilder>(query: T, fil
   if (filters.costCenter) q = q.eq('cost_center_id', filters.costCenter)
   if (filters.vendorId) q = q.eq('vendor_id', filters.vendorId)
   if (filters.status) q = q.eq('status_id', filters.status)
-  if (filters.hubStatus) q = q.eq('hub_status_id', filters.hubStatus)
   if (filters.dateFrom) q = q.gte('date', filters.dateFrom)
   if (filters.dateTo) q = q.lte('date', filters.dateTo)
   if (filters.vendor.trim()) {
@@ -45,10 +44,6 @@ export function applyEntriesFilters<T extends EntriesQueryBuilder>(query: T, fil
     const term = filters.vendor.trim()
     const escaped = term.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
     q = q.or(`vendor_display_name.ilike."%${escaped}%",vendor_raw.ilike."%${escaped}%"`)
-  }
-  // export-pending: "hub_status_exported_at is null and hub_status_code <> 'not_set'"
-  if (filters.exportPending) {
-    q = q.is('hub_status_exported_at', null).neq('hub_status_code', 'not_set')
   }
   // has-variance: REPURPOSED 2026-08-11 -- amount_variance no longer exists (§3.4,
   // there is no genuinely separate second amount to diff). Now means "missing a
@@ -71,6 +66,9 @@ export function applyEntriesFilters<T extends EntriesQueryBuilder>(query: T, fil
   // Voided entries are hidden by default (2026-09-24) — see EntriesFilters.showVoided.
   if (!filters.showVoided) {
     q = q.eq('is_void', false)
+  }
+  if (filters.unassignedBudgetHead) {
+    q = q.is('budget_head_id', null)
   }
 
   return q
@@ -96,8 +94,6 @@ const COLUMN_KEY_SELECT_COLUMNS: Record<ColumnKey, readonly string[]> = {
   date: ['date'],
   amount: ['amount'],
   status_label: ['status_label'],
-  hub_status_label: ['hub_status_label'],
-  export_pending: ['hub_status_exported_at', 'hub_status_code'],
   document_count: ['document_count'],
 }
 

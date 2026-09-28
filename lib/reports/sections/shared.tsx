@@ -127,17 +127,6 @@ export type ZoneSpendRow = {
   total_amount: number | null
 }
 
-export type HubAgeingRow = {
-  entry_id: number
-  department_id: number | null
-  ubbl_number: string
-  hub_status_code: string
-  hub_status_label: string
-  hub_status_changed_at: string | null
-  days_in_status: number
-  age_bucket: '0-2' | '3-7' | '8+'
-}
-
 export type OpenIssueRow = {
   source_table: string
   id: number

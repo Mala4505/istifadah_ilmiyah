@@ -24,15 +24,6 @@ export type SubDepartmentRow = {
   budgetAmount: number | null
 }
 
-export type HubStatusRow = {
-  id: number
-  code: string
-  label: string
-  sortOrder: number
-  isExportable: boolean
-  isTerminal: boolean
-}
-
 /** A department name embedded via a to-one FK select can come back as an
  * object or a one-element array depending on supabase-js's relationship
  * inference -- normalise both shapes here. */

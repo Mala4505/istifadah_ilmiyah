@@ -24,7 +24,7 @@ import { computeMatchCandidates } from '@/lib/review/match-candidates'
 import { loadStaffKeymapPreferences } from '@/lib/shortcuts/load'
 import { formatBinding } from '@/lib/shortcuts/config'
 import { getSelectedEventId } from '@/lib/events/current'
-import { getCachedDepartments, getCachedHubStatuses, getCachedAdminHeads, getCachedZones } from '@/lib/cache/reference-data'
+import { getCachedDepartments, getCachedAdminHeads, getCachedZones } from '@/lib/cache/reference-data'
 
 /**
  * /review -- Screen 7, the throughput screen (MASTER-PLAN §5 row 7, §7,
@@ -549,7 +549,6 @@ async function loadDocumentDetail(
     siblingBillsRes,
     entryLinksRes,
     billEntryVarianceRow,
-    hubStatuses,
     cachedAdminHeads,
     cachedZones,
     departments,
@@ -599,11 +598,6 @@ async function loadDocumentDetail(
       .select('document_extraction_id, entry_id')
       .eq('source_document_id', sourceDocumentId),
     getBillEntryVariance(supabase, documentExtractionId),
-    // Perf audit Phase 2: cached hub_status list (lib/cache/reference-data.ts)
-    // instead of a live query. Fetched unconditionally (cheap once warm) and
-    // reused below both for hubStatusOptions and the entry's hub-status code
-    // lookup -- one fetch instead of two.
-    getCachedHubStatuses(supabase),
     // Perf audit Phase 2: admin_head/zone come from the per-user cache (kept
     // its userId cache key even though the RLS gate it existed for is gone --
     // see lib/cache/reference-data.ts's doc comment).
@@ -707,7 +701,6 @@ async function loadDocumentDetail(
     invoice_number: string | null
     vendor_id: number | null
     vendor_raw: string | null
-    hub_status_id: number | null
     department_id: number | null
     admin_head_id: number | null
     zone_id: number | null
@@ -724,7 +717,7 @@ async function loadDocumentDetail(
       ? supabase
           .from('entries')
           .select(
-            'id, amount, ubbl_number, invoice_number, vendor_id, vendor_raw, hub_status_id, department_id, admin_head_id, zone_id, sub_department_id'
+            'id, amount, ubbl_number, invoice_number, vendor_id, vendor_raw, department_id, admin_head_id, zone_id, sub_department_id'
           )
           .in('id', linkedEntryIds)
       : Promise.resolve({ data: [] as LinkedEntryRow[] }),
@@ -795,13 +788,7 @@ async function loadDocumentDetail(
     }))
     .sort((a, b) => (b.amount ?? 0) - (a.amount ?? 0) || a.entryId - b.entryId)
 
-  let entryHubStatusCode: string | null = null
   const entryDepartmentName: string | null = departmentNameById(entry?.department_id ?? null)
-  if (entry?.hub_status_id) {
-    // hubStatuses already resolved in Tier 0 -- no second hub_status round
-    // trip needed here.
-    entryHubStatusCode = hubStatuses.find((h) => h.id === entry.hub_status_id)?.code ?? null
-  }
 
   // Tier 2 -- needs Tier 1's resolved `entry` (the primary linked entry).
   const [exceptionsRes, linkedVendorRes, subDepartmentsRes] = await Promise.all([
@@ -1025,10 +1012,5 @@ async function loadDocumentDetail(
     uncertainFields,
     pages,
     openExceptions,
-    canSetHubStatus: entryId !== null,
-    hubStatusCode: entryHubStatusCode,
-    hubStatusOptions: entryId
-      ? hubStatuses.map((h) => ({ id: h.id, code: h.code, label: h.label }))
-      : [],
   }
 }

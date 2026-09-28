@@ -2,10 +2,9 @@
 
 /**
  * Server actions backing the /review screen (MASTER-PLAN §7, §11.2 Day 4).
- * `S` (Hub status) reuses lib/actions/hub-status.ts directly, per the task
- * brief -- nothing here duplicates it. `R` (re-extract) posts straight to
- * the existing app/api/documents/reescalate/route.ts from the client --
- * that route already does its own role check, so no wrapper is needed here.
+ * `R` (re-extract) posts straight to the existing
+ * app/api/documents/reescalate/route.ts from the client -- that route
+ * already does its own role check, so no wrapper is needed here.
  */
 
 import { revalidatePath } from 'next/cache'

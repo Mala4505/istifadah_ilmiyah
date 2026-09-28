@@ -6,7 +6,6 @@ import {
   getCachedDepartments,
   getCachedCostCenters,
   getCachedEntryStatuses,
-  getCachedHubStatuses,
   getCachedAdminHeads,
   getCachedZones,
   getCachedBudgetHeads,
@@ -20,7 +19,7 @@ import type { EntryStatusCount } from '@/components/entries/status-count-chips'
 import type { StaffRole } from '@/lib/auth/roles'
 
 type EntryStatusCountRow = {
-  dimension: 'status' | 'hub_status' | 'type'
+  dimension: 'status' | 'type'
   status_id: number | null
   status_code: string
   status_label: string
@@ -53,7 +52,6 @@ async function loadEntriesPageData(): Promise<{
   ownDepartmentIds: number[]
   typeCounts: EntryStatusCount[]
   statusCounts: EntryStatusCount[]
-  hubStatusCounts: EntryStatusCount[]
   billKpis: EntryBillKpis
 }> {
   const supabase = await createClient()
@@ -95,14 +93,13 @@ async function loadEntriesPageData(): Promise<{
   const zoneMemberIds = (zoneMembership.data ?? []).map((r) => r.zone_id)
   const userId = user?.id ?? null
 
-  const [departmentRows, bhRows, adminHeadRows, zoneRows, costCenterRows, statusRows, hubRows, typeRows, statusCountsRes, billKpis] = await Promise.all([
+  const [departmentRows, bhRows, adminHeadRows, zoneRows, costCenterRows, statusRows, typeRows, statusCountsRes, billKpis] = await Promise.all([
     getCachedDepartments(supabase),
     getCachedBudgetHeads(supabase, userId),
     getCachedAdminHeads(supabase, userId),
     getCachedZones(supabase, userId),
     getCachedCostCenters(supabase),
     getCachedEntryStatuses(supabase),
-    getCachedHubStatuses(supabase),
     getCachedEntryTypes(supabase),
     // Status-count chips (docs/hub-screen-certification.md §3.7). Event-scoped
     // the same way app/(app)/page.tsx scopes this view — a plain
@@ -147,7 +144,6 @@ async function loadEntriesPageData(): Promise<{
     zones: zone.map((z) => ({ id: z.id, label: `${z.zone_number}. ${z.name}` })),
     costCenters: costCenterRows.map((c) => ({ id: c.id, label: c.name })),
     statuses: statusRows.map((s) => ({ id: s.id, label: s.label, code: s.code })),
-    hubStatuses: hubRows.map((h) => ({ id: h.id, label: h.label, code: h.code })),
     entryTypes: typeRows.map((t) => ({ id: t.code, label: t.label, code: t.code })),
   }
 
@@ -184,13 +180,12 @@ async function loadEntriesPageData(): Promise<{
     ownDepartmentIds,
     typeCounts: toStatusCounts('type', 'status_code'),
     statusCounts: toStatusCounts('status'),
-    hubStatusCounts: toStatusCounts('hub_status'),
     billKpis,
   }
 }
 
 export default async function EntriesPage() {
-  const { options, role, ownDepartmentIds, typeCounts, statusCounts, hubStatusCounts, billKpis } = await loadEntriesPageData()
+  const { options, role, ownDepartmentIds, typeCounts, statusCounts, billKpis } = await loadEntriesPageData()
 
   return (
     <Suspense fallback={<EntriesPageSkeleton />}>
@@ -200,7 +195,6 @@ export default async function EntriesPage() {
         initialOwnDepartmentIds={ownDepartmentIds}
         typeCounts={typeCounts}
         statusCounts={statusCounts}
-        hubStatusCounts={hubStatusCounts}
         billKpis={billKpis}
       />
     </Suspense>

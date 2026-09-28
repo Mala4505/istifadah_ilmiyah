@@ -173,8 +173,8 @@ export interface ReviewDocumentDetail {
   matchStatus: string
   /** Phase 5: THE PRIMARY linked entry -- the largest-amount entry among
    *  `entryLinks` (deterministic id tie-break), or null when nothing is
-   *  linked. Kept only for the features still gated on a single entry (hub
-   *  status, Classify options, the exceptions filter). The Connect step and
+   *  linked. Kept only for the features still gated on a single entry
+   *  (Classify options, the exceptions filter). The Connect step and
    *  the variance figures read `entryLinks` / `billEntryVariance` instead. */
   entryId: number | null
   /** Every entry linked to this bill via `entry_bill_link` (Phase 5), largest
@@ -251,7 +251,4 @@ export interface ReviewDocumentDetail {
   uncertainFields: UncertainField[]
   pages: PageStatus[]
   openExceptions: OpenExceptionSummary[]
-  canSetHubStatus: boolean
-  hubStatusCode: string | null
-  hubStatusOptions: { id: number; code: string; label: string }[]
 }

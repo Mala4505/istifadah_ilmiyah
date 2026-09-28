@@ -280,10 +280,9 @@ export interface VoidEntriesResult {
  * `departmental_entry_missing_from_portal` exceptions raised against those
  * same entries — the void note doubles as the exception's resolution note,
  * since voiding the entry IS the resolution ("Resolved with no reason is not
- * an audit trail" applies to the void note itself, same as `resolveException`
- * and `setHubStatus`).
+ * an audit trail" applies to the void note itself, same as `resolveException`).
  *
- * Modeled directly on `setHubStatus` (lib/actions/hub-status.ts): runs on the
+ * Runs on the
  * session-bound client, so `entries_update` RLS (admin-or-above,
  * department-scoped via can_see_department — 20260819000003_role_rbac_v2.sql
  * around L276-279) is the actual gate, not this function. This turns a silent

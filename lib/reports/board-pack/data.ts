@@ -92,7 +92,6 @@ export async function assembleBoardPackData(
 
   const warnings = [
     hero.errors.kpi,
-    hero.errors.hubStatus,
     hero.errors.pipeline,
     hero.errors.spendTrend,
     brief.errors.league,

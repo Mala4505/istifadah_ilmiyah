@@ -1,53 +1,15 @@
 /**
- * Bidirectional raw-row <-> entry-fields transform (MASTER-PLAN §10, §3.6).
+ * Departmental export row -> entry-fields transform (MASTER-PLAN §10, §3.6).
  *
  * Pure row-shape transformation only — no database connection, no Supabase
  * client. Whoever wires `/api/import` calls `parseDepartmentalRow` per row
- * and does the DB upsert; whoever wires the status-export job calls
- * `hubStatusToExportRow` per entry and writes the output file.
+ * and does the DB upsert.
  *
- * Today this covers the Departmental import direction plus the Hub-status
- * export direction, per §3.6's parsing rules verified against the real
- * file. The Main import direction is a config change once a populated Main
- * export arrives (§3.6: "a config change, not new architecture") and is
- * deliberately not guessed at here.
+ * Today this covers the Departmental import direction, per §3.6's parsing
+ * rules verified against the real file. The Main import direction is a
+ * config change once a populated Main export arrives (§3.6: "a config
+ * change, not new architecture") and is deliberately not guessed at here.
  */
-
-// ---------------------------------------------------------------------------
-// hubStatusToExportRow — Hub -> Departmental/Main export row (§3.7)
-// ---------------------------------------------------------------------------
-
-/** The two Hub-owned status fields that flow outward (§3.6, §3.7). */
-export interface HubStatusEntry {
-  ubblNumber: string
-  mainNumber: string | null
-  hubStatusCode: string
-  hubStatusNote: string | null
-  hubStatusChangedAt: string | Date | null
-}
-
-export interface HubStatusExportRow {
-  ubbl_number: string
-  main_number: string | null
-  hub_status_code: string
-  hub_status_note: string | null
-  /** ISO 8601 timestamp string, or null if the status was never set. */
-  changed_at: string | null
-}
-
-/** Pure transform: Hub entry shape -> the row shape written to the status export file. */
-export function hubStatusToExportRow(entry: HubStatusEntry): HubStatusExportRow {
-  return {
-    ubbl_number: entry.ubblNumber,
-    main_number: entry.mainNumber,
-    hub_status_code: entry.hubStatusCode,
-    hub_status_note: entry.hubStatusNote,
-    changed_at:
-      entry.hubStatusChangedAt instanceof Date
-        ? entry.hubStatusChangedAt.toISOString()
-        : entry.hubStatusChangedAt,
-  }
-}
 
 // ---------------------------------------------------------------------------
 // parseDepartmentalRow — Departmental export row -> entry-fields (§3.6)

@@ -12,7 +12,6 @@ import {
   TriangleAlert,
   FileBarChart,
   UploadCloud,
-  Download,
   Settings,
   Keyboard,
   LogOut,
@@ -42,8 +41,8 @@ import { isAdminOrAbove, isSuperadmin } from '@/lib/auth/roles'
 export const NAV_RAIL_COLLAPSED_COOKIE = 'nav_rail_collapsed'
 const COLLAPSE_COOKIE_MAX_AGE = 60 * 60 * 24 * 365
 
-// Persistent left rail (MASTER-PLAN §5 "Navigation"). Import, Settings, and
-// Export are admin-only per §4.4c's role table, and each is hidden outright
+// Persistent left rail (MASTER-PLAN §5 "Navigation"). Import and Settings
+// are admin-only per §4.4c's role table, and each is hidden outright
 // from anyone below that role — the page itself already blocks lower roles
 // server-side, so showing the link only ever produced a click that led to a
 // refusal.
@@ -60,7 +59,6 @@ const NAV_ITEMS = [
   { label: 'Reports', href: '/reports', icon: FileBarChart },
   { label: 'Import', href: '/import', icon: UploadCloud, adminOnly: true },
   { label: 'Shortcuts', href: '/shortcuts', icon: Keyboard },
-  { label: 'Export', href: '/export', icon: Download, adminOnly: true },
   { label: 'Settings', href: '/settings', icon: Settings, adminOnly: true },
 ] as const
 

@@ -29,9 +29,7 @@ import { ReportSection } from '@/components/reports/report-section'
 import { EmptyState } from '@/components/reports/empty-state'
 import { KpiTile } from '@/components/reports/charts/kpi-tile'
 import { TrendChart } from '@/components/reports/charts/trend-chart'
-import { DonutChart, type DonutSegment } from '@/components/reports/charts/donut-chart'
 import { FunnelChart } from '@/components/reports/charts/funnel-chart'
-import { ORDINAL_RAMP } from '@/components/reports/charts/ordinal-ramp'
 import { formatINRCompact, formatNumber } from '@/lib/reports/format'
 import { SectionSkeleton } from '@/components/reports/sections/surface-loading'
 import { BudgetByHeadSection } from '@/components/reports/sections/budget-by-head'
@@ -43,7 +41,6 @@ import { AboveMedianOverpaymentSection } from '@/components/reports/sections/abo
 import { InstrumentTypeMixSection } from '@/components/reports/sections/instrument-type-mix'
 import { SpendByFamilySection } from '@/components/reports/sections/spend-by-family'
 import { RateBenchmarkSection } from '@/components/reports/sections/rate-benchmark'
-import { HubStatusAgeingSection } from '@/components/reports/sections/hub-status-ageing'
 import { OpenIssuesSection } from '@/components/reports/sections/open-issues'
 import { ComplianceSection } from '@/components/reports/sections/compliance'
 import { ExceptionHeatmapSection } from '@/components/reports/sections/exception-heatmap'
@@ -182,17 +179,10 @@ export default async function ReportsPage({
 
   const eventName = selectedEvent?.name ?? null
 
-  // ---- Overview band (hero KPIs, spend pace, hub-status mix, pipeline) ----
+  // ---- Overview band (hero KPIs, spend pace, pipeline) ----
   const spendDelta = seriesDelta(hero.kpi.weeklySpendSeries)
   const entryDelta = seriesDelta(hero.kpi.weeklyEntrySeries)
   const riskDelta = seriesDelta(hero.kpi.weeklyAtRiskSeries)
-
-  const hubStatusSegments: DonutSegment[] = hero.hubStatus.map((s, i) => ({
-    key: s.key,
-    label: s.label,
-    value: s.value,
-    colorClass: ORDINAL_RAMP[i % ORDINAL_RAMP.length]!.strokeClass,
-  }))
 
   const spendTrendPoints = hero.spendTrend.map((p) => ({ label: p.weekLabel, actual: p.actual, target: p.target }))
 
@@ -207,7 +197,7 @@ export default async function ReportsPage({
       {isOverview && (
         <p className="max-w-2xl text-sm text-muted-foreground">
           Every report section, reachable from the index on the left — the pivot-and-drill workspace behind the four
-          focused surfaces above. This rests on an overview of the event (spend pace, Hub status mix, document pipeline);
+          focused surfaces above. This rests on an overview of the event (spend pace, document pipeline);
           pick any report from the index to swap the pane to that one section at full fidelity, with its CSV export.
         </p>
       )}
@@ -261,27 +251,15 @@ export default async function ReportsPage({
             )}
           </ReportSection>
 
-          <div className="flex flex-col gap-4">
-            <ReportSection id="hub-status-mix" title="Hub status mix" description="Where every entry sits in the review workflow right now.">
-              {hero.errors.hubStatus ? (
-                <EmptyState title="Couldn't load Hub status" description={hero.errors.hubStatus} />
-              ) : hubStatusSegments.every((s) => s.value === 0) || hubStatusSegments.length === 0 ? (
-                <EmptyState title="No entries yet" />
-              ) : (
-                <DonutChart segments={hubStatusSegments} centerLabel={`${formatNumber(hero.hubStatus.reduce((s, r) => s + r.value, 0))} entries`} />
-              )}
-            </ReportSection>
-
-            <ReportSection id="document-pipeline" title="Document pipeline" description="Uploaded bills, and how many make it through each stage.">
-              {hero.errors.pipeline ? (
-                <EmptyState title="Couldn't load the pipeline" description={hero.errors.pipeline} />
-              ) : hero.pipeline.every((p) => p.count === 0) ? (
-                <EmptyState title="No documents uploaded yet" />
-              ) : (
-                <FunnelChart stages={hero.pipeline} />
-              )}
-            </ReportSection>
-          </div>
+          <ReportSection id="document-pipeline" title="Document pipeline" description="Uploaded bills, and how many make it through each stage.">
+            {hero.errors.pipeline ? (
+              <EmptyState title="Couldn't load the pipeline" description={hero.errors.pipeline} />
+            ) : hero.pipeline.every((p) => p.count === 0) ? (
+              <EmptyState title="No documents uploaded yet" />
+            ) : (
+              <FunnelChart stages={hero.pipeline} />
+            )}
+          </ReportSection>
         </div>
       </section>
       ) : (
@@ -517,22 +495,11 @@ async function IntegrityGroup1({
   totalSpend: number
   selectedEvent: Event | null
 }) {
-  if (groupHiddenInPane(only, ['hub-status-ageing', 'open-issues', 'compliance'])) return null
+  if (groupHiddenInPane(only, ['open-issues', 'compliance'])) return null
   const integrity = await getIntegritySurface(compareBasis, totalSpend, selectedEvent)
   return (
     <>
       {integrity.priorError && <p className="text-xs text-destructive">{integrity.priorError}</p>}
-      {isSectionInPane(only, 'hub-status-ageing') && (
-        <HubStatusAgeingSection
-          rows={integrity.hubAgeing.rows}
-          error={integrity.hubAgeing.error}
-          compareBasis={compareBasis}
-          buckets={integrity.hubAgeing.buckets}
-          series={integrity.hubAgeing.series}
-          previousCount={integrity.hubAgeing.previousCount}
-          insight={integrity.hubAgeing.insight}
-        />
-      )}
       {isSectionInPane(only, 'open-issues') && (
         <OpenIssuesSection
           rows={integrity.openIssues.rows}

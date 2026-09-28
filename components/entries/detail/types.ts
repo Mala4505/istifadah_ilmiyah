@@ -34,14 +34,6 @@ export interface EntryEnriched {
   cost_center_id: number | null
   cost_center_name: string | null
   remark: string | null
-  // hub_status_* columns unchanged/deferred, see supabase/migrations/20260811000003
-  hub_status_id: number
-  hub_status_code: string
-  hub_status_label: string
-  hub_status_changed_at: string | null
-  hub_status_changed_by: string | null
-  hub_status_note: string | null
-  hub_status_exported_at: string | null
   settles_entry_id: number | null
   is_void: boolean
   void_note: string | null
@@ -73,14 +65,6 @@ export interface ZoneOption {
   id: number
   zone_number: number
   name: string
-}
-
-export interface HubStatusOption {
-  id: number
-  code: string
-  label: string
-  sort_order: number
-  is_exportable: boolean
 }
 
 export interface ChangeLogRow {

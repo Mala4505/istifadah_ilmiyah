@@ -23,9 +23,8 @@ import { voidEntries } from '@/lib/actions/entries'
  * Single-entry counterpart to bulk-void-dialog.tsx (item 6,
  * departmental-portal-vanished-entry flow, 2026-09-19) — calls the same
  * shared `voidEntries` server action (lib/actions/entries.ts) with a
- * one-element `entryIds` array, same as how HubStatusSection's single-entry
- * control calls the shared `setHubStatus` action. This component owns no
- * void-mutation logic of its own.
+ * one-element `entryIds` array. This component owns no void-mutation logic
+ * of its own.
  */
 export function VoidEntryControl({ entryId }: { entryId: number }) {
   const router = useRouter()

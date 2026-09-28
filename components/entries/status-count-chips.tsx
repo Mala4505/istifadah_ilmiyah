@@ -25,25 +25,19 @@ export type EntryStatusCount = {
 export function StatusCountChips({
   typeCounts,
   statusCounts,
-  hubStatusCounts,
   activeType,
   activeStatus,
-  activeHubStatus,
   onSelectType,
   onSelectStatus,
-  onSelectHubStatus,
 }: {
   typeCounts: EntryStatusCount[]
   statusCounts: EntryStatusCount[]
-  hubStatusCounts: EntryStatusCount[]
   activeType: string
   activeStatus: string
-  activeHubStatus: string
   onSelectType: (id: string) => void
   onSelectStatus: (id: string) => void
-  onSelectHubStatus: (id: string) => void
 }) {
-  if (typeCounts.length === 0 && statusCounts.length === 0 && hubStatusCounts.length === 0) return null
+  if (typeCounts.length === 0 && statusCounts.length === 0) return null
 
   return (
     <div className="flex flex-col gap-2 rounded-lg border border-border bg-card p-2.5 text-xs">
@@ -58,12 +52,6 @@ export function StatusCountChips({
         rows={statusCounts}
         active={activeStatus}
         onSelect={onSelectStatus}
-      />
-      <ChipGroup
-        label="Hub status"
-        rows={hubStatusCounts}
-        active={activeHubStatus}
-        onSelect={onSelectHubStatus}
       />
     </div>
   )

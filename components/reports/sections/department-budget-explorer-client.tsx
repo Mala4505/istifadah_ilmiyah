@@ -1,6 +1,7 @@
 'use client'
 
 import { useMemo, useState } from 'react'
+import Link from 'next/link'
 import { ChevronLeft } from 'lucide-react'
 import { ReportSection } from '@/components/reports/report-section'
 import { EmptyState } from '@/components/reports/empty-state'
@@ -157,17 +158,40 @@ export function DepartmentBudgetExplorerClient({
     {
       key: 'name',
       header: nameHeader,
+      // Department rows keep the drill-into-divisions click (existing
+      // behaviour) plus a separate "entries" link so neither action shadows
+      // the other. Division rows have nowhere left to drill into, so the name
+      // itself becomes the link -- scoped to the PARENT department, not the
+      // division: `entries` has no sub_department_id filter wired up yet
+      // (v_entry_enriched has the column, but components/entries/types.ts's
+      // EntriesFilters doesn't expose it), so this is the closest filter that
+      // actually exists today. Matches the Zone/Vendor report tables, which
+      // already link their name cell to `/entries?zone_id=…` /
+      // `?vendor_id=…` (zone-spend.tsx, vendor-spend.tsx).
       render: (r) =>
         selectedDept ? (
-          r.name
-        ) : (
-          <button
-            type="button"
-            onClick={() => setSelectedDeptId(r.id)}
+          <Link
+            href={`/entries?department_id=${selectedDept.department_id}`}
             className="text-primary underline-offset-2 hover:underline"
           >
             {r.name}
-          </button>
+          </Link>
+        ) : (
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setSelectedDeptId(r.id)}
+              className="text-primary underline-offset-2 hover:underline"
+            >
+              {r.name}
+            </button>
+            <Link
+              href={`/entries?department_id=${r.id}`}
+              className="text-xs text-muted-foreground underline-offset-2 hover:text-primary hover:underline"
+            >
+              entries
+            </Link>
+          </div>
         ),
     },
     { key: 'budget', header: 'Budget', align: 'right', render: (r) => formatINR(r.budget) },

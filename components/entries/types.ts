@@ -39,14 +39,6 @@ export type EntryEnriched = {
   cost_center_id: number | null
   cost_center_name: string | null
   remark: string | null
-  // hub_status_* columns unchanged/deferred, see supabase/migrations/20260811000003
-  hub_status_id: number
-  hub_status_code: string
-  hub_status_label: string
-  hub_status_changed_at: string | null
-  hub_status_changed_by: string | null
-  hub_status_note: string | null
-  hub_status_exported_at: string | null
   settles_entry_id: number | null
   is_void: boolean
   source: 'import' | 'manual' | 'api'
@@ -69,7 +61,6 @@ export type FilterOptions = {
   zones: LookupOption[]
   costCenters: LookupOption[]
   statuses: LookupOption[]
-  hubStatuses: LookupOption[]
   // DB-backed (public.entry_type), not the EntryType TS union below -- so a
   // type added in the database shows up here without a code change.
   entryTypes: EntryTypeOption[]
@@ -85,8 +76,6 @@ export type EntriesFilters = {
   zone: string
   costCenter: string
   status: string
-  hubStatus: string
-  exportPending: boolean
   dateFrom: string
   dateTo: string
   vendor: string
@@ -107,6 +96,13 @@ export type EntriesFilters = {
    *  Turning this on removes the `is_void = false` filter, mixing voided rows
    *  back in (the table's own "Void" badge still marks which ones they are). */
   showVoided: boolean
+  /** Entries with `budget_head_id is null` — mainly ones a portal scrape
+   *  created from a tab that renders no Budget Head column at all (e.g. the
+   *  Reimbursement tab), which sit unclassified until the next Departmental
+   *  .xlsx import fills them in (lib/import/run-portal-import.ts's
+   *  new_budget_head exception). Lets an operator find and manually resolve
+   *  them sooner instead of waiting. */
+  unassignedBudgetHead: boolean
 }
 
 export const DEFAULT_FILTERS: EntriesFilters = {
@@ -117,8 +113,6 @@ export const DEFAULT_FILTERS: EntriesFilters = {
   zone: '',
   costCenter: '',
   status: '',
-  hubStatus: '',
-  exportPending: false,
   dateFrom: '',
   dateTo: '',
   vendor: '',
@@ -127,6 +121,7 @@ export const DEFAULT_FILTERS: EntriesFilters = {
   hasDocument: false,
   awaitingDocument: false,
   showVoided: false,
+  unassignedBudgetHead: false,
 }
 
 export const PAGE_SIZE = 50
@@ -149,7 +144,6 @@ export type SortColumn =
   | 'ubbl_number'
   | 'main_number'
   | 'budget_head_short_label'
-  | 'hub_status_label'
   | 'document_count'
 export type SortDirection = 'asc' | 'desc'
 export type EntriesSort = { column: SortColumn; direction: SortDirection }
@@ -169,8 +163,6 @@ export type ColumnKey =
   | 'date'
   | 'amount'
   | 'status_label'
-  | 'hub_status_label'
-  | 'export_pending'
   | 'document_count'
 
 export type ColumnDef = {
@@ -194,7 +186,5 @@ export const ALL_COLUMNS: ColumnDef[] = [
   { key: 'invoice_number', label: 'Invoice #', defaultVisible: false },
   { key: 'amount', label: 'Amount', defaultVisible: true, align: 'right' },
   { key: 'status_label', label: 'Status', defaultVisible: true },
-  { key: 'hub_status_label', label: 'Hub status', defaultVisible: true },
-  { key: 'export_pending', label: 'Export', defaultVisible: false },
   { key: 'document_count', label: 'Docs', defaultVisible: true, align: 'right' },
 ]

@@ -53,12 +53,11 @@ export async function IntegrityOverview({
   const exceptionAtRisk = data.exceptionHeatmap.rows.reduce((sum, r) => sum + r.amount_at_risk, 0)
   const exceptionIssueCount = data.exceptionHeatmap.rows.reduce((sum, r) => sum + r.issue_count, 0)
   const openIssuesCount = data.openIssues.rows.length
-  const agedInHubStatus = data.hubAgeing.buckets['8+']
 
-  // The hero figures are drawn directly from these three section slices — if
+  // The hero figures are drawn directly from these two section slices — if
   // one failed to load, show the friendly reason instead of misleading ₹0 / 0
   // tiles. The flagship sections below still surface their own errors.
-  const heroError = data.openIssues.error ?? data.exceptionHeatmap.error ?? data.hubAgeing.error
+  const heroError = data.openIssues.error ?? data.exceptionHeatmap.error
 
   const remainingSections = SURFACE_SECTIONS.integrity.filter((s) => !FLAGSHIP_SECTION_IDS.has(s.id))
 
@@ -68,7 +67,7 @@ export async function IntegrityOverview({
       {heroError ? (
         <EmptyState title="Couldn't load the integrity overview figures" description={heroError} />
       ) : (
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
           <KpiTile label="Open ₹ at risk" value={formatINRCompact(data.openIssues.atRiskTotal)} />
           <KpiTile label="Open issues" value={formatNumber(openIssuesCount)} />
           <KpiTile
@@ -77,7 +76,6 @@ export async function IntegrityOverview({
             delta={`${formatNumber(exceptionIssueCount)} open ${exceptionIssueCount === 1 ? 'finding' : 'findings'}`}
             deltaTone="neutral"
           />
-          <KpiTile label="Entries aged 8+ days in hub status" value={formatNumber(agedInHubStatus)} />
         </div>
       )}
       {data.priorError && <p className="text-xs text-destructive">{data.priorError}</p>}

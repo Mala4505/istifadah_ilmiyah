@@ -5,8 +5,8 @@ import { createClient } from '@/lib/supabase/server'
 
 // Reports-page "overview" band (redesign approved as an HTML mockup, wired
 // into the real page by a later pass). This module owns only the
-// data-aggregation layer: 4 KPI tiles with weekly sparklines, a Hub-status
-// composition breakdown, a document-pipeline stage-count breakdown, and a
+// data-aggregation layer: 4 KPI tiles with weekly sparklines, a
+// document-pipeline stage-count breakdown, and a
 // weekly cumulative-spend-vs-target-pace series. It deliberately mirrors the
 // conventions of loadReportsData/loadAnalyticsData in
 // app/(app)/reports/page.tsx: own `createClient()` call, `.returns<T[]>()`
@@ -26,13 +26,6 @@ const TREND_WEEKS = 10
 // starts_on/ends_on ever end up implausibly far apart -- keeps a bad data
 // entry from generating an unbounded bucket list.
 const MAX_SPEND_TREND_WEEKS = 260
-
-type HubStatusRow = {
-  status_code: string
-  status_label: string
-  sort_order: number
-  entry_count: number
-}
 
 type OpenIssueAmountRow = {
   amount_at_risk: number | null
@@ -79,10 +72,9 @@ export type HeroMetrics = {
     weeklyAtRiskSeries: number[]
     weeklyAvgDaysSeries: number[]
   }
-  hubStatus: { key: string; label: string; value: number; sortOrder: number }[]
   pipeline: { key: string; label: string; count: number }[]
   spendTrend: { weekLabel: string; weekStart: string; actual: number; target: number | null }[]
-  errors: { kpi: string | null; hubStatus: string | null; pipeline: string | null; spendTrend: string | null }
+  errors: { kpi: string | null; pipeline: string | null; spendTrend: string | null }
 }
 
 function round2(n: number): number {
@@ -268,7 +260,7 @@ export async function loadHeroMetrics(
 ): Promise<HeroMetrics> {
   const supabase: SupabaseClient = client ?? (await createClient())
 
-  const [entriesRes, issuesRes, hubStatusRes, budgetRes, sourceDocRes, eventRes] = await Promise.all([
+  const [entriesRes, issuesRes, budgetRes, sourceDocRes, eventRes] = await Promise.all([
     supabase.from('entries').select('id, amount, date').eq('event_id', eventId).eq('is_void', false).returns<EntryRow[]>(),
     // Phase 0 §0.2 eventId-null-vs-not branch, copied verbatim from
     // loadReportsData (app/(app)/reports/page.tsx) rather than simplified --
@@ -283,13 +275,6 @@ export async function loadHeroMetrics(
           .or(`event_id.eq.${eventId},event_id.is.null`)
           .limit(OPEN_ISSUES_ROW_CAP)
           .returns<OpenIssueAmountRow[]>(),
-    supabase
-      .from('v_entry_status_counts')
-      .select('status_code, status_label, sort_order, entry_count')
-      .eq('dimension', 'hub_status')
-      .eq('event_id', eventId)
-      .order('sort_order', { ascending: true })
-      .returns<HubStatusRow[]>(),
     supabase.from('v_budget_vs_actual').select('approved_amount').eq('event_id', eventId).returns<BudgetApprovedRow[]>(),
     supabase
       .from('source_document')
@@ -318,7 +303,6 @@ export async function loadHeroMetrics(
 
   const entriesErr = friendlyDataError(entriesRes.error, 'heroMetrics:entriesRes')
   const issuesErr = friendlyDataError(issuesRes.error, 'heroMetrics:issuesRes')
-  const hubStatusErr = friendlyDataError(hubStatusRes.error, 'heroMetrics:hubStatusRes')
   const budgetErr = friendlyDataError(budgetRes.error, 'heroMetrics:budgetRes')
   const sourceDocErr = friendlyDataError(sourceDocRes.error, 'heroMetrics:sourceDocRes')
   const extractionErr = friendlyDataError(extractionRes.error, 'heroMetrics:extractionRes')
@@ -326,7 +310,6 @@ export async function loadHeroMetrics(
 
   const entryRows = entriesRes.data ?? []
   const issueRows = issuesRes.data ?? []
-  const hubStatusRows = hubStatusRes.data ?? []
   const budgetRows = budgetRes.data ?? []
   const sourceDocRows = sourceDocRes.data ?? []
   const extractionRows = extractionRes.data ?? []
@@ -380,15 +363,6 @@ export async function loadHeroMetrics(
     (rs) => (rs.length === 0 ? 0 : round2(rs.reduce((s, r) => s + daysBetween(r.uploadedAt, r.verifiedAt), 0) / rs.length))
   )
 
-  // ---- Hub-status composition ------------------------------------------------
-
-  const hubStatus = hubStatusRows.map((r) => ({
-    key: r.status_code,
-    label: r.status_label,
-    value: r.entry_count,
-    sortOrder: r.sort_order,
-  }))
-
   // ---- Document pipeline -----------------------------------------------------
 
   const uploaded = sourceDocRows.length
@@ -438,12 +412,10 @@ export async function loadHeroMetrics(
       weeklyAtRiskSeries,
       weeklyAvgDaysSeries,
     },
-    hubStatus,
     pipeline,
     spendTrend,
     errors: {
       kpi: entriesErr ?? issuesErr ?? sourceDocErr ?? extractionErr,
-      hubStatus: hubStatusErr,
       pipeline: sourceDocErr ?? extractionErr,
       spendTrend: entriesErr ?? eventErr ?? budgetErr,
     },

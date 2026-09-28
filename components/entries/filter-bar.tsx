@@ -43,10 +43,10 @@ export function clearFilterChip(key: FilterChipKey): Partial<EntriesFilters> {
  * Every filter stays — the plan's decision (§1) was explicit that every
  * group gets used regularly, so this is a reorganization into four labelled
  * sections, not a removal:
- *   - Status: Type, Status, Hub status
+ *   - Status: Type, Status
  *   - Classification: Department, Budget head, Admin head, Zone, Cost center
  *   - Search: Vendor, Date from, Date to
- *   - Flags: Export-pending, Missing Main #, Has document, Awaiting bill
+ *   - Flags: Missing Main #, Has document, Awaiting bill
  *
  * Collapsed by default (finding 7.2): the full panel used to take ~450px
  * before the first table row, so entries — the most-used screen — opens
@@ -162,17 +162,6 @@ export function FilterBar({
             ))}
           </SelectNative>
         </Field>
-
-        <Field label="Hub status" htmlFor="filter-hub-status">
-          <SelectNative id="filter-hub-status" value={filters.hubStatus} onChange={(e) => onChange({ hubStatus: e.target.value })}>
-            <option value="">Any Hub status</option>
-            {options.hubStatuses.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.label}
-              </option>
-            ))}
-          </SelectNative>
-        </Field>
       </FilterSection>
 
       <FilterSection label="Classification">
@@ -269,11 +258,6 @@ export function FilterBar({
         <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-foreground/70">Flags</h3>
         <div className="flex flex-wrap items-center gap-4">
           <ToggleField
-            label="Export-pending"
-            checked={filters.exportPending}
-            onCheckedChange={(v) => onChange({ exportPending: v })}
-          />
-          <ToggleField
             label="Missing Main #"
             checked={filters.hasVariance}
             onCheckedChange={(v) => onChange({ hasVariance: v })}
@@ -294,6 +278,11 @@ export function FilterBar({
             label="Show voided"
             checked={filters.showVoided}
             onCheckedChange={(v) => onChange({ showVoided: v })}
+          />
+          <ToggleField
+            label="No budget head"
+            checked={filters.unassignedBudgetHead}
+            onCheckedChange={(v) => onChange({ unassignedBudgetHead: v })}
           />
         </div>
       </div>
@@ -345,7 +334,6 @@ export function buildFilterSummary(filters: EntriesFilters, options: FilterOptio
 
   pushSelect('type', filters.type, options.entryTypes, 'Type')
   pushSelect('status', filters.status, options.statuses, 'Status')
-  pushSelect('hubStatus', filters.hubStatus, options.hubStatuses, 'Hub status')
   pushSelect('department', filters.department, options.departments, 'Department')
   pushSelect('budgetHead', filters.budgetHead, options.budgetHeads, 'Budget head')
   pushSelect('adminHead', filters.adminHead, options.adminHeads, 'Admin head')
@@ -359,7 +347,6 @@ export function buildFilterSummary(filters: EntriesFilters, options: FilterOptio
     parts.push({ key: 'dateRange', label: formatDateRangeSummary(filters.dateFrom, filters.dateTo) })
   }
 
-  if (filters.exportPending) parts.push({ key: 'exportPending', label: 'Export-pending' })
   if (filters.hasVariance) parts.push({ key: 'hasVariance', label: 'Missing Main #' })
   if (filters.hasDocument) parts.push({ key: 'hasDocument', label: 'Has document' })
   if (filters.awaitingDocument) parts.push({ key: 'awaitingDocument', label: 'Awaiting bill' })

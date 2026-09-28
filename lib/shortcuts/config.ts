@@ -17,7 +17,6 @@ export type ShortcutActionId =
   | 'cyclePane'
   | 'openException'
   | 'reExtract'
-  | 'openHubStatus'
   | 'openVendorAutocomplete'
   | 'focusZone'
   | 'focusAdminHead'
@@ -86,13 +85,6 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
     label: 'Re-extract with Sonnet',
     description: 'Re-runs extraction on the whole document.',
     default: { key: 'r', alt: true },
-    configurable: true,
-  },
-  {
-    id: 'openHubStatus',
-    label: 'Open hub status',
-    description: 'Opens the hub status picker for the current bill.',
-    default: { key: 's', alt: true },
     configurable: true,
   },
   {

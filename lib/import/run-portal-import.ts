@@ -1262,7 +1262,7 @@ export async function retryUnmatchedAuditRows(
  *
  * Deliberately does not touch budget_head_id, department_id, budget_allocation
  * or any Hub-owned enrichment column (zone_id, admin_head_id, cost_center_id,
- * remark, hub_status_*) — see this file's header.
+ * remark) — see this file's header.
  *
  * `tableKind` is the Dept-module tab this row's batch was scraped from
  * (detectDepartmentalTableKind, computed once per batch in

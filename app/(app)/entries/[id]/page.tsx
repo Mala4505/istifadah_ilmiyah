@@ -8,7 +8,6 @@ import { AdvanceSettlementPicker } from '@/components/entries/detail/advance-set
 import { ChangeHistoryList } from '@/components/entries/detail/change-history-list'
 import { EnrichmentForm } from '@/components/entries/detail/enrichment-form'
 import { EntryNotFound } from '@/components/entries/detail/entry-not-found'
-import { HubStatusSection } from '@/components/entries/detail/hub-status-section'
 import { VoidEntryControl } from '@/components/entries/detail/void-entry-control'
 import { ImportFieldsPanel } from '@/components/entries/detail/import-fields-panel'
 import { LinkedDocuments, type LinkedDocumentView } from '@/components/entries/detail/linked-documents'
@@ -24,7 +23,6 @@ import type {
   CostCenterOption,
   ChangeLogRow,
   EntryEnriched,
-  HubStatusOption,
   ZoneOption,
 } from '@/components/entries/detail/types'
 import { createClient, getCachedUser } from '@/lib/supabase/server'
@@ -41,7 +39,6 @@ import {
   getCachedAdminHeads,
   getCachedZones,
   getCachedCostCenters,
-  getCachedHubStatuses,
 } from '@/lib/cache/reference-data'
 
 export const dynamic = 'force-dynamic'
@@ -121,7 +118,6 @@ export default async function EntryDetailPage({
     cachedAdminHeads,
     cachedZones,
     cachedCostCenters,
-    cachedHubStatuses,
     changeLogResult,
     entryCoreResult,
     vendorResult,
@@ -132,7 +128,6 @@ export default async function EntryDetailPage({
     getCachedAdminHeads(supabase, user?.id ?? null),
     getCachedZones(supabase, user?.id ?? null),
     getCachedCostCenters(supabase),
-    getCachedHubStatuses(supabase),
     supabase
       .from('entry_change_log')
       .select('id, entry_id, changed_by, changed_at, source, changes')
@@ -180,7 +175,6 @@ export default async function EntryDetailPage({
     .filter((z) => selectedEventId === null || zoneMemberIds.has(z.id))
     .map((z): ZoneOption => ({ id: z.id, zone_number: z.zone_number, name: z.name }))
   const costCenterOptions = cachedCostCenters as CostCenterOption[]
-  const hubStatusOptions = cachedHubStatuses as HubStatusOption[]
   const changeLogRows = (changeLogResult.data ?? []) as ChangeLogRow[]
   const budgetHeadRaw = (entryCoreResult.data as { budget_head_raw: string | null } | null)
     ?.budget_head_raw ?? null
@@ -213,24 +207,13 @@ export default async function EntryDetailPage({
   const adminHeadById = new Map(adminHeadOptions.map((h) => [h.id, h]))
   const zoneById = new Map(zoneOptions.map((z) => [z.id, z]))
   const costCenterById = new Map(costCenterOptions.map((c) => [c.id, c]))
-  const hubStatusById = new Map(hubStatusOptions.map((h) => [h.id, h]))
 
   function resolveLookup(field: string, value: number): string | null {
     if (field === 'admin_head_id') return adminHeadById.get(value)?.name ?? null
     if (field === 'zone_id') return zoneById.get(value)?.name ?? null
     if (field === 'cost_center_id') return costCenterById.get(value)?.name ?? null
-    if (field === 'hub_status_id') return hubStatusById.get(value)?.label ?? null
     return null
   }
-
-  const hubStatusTimelineRows = changeLogRows.filter((r) => 'hub_status_id' in r.changes)
-  // HubStatusSection is a Client Component, so `resolveChangedBy` (a server
-  // closure over `user`/`staffNames`) can't be passed to it directly — Next
-  // errors "Functions cannot be passed directly to Client Components".
-  // Resolved here instead, into a plain serializable row.id -> label map.
-  const hubStatusChangedByLabels: Record<number, string> = Object.fromEntries(
-    hubStatusTimelineRows.map((r) => [r.id, resolveChangedBy(r.changed_by)])
-  )
 
   // Answers "how does this PDF connect to this entry line": the actual
   // attached documents, plus the OCR'd values the match was made on — not
@@ -472,16 +455,6 @@ export default async function EntryDetailPage({
         exceptions={entryIssueExceptions}
         flags={entryIssueFlags}
         canResolve={canResolveIssues}
-      />
-
-      <HubStatusSection
-        entryId={entry.id}
-        hubStatusCode={entry.hub_status_code}
-        hubStatusLabel={entry.hub_status_label}
-        hubStatusExportedAt={entry.hub_status_exported_at}
-        hubStatusOptions={hubStatusOptions}
-        timelineRows={hubStatusTimelineRows}
-        changedByLabels={hubStatusChangedByLabels}
       />
 
       {canResolveIssues && !entry.is_void && <VoidEntryControl entryId={entry.id} />}

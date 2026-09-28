@@ -1,7 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import {
   type DepartmentOption,
-  type HubStatusRow,
   type SubDepartmentRow,
   type ZoneRow,
 } from '@/lib/settings/shape'
@@ -18,7 +17,6 @@ export interface MasterData {
   heads: HeadRow[]
   zones: ZoneRow[]
   subDepartments: SubDepartmentRow[]
-  hubStatuses: HubStatusRow[]
 }
 
 /**
@@ -30,7 +28,7 @@ export interface MasterData {
  * like vendor/department), so they're membership-filtered but no longer
  * grouped or scoped by department at all -- see app/(app)/settings/master-data
  * /page.tsx, which renders them as their own flat, editable tables rather
- * than nested under each department. Hub statuses are global. Sub-department
+ * than nested under each department. Sub-department
  * budget amounts come from v_sub_department_budget_vs_actual so the
  * per-department view can still show them.
  */
@@ -45,7 +43,6 @@ export async function loadMasterData(
     { data: headsData },
     { data: zonesData },
     { data: subDepartmentsData },
-    { data: hubStatusesData },
     { data: departmentMembershipData },
     { data: headMembershipData },
     { data: zoneMembershipData },
@@ -56,10 +53,6 @@ export async function loadMasterData(
     supabase.from('admin_head').select('id, head_number, name, is_active').order('head_number'),
     supabase.from('zone').select('id, zone_number, name, is_active').order('zone_number'),
     supabase.from('sub_department').select('id, department_id, name, is_active').order('name'),
-    supabase
-      .from('hub_status')
-      .select('id, code, label, sort_order, is_exportable, is_terminal')
-      .order('sort_order'),
     selectedEventId === null
       ? Promise.resolve({ data: [] as { department_id: number }[] })
       : supabase.from('event_department').select('department_id').eq('event_id', selectedEventId),
@@ -126,14 +119,5 @@ export async function loadMasterData(
       budgetAmount: budgetById.get(row.id as number) ?? null,
     }))
 
-  const hubStatuses: HubStatusRow[] = (hubStatusesData ?? []).map((row) => ({
-    id: row.id as number,
-    code: row.code as string,
-    label: row.label as string,
-    sortOrder: row.sort_order as number,
-    isExportable: row.is_exportable as boolean,
-    isTerminal: row.is_terminal as boolean,
-  }))
-
-  return { departments, heads, zones, subDepartments, hubStatuses }
+  return { departments, heads, zones, subDepartments }
 }

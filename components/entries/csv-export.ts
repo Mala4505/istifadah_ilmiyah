@@ -22,8 +22,6 @@ function cellValue(row: EntryEnriched, key: ColumnKey): string {
       return formatDate(row.date)
     case 'amount':
       return row.amount == null ? '' : String(row.amount)
-    case 'export_pending':
-      return row.hub_status_exported_at === null && row.hub_status_code !== 'not_set' ? 'yes' : 'no'
     default:
       return String((row as unknown as Record<string, unknown>)[key] ?? '')
   }

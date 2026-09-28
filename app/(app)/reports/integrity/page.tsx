@@ -11,7 +11,6 @@ import { loadAmountForensics } from '@/lib/reports/surfaces/amount-forensics'
 import { loadSpendCurveOpenAgeing } from '@/lib/reports/surfaces/spend-curve-open-ageing'
 import { loadDuplicateVendorRisk } from '@/lib/reports/surfaces/duplicate-vendor-risk'
 import { loadThresholdSplitting } from '@/lib/reports/surfaces/threshold-splitting'
-import { HubStatusAgeingSection } from '@/components/reports/sections/hub-status-ageing'
 import { OpenIssuesSection } from '@/components/reports/sections/open-issues'
 import { ComplianceSection } from '@/components/reports/sections/compliance'
 import { ExceptionHeatmapSection } from '@/components/reports/sections/exception-heatmap'
@@ -116,7 +115,7 @@ export default async function IntegritySurfacePage({
       {isOverview ? (
         <>
           <p className="max-w-2xl text-sm text-muted-foreground">
-            What the review function is working through: Hub-status ageing, the open exceptions and flags ranked by severity
+            What the review function is working through: the open exceptions and flags ranked by severity
             and ₹ at risk, the compliance &amp; leakage sweep, the exception heat map and amount-at-risk waterfall, open-item
             ageing, the duplicate-payment register, ledger vs bill reconciliation, entries with no supporting bill, and the
             two forensic tests — Benford&apos;s Law and round-number bias — plus threshold-splitting. Every figure links to
@@ -129,7 +128,7 @@ export default async function IntegritySurfacePage({
       ) : (
         <>
           <Suspense fallback={<SectionSkeleton />}>
-            <HubAgeingAndOpenIssuesGroup only={only} compareBasis={compareBasis} totalSpend={totalSpend} selectedEvent={selectedEvent} />
+            <OpenIssuesGroup only={only} compareBasis={compareBasis} totalSpend={totalSpend} selectedEvent={selectedEvent} />
           </Suspense>
           <Suspense fallback={<SectionSkeleton />}>
             <OpenItemAgeingGroup only={only} compareBasis={compareBasis} />
@@ -155,7 +154,7 @@ export default async function IntegritySurfacePage({
   )
 }
 
-async function HubAgeingAndOpenIssuesGroup({
+async function OpenIssuesGroup({
   only,
   compareBasis,
   totalSpend,
@@ -166,22 +165,11 @@ async function HubAgeingAndOpenIssuesGroup({
   totalSpend: number
   selectedEvent: Event | null
 }) {
-  if (groupHiddenInPane(only, ['hub-status-ageing', 'open-issues'])) return null
+  if (groupHiddenInPane(only, ['open-issues'])) return null
   const data = await getIntegritySurface(compareBasis, totalSpend, selectedEvent)
   return (
     <>
       {data.priorError && <p className="text-xs text-destructive">{data.priorError}</p>}
-      {isSectionInPane(only, 'hub-status-ageing') && (
-        <HubStatusAgeingSection
-          rows={data.hubAgeing.rows}
-          error={data.hubAgeing.error}
-          compareBasis={compareBasis}
-          buckets={data.hubAgeing.buckets}
-          series={data.hubAgeing.series}
-          previousCount={data.hubAgeing.previousCount}
-          insight={data.hubAgeing.insight}
-        />
-      )}
       {isSectionInPane(only, 'open-issues') && (
         <OpenIssuesSection
           rows={data.openIssues.rows}

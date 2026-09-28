@@ -1,5 +1,4 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { SettingsSubPage, SettingsGatedState } from '@/components/settings/settings-sub-page'
 import { MasterDepartmentTable } from '@/components/settings/master-department-table'
@@ -44,7 +43,7 @@ export default async function SettingsMasterDataPage() {
   const gate = await requireSettingsSuperadminPage()
   if (!gate.ok) return <SettingsGatedState reason={gate.reason} title="Master data" />
 
-  const { departments, heads, zones, subDepartments, hubStatuses } = await loadMasterData(
+  const { departments, heads, zones, subDepartments } = await loadMasterData(
     gate.supabase,
     gate.selectedEventId,
   )
@@ -57,7 +56,6 @@ export default async function SettingsMasterDataPage() {
           <TabsTrigger value="sub-departments">Sub-departments</TabsTrigger>
           <TabsTrigger value="zones">Zones</TabsTrigger>
           <TabsTrigger value="admin-heads">Admin heads</TabsTrigger>
-          <TabsTrigger value="hub-status">Hub status</TabsTrigger>
         </TabsList>
 
         <TabsContent value="departments">
@@ -135,47 +133,6 @@ export default async function SettingsMasterDataPage() {
                 <p className="text-sm text-muted-foreground">No admin heads yet.</p>
               ) : (
                 <MasterAdminHeadTable heads={heads} />
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="hub-status">
-          <Card>
-            <CardHeader>
-              <CardTitle>Hub status lifecycle</CardTitle>
-              <CardDescription>
-                This is the Hub-owned status set that staff apply to entries — kept deliberately
-                separate from the status imported from the source system, so a later import can
-                never silently overwrite a human decision.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              {hubStatuses.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No Hub statuses configured yet.</p>
-              ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Order</TableHead>
-                      <TableHead>Code</TableHead>
-                      <TableHead>Label</TableHead>
-                      <TableHead>Exported?</TableHead>
-                      <TableHead>Terminal?</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {hubStatuses.map((status) => (
-                      <TableRow key={status.id}>
-                        <TableCell>{status.sortOrder}</TableCell>
-                        <TableCell>{status.code}</TableCell>
-                        <TableCell>{status.label}</TableCell>
-                        <TableCell>{status.isExportable ? 'Yes' : 'No'}</TableCell>
-                        <TableCell>{status.isTerminal ? 'Yes' : 'No'}</TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
               )}
             </CardContent>
           </Card>

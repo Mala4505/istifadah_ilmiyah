@@ -5,7 +5,7 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { toast } from 'sonner'
 import { toastError } from '@/components/ui/error-toast'
 import { FriendlyError } from '@/components/ui/friendly-error'
-import { Ban, Building2, Download, RotateCcw, Tag } from 'lucide-react'
+import { Ban, Building2, Download, RotateCcw } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -16,7 +16,6 @@ import { EntriesTable } from './entries-table'
 import { StatusCountChips, type EntryStatusCount } from './status-count-chips'
 import { EntryBillKpiBar } from './entry-bill-kpi-bar'
 import type { EntryBillKpis } from '@/lib/documents/entry-bill-kpis'
-import { BulkStatusDialog } from './bulk-status-dialog'
 import { BulkEnrichmentDialog } from './bulk-enrichment-dialog'
 import { BulkVoidDialog } from './bulk-void-dialog'
 import { exportEntriesToCsv } from './csv-export'
@@ -35,8 +34,6 @@ function filtersToSearchParams(filters: EntriesFilters): URLSearchParams {
   if (filters.zone) sp.set('zone', filters.zone)
   if (filters.costCenter) sp.set('cc', filters.costCenter)
   if (filters.status) sp.set('st', filters.status)
-  if (filters.hubStatus) sp.set('hs', filters.hubStatus)
-  if (filters.exportPending) sp.set('exp', '1')
   if (filters.dateFrom) sp.set('from', filters.dateFrom)
   if (filters.dateTo) sp.set('to', filters.dateTo)
   if (filters.vendor) sp.set('vendor', filters.vendor)
@@ -45,6 +42,7 @@ function filtersToSearchParams(filters: EntriesFilters): URLSearchParams {
   if (filters.hasDocument) sp.set('doc', '1')
   if (filters.awaitingDocument) sp.set('abill', '1')
   if (filters.showVoided) sp.set('void', '1')
+  if (filters.unassignedBudgetHead) sp.set('ubh', '1')
   return sp
 }
 
@@ -61,8 +59,6 @@ function searchParamsToFilters(sp: URLSearchParams): EntriesFilters {
     zone: sp.get('zone') ?? sp.get('zone_id') ?? '',
     costCenter: sp.get('cc') ?? sp.get('cost_center_id') ?? '',
     status: sp.get('st') ?? '',
-    hubStatus: sp.get('hs') ?? '',
-    exportPending: sp.get('exp') === '1',
     dateFrom: sp.get('from') ?? '',
     dateTo: sp.get('to') ?? '',
     vendor: sp.get('vendor') ?? '',
@@ -71,6 +67,7 @@ function searchParamsToFilters(sp: URLSearchParams): EntriesFilters {
     hasDocument: sp.get('doc') === '1',
     awaitingDocument: sp.get('abill') === '1',
     showVoided: sp.get('void') === '1',
+    unassignedBudgetHead: sp.get('ubh') === '1',
   }
 }
 
@@ -87,7 +84,6 @@ const SORT_COLUMNS: SortColumn[] = [
   'ubbl_number',
   'main_number',
   'budget_head_short_label',
-  'hub_status_label',
   'document_count',
 ]
 
@@ -163,7 +159,6 @@ export function EntriesExplorer({
   initialOwnDepartmentIds,
   typeCounts,
   statusCounts,
-  hubStatusCounts,
   billKpis,
 }: {
   initialOptions: FilterOptions
@@ -171,7 +166,6 @@ export function EntriesExplorer({
   initialOwnDepartmentIds: number[]
   typeCounts: EntryStatusCount[]
   statusCounts: EntryStatusCount[]
-  hubStatusCounts: EntryStatusCount[]
   billKpis: EntryBillKpis
 }) {
   const supabase = useMemo(() => createClient(), [])
@@ -199,7 +193,6 @@ export function EntriesExplorer({
   const [allMatchingSelected, setAllMatchingSelected] = useState(false)
   const [selectingAll, setSelectingAll] = useState(false)
   const [visibleColumns, setVisibleColumns] = useState<Set<ColumnKey>>(() => defaultVisibleColumns())
-  const [bulkDialogOpen, setBulkDialogOpen] = useState(false)
   const [bulkEnrichDialogOpen, setBulkEnrichDialogOpen] = useState(false)
   const [bulkVoidDialogOpen, setBulkVoidDialogOpen] = useState(false)
   const [exporting, setExporting] = useState(false)
@@ -529,13 +522,10 @@ export function EntriesExplorer({
           <StatusCountChips
             typeCounts={typeCounts}
             statusCounts={statusCounts}
-            hubStatusCounts={hubStatusCounts}
             activeType={filters.type}
             activeStatus={filters.status}
-            activeHubStatus={filters.hubStatus}
             onSelectType={(id) => handleFilterChange({ type: id })}
             onSelectStatus={(id) => handleFilterChange({ status: id })}
-            onSelectHubStatus={(id) => handleFilterChange({ hubStatus: id })}
           />
 
           {selected.size > 0 && (
@@ -552,10 +542,6 @@ export function EntriesExplorer({
               )}
               {canBulkEdit ? (
                 <>
-                  <Button size="sm" className="gap-1.5" onClick={() => setBulkDialogOpen(true)}>
-                    <Tag className="h-3.5 w-3.5" />
-                    Set Hub status…
-                  </Button>
                   <Button
                     size="sm"
                     variant="outline"
@@ -577,7 +563,7 @@ export function EntriesExplorer({
                 </>
               ) : (
                 <span className="text-xs text-muted-foreground">
-                  Your role can view but not change Hub status or enrichment fields.
+                  Your role can view but not change enrichment fields.
                 </span>
               )}
               <Button variant="ghost" size="sm" onClick={clearSelection}>
@@ -634,18 +620,6 @@ export function EntriesExplorer({
           )}
         </>
       )}
-
-      <BulkStatusDialog
-        open={bulkDialogOpen}
-        onOpenChange={setBulkDialogOpen}
-        entryIds={Array.from(selected)}
-        hubStatuses={options.hubStatuses}
-        onDone={() => {
-          clearSelection()
-          restoreTableFocus()
-          void loadFirstPage(filters, sort, pageSize)
-        }}
-      />
 
       <BulkEnrichmentDialog
         open={bulkEnrichDialogOpen}

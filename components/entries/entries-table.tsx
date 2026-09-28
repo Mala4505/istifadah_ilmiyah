@@ -11,7 +11,7 @@ import { SortableTableHead, nextSort } from '@/components/ui/sortable-table-head
 import { cn } from '@/lib/utils'
 import type { ColumnKey, EntriesSort, EntryEnriched, SortColumn } from './types'
 import { ALL_COLUMNS, TYPE_LABELS } from './types'
-import { formatDate, formatMoney, hubStatusBadgeVariant, statusBadgeVariant } from './format'
+import { formatDate, formatMoney, statusBadgeVariant } from './format'
 
 // Click-to-sort (docs/hub-screen-certification.md §3.2). Every key here is
 // also a valid SortColumn (see types.ts) — the strings are identical on
@@ -23,7 +23,6 @@ const SORTABLE_COLUMNS = new Set<ColumnKey>([
   'amount',
   'vendor_display_name',
   'status_label',
-  'hub_status_label',
   'ubbl_number',
   'main_number',
   'budget_head_short_label',
@@ -209,14 +208,6 @@ function renderCell(row: EntryEnriched, key: ColumnKey) {
         <Badge variant={statusBadgeVariant(row.status_label, row.status_code)}>{row.status_label}</Badge>
       ) : (
         '—'
-      )
-    case 'hub_status_label':
-      return <Badge variant={hubStatusBadgeVariant(row.hub_status_code)}>{row.hub_status_label}</Badge>
-    case 'export_pending':
-      return row.hub_status_exported_at === null && row.hub_status_code !== 'not_set' ? (
-        <Badge variant="warning">Pending</Badge>
-      ) : (
-        <span className="text-muted-foreground">—</span>
       )
     case 'document_count':
       // >0 → the count; 0 on a live entry → it is still waiting for a bill

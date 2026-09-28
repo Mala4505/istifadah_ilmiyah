@@ -1,6 +1,6 @@
 import { friendlyDataError } from '@/lib/friendly-error'
 import Link from 'next/link'
-import { ScanLine, TriangleAlert, Wallet, UploadCloud, FileScan, ArrowRight, ListChecks, Tag } from 'lucide-react'
+import { ScanLine, TriangleAlert, Wallet, UploadCloud, FileScan, ArrowRight, ListChecks } from 'lucide-react'
 import { createClient, getCachedUser } from '@/lib/supabase/server'
 import { getCachedStaffProfile } from '@/lib/export/auth'
 import { getSelectedEventId } from '@/lib/events/current'
@@ -27,7 +27,7 @@ type BudgetVsActualRow = {
 }
 type ImportBatchRow = { id: number; row_count: number | null; mode: string; status: string }
 type EntryStatusCountRow = {
-  dimension: 'status' | 'hub_status'
+  dimension: 'status'
   status_id: number | null
   status_code: string
   status_label: string
@@ -146,7 +146,6 @@ async function loadDashboardData() {
     unmatchedDocsError: friendlyDataError(unmatchedDocsRes.error, 'dashboard:unmatchedDocsRes'),
 
     statusCounts: toStatusCounts('status'),
-    hubStatusCounts: toStatusCounts('hub_status'),
     statusCountsError: friendlyDataError(statusCountsRes.error, 'dashboard:statusCountsRes'),
 
     isAdmin,
@@ -254,7 +253,7 @@ export default async function DashboardPage() {
       <DashboardSection
         icon={ListChecks}
         title="Entries overview"
-        description="Original status comes straight from the Departmental import and Audit-portal scrape, and can't be changed here. Current status is the one this app updates — and the only thing ever exported back out. Every count links to the matching filter on Entries."
+        description="Status comes straight from the Departmental import and Audit-portal scrape, and can't be changed here. Every count links to the matching filter on Entries."
         aside={
           // Running an import is admin-only (§4.4c), and /import refuses
           // everyone else server-side — a department account would only ever
@@ -286,20 +285,11 @@ export default async function DashboardPage() {
         ) : (
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
             <StatusCountCard
-              title="Original status"
+              title="Status"
               icon={ListChecks}
               rows={data.statusCounts}
               paramKey="st"
               variantFor={dashboardStatusBadgeVariant}
-              emptyHint="No entries imported yet."
-            />
-            <StatusCountCard
-              title="Current status"
-              icon={Tag}
-              rows={data.hubStatusCounts}
-              paramKey="hs"
-              variantFor={dashboardStatusBadgeVariant}
-              emphasizeCodes={['awaiting_verification', 'awaiting_validation']}
               emptyHint="No entries imported yet."
             />
           </div>

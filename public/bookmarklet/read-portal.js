@@ -428,6 +428,121 @@
       .catch(onError)
   }
 
+  // Mirrors components/import/import-workspace.tsx's PORTAL_CHUNK_SIZE. Keep
+  // the two in sync -- both exist to keep one request's wall time well under
+  // any request-timeout ceiling at the measured per-row DB cost.
+  var CHUNK_SIZE = 75
+
+  function chunkRows(rows, size) {
+    var out = []
+    for (var i = 0; i < rows.length; i += size) out.push(rows.slice(i, i + size))
+    return out
+  }
+
+  // Not cryptographically random -- doesn't need to be. Only has to be
+  // distinct enough to correlate this scrape's own chunks server-side
+  // (scrapeSessionId, see supabase/migrations/20260927000001's header) and
+  // fit the API's 100-char cap. Hand-rolled rather than crypto.randomUUID()
+  // since this script runs on whatever browser the PORTAL happens to be
+  // opened in, not a browser this codebase controls.
+  function randomSessionId() {
+    var s = ''
+    for (var i = 0; i < 16; i++) s += Math.floor(Math.random() * 36).toString(36)
+    return s + Date.now().toString(36)
+  }
+
+  function mergeSummary(target, part) {
+    for (var k in part) {
+      if (Object.prototype.hasOwnProperty.call(part, k)) target[k] = (target[k] || 0) + part[k]
+    }
+  }
+
+  /**
+   * Sequentially POSTs `payload.rows` in CHUNK_SIZE-row requests instead of
+   * one request carrying the whole scrape.
+   *
+   * This runs from the PORTAL's own tab/network, not the Hub's -- the same
+   * "several DB round trips per row" cost PORTAL_CHUNK_SIZE's comment
+   * describes applies here too, and a browser `fetch` has NO built-in
+   * timeout: a giant single request just hangs, sometimes for a very long
+   * time, before the network finally gives up and rejects it. Only then does
+   * onPostFailure below run and hand the operator the fallback .json file --
+   * so what looks like "the download takes hours" was actually "the direct
+   * upload attempt takes hours to finally fail". Chunking surfaces a real
+   * failure (a CSP block, a dropped connection) on the FIRST small request,
+   * in seconds, and a scrape that succeeds chunked often never needs the
+   * fallback file at all.
+   *
+   * A scrape at or under CHUNK_SIZE skips all of this and posts exactly as
+   * before -- one request, no session id, identical to pre-chunking
+   * behaviour and to how the Hub's own fallback upload treats a small file.
+   */
+  function postChunked(payload, mode, onProgress, onResult, onError) {
+    var rows = payload.rows
+    if (rows.length <= CHUNK_SIZE) {
+      post(payload, mode, onResult, function (error) {
+        onError(error, 0, rows.length)
+      })
+      return
+    }
+
+    var sessionId = randomSessionId()
+    var chunks = chunkRows(rows, CHUNK_SIZE)
+    var combined = null
+    var rowsDone = 0
+
+    function chunkPayload(chunk, isFinal) {
+      var p = {}
+      for (var k in payload) if (Object.prototype.hasOwnProperty.call(payload, k)) p[k] = payload[k]
+      p.rows = chunk
+      p.scrapeSessionId = sessionId
+      p.isFinalChunk = isFinal
+      return p
+    }
+
+    function step(i) {
+      onProgress(i + 1, chunks.length, rowsDone, rows.length)
+      var chunk = chunks[i]
+      var isFinal = i === chunks.length - 1
+
+      post(
+        chunkPayload(chunk, isFinal),
+        mode,
+        function (result) {
+          if (!combined) {
+            combined = result
+            combined.rowCount = 0
+            combined.summary = {}
+            combined.warnings = []
+            combined.exceptions = []
+          } else if (result.status === 'failed') {
+            combined.status = 'failed'
+            combined.errorMessage = result.errorMessage
+          } else if (combined.status !== 'failed' && result.status === 'completed_with_exceptions') {
+            combined.status = 'completed_with_exceptions'
+          }
+          combined.batchId = result.batchId
+          combined.rowCount += result.rowCount || 0
+          mergeSummary(combined.summary, result.summary || {})
+          combined.warnings = combined.warnings.concat(result.warnings || [])
+          combined.exceptions = combined.exceptions.concat(result.exceptions || [])
+
+          rowsDone += chunk.length
+          if (i + 1 < chunks.length) {
+            step(i + 1)
+          } else {
+            onResult(combined)
+          }
+        },
+        function (error) {
+          onError(error, rowsDone, rows.length)
+        }
+      )
+    }
+
+    step(0)
+  }
+
   // -------------------------------------------------------------------------
   // Go
   // -------------------------------------------------------------------------
@@ -489,7 +604,30 @@
           var commitBtn = document.getElementById('ih-commit-direct')
           if (!previewBtn || !commitBtn) return
 
-          function onPostFailure(error) {
+          // Re-renders the busy overlay with how far a multi-chunk upload has
+          // gotten. No-ops for a scrape at or under CHUNK_SIZE (postChunked
+          // never calls back more than once for those), so the plain
+          // "Previewing…"/"Committing…" label is untouched for the common
+          // small-scrape case.
+          function chunkProgress(verb) {
+            return function (chunkIndex, totalChunks, rowsDone, rowsTotal) {
+              if (totalChunks <= 1) return
+              busy(
+                verb +
+                  ' — chunk ' +
+                  chunkIndex +
+                  ' of ' +
+                  totalChunks +
+                  ' (' +
+                  rowsDone +
+                  ' of ' +
+                  rowsTotal +
+                  ' rows sent)…'
+              )
+            }
+          }
+
+          function onPostFailure(error, rowsDone, rowsTotal) {
             stopBusy()
             // The likely cause is the portal's own `connect-src` CSP blocking
             // the upload, which no amount of retrying fixes — hand the
@@ -499,24 +637,40 @@
             // it goes behind a collapsed detail rather than being the
             // headline — same convention the Hub itself uses for extraction
             // failures (components/documents/document-card.tsx).
+            //
+            // rowsDone > 0 means at least one earlier chunk of THIS scrape
+            // already posted successfully — not a CSP block (that would have
+            // failed on the very first chunk), more likely a connection that
+            // dropped partway. Said plainly rather than blamed on the portal,
+            // since blaming the wrong thing here sends an operator chasing a
+            // CSP setting that was never the problem.
             var saved = download(payload)
+            var headline =
+              rowsDone > 0
+                ? '<div style="color:#b91c1c;margin-bottom:4px">The connection dropped partway — ' +
+                  esc(rowsDone) +
+                  ' of ' +
+                  esc(rowsTotal) +
+                  ' rows were already sent successfully before this happened.</div>'
+                : '<div style="color:#b91c1c;margin-bottom:4px">This portal is blocking the direct connection to the Hub.</div>'
             ui(
-              '<div style="color:#b91c1c;margin-bottom:4px">This portal is blocking the direct connection to the Hub.</div>' +
+              headline +
                 '<details style="margin-bottom:8px"><summary style="cursor:pointer;color:#71717a">Technical detail</summary>' +
                 '<div style="color:#71717a;margin-top:4px">' +
                 esc(error.message) +
                 '</div></details>' +
                 (saved
-                  ? '<div>The rows were downloaded as a .json file instead — drop it on the Hub&rsquo;s Import page, in the same box you drop .xlsx files into. It runs the same preview-then-commit flow.</div>'
+                  ? '<div>The rows were downloaded as a .json file instead — drop it on the Hub&rsquo;s Import page, in the same box you drop .xlsx files into. It runs the same preview-then-commit flow. Already-sent rows update harmlessly if you drop the full file, so nothing here needs sorting out by hand.</div>'
                   : '<div>Saving a file also failed. Copy the rows manually and paste them into the Hub instead.</div>')
             )
           }
 
           previewBtn.onclick = function () {
             busy('Previewing…')
-            post(
+            postChunked(
               payload,
               'dry_run',
+              chunkProgress('Previewing'),
               function (result) {
                 stopBusy()
                 // A failed dry run means the same commit would hit the same
@@ -537,9 +691,10 @@
                       if (!btn) return
                       btn.onclick = function () {
                         busy('Committing…')
-                        post(
+                        postChunked(
                           payload,
                           'commit',
+                          chunkProgress('Committing'),
                           function (committed) {
                             stopBusy()
                             // A well-formed `status: 'failed'` result (a data
@@ -553,8 +708,23 @@
                                 (committed.status === 'failed' ? '' : savedMessage())
                             )
                           },
-                          function (error) {
-                            fail('Commit failed: ' + error.message)
+                          function (error, rowsDone, rowsTotal) {
+                            stopBusy()
+                            // The preview that got us here just succeeded over
+                            // this same connection, so this is not a CSP block
+                            // — no file-download fallback offered, just what
+                            // happened and whether it's safe to retry.
+                            fail(
+                              rowsDone > 0
+                                ? 'Commit failed partway — ' +
+                                    rowsDone +
+                                    ' of ' +
+                                    rowsTotal +
+                                    ' rows were already committed successfully before this happened (' +
+                                    error.message +
+                                    '). Safe to try again: re-committing an already-saved row just updates it harmlessly.'
+                                : 'Commit failed: ' + error.message
+                            )
                           }
                         )
                       }
@@ -568,9 +738,10 @@
 
           commitBtn.onclick = function () {
             busy('Committing…')
-            post(
+            postChunked(
               payload,
               'commit',
+              chunkProgress('Committing'),
               function (committed) {
                 stopBusy()
                 ui(

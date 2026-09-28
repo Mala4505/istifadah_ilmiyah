@@ -59,7 +59,6 @@ import { TallyFooter } from './tally-footer'
 import { ClaimBanner } from './claim-banner'
 import { ShortcutsOverlay } from './shortcuts-overlay'
 import { ExceptionDialog } from './exception-dialog'
-import { HubStatusDialog } from './hub-status-dialog'
 import { ReviewStatusLine, type StageStatus } from './review-status-line'
 
 // Perf audit 3.1: pdf-viewer.tsx wraps pdf.js (worker/wasm assets) -- eagerly
@@ -926,7 +925,6 @@ export function ReviewWorkspace({
 
   const [shortcutsOpen, setShortcutsOpen] = useState(false)
   const [exceptionOpen, setExceptionOpen] = useState(false)
-  const [hubStatusOpen, setHubStatusOpen] = useState(false)
   const [reExtracting, setReExtracting] = useState(false)
   const [addingLineItem, setAddingLineItem] = useState(false)
   // Phase 4 (§2.6): the one uncertain header field currently being
@@ -1582,16 +1580,6 @@ export function ReviewWorkspace({
     setVendorAliasPrompt(null)
   }
 
-  function openHubStatus() {
-    if (!detail.canSetHubStatus || detail.entryId === null) {
-      toast.error(
-        'This document is not matched to an entry yet, so there is no Hub status to set. Connect it to a ledger entry first.'
-      )
-      return
-    }
-    setHubStatusOpen(true)
-  }
-
   // Global keyboard contract (§7, remapped per plan §2.1). Cmd/Ctrl-Enter
   // saves everywhere, including inside a field. Everything else only fires
   // when focus sits somewhere "safe" (isSafeShortcutTarget -- body, or an
@@ -1681,11 +1669,6 @@ export function ReviewWorkspace({
       if (matchesBinding(e, keymap.reExtract)) {
         e.preventDefault()
         requestReExtract()
-        return
-      }
-      if (matchesBinding(e, keymap.openHubStatus)) {
-        e.preventDefault()
-        openHubStatus()
         return
       }
       if (matchesBinding(e, keymap.openVendorAutocomplete)) {
@@ -1794,14 +1777,6 @@ export function ReviewWorkspace({
   if (detail.legibility) toolbarInfoParts.push(detail.legibility)
   if (editedFieldCount > 0) toolbarInfoParts.push(`${editedFieldCount} changed from OCR`)
   if (detail.billCount > 1) toolbarInfoParts.push(`Bill ${detail.billIndex + 1} of ${detail.billCount} in this PDF`)
-  // Hub cert 2.6: the Hub status is loaded (detail.hubStatusCode) but was
-  // never surfaced anywhere the reviewer can see without opening the Hub
-  // status dialog. Show its human label when set.
-  if (detail.hubStatusCode) {
-    const hubStatusLabel =
-      detail.hubStatusOptions.find((o) => o.code === detail.hubStatusCode)?.label ?? detail.hubStatusCode
-    toolbarInfoParts.push(`Hub: ${hubStatusLabel}`)
-  }
   const toolbarInfoText = toolbarInfoParts.join(' · ')
 
   // 2026-09-12 (overwhelm fix): a single messy scan can trip several
@@ -1925,9 +1900,6 @@ export function ReviewWorkspace({
               {reExtracting
                 ? 'Re-extracting…'
                 : `Re-extract with Sonnet (${formatBinding(keymap.reExtract)})`}
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={openHubStatus} disabled={!detail.canSetHubStatus || formDisabled}>
-              Hub status ({formatBinding(keymap.openHubStatus)})
             </DropdownMenuItem>
             <DropdownMenuItem onClick={() => setShortcutsOpen(true)}>
               Shortcuts ({formatBinding(keymap.toggleHelp)})
@@ -2292,16 +2264,6 @@ export function ReviewWorkspace({
         entryId={detail.entryId}
         onFlagged={() => router.refresh()}
       />
-      {detail.entryId !== null ? (
-        <HubStatusDialog
-          open={hubStatusOpen}
-          onOpenChange={setHubStatusOpen}
-          entryId={detail.entryId}
-          currentCode={detail.hubStatusCode}
-          options={detail.hubStatusOptions}
-          onChanged={() => router.refresh()}
-        />
-      ) : null}
     </div>
   )
 }

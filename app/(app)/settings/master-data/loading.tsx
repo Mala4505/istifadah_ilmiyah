@@ -5,7 +5,7 @@ import { Card, CardContent } from '@/components/ui/card'
  * Next.js's built-in loading convention (house style: settings/loading.tsx,
  * settings/users/loading.tsx). Shown while
  * app/(app)/settings/master-data/page.tsx (force-dynamic) re-renders its
- * per-department master rows and the Hub-status lifecycle table server-side.
+ * per-department master rows server-side.
  */
 export default function SettingsMasterDataLoading() {
   return (

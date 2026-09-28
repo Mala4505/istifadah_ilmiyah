@@ -2,7 +2,7 @@
  * Data loader for the Integrity surface (reporting-blueprint.md §5: the
  * review function's view -- what the modules are waiting on, what is flagged,
  * and where money could be leaking). Carries the former page.tsx sections:
- * Hub-status ageing, open issues digest, and compliance & leakage.
+ * open issues digest, and compliance & leakage.
  *
  * Split out of the monolithic loadReportsData / loadAnalyticsData so this
  * surface queries only its own three views (§8 Phase Three: "Page weight and
@@ -34,7 +34,6 @@ import {
   ROW_CAP,
   buildTrailingWeeklySeries,
   round2Local,
-  type HubAgeingRow,
   type OpenIssueRow,
   type ComplianceRow,
   type ExceptionHeatmapRow,
@@ -47,13 +46,6 @@ import { resolvePreviousEvent } from '@/lib/reports/sections/resolve-previous-ev
 // so the overview pages (which don't hold row-level data) can show the same
 // takeaway the full section's own sentence helper renders. Returns null when
 // there's nothing worth saying rather than forcing a sentence out of nothing.
-
-function hubAgeingInsight(rows: HubAgeingRow[], buckets: { '0-2': number; '3-7': number; '8+': number }): string | null {
-  if (rows.length === 0) return null
-  if (buckets['8+'] === 0) return `${formatNumber(rows.length)} entries are awaiting review, none older than 7 days.`
-  const share8Plus = (buckets['8+'] / rows.length) * 100
-  return `${formatNumber(buckets['8+'])} entries (${Math.round(share8Plus)}% of the queue) have been waiting 8+ days.`
-}
 
 function openIssuesInsight(rows: OpenIssueRow[]): string | null {
   if (rows.length === 0) return null
@@ -116,14 +108,6 @@ export type IntegritySurfaceData = {
   /** Prior-event query round error, surfaced as one page-level line (mirrors
    *  the former page.tsx's single `priorEvent.error` line). */
   priorError: string | null
-  hubAgeing: {
-    rows: HubAgeingRow[]
-    error: string | null
-    buckets: { '0-2': number; '3-7': number; '8+': number }
-    series: number[]
-    previousCount: number | null
-    insight: string | null
-  }
   openIssues: {
     rows: OpenIssueRow[]
     error: string | null
@@ -161,8 +145,6 @@ export type IntegritySurfaceData = {
   }
 }
 
-const AGEING_SELECT =
-  'entry_id, department_id, ubbl_number, hub_status_code, hub_status_label, hub_status_changed_at, days_in_status, age_bucket'
 const ISSUES_SELECT =
   'source_table, id, entry_id, issue_type, severity, amount_at_risk, description, status, created_at'
 const COMPLIANCE_SELECT =
@@ -191,14 +173,7 @@ export async function loadIntegritySurface(
   const supabase = await createClient()
   const eventId = selectedEvent?.id ?? null
 
-  const [ageingRes, issuesRes, complianceRes, heatmapRes, atRiskRes] = await Promise.all([
-    supabase
-      .from('v_hub_status_ageing')
-      .select(AGEING_SELECT)
-      .eq('event_id', eventId)
-      .order('days_in_status', { ascending: false })
-      .limit(ROW_CAP)
-      .returns<HubAgeingRow[]>(),
+  const [issuesRes, complianceRes, heatmapRes, atRiskRes] = await Promise.all([
     // Phase 0 §0.2: keep rows whose event can't be resolved (document-/
     // batch-level exceptions, vendor-level flags) regardless of the active
     // event -- a plain `.eq('event_id', eventId)` silently drops them.
@@ -243,19 +218,11 @@ export async function loadIntegritySurface(
           .returns<AmountAtRiskByStatusRow[]>(),
   ])
 
-  const ageingRows = ageingRes.data ?? []
   const issueRows = issuesRes.data ?? []
   const complianceRows = complianceRes.data ?? []
   const heatmapRows = heatmapRes.data ?? []
   const atRiskRows = atRiskRes.data ?? []
 
-  const ageingBuckets = {
-    '0-2': ageingRows.filter((r) => r.age_bucket === '0-2').length,
-    '3-7': ageingRows.filter((r) => r.age_bucket === '3-7').length,
-    '8+': ageingRows.filter((r) => r.age_bucket === '8+').length,
-  }
-
-  const ageingSeries = buildTrailingWeeklySeries(ageingRows, (r) => r.hub_status_changed_at, (rs) => rs.length)
   const issuesSeries = buildTrailingWeeklySeries(
     issueRows,
     (r) => r.created_at,
@@ -285,12 +252,10 @@ export async function loadIntegritySurface(
 
   const previousEvent = await resolvePreviousEvent(supabase, compareBasis, eventId)
   let prior: {
-    ageingCount: number | null
     issuesAtRisk: number | null
     complianceAtRisk: number | null
     heatmapAtRisk: number | null
   } = {
-    ageingCount: null,
     issuesAtRisk: null,
     complianceAtRisk: null,
     heatmapAtRisk: null,
@@ -298,13 +263,7 @@ export async function loadIntegritySurface(
   let priorError: string | null = null
 
   if (previousEvent) {
-    const [pAgeing, pIssues, pCompliance, pHeatmap] = await Promise.all([
-      supabase
-        .from('v_hub_status_ageing')
-        .select('age_bucket')
-        .eq('event_id', previousEvent.id)
-        .limit(ROW_CAP)
-        .returns<{ age_bucket: string }[]>(),
+    const [pIssues, pCompliance, pHeatmap] = await Promise.all([
       // previousEvent.id is never null here (resolvePreviousEvent guards it),
       // so the `.or()` branch always applies -- same shape as above.
       supabase
@@ -327,26 +286,16 @@ export async function loadIntegritySurface(
         .returns<{ amount_at_risk: number | null }[]>(),
     ])
     priorError =
-      friendlyDataError(pAgeing.error, 'reports:integrity:priorAgeing') ??
       friendlyDataError(pIssues.error, 'reports:integrity:priorIssues') ??
       friendlyDataError(pCompliance.error, 'reports:integrity:priorCompliance') ??
       friendlyDataError(pHeatmap.error, 'reports:integrity:priorHeatmap')
     prior = {
-      ageingCount: (pAgeing.data ?? []).length,
       issuesAtRisk: sumBy(pIssues.data, 'amount_at_risk'),
       complianceAtRisk: sumBy(pCompliance.data, 'amount_at_risk'),
       heatmapAtRisk: sumBy(pHeatmap.data, 'amount_at_risk'),
     }
   }
 
-  const ageingPrevious =
-    compareBasis === 'prior_event'
-      ? prior.ageingCount
-      : compareBasis === 'prior_week'
-        ? ageingRows.filter(
-            (r) => r.hub_status_changed_at != null && new Date(r.hub_status_changed_at) <= priorWeekCutoff
-          ).length
-        : null
   const issuesPrevious =
     compareBasis === 'prior_event'
       ? prior.issuesAtRisk
@@ -366,14 +315,6 @@ export async function loadIntegritySurface(
     eventName: selectedEvent?.name ?? null,
     previousEventName: previousEvent?.name ?? null,
     priorError,
-    hubAgeing: {
-      rows: ageingRows,
-      error: friendlyDataError(ageingRes.error, 'reports:integrity:ageing'),
-      buckets: ageingBuckets,
-      series: ageingSeries,
-      previousCount: ageingPrevious,
-      insight: hubAgeingInsight(ageingRows, ageingBuckets),
-    },
     openIssues: {
       rows: issueRows,
       error: friendlyDataError(issuesRes.error, 'reports:integrity:issues'),

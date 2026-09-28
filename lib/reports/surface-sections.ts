@@ -70,7 +70,6 @@ const VENDORS_SECTIONS: ReportSectionRef[] = [
 ]
 
 const INTEGRITY_SECTIONS: ReportSectionRef[] = [
-  { id: 'hub-status-ageing', label: 'Hub-status Ageing' },
   { id: 'open-issues', label: 'Open Issues' },
   { id: 'open-item-ageing', label: 'Open-item Ageing' },
   { id: 'compliance', label: 'Compliance & Leakage' },
@@ -95,7 +94,6 @@ const EXPLORE_SECTIONS: ReportSectionRef[] = [
   { id: 'department-budget-explorer', label: 'Department Budget Explorer' },
   { id: 'vendor-spend', label: 'Vendor Spend' },
   { id: 'zone-spend', label: 'Spend by Zone' },
-  { id: 'hub-status-ageing', label: 'Hub-status Ageing' },
   { id: 'open-issues', label: 'Open Issues' },
   { id: 'compliance', label: 'Compliance & Leakage' },
   { id: 'spend-by-family', label: 'Spend by Item Family' },

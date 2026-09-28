@@ -132,9 +132,10 @@ export interface BulkAttachResult {
  * Bulk-attach across multiple documents to their respective (suggested or
  * hand-picked) entries in one UI action (§11.2 Day 3: "bulk attach"). Each
  * pair targets a different entry, so this cannot be a single `.in()`
- * update — it is one update per pair, same as setHubStatus's per-row
- * partial-success accounting: a document that fails (permission, RLS
- * visibility, or a bad id) is reported, not silently dropped.
+ * update — it is one update per pair, with the same per-row
+ * partial-success accounting other bulk actions in this codebase use: a
+ * document that fails (permission, RLS visibility, or a bad id) is
+ * reported, not silently dropped.
  */
 export async function bulkAttachDocuments(pairs: BulkAttachPair[]): Promise<BulkAttachResult> {
   const cleanPairs = pairs.filter(

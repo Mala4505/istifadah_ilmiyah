@@ -3,7 +3,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 
 /**
  * Perf audit Phase 2 (docs/perf-ux-audit-checklist.md): department, budget
- * head, admin head, zone, cost center, entry status, and hub status barely
+ * head, admin head, zone, cost center, and entry status barely
  * change (a handful of times a term per the checklist) but were re-queried
  * from Postgres on every navigation. Cached here with a short revalidate
  * window and invalidated eagerly by the admin mutations that change them
@@ -15,7 +15,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
  * RLS split (supabase/migrations/20260808000026_rls_policies.sql,
  * 20260819000003_role_rbac_v2.sql, 20260913000001_admin_head_zone_drop_department.sql)
  * matters here: `department`, `admin_head`, `zone`, `cost_center`,
- * `entry_status`, and `hub_status` all gate on `private.is_staff()` only --
+ * and `entry_status` all gate on `private.is_staff()` only --
  * every authenticated staff member reads the same rows, so one cache entry
  * serves everyone. `budget_head` alone still additionally gates through
  * `private.can_see_department()` (nullable department_id: `department_id is
@@ -54,7 +54,6 @@ export const REFERENCE_DATA_TAGS = {
   zone: 'ref:zone',
   costCenter: 'ref:cost_center',
   entryStatus: 'ref:entry_status',
-  hubStatus: 'ref:hub_status',
   entryType: 'ref:entry_type',
 } as const
 
@@ -94,14 +93,6 @@ export interface CachedEntryStatus {
   id: number
   code: string
   label: string
-}
-
-export interface CachedHubStatus {
-  id: number
-  code: string
-  label: string
-  sort_order: number
-  is_exportable: boolean
 }
 
 export interface CachedEntryType {
@@ -145,20 +136,6 @@ export function getCachedEntryStatuses(supabase: SupabaseClient): Promise<Cached
     },
     ['ref-entry-status'],
     { revalidate: REVALIDATE_SECONDS, tags: [REFERENCE_DATA_TAGS.entryStatus] }
-  )()
-}
-
-export function getCachedHubStatuses(supabase: SupabaseClient): Promise<CachedHubStatus[]> {
-  return unstable_cache(
-    async () => {
-      const { data } = await supabase
-        .from('hub_status')
-        .select('id,code,label,sort_order,is_exportable')
-        .order('sort_order')
-      return (data ?? []) as CachedHubStatus[]
-    },
-    ['ref-hub-status'],
-    { revalidate: REVALIDATE_SECONDS, tags: [REFERENCE_DATA_TAGS.hubStatus] }
   )()
 }
 
