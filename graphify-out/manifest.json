@@ -1,0 +1,3367 @@
+{
+  "M:\\Projects\\Istifadah Ilmiyah\\.graphify_detect.json": {
+    "mtime": 1790648984.0406742,
+    "ast_hash": "6b94e839882116f72d7de5fd49c9d1fd",
+    "semantic_hash": "6b94e839882116f72d7de5fd49c9d1fd"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\.mcp.json": {
+    "mtime": 1786191227.3454852,
+    "ast_hash": "37f9f49f90e707acdf627d5df127d6a3",
+    "semantic_hash": "37f9f49f90e707acdf627d5df127d6a3"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\app\\(app)\\accuracy\\loading.tsx": {
+    "mtime": 1789214225.6955633,
+    "ast_hash": "623e012930aaf43c3d2f8897acb17705",
+    "semantic_hash": "623e012930aaf43c3d2f8897acb17705"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\app\\(app)\\accuracy\\page.tsx": {
+    "mtime": 1789214225.698107,
+    "ast_hash": "b69cc57af9c247d8be7033847dfd7733",
+    "semantic_hash": "b69cc57af9c247d8be7033847dfd7733"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\app\\(app)\\documents\\loading.tsx": {
+    "mtime": 1789214225.6987152,
+    "ast_hash": "7c0250c5d5a0d6f541cda22be0bb9dec",
+    "semantic_hash": "7c0250c5d5a0d6f541cda22be0bb9dec"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\app\\(app)\\documents\\page.tsx": {
+    "mtime": 1789730966.1091058,
+    "ast_hash": "9fe37ae29c1a644609d5b8d186852b05",
+    "semantic_hash": "9fe37ae29c1a644609d5b8d186852b05"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\app\\(app)\\documents\\workload\\loading.tsx": {
+    "mtime": 1789214225.702752,
+    "ast_hash": "442e30eeb1ffd1e2bdf7333b28c77df2",
+    "semantic_hash": "442e30eeb1ffd1e2bdf7333b28c77df2"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\app\\(app)\\documents\\workload\\page.tsx": {
+    "mtime": 1789214225.702752,
+    "ast_hash": "6935737575eb46615237ac4488a41c2a",
+    "semantic_hash": "6935737575eb46615237ac4488a41c2a"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\app\\(app)\\entries\\[id]\\loading.tsx": {
+    "mtime": 1786201178.012249,
+    "ast_hash": "f125f59f4e1247b8ffa193fb8a56d3c7",
+    "semantic_hash": "f125f59f4e1247b8ffa193fb8a56d3c7"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\app\\(app)\\entries\\[id]\\page.tsx": {
+    "mtime": 1790592655.9168363,
+    "ast_hash": "4f98730621ae6821acb386a879f6739f",
+    "semantic_hash": "4f98730621ae6821acb386a879f6739f"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\app\\(app)\\entries\\loading.tsx": {
+    "mtime": 1789214225.7057493,
+    "ast_hash": "3a3309520cfb82f4b3ba71378d166475",
+    "semantic_hash": "3a3309520cfb82f4b3ba71378d166475"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\app\\(app)\\entries\\page.tsx": {
+    "mtime": 1790592627.1252458,
+    "ast_hash": "3ba656fc5d1c3e3cc6737ecfb166babe",
+    "semantic_hash": "3ba656fc5d1c3e3cc6737ecfb166babe"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\app\\(app)\\exceptions\\loading.tsx": {
+    "mtime": 1789214225.7067504,
+    "ast_hash": "acca754e7c7db2a40609e1a1a47e784b",
+    "semantic_hash": "acca754e7c7db2a40609e1a1a47e784b"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\app\\(app)\\exceptions\\page.tsx": {
+    "mtime": 1789399852.6822772,
+    "ast_hash": "fb429c92c6a5bbebabf437c1563c9a5f",
+    "semantic_hash": "fb429c92c6a5bbebabf437c1563c9a5f"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\app\\(app)\\import\\bookmarklet\\loading.tsx": {
+    "mtime": 1789214225.71283,
+    "ast_hash": "b428b3bde19872b031a2d9bdcabf1b3e",
+    "semantic_hash": "b428b3bde19872b031a2d9bdcabf1b3e"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\app\\(app)\\import\\bookmarklet\\page.tsx": {
+    "mtime": 1786623766.8372757,
+    "ast_hash": "583d74a0f8ddcedfb1c61b1c82dd24f0",
+    "semantic_hash": "583d74a0f8ddcedfb1c61b1c82dd24f0"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\app\\(app)\\import\\loading.tsx": {
+    "mtime": 1789214225.7148278,
+    "ast_hash": "4d22a9ecc9140403375d5973d61756ad",
+    "semantic_hash": "4d22a9ecc9140403375d5973d61756ad"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\app\\(app)\\import\\page.tsx": {
+    "mtime": 1789214225.715829,
+    "ast_hash": "5457b3c28ee5787fc0e54a4cecdf1048",
+    "semantic_hash": "5457b3c28ee5787fc0e54a4cecdf1048"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\app\\(app)\\layout.tsx": {
+    "mtime": 1789214225.716829,
+    "ast_hash": "67fb356c7a6e72774ca2aaa3055747d1",
+    "semantic_hash": "67fb356c7a6e72774ca2aaa3055747d1"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\app\\(app)\\loading.tsx": {
+    "mtime": 1789214225.7183406,
+    "ast_hash": "7c2156ad5c6e4c95cdce85cd0d82e6f1",
+    "semantic_hash": "7c2156ad5c6e4c95cdce85cd0d82e6f1"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\app\\(app)\\page.tsx": {
+    "mtime": 1790592993.5352237,
+    "ast_hash": "4126373275cc3675f11f5536ef05ad7a",
+    "semantic_hash": "4126373275cc3675f11f5536ef05ad7a"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\app\\(app)\\reports\\board-pack-actions.ts": {
+    "mtime": 1789214225.724361,
+    "ast_hash": "c03107f0e80f98614fadcee4b2f7b3f6",
+    "semantic_hash": "c03107f0e80f98614fadcee4b2f7b3f6"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\app\\(app)\\reports\\brief\\loading.tsx": {
+    "mtime": 1789214225.7253635,
+    "ast_hash": "efcb1da36211b8bf00a35e90b09b1eb8",
+    "semantic_hash": "efcb1da36211b8bf00a35e90b09b1eb8"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\app\\(app)\\reports\\brief\\page.tsx": {
+    "mtime": 1789214225.7298858,
+    "ast_hash": "a5a52d9ceef95b83b6f6a73987510e9f",
+    "semantic_hash": "a5a52d9ceef95b83b6f6a73987510e9f"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\app\\(app)\\reports\\budget\\loading.tsx": {
+    "mtime": 1789214225.7309022,
+    "ast_hash": "b5d2e86a59f80d0a02650282b01fd730",
+    "semantic_hash": "b5d2e86a59f80d0a02650282b01fd730"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\app\\(app)\\reports\\budget\\page.tsx": {
+    "mtime": 1790397380.2966917,
+    "ast_hash": "eb72ad2f427fb31cb79ba1650d2dda55",
+    "semantic_hash": "eb72ad2f427fb31cb79ba1650d2dda55"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\app\\(app)\\reports\\error.tsx": {
+    "mtime": 1789214225.7323003,
+    "ast_hash": "b0fd88a40c607274f4b6933ddca460ad",
+    "semantic_hash": "b0fd88a40c607274f4b6933ddca460ad"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\app\\(app)\\reports\\integrity\\loading.tsx": {
+    "mtime": 1789214225.734358,
+    "ast_hash": "a38ba33314ac52e2fac74789f0283884",
+    "semantic_hash": "a38ba33314ac52e2fac74789f0283884"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\app\\(app)\\reports\\integrity\\page.tsx": {
+    "mtime": 1790592960.068496,
+    "ast_hash": "d89e6439b143b794e0247ff0dcf5ae55",
+    "semantic_hash": "d89e6439b143b794e0247ff0dcf5ae55"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\app\\(app)\\reports\\layout.tsx": {
+    "mtime": 1789214225.7388947,
+    "ast_hash": "d59c89d2caa9b2ba3261fcec3223eb92",
+    "semantic_hash": "d59c89d2caa9b2ba3261fcec3223eb92"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\app\\(app)\\reports\\loading.tsx": {
+    "mtime": 1789214225.739896,
+    "ast_hash": "f0469d6091b7bba584b31b3d3f3c3391",
+    "semantic_hash": "f0469d6091b7bba584b31b3d3f3c3391"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\app\\(app)\\reports\\page.tsx": {
+    "mtime": 1790592933.3260577,
+    "ast_hash": "902f6b5e0079192c9a3a66b65a88c978",
+    "semantic_hash": "902f6b5e0079192c9a3a66b65a88c978"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\app\\(app)\\reports\\vendors\\loading.tsx": {
+    "mtime": 1789214225.7449074,
+    "ast_hash": "ec3815683b57c06487616b353beb7f55",
+    "semantic_hash": "ec3815683b57c06487616b353beb7f55"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\app\\(app)\\reports\\vendors\\page.tsx": {
+    "mtime": 1789214225.7459044,
+    "ast_hash": "eeb75fc7fcad1bb756735f7598e8e507",
+    "semantic_hash": "eeb75fc7fcad1bb756735f7598e8e507"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\app\\(app)\\review\\loading.tsx": {
+    "mtime": 1786693656.4686372,
+    "ast_hash": "02af69a8ba942e0f92b09c484eb3f4b8",
+    "semantic_hash": "02af69a8ba942e0f92b09c484eb3f4b8"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\app\\(app)\\review\\page.tsx": {
+    "mtime": 1790592708.1246207,
+    "ast_hash": "587978173e7d58b9840ba73bba2933a4",
+    "semantic_hash": "587978173e7d58b9840ba73bba2933a4"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\app\\(app)\\settings\\budget-heads\\loading.tsx": {
+    "mtime": 1789214225.7496507,
+    "ast_hash": "888e1d88664b42c3841b49ad30722294",
+    "semantic_hash": "888e1d88664b42c3841b49ad30722294"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\app\\(app)\\settings\\budget-heads\\page.tsx": {
+    "mtime": 1789214225.7516668,
+    "ast_hash": "09f89adc5add84f57bb415352b823abc",
+    "semantic_hash": "09f89adc5add84f57bb415352b823abc"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\app\\(app)\\settings\\budgets\\loading.tsx": {
+    "mtime": 1789214225.7526686,
+    "ast_hash": "bdb8219386ebce072667bec43638eec3",
+    "semantic_hash": "bdb8219386ebce072667bec43638eec3"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\app\\(app)\\settings\\budgets\\page.tsx": {
+    "mtime": 1789214225.7536652,
+    "ast_hash": "39e46d4fd05553f54ce7de48acd0490b",
+    "semantic_hash": "39e46d4fd05553f54ce7de48acd0490b"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\app\\(app)\\settings\\events\\loading.tsx": {
+    "mtime": 1789214225.7546666,
+    "ast_hash": "72f852263cfbfa6b4d590723d287633c",
+    "semantic_hash": "72f852263cfbfa6b4d590723d287633c"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\app\\(app)\\settings\\events\\page.tsx": {
+    "mtime": 1789214225.7556672,
+    "ast_hash": "f1a86f0645506486da3970ad2178be65",
+    "semantic_hash": "f1a86f0645506486da3970ad2178be65"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\app\\(app)\\settings\\loading.tsx": {
+    "mtime": 1789214225.756668,
+    "ast_hash": "f847cfd61cdff38aacc3ff11a06278bc",
+    "semantic_hash": "f847cfd61cdff38aacc3ff11a06278bc"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\app\\(app)\\settings\\master-data\\loading.tsx": {
+    "mtime": 1790593057.3873198,
+    "ast_hash": "74e47a71e4c6b338ad1efa216f0a1958",
+    "semantic_hash": "74e47a71e4c6b338ad1efa216f0a1958"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\app\\(app)\\settings\\master-data\\page.tsx": {
+    "mtime": 1790593051.5802667,
+    "ast_hash": "c8eabb4043fa5f630af41881e67c8959",
+    "semantic_hash": "c8eabb4043fa5f630af41881e67c8959"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\app\\(app)\\settings\\page.tsx": {
+    "mtime": 1789315830.3515542,
+    "ast_hash": "86288496fdd390bac4d5d9b32d2281a3",
+    "semantic_hash": "86288496fdd390bac4d5d9b32d2281a3"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\app\\(app)\\settings\\users\\loading.tsx": {
+    "mtime": 1789214225.7640727,
+    "ast_hash": "1172914bc8fd0e21d41fbfd18a4130cf",
+    "semantic_hash": "1172914bc8fd0e21d41fbfd18a4130cf"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\app\\(app)\\settings\\users\\page.tsx": {
+    "mtime": 1789214225.7650678,
+    "ast_hash": "511115880ee15917f4189a30274ac5ae",
+    "semantic_hash": "511115880ee15917f4189a30274ac5ae"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\app\\(app)\\settings\\vendors\\loading.tsx": {
+    "mtime": 1789214225.7660658,
+    "ast_hash": "80aecbe61588f0ce009a5ff90425aa68",
+    "semantic_hash": "80aecbe61588f0ce009a5ff90425aa68"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\app\\(app)\\settings\\vendors\\page.tsx": {
+    "mtime": 1789214225.7660658,
+    "ast_hash": "5d54c1b0946fab8842168dcdc7bffba0",
+    "semantic_hash": "5d54c1b0946fab8842168dcdc7bffba0"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\app\\(app)\\shortcuts\\loading.tsx": {
+    "mtime": 1789214225.767954,
+    "ast_hash": "00fc15d86643363922a16d432208c3a7",
+    "semantic_hash": "00fc15d86643363922a16d432208c3a7"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\app\\(app)\\shortcuts\\page.tsx": {
+    "mtime": 1789214225.7699707,
+    "ast_hash": "b58c0c03a2300aaf4c42e00aa6aa351a",
+    "semantic_hash": "b58c0c03a2300aaf4c42e00aa6aa351a"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\app\\api\\documents\\ingest\\route.ts": {
+    "mtime": 1789630621.5309324,
+    "ast_hash": "b3c0879018f730d16b73ef2e74e30c7e",
+    "semantic_hash": "b3c0879018f730d16b73ef2e74e30c7e"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\app\\api\\documents\\reescalate\\route.ts": {
+    "mtime": 1789214225.7756863,
+    "ast_hash": "211e3366530d089232d1613ff9a686a8",
+    "semantic_hash": "211e3366530d089232d1613ff9a686a8"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\app\\api\\documents\\status\\route.ts": {
+    "mtime": 1789214225.7776875,
+    "ast_hash": "5284057442c6a4c496b73bf13916817c",
+    "semantic_hash": "5284057442c6a4c496b73bf13916817c"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\app\\api\\documents\\upload-url\\route.ts": {
+    "mtime": 1789630535.5172117,
+    "ast_hash": "4148387d3e084b217603a153925849ea",
+    "semantic_hash": "4148387d3e084b217603a153925849ea"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\app\\api\\import\\department-budget\\route.ts": {
+    "mtime": 1789677183.532251,
+    "ast_hash": "6f249289d38e0443ed607d54a3f16d11",
+    "semantic_hash": "6f249289d38e0443ed607d54a3f16d11"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\app\\api\\import\\portal\\route.ts": {
+    "mtime": 1790513300.7016456,
+    "ast_hash": "c5b68f2e791579a55ce0b6bab477aff2",
+    "semantic_hash": "c5b68f2e791579a55ce0b6bab477aff2"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\app\\api\\import\\route.ts": {
+    "mtime": 1789677173.12852,
+    "ast_hash": "f3f6788de1d110447fffc33ff4e0c4a8",
+    "semantic_hash": "f3f6788de1d110447fffc33ff4e0c4a8"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\app\\api\\import\\sub-department-budget\\route.ts": {
+    "mtime": 1789677188.278628,
+    "ast_hash": "c1bc22ebccc0d1352ab620e0c6940c07",
+    "semantic_hash": "c1bc22ebccc0d1352ab620e0c6940c07"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\app\\api\\jobs\\tick\\route.ts": {
+    "mtime": 1789214225.786407,
+    "ast_hash": "d9847859e837d5dbb05200fca06018f3",
+    "semantic_hash": "d9847859e837d5dbb05200fca06018f3"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\app\\api\\scrape-token\\route.ts": {
+    "mtime": 1789214225.786407,
+    "ast_hash": "678d187fb5ed2b4bffdfd7cfdaa826d5",
+    "semantic_hash": "678d187fb5ed2b4bffdfd7cfdaa826d5"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\app\\error.tsx": {
+    "mtime": 1789214225.7879214,
+    "ast_hash": "232a54ecc50839580a0f3b8183e23663",
+    "semantic_hash": "232a54ecc50839580a0f3b8183e23663"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\app\\global-error.tsx": {
+    "mtime": 1789214225.7889514,
+    "ast_hash": "90016e5cf8513944585dceec82ca8061",
+    "semantic_hash": "90016e5cf8513944585dceec82ca8061"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\app\\layout.tsx": {
+    "mtime": 1786529523.413329,
+    "ast_hash": "42f550fa023109ed020d0b3bfbd69a01",
+    "semantic_hash": "42f550fa023109ed020d0b3bfbd69a01"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\app\\login\\page.tsx": {
+    "mtime": 1789214225.7919543,
+    "ast_hash": "3c682b1ef6bf890ca379716933b6055a",
+    "semantic_hash": "3c682b1ef6bf890ca379716933b6055a"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\app\\not-found.tsx": {
+    "mtime": 1789214225.7959516,
+    "ast_hash": "018efaa4757f2298603d7b00070fa036",
+    "semantic_hash": "018efaa4757f2298603d7b00070fa036"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\admin\\budget-head-table.tsx": {
+    "mtime": 1789315857.9359052,
+    "ast_hash": "e9344486c8cec8e0e90de8d474e02b54",
+    "semantic_hash": "e9344486c8cec8e0e90de8d474e02b54"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\admin\\create-user-dialog.tsx": {
+    "mtime": 1789214225.797954,
+    "ast_hash": "638dc70ce6e842b2b4222b6291813293",
+    "semantic_hash": "638dc70ce6e842b2b4222b6291813293"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\admin\\department-picker.tsx": {
+    "mtime": 1789214225.7994568,
+    "ast_hash": "55a96bffa27b7686b039480c520f9ab2",
+    "semantic_hash": "55a96bffa27b7686b039480c520f9ab2"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\admin\\reset-password-dialog.tsx": {
+    "mtime": 1789214225.80149,
+    "ast_hash": "85a2f0e7f4d7d8a459dd7f3e30c92aef",
+    "semantic_hash": "85a2f0e7f4d7d8a459dd7f3e30c92aef"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\admin\\users-table.tsx": {
+    "mtime": 1789214225.8024936,
+    "ast_hash": "b3a2ce96513da5bb6601410fc7b8a0b9",
+    "semantic_hash": "b3a2ce96513da5bb6601410fc7b8a0b9"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\admin\\vendor-line-item-template.tsx": {
+    "mtime": 1789214225.8034937,
+    "ast_hash": "c6e84f93ef9c01d7d6ce0d5ca3fbbb9f",
+    "semantic_hash": "c6e84f93ef9c01d7d6ce0d5ca3fbbb9f"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\admin\\vendor-merge-panel.tsx": {
+    "mtime": 1789214225.804493,
+    "ast_hash": "ea9513c2a09c78855525da26ecc1b28a",
+    "semantic_hash": "ea9513c2a09c78855525da26ecc1b28a"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\app-shell\\command-palette-lazy.tsx": {
+    "mtime": 1789214225.8060098,
+    "ast_hash": "5681ce472fac61d29dfffff5a86245d2",
+    "semantic_hash": "5681ce472fac61d29dfffff5a86245d2"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\app-shell\\command-palette.tsx": {
+    "mtime": 1789214225.8081076,
+    "ast_hash": "5a8a58806d1883e38880fb3e5743d603",
+    "semantic_hash": "5a8a58806d1883e38880fb3e5743d603"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\app-shell\\compare-basis-select.tsx": {
+    "mtime": 1789214225.8101308,
+    "ast_hash": "8e49c2bb90101d799324eb1a1e5db9cb",
+    "semantic_hash": "8e49c2bb90101d799324eb1a1e5db9cb"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\app-shell\\event-switcher.tsx": {
+    "mtime": 1789214225.8125598,
+    "ast_hash": "56cf1198d6b713500b39f263d0dfc22b",
+    "semantic_hash": "56cf1198d6b713500b39f263d0dfc22b"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\app-shell\\logo.tsx": {
+    "mtime": 1786529300.1035717,
+    "ast_hash": "2f8d1f1da95f5d5640d7784433c85104",
+    "semantic_hash": "2f8d1f1da95f5d5640d7784433c85104"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\app-shell\\nav-rail.tsx": {
+    "mtime": 1790593082.1494758,
+    "ast_hash": "e7cc8930a58c316a96ac4b4b0edbfd72",
+    "semantic_hash": "e7cc8930a58c316a96ac4b4b0edbfd72"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\app-shell\\report-surface-nav.tsx": {
+    "mtime": 1789214225.815567,
+    "ast_hash": "9fc12002fbe74284f07f776a4dedd761",
+    "semantic_hash": "9fc12002fbe74284f07f776a4dedd761"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\app-shell\\reports-period-bar.tsx": {
+    "mtime": 1789214225.8165586,
+    "ast_hash": "d0347dd3f6451cbcb7a291aa49c7679e",
+    "semantic_hash": "d0347dd3f6451cbcb7a291aa49c7679e"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\app-shell\\theme-toggle.tsx": {
+    "mtime": 1786345428.957113,
+    "ast_hash": "db7b703a7ad2ce6a5d18178a2dcb2134",
+    "semantic_hash": "db7b703a7ad2ce6a5d18178a2dcb2134"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\dashboard\\dashboard-section.tsx": {
+    "mtime": 1789369793.613044,
+    "ast_hash": "0facf98c4b3f83254d3406cc26c856cc",
+    "semantic_hash": "0facf98c4b3f83254d3406cc26c856cc"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\dashboard\\stat-tile.tsx": {
+    "mtime": 1789214225.8180773,
+    "ast_hash": "5b87ee3e549ab264559e66501ac64262",
+    "semantic_hash": "5b87ee3e549ab264559e66501ac64262"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\dashboard\\status-count-card.tsx": {
+    "mtime": 1789214225.8206944,
+    "ast_hash": "8b90af07f33250675f8ce6db05f4e4aa",
+    "semantic_hash": "8b90af07f33250675f8ce6db05f4e4aa"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\documents\\assignee-chip.tsx": {
+    "mtime": 1789214225.8206944,
+    "ast_hash": "11cdd871a07ea3a61af0dd4c99db424f",
+    "semantic_hash": "11cdd871a07ea3a61af0dd4c99db424f"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\documents\\assignee-picker.tsx": {
+    "mtime": 1789214225.821893,
+    "ast_hash": "07054acfb7b0e4fa4c86cb0b1b3de31f",
+    "semantic_hash": "07054acfb7b0e4fa4c86cb0b1b3de31f"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\documents\\assignment-scope.tsx": {
+    "mtime": 1789214225.821893,
+    "ast_hash": "c925b034c526832929e6dbe42d07480a",
+    "semantic_hash": "c925b034c526832929e6dbe42d07480a"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\documents\\bill-kpi-bar.tsx": {
+    "mtime": 1789214225.8231134,
+    "ast_hash": "3c36da15f68eece743571025b7737125",
+    "semantic_hash": "3c36da15f68eece743571025b7737125"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\documents\\document-card.tsx": {
+    "mtime": 1789315920.7105992,
+    "ast_hash": "13ef4f2975b16c7fbd9dcf8b6cefd5c2",
+    "semantic_hash": "13ef4f2975b16c7fbd9dcf8b6cefd5c2"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\documents\\document-inbox.tsx": {
+    "mtime": 1789631177.0603178,
+    "ast_hash": "93d8740632788ba2f5d0e1a6f92f0aa9",
+    "semantic_hash": "93d8740632788ba2f5d0e1a6f92f0aa9"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\documents\\document-sort.ts": {
+    "mtime": 1789214225.826129,
+    "ast_hash": "9675a4b5df79786d4c441d00302edbc7",
+    "semantic_hash": "9675a4b5df79786d4c441d00302edbc7"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\documents\\document-table.tsx": {
+    "mtime": 1789314521.6704192,
+    "ast_hash": "a5168099f230d7edf0dd4a0761dd34bb",
+    "semantic_hash": "a5168099f230d7edf0dd4a0761dd34bb"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\documents\\format.ts": {
+    "mtime": 1786693622.7296731,
+    "ast_hash": "4d0057f252afcdd54496fc2ef46cb7ff",
+    "semantic_hash": "4d0057f252afcdd54496fc2ef46cb7ff"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\documents\\inbox-view-nav.tsx": {
+    "mtime": 1789214225.831661,
+    "ast_hash": "246f490cd517215cb85ebd79e58ee6e9",
+    "semantic_hash": "246f490cd517215cb85ebd79e58ee6e9"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\documents\\load-more-documents.tsx": {
+    "mtime": 1789214225.831661,
+    "ast_hash": "9c23483201233c8c65e574ba8f5e90c9",
+    "semantic_hash": "9c23483201233c8c65e574ba8f5e90c9"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\documents\\split-preview-modal.tsx": {
+    "mtime": 1789214225.8326578,
+    "ast_hash": "f7b4375d9c99e84169d61dcb8f7f4cb5",
+    "semantic_hash": "f7b4375d9c99e84169d61dcb8f7f4cb5"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\documents\\types.ts": {
+    "mtime": 1789214225.8346653,
+    "ast_hash": "89f4fe191a98f1c4350abdd0d46726bc",
+    "semantic_hash": "89f4fe191a98f1c4350abdd0d46726bc"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\documents\\upload-dropzone.tsx": {
+    "mtime": 1789631194.7546494,
+    "ast_hash": "e2389d5925a615abe5ab150ceff6b9d0",
+    "semantic_hash": "e2389d5925a615abe5ab150ceff6b9d0"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\documents\\workload-board-skeleton.tsx": {
+    "mtime": 1789214225.8356643,
+    "ast_hash": "d867b01437b12f9494bcaf0de8df0c44",
+    "semantic_hash": "d867b01437b12f9494bcaf0de8df0c44"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\documents\\workload-board.tsx": {
+    "mtime": 1789373929.4653108,
+    "ast_hash": "7dc22a577007f48a45ca99f6d278c47e",
+    "semantic_hash": "7dc22a577007f48a45ca99f6d278c47e"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\entries\\bulk-enrichment-dialog.tsx": {
+    "mtime": 1789214225.837664,
+    "ast_hash": "cc54c56be318c689bd42d1e0686d8c66",
+    "semantic_hash": "cc54c56be318c689bd42d1e0686d8c66"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\entries\\bulk-void-dialog.tsx": {
+    "mtime": 1789764753.832829,
+    "ast_hash": "1e7070d87bab3de16eebdaf721f160f0",
+    "semantic_hash": "1e7070d87bab3de16eebdaf721f160f0"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\entries\\column-chooser.tsx": {
+    "mtime": 1786201178.0182505,
+    "ast_hash": "bd5584ad842c968437d7280ddf36b8b1",
+    "semantic_hash": "bd5584ad842c968437d7280ddf36b8b1"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\entries\\csv-export.ts": {
+    "mtime": 1790592529.2272537,
+    "ast_hash": "7a99d28c8c2fa1d13e2d76476b91372c",
+    "semantic_hash": "7a99d28c8c2fa1d13e2d76476b91372c"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\entries\\detail\\advance-payment-detail-section.tsx": {
+    "mtime": 1789214225.8401952,
+    "ast_hash": "af56ff714f1883d4b9c262d5c9465403",
+    "semantic_hash": "af56ff714f1883d4b9c262d5c9465403"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\entries\\detail\\advance-settlement-picker.tsx": {
+    "mtime": 1789214225.8411968,
+    "ast_hash": "0b8425196c2623ca0952c7625b3ed9d1",
+    "semantic_hash": "0b8425196c2623ca0952c7625b3ed9d1"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\entries\\detail\\bill-view-modal.tsx": {
+    "mtime": 1789214225.8411968,
+    "ast_hash": "980be9f528175fe9b618ce3f3c9a8734",
+    "semantic_hash": "980be9f528175fe9b618ce3f3c9a8734"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\entries\\detail\\change-history-list.tsx": {
+    "mtime": 1786201178.019251,
+    "ast_hash": "13ad1b2aeb1f9038426aae9fd90fe67a",
+    "semantic_hash": "13ad1b2aeb1f9038426aae9fd90fe67a"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\entries\\detail\\enrichment-form.tsx": {
+    "mtime": 1789315886.6833577,
+    "ast_hash": "ecd3be9c46668d3eb7f63c665535972b",
+    "semantic_hash": "ecd3be9c46668d3eb7f63c665535972b"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\entries\\detail\\entry-issues.tsx": {
+    "mtime": 1789370328.5198903,
+    "ast_hash": "ab17d3f37b861e847ee2cea13c21038f",
+    "semantic_hash": "ab17d3f37b861e847ee2cea13c21038f"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\entries\\detail\\entry-not-found.tsx": {
+    "mtime": 1786201178.0202515,
+    "ast_hash": "b3cbbd7e723451100cbc42a5d528ac82",
+    "semantic_hash": "b3cbbd7e723451100cbc42a5d528ac82"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\entries\\detail\\format.ts": {
+    "mtime": 1789764843.4040022,
+    "ast_hash": "c377086f98a80767fbad9ddf53abf4dd",
+    "semantic_hash": "c377086f98a80767fbad9ddf53abf4dd"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\entries\\detail\\import-fields-panel.tsx": {
+    "mtime": 1789399811.8422873,
+    "ast_hash": "ab3ddcdfd23d6e009e8f656bcc401016",
+    "semantic_hash": "ab3ddcdfd23d6e009e8f656bcc401016"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\entries\\detail\\linked-documents.tsx": {
+    "mtime": 1789214225.8513951,
+    "ast_hash": "1d02ecceef5875ae7cc190e8031e4251",
+    "semantic_hash": "1d02ecceef5875ae7cc190e8031e4251"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\entries\\detail\\provisional-number-banner.tsx": {
+    "mtime": 1789214225.852392,
+    "ast_hash": "89146945e59e653718bf6a5f92180f1d",
+    "semantic_hash": "89146945e59e653718bf6a5f92180f1d"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\entries\\detail\\reimbursement-detail-section.tsx": {
+    "mtime": 1789214225.8533936,
+    "ast_hash": "f13cc9fedd360b95575bc99b537f217d",
+    "semantic_hash": "f13cc9fedd360b95575bc99b537f217d"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\entries\\detail\\resolve-flag-dialog.tsx": {
+    "mtime": 1789214225.8543975,
+    "ast_hash": "ed4c15617593e3b2dc34734c9d42d05f",
+    "semantic_hash": "ed4c15617593e3b2dc34734c9d42d05f"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\entries\\detail\\types.ts": {
+    "mtime": 1790592503.4746566,
+    "ast_hash": "ee25e7e134603ea44224d9edca936b8d",
+    "semantic_hash": "ee25e7e134603ea44224d9edca936b8d"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\entries\\detail\\void-entry-control.tsx": {
+    "mtime": 1790593255.7641573,
+    "ast_hash": "ca3d8ddcad0af696e26f0a2472116acf",
+    "semantic_hash": "ca3d8ddcad0af696e26f0a2472116acf"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\entries\\entries-explorer.tsx": {
+    "mtime": 1790592607.7500672,
+    "ast_hash": "10b177ee9b95c786c052a2770fb1d601",
+    "semantic_hash": "10b177ee9b95c786c052a2770fb1d601"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\entries\\entries-table.tsx": {
+    "mtime": 1790592539.3196871,
+    "ast_hash": "b415526e1ed5e7f4f37b1132f5592d1b",
+    "semantic_hash": "b415526e1ed5e7f4f37b1132f5592d1b"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\entries\\entry-bill-kpi-bar.tsx": {
+    "mtime": 1789214225.8579128,
+    "ast_hash": "07c8dd0061e162aa3e683e72754267f3",
+    "semantic_hash": "07c8dd0061e162aa3e683e72754267f3"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\entries\\filter-bar.tsx": {
+    "mtime": 1790592553.9393916,
+    "ast_hash": "9416fb1c715f377365ccbfaf605ec035",
+    "semantic_hash": "9416fb1c715f377365ccbfaf605ec035"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\entries\\format.ts": {
+    "mtime": 1790592480.2270126,
+    "ast_hash": "317c6ba8c3961175b9ba57b18fbba405",
+    "semantic_hash": "317c6ba8c3961175b9ba57b18fbba405"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\entries\\new-entry-dialog.tsx": {
+    "mtime": 1789214225.8618565,
+    "ast_hash": "65c5c6bd61b5a53ea0f9356f41d6e78d",
+    "semantic_hash": "65c5c6bd61b5a53ea0f9356f41d6e78d"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\entries\\query.ts": {
+    "mtime": 1790592521.8886456,
+    "ast_hash": "d33e0be8f69242647762227c7ef17de0",
+    "semantic_hash": "d33e0be8f69242647762227c7ef17de0"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\entries\\status-count-chips.tsx": {
+    "mtime": 1790592563.644093,
+    "ast_hash": "e6d53351a6b8a776752a167589ba72f4",
+    "semantic_hash": "e6d53351a6b8a776752a167589ba72f4"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\entries\\types.ts": {
+    "mtime": 1790592495.7781,
+    "ast_hash": "ea183789a992fc7d7dba631eca54e9cb",
+    "semantic_hash": "ea183789a992fc7d7dba631eca54e9cb"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\events\\create-event-form.tsx": {
+    "mtime": 1789214225.8698692,
+    "ast_hash": "c4488b80d946b80e28bcd3f9cac805e3",
+    "semantic_hash": "c4488b80d946b80e28bcd3f9cac805e3"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\exceptions\\bulk-resolve-exceptions-dialog.tsx": {
+    "mtime": 1789214225.8708818,
+    "ast_hash": "3e99424f4fa1699cb6d23fba0dd1be6f",
+    "semantic_hash": "3e99424f4fa1699cb6d23fba0dd1be6f"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\exceptions\\bulk-selection.ts": {
+    "mtime": 1789214225.8718839,
+    "ast_hash": "10bb36db612545ac526e73574b249192",
+    "semantic_hash": "10bb36db612545ac526e73574b249192"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\exceptions\\exceptions-filters.tsx": {
+    "mtime": 1789214225.8728886,
+    "ast_hash": "719fa4d021a29e6db0d4107169be74aa",
+    "semantic_hash": "719fa4d021a29e6db0d4107169be74aa"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\exceptions\\exceptions-pagination.tsx": {
+    "mtime": 1789214225.873882,
+    "ast_hash": "3a32c8ac7e2f169a3bca388778d71436",
+    "semantic_hash": "3a32c8ac7e2f169a3bca388778d71436"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\exceptions\\exceptions-table.tsx": {
+    "mtime": 1789940697.6721144,
+    "ast_hash": "484fe48662df8b483aba4e1e0a0755bb",
+    "semantic_hash": "484fe48662df8b483aba4e1e0a0755bb"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\exceptions\\labels.ts": {
+    "mtime": 1790394402.1112263,
+    "ast_hash": "16a9b7254d46cd7814bfcb5466db888b",
+    "semantic_hash": "16a9b7254d46cd7814bfcb5466db888b"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\exceptions\\queue-sort.ts": {
+    "mtime": 1789214225.878391,
+    "ast_hash": "bb42e9b649ad1ec5a2f0ada53de330e5",
+    "semantic_hash": "bb42e9b649ad1ec5a2f0ada53de330e5"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\exceptions\\resolve-exception-dialog.tsx": {
+    "mtime": 1789370265.7585926,
+    "ast_hash": "ee17d6fec13faba3ce734bd8ca4c84ac",
+    "semantic_hash": "ee17d6fec13faba3ce734bd8ca4c84ac"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\exceptions\\severity-count-chips.tsx": {
+    "mtime": 1789214225.8804128,
+    "ast_hash": "bcc4bf47b6512e9763a8e16d6ccc9e7d",
+    "semantic_hash": "bcc4bf47b6512e9763a8e16d6ccc9e7d"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\exceptions\\severity-legend.tsx": {
+    "mtime": 1789214225.8814063,
+    "ast_hash": "f3376cf458f048b2b3f39958e688f7e3",
+    "semantic_hash": "f3376cf458f048b2b3f39958e688f7e3"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\exceptions\\what-to-do.ts": {
+    "mtime": 1790394409.9488907,
+    "ast_hash": "ebb74c22a6408607dc36880c659573c8",
+    "semantic_hash": "ebb74c22a6408607dc36880c659573c8"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\import\\batch-history.tsx": {
+    "mtime": 1789214225.885404,
+    "ast_hash": "1ac398c1dc1fac77dba6dcae95c06559",
+    "semantic_hash": "1ac398c1dc1fac77dba6dcae95c06559"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\import\\department-budget-import-workspace.tsx": {
+    "mtime": 1789214225.886402,
+    "ast_hash": "bd668b7327a1c9aa845077d300f67216",
+    "semantic_hash": "bd668b7327a1c9aa845077d300f67216"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\import\\department-budget-row-log-table.tsx": {
+    "mtime": 1789214225.886402,
+    "ast_hash": "7ae262b8b7542dc61724a923b4762af1",
+    "semantic_hash": "7ae262b8b7542dc61724a923b4762af1"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\import\\import-page-client.tsx": {
+    "mtime": 1789214225.887916,
+    "ast_hash": "9b86d65fda6e0cb62129dca3225503b7",
+    "semantic_hash": "9b86d65fda6e0cb62129dca3225503b7"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\import\\import-workspace.tsx": {
+    "mtime": 1790513457.7702045,
+    "ast_hash": "f9eda6f18178c1f91f08f9c8d2484750",
+    "semantic_hash": "f9eda6f18178c1f91f08f9c8d2484750"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\import\\portal-reader-workspace.tsx": {
+    "mtime": 1789214225.889928,
+    "ast_hash": "4651edfe231256639ac51b6c747a2c50",
+    "semantic_hash": "4651edfe231256639ac51b6c747a2c50"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\import\\row-log-badge.tsx": {
+    "mtime": 1786201178.0284634,
+    "ast_hash": "9950ab86a65302023e98fe9ac4f2897e",
+    "semantic_hash": "9950ab86a65302023e98fe9ac4f2897e"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\import\\row-log-table.tsx": {
+    "mtime": 1790591548.8624473,
+    "ast_hash": "6712ad8a9e7677415591ade993362b74",
+    "semantic_hash": "6712ad8a9e7677415591ade993362b74"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\import\\sub-department-budget-import-workspace.tsx": {
+    "mtime": 1789214225.8909285,
+    "ast_hash": "c820dd220c80690a0b7e2df44b064848",
+    "semantic_hash": "c820dd220c80690a0b7e2df44b064848"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\import\\sub-department-budget-row-log-table.tsx": {
+    "mtime": 1789214225.8909285,
+    "ast_hash": "dc522bc1d3e75669eadaecd50306556b",
+    "semantic_hash": "dc522bc1d3e75669eadaecd50306556b"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\import\\summary-badges.tsx": {
+    "mtime": 1786201178.029462,
+    "ast_hash": "f68240c50ee3adba2c1d30cf485a61a9",
+    "semantic_hash": "f68240c50ee3adba2c1d30cf485a61a9"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\bar-list.tsx": {
+    "mtime": 1789214225.8929389,
+    "ast_hash": "3b1270189bf0db5fd4b7aadf4a4219b6",
+    "semantic_hash": "3b1270189bf0db5fd4b7aadf4a4219b6"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\charts\\amount-histogram-chart.tsx": {
+    "mtime": 1789214225.8969274,
+    "ast_hash": "d04716dc698194bf8d828df01b051025",
+    "semantic_hash": "d04716dc698194bf8d828df01b051025"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\charts\\attention-map-chart.tsx": {
+    "mtime": 1789214225.8979278,
+    "ast_hash": "43579a03ba8d064bf23db5b2987e101c",
+    "semantic_hash": "43579a03ba8d064bf23db5b2987e101c"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\charts\\benford-chart-lazy.tsx": {
+    "mtime": 1789214225.898436,
+    "ast_hash": "45dacf7919f8e6bcf3d13f48c20b5d6e",
+    "semantic_hash": "45dacf7919f8e6bcf3d13f48c20b5d6e"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\charts\\benford-chart.tsx": {
+    "mtime": 1789214225.8989446,
+    "ast_hash": "74cdcce844e2c67e66cad92035669cf3",
+    "semantic_hash": "74cdcce844e2c67e66cad92035669cf3"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\charts\\concentration-curve-chart.tsx": {
+    "mtime": 1789214225.9005833,
+    "ast_hash": "a220348f737eb2f45588cc5aad6ba485",
+    "semantic_hash": "a220348f737eb2f45588cc5aad6ba485"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\charts\\department-dependency-chart.tsx": {
+    "mtime": 1789214225.9026055,
+    "ast_hash": "4d0c9acd320c2e67ddf20ee8701a36df",
+    "semantic_hash": "4d0c9acd320c2e67ddf20ee8701a36df"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\charts\\discount-spread-chart.tsx": {
+    "mtime": 1789214225.9026055,
+    "ast_hash": "3fc231fe871ef456957433b1280a4970",
+    "semantic_hash": "3fc231fe871ef456957433b1280a4970"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\charts\\donut-chart.tsx": {
+    "mtime": 1789214225.903597,
+    "ast_hash": "4ee47c0b707606462bdcdebd0a87dc6b",
+    "semantic_hash": "4ee47c0b707606462bdcdebd0a87dc6b"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\charts\\entry-type-split-chart.tsx": {
+    "mtime": 1789214225.9045992,
+    "ast_hash": "3fee6e9bea5840a035ed8d491e94bb47",
+    "semantic_hash": "3fee6e9bea5840a035ed8d491e94bb47"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\charts\\funnel-chart.tsx": {
+    "mtime": 1789214225.9055974,
+    "ast_hash": "2ccfcc98db5471f94a1c516798bfc6c7",
+    "semantic_hash": "2ccfcc98db5471f94a1c516798bfc6c7"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\charts\\gap-distribution-chart.tsx": {
+    "mtime": 1789214225.9055974,
+    "ast_hash": "b060bc7a10e476a1d89080bf401204d4",
+    "semantic_hash": "b060bc7a10e476a1d89080bf401204d4"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\charts\\heatmap-matrix-chart.tsx": {
+    "mtime": 1789214225.907601,
+    "ast_hash": "d475ebd11bd88d290dba916db51046fd",
+    "semantic_hash": "d475ebd11bd88d290dba916db51046fd"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\charts\\instrument-mix-chart.tsx": {
+    "mtime": 1789214225.907601,
+    "ast_hash": "4b533f37f918a1a3bba05aec61913643",
+    "semantic_hash": "4b533f37f918a1a3bba05aec61913643"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\charts\\kpi-tile.tsx": {
+    "mtime": 1789214225.9098501,
+    "ast_hash": "ebd7918eea02cdc50f54009dada96304",
+    "semantic_hash": "ebd7918eea02cdc50f54009dada96304"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\charts\\new-vendor-first-bill-chart.tsx": {
+    "mtime": 1789214225.9108646,
+    "ast_hash": "97a96bd8df7b19d9285dfd0d3cf857fb",
+    "semantic_hash": "97a96bd8df7b19d9285dfd0d3cf857fb"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\charts\\ordinal-ramp.ts": {
+    "mtime": 1789214225.913865,
+    "ast_hash": "b97bfd13d3c9ed7b1b867c3fd5cb2344",
+    "semantic_hash": "b97bfd13d3c9ed7b1b867c3fd5cb2344"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\charts\\purchase-tree-chart-lazy.tsx": {
+    "mtime": 1789214225.9148717,
+    "ast_hash": "096bcb38aae39cb5e17b956a4313db5c",
+    "semantic_hash": "096bcb38aae39cb5e17b956a4313db5c"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\charts\\purchase-tree-chart.tsx": {
+    "mtime": 1789214225.9148717,
+    "ast_hash": "481f3424b4d3ecf610c83cc338b983b9",
+    "semantic_hash": "481f3424b4d3ecf610c83cc338b983b9"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\charts\\quantity-by-unit-chart.tsx": {
+    "mtime": 1789214225.9158728,
+    "ast_hash": "6b4baab9ccf0b305e36dd82e24f37de6",
+    "semantic_hash": "6b4baab9ccf0b305e36dd82e24f37de6"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\charts\\rate-drift-chart.tsx": {
+    "mtime": 1789214225.9168742,
+    "ast_hash": "9366c8759375c4595d927c81c44ff7ae",
+    "semantic_hash": "9366c8759375c4595d927c81c44ff7ae"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\charts\\related-party-network-chart-lazy.tsx": {
+    "mtime": 1789214225.9178653,
+    "ast_hash": "bc88b1700fcb712024f523a44b9da6f8",
+    "semantic_hash": "bc88b1700fcb712024f523a44b9da6f8"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\charts\\related-party-network-chart.tsx": {
+    "mtime": 1789214225.9183757,
+    "ast_hash": "3ab42c582d10c3774fdad6e67a85f418",
+    "semantic_hash": "3ab42c582d10c3774fdad6e67a85f418"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\charts\\sparkline.tsx": {
+    "mtime": 1789214225.9183757,
+    "ast_hash": "741a0233508796da33bc1cdfdd40e371",
+    "semantic_hash": "741a0233508796da33bc1cdfdd40e371"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\charts\\spend-curve-chart.tsx": {
+    "mtime": 1789214225.9193888,
+    "ast_hash": "a9ac84bdba98f89342a3c2471b850cb0",
+    "semantic_hash": "a9ac84bdba98f89342a3c2471b850cb0"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\charts\\strip-plot-chart.tsx": {
+    "mtime": 1789214225.9203856,
+    "ast_hash": "85e6b3f7814ed607e4eef7c9ecf51859",
+    "semantic_hash": "85e6b3f7814ed607e4eef7c9ecf51859"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\charts\\tax-exposure-chart.tsx": {
+    "mtime": 1789214225.921393,
+    "ast_hash": "3c1f7cef76e1894fd05287a7548b3ebf",
+    "semantic_hash": "3c1f7cef76e1894fd05287a7548b3ebf"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\charts\\trend-chart.tsx": {
+    "mtime": 1789214225.921393,
+    "ast_hash": "770f14a140a28a417405e796d0613e2a",
+    "semantic_hash": "770f14a140a28a417405e796d0613e2a"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\charts\\vendor-activity-timeline-chart.tsx": {
+    "mtime": 1789214225.9233944,
+    "ast_hash": "6afbd02c30653bc213b1d92bfabd8f5d",
+    "semantic_hash": "6afbd02c30653bc213b1d92bfabd8f5d"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\charts\\vendor-exclusivity-chart.tsx": {
+    "mtime": 1789214225.9233944,
+    "ast_hash": "ce175fcffc400b714b55b79180ab6f8b",
+    "semantic_hash": "ce175fcffc400b714b55b79180ab6f8b"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\charts\\vendor-price-ranking-chart.tsx": {
+    "mtime": 1789214225.9243975,
+    "ast_hash": "69f66ac7d36f09d5a0e1a920d02c8371",
+    "semantic_hash": "69f66ac7d36f09d5a0e1a920d02c8371"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\charts\\vendor-scorecard-grid.tsx": {
+    "mtime": 1789214225.9263942,
+    "ast_hash": "7e1ff7fdc01d2b1089a0be4dfb0d7af4",
+    "semantic_hash": "7e1ff7fdc01d2b1089a0be4dfb0d7af4"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\charts\\waterfall-chart.tsx": {
+    "mtime": 1789214225.9289217,
+    "ast_hash": "da704c7598e7ddc41eaa7746b4a219e2",
+    "semantic_hash": "da704c7598e7ddc41eaa7746b4a219e2"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\charts\\zone-category-matrix-chart.tsx": {
+    "mtime": 1789214225.9299202,
+    "ast_hash": "595bd28060d9028c5d04d777854ef2f9",
+    "semantic_hash": "595bd28060d9028c5d04d777854ef2f9"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\charts\\zone-economics-matrix-chart.tsx": {
+    "mtime": 1789214225.9309325,
+    "ast_hash": "fac75c10391c75ad38be347a7255d47e",
+    "semantic_hash": "fac75c10391c75ad38be347a7255d47e"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\data-table.tsx": {
+    "mtime": 1789214225.931927,
+    "ast_hash": "20f55bebe6735f4015c82fcc20c10e98",
+    "semantic_hash": "20f55bebe6735f4015c82fcc20c10e98"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\empty-state.tsx": {
+    "mtime": 1786201178.0304632,
+    "ast_hash": "dbc3351ff3d79b4fd54195a2b170dced",
+    "semantic_hash": "dbc3351ff3d79b4fd54195a2b170dced"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\export-csv-button.tsx": {
+    "mtime": 1786346388.3761868,
+    "ast_hash": "8ab8c7ede92c086472acbd37a52e27ec",
+    "semantic_hash": "8ab8c7ede92c086472acbd37a52e27ec"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\export-pdf-button.tsx": {
+    "mtime": 1789214225.9339201,
+    "ast_hash": "5b63959ed3a9f4f9f5e5a54c3ed9d4ce",
+    "semantic_hash": "5b63959ed3a9f4f9f5e5a54c3ed9d4ce"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\overviews\\budget-overview.tsx": {
+    "mtime": 1789214225.934921,
+    "ast_hash": "849cfaa06e65f98a12d2c33329f78782",
+    "semantic_hash": "849cfaa06e65f98a12d2c33329f78782"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\overviews\\integrity-overview.tsx": {
+    "mtime": 1790592890.5362499,
+    "ast_hash": "8608c7cce877fcb60da952a875753d5f",
+    "semantic_hash": "8608c7cce877fcb60da952a875753d5f"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\overviews\\vendors-overview.tsx": {
+    "mtime": 1789214225.9359167,
+    "ast_hash": "af2196c4a5b2485517ee0674a2f5c54a",
+    "semantic_hash": "af2196c4a5b2485517ee0674a2f5c54a"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\present-mode-toggle.tsx": {
+    "mtime": 1789214225.9369185,
+    "ast_hash": "69d30221747c543206c2d235b714e54e",
+    "semantic_hash": "69d30221747c543206c2d235b714e54e"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\report-index.tsx": {
+    "mtime": 1789214225.9369185,
+    "ast_hash": "bd540e08d6222600035b0fa9f808bf30",
+    "semantic_hash": "bd540e08d6222600035b0fa9f808bf30"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\report-section.tsx": {
+    "mtime": 1786201178.0304632,
+    "ast_hash": "c1c91af9aa8a81e7492fc65dc516da60",
+    "semantic_hash": "c1c91af9aa8a81e7492fc65dc516da60"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\section-anchor-sync.tsx": {
+    "mtime": 1789214225.9379177,
+    "ast_hash": "ab03313cf4aebc36e74bf6973525db04",
+    "semantic_hash": "ab03313cf4aebc36e74bf6973525db04"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\sections\\above-median-overpayment.tsx": {
+    "mtime": 1789214225.9402068,
+    "ast_hash": "f34c51a43380a70237b402424f3ce9cf",
+    "semantic_hash": "f34c51a43380a70237b402424f3ce9cf"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\sections\\admin-head-accountability.tsx": {
+    "mtime": 1789315977.5498955,
+    "ast_hash": "777c603db528b0aafeb4a169b7178f76",
+    "semantic_hash": "777c603db528b0aafeb4a169b7178f76"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\sections\\amount-at-risk-waterfall.tsx": {
+    "mtime": 1789214225.9412053,
+    "ast_hash": "c09aead7af2c103825afe93118659b05",
+    "semantic_hash": "c09aead7af2c103825afe93118659b05"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\sections\\benford-digit-test.tsx": {
+    "mtime": 1789214225.942203,
+    "ast_hash": "ac779bf7d33b75d9da49ae673c06c169",
+    "semantic_hash": "ac779bf7d33b75d9da49ae673c06c169"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\sections\\board-pack-download.tsx": {
+    "mtime": 1789214225.9442048,
+    "ast_hash": "b3f3beba30168d7eec43338236ab38f8",
+    "semantic_hash": "b3f3beba30168d7eec43338236ab38f8"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\sections\\board-pack-list.tsx": {
+    "mtime": 1789214225.9452114,
+    "ast_hash": "ae018c82b95351046b5048b58a322e0f",
+    "semantic_hash": "ae018c82b95351046b5048b58a322e0f"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\sections\\budget-by-head.tsx": {
+    "mtime": 1789214225.9462075,
+    "ast_hash": "de7b8442915a75cef52ad0c15fafee6a",
+    "semantic_hash": "de7b8442915a75cef52ad0c15fafee6a"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\sections\\budget-category-mix.tsx": {
+    "mtime": 1789214225.9462075,
+    "ast_hash": "e2b7621c5cd52788bdf8a98759953264",
+    "semantic_hash": "e2b7621c5cd52788bdf8a98759953264"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\sections\\budget-revision-history-picker.tsx": {
+    "mtime": 1789214225.947722,
+    "ast_hash": "249cb2e9696f9d9d7e6ad397369122bf",
+    "semantic_hash": "249cb2e9696f9d9d7e6ad397369122bf"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\sections\\budget-revision-history.tsx": {
+    "mtime": 1789214225.947722,
+    "ast_hash": "5e699fdacbb9e8e8a207b037362473b8",
+    "semantic_hash": "5e699fdacbb9e8e8a207b037362473b8"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\sections\\compliance.tsx": {
+    "mtime": 1789214225.948815,
+    "ast_hash": "54a896d2432e534f751e361942ae073d",
+    "semantic_hash": "54a896d2432e534f751e361942ae073d"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\sections\\department-budget-explorer-client.tsx": {
+    "mtime": 1790591602.797798,
+    "ast_hash": "1d0e7a995ea9f83fd904d3df59df2389",
+    "semantic_hash": "1d0e7a995ea9f83fd904d3df59df2389"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\sections\\department-budget-explorer.tsx": {
+    "mtime": 1789214225.949738,
+    "ast_hash": "eb13385ecdf42a5ddfbbc553c09f82e5",
+    "semantic_hash": "eb13385ecdf42a5ddfbbc553c09f82e5"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\sections\\department-budget.tsx": {
+    "mtime": 1790394345.8857124,
+    "ast_hash": "c6b370341ea442d6b6f79bbefc26dd5e",
+    "semantic_hash": "c6b370341ea442d6b6f79bbefc26dd5e"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\sections\\department-dependency.tsx": {
+    "mtime": 1789214225.9507344,
+    "ast_hash": "37e00919b550f2305039afa1aa334511",
+    "semantic_hash": "37e00919b550f2305039afa1aa334511"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\sections\\discount-consistency.tsx": {
+    "mtime": 1789214225.9517353,
+    "ast_hash": "a8747eb0d077aadcfa262d848e684a78",
+    "semantic_hash": "a8747eb0d077aadcfa262d848e684a78"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\sections\\duplicate-payment-register.tsx": {
+    "mtime": 1789214225.9527369,
+    "ast_hash": "9bbc6aa8a6b423f64b1d3655797fe9aa",
+    "semantic_hash": "9bbc6aa8a6b423f64b1d3655797fe9aa"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\sections\\entries-without-bill.tsx": {
+    "mtime": 1789214225.953736,
+    "ast_hash": "1c2f38da5464411ca6625051d55ede9c",
+    "semantic_hash": "1c2f38da5464411ca6625051d55ede9c"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\sections\\entry-type-split.tsx": {
+    "mtime": 1789214225.954742,
+    "ast_hash": "94dba4c0d3727536e4ae6169a6fb4d9f",
+    "semantic_hash": "94dba4c0d3727536e4ae6169a6fb4d9f"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\sections\\event-comparison.tsx": {
+    "mtime": 1789214225.9557412,
+    "ast_hash": "be3d8548e4a4681c3f3b5e7c875a7846",
+    "semantic_hash": "be3d8548e4a4681c3f3b5e7c875a7846"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\sections\\exception-heatmap.tsx": {
+    "mtime": 1789214225.9570026,
+    "ast_hash": "e7fb95d110bd2aafae52527e04aaa6ee",
+    "semantic_hash": "e7fb95d110bd2aafae52527e04aaa6ee"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\sections\\gstin-tax-exposure.tsx": {
+    "mtime": 1789214225.9590378,
+    "ast_hash": "ba50724a65e8339bf4083d003cc5d698",
+    "semantic_hash": "ba50724a65e8339bf4083d003cc5d698"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\sections\\hsn-gst-anomaly.tsx": {
+    "mtime": 1789214225.9610445,
+    "ast_hash": "b21375a0d74a30463e2245ee85af3bec",
+    "semantic_hash": "b21375a0d74a30463e2245ee85af3bec"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\sections\\instrument-type-mix.tsx": {
+    "mtime": 1789214225.9641023,
+    "ast_hash": "028a60aa4ea3c03eb30dd9c8d496bbcc",
+    "semantic_hash": "028a60aa4ea3c03eb30dd9c8d496bbcc"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\sections\\ledger-bill-reconciliation.tsx": {
+    "mtime": 1789214225.9651196,
+    "ast_hash": "17cf4681b41c59adccd7a338e0fe43be",
+    "semantic_hash": "17cf4681b41c59adccd7a338e0fe43be"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\sections\\new-vendor-first-bill.tsx": {
+    "mtime": 1789214225.9661124,
+    "ast_hash": "a69ce203927fc27fe4cc929183551cf6",
+    "semantic_hash": "a69ce203927fc27fe4cc929183551cf6"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\sections\\open-issues.tsx": {
+    "mtime": 1789214225.9661124,
+    "ast_hash": "45b0c2b6ec657256056b39f27ccae0da",
+    "semantic_hash": "45b0c2b6ec657256056b39f27ccae0da"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\sections\\open-item-ageing.tsx": {
+    "mtime": 1789214225.9671135,
+    "ast_hash": "d44a19e4e2075a600c36721d3ff9a990",
+    "semantic_hash": "d44a19e4e2075a600c36721d3ff9a990"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\sections\\outstanding-advance-ageing.tsx": {
+    "mtime": 1789214225.968112,
+    "ast_hash": "489059a75914f0dd6ff29552b4e7ce11",
+    "semantic_hash": "489059a75914f0dd6ff29552b4e7ce11"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\sections\\purchase-tree.tsx": {
+    "mtime": 1789214225.968112,
+    "ast_hash": "ae4b7b05186a8755702fcb1719c2a495",
+    "semantic_hash": "ae4b7b05186a8755702fcb1719c2a495"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\sections\\quantity-by-unit.tsx": {
+    "mtime": 1789214225.9692154,
+    "ast_hash": "ff62a4e14fadf88209cf383a06b675b9",
+    "semantic_hash": "ff62a4e14fadf88209cf383a06b675b9"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\sections\\rate-benchmark.tsx": {
+    "mtime": 1789214225.970225,
+    "ast_hash": "09d90270325eba2f121617d74ca2d4da",
+    "semantic_hash": "09d90270325eba2f121617d74ca2d4da"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\sections\\rate-drift.tsx": {
+    "mtime": 1789214225.9712174,
+    "ast_hash": "e840ff6ed96a7d1480fbd32524dc0151",
+    "semantic_hash": "e840ff6ed96a7d1480fbd32524dc0151"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\sections\\reimbursement-profile.tsx": {
+    "mtime": 1789214225.9722135,
+    "ast_hash": "d370b16fcf16e4aeb131eb066a873a4b",
+    "semantic_hash": "d370b16fcf16e4aeb131eb066a873a4b"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\sections\\related-party-clusters.tsx": {
+    "mtime": 1789214225.9722135,
+    "ast_hash": "a66d9ab4b7d29743f750ba583b1d77a9",
+    "semantic_hash": "a66d9ab4b7d29743f750ba583b1d77a9"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\sections\\round-number-bias.tsx": {
+    "mtime": 1789214225.973219,
+    "ast_hash": "3d32283ba7982d2946750760606c52c7",
+    "semantic_hash": "3d32283ba7982d2946750760606c52c7"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\sections\\rupee-provenance-picker.tsx": {
+    "mtime": 1789214225.9737217,
+    "ast_hash": "4f1f055932be7c7c90f37664395734f4",
+    "semantic_hash": "4f1f055932be7c7c90f37664395734f4"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\sections\\rupee-provenance.tsx": {
+    "mtime": 1789214225.97473,
+    "ast_hash": "04488ba7c541787697ed5814acd2b008",
+    "semantic_hash": "04488ba7c541787697ed5814acd2b008"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\sections\\spend-by-family.tsx": {
+    "mtime": 1789214225.9757426,
+    "ast_hash": "d8449604cda0dbadd79b5c8980cd1ef7",
+    "semantic_hash": "d8449604cda0dbadd79b5c8980cd1ef7"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\sections\\spend-curve.tsx": {
+    "mtime": 1789214225.9767466,
+    "ast_hash": "8e4277bc112811f435e3b59fda91f822",
+    "semantic_hash": "8e4277bc112811f435e3b59fda91f822"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\sections\\sub-department-budget.tsx": {
+    "mtime": 1789214225.978253,
+    "ast_hash": "a40d83d6d66f8c57e60fb84c5e2827d7",
+    "semantic_hash": "a40d83d6d66f8c57e60fb84c5e2827d7"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\sections\\surface-loading.tsx": {
+    "mtime": 1789214225.9792676,
+    "ast_hash": "44e1b545bc7ccd5afb8ca8f6b8e28aa5",
+    "semantic_hash": "44e1b545bc7ccd5afb8ca8f6b8e28aa5"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\sections\\threshold-splitting.tsx": {
+    "mtime": 1789214225.9812648,
+    "ast_hash": "c8fcc3c248a2cc4d53283e720f9b85e1",
+    "semantic_hash": "c8fcc3c248a2cc4d53283e720f9b85e1"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\sections\\vendor-activity-span.tsx": {
+    "mtime": 1789214225.9822671,
+    "ast_hash": "8512df94db6c74d84edd59b1e257303d",
+    "semantic_hash": "8512df94db6c74d84edd59b1e257303d"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\sections\\vendor-advance-position.tsx": {
+    "mtime": 1790397346.4405937,
+    "ast_hash": "ff5b587cf7c2adea1421b3892d6c6a00",
+    "semantic_hash": "ff5b587cf7c2adea1421b3892d6c6a00"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\sections\\vendor-concentration.tsx": {
+    "mtime": 1789214225.9832666,
+    "ast_hash": "093f5c4ed5efcb1c9708cea5cd9392d9",
+    "semantic_hash": "093f5c4ed5efcb1c9708cea5cd9392d9"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\sections\\vendor-exclusivity.tsx": {
+    "mtime": 1789214225.9842641,
+    "ast_hash": "2d9ace88ce3354effb1012046a9d2748",
+    "semantic_hash": "2d9ace88ce3354effb1012046a9d2748"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\sections\\vendor-price-ranking.tsx": {
+    "mtime": 1789214225.9842641,
+    "ast_hash": "1de2126032e4e3d0c1dba94afa5346fb",
+    "semantic_hash": "1de2126032e4e3d0c1dba94afa5346fb"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\sections\\vendor-risk-board.tsx": {
+    "mtime": 1789214225.9852626,
+    "ast_hash": "a209bead57270902d24101e2471092c2",
+    "semantic_hash": "a209bead57270902d24101e2471092c2"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\sections\\vendor-scorecard.tsx": {
+    "mtime": 1789214225.986274,
+    "ast_hash": "dc2d2152e4174ffd29b184672a51822d",
+    "semantic_hash": "dc2d2152e4174ffd29b184672a51822d"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\sections\\vendor-spend.tsx": {
+    "mtime": 1789214225.986274,
+    "ast_hash": "f319c0591cc643ccb9ac2abda08897f7",
+    "semantic_hash": "f319c0591cc643ccb9ac2abda08897f7"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\sections\\weekly-digest.tsx": {
+    "mtime": 1789214225.9877853,
+    "ast_hash": "add506aa822ac325c7ff3e12bbec939c",
+    "semantic_hash": "add506aa822ac325c7ff3e12bbec939c"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\sections\\zone-category-matrix.tsx": {
+    "mtime": 1789214225.9877853,
+    "ast_hash": "dfe618255f3f7263440a6803cf5275ae",
+    "semantic_hash": "dfe618255f3f7263440a6803cf5275ae"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\sections\\zone-spend.tsx": {
+    "mtime": 1789214225.988873,
+    "ast_hash": "42992a10170bdab0c90801416d8eac90",
+    "semantic_hash": "42992a10170bdab0c90801416d8eac90"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\sections\\zone-unit-economics.tsx": {
+    "mtime": 1789214225.9897945,
+    "ast_hash": "8f5ade212554034202ab3d6b3857d6dd",
+    "semantic_hash": "8f5ade212554034202ab3d6b3857d6dd"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\reports\\severity-badge.tsx": {
+    "mtime": 1789214225.9907963,
+    "ast_hash": "afc5f6bdb4d1e52908933a1beaa940d4",
+    "semantic_hash": "afc5f6bdb4d1e52908933a1beaa940d4"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\review\\claim-banner.tsx": {
+    "mtime": 1786426135.5474267,
+    "ast_hash": "4d1d4b4f523e694a7f4643fa5c757230",
+    "semantic_hash": "4d1d4b4f523e694a7f4643fa5c757230"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\review\\entry-attach-combobox.tsx": {
+    "mtime": 1789214225.9907963,
+    "ast_hash": "1d3835b5cca5d233d56866558cc810bf",
+    "semantic_hash": "1d3835b5cca5d233d56866558cc810bf"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\review\\exception-dialog.tsx": {
+    "mtime": 1789214225.9917946,
+    "ast_hash": "6741b9a5e7c1e24d15ec765cdb4a25b8",
+    "semantic_hash": "6741b9a5e7c1e24d15ec765cdb4a25b8"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\review\\extraction-form.tsx": {
+    "mtime": 1789214225.9937985,
+    "ast_hash": "23c863d74fe0f2c995cd7a2d7e178e86",
+    "semantic_hash": "23c863d74fe0f2c995cd7a2d7e178e86"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\review\\match-strip.tsx": {
+    "mtime": 1789214225.9978454,
+    "ast_hash": "d04044b211e05f3253b13c893ed60219",
+    "semantic_hash": "d04044b211e05f3253b13c893ed60219"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\review\\pdf-viewer.tsx": {
+    "mtime": 1789539520.4674833,
+    "ast_hash": "9afe2ece46f8b76dc8c6bcc60402cfb9",
+    "semantic_hash": "9afe2ece46f8b76dc8c6bcc60402cfb9"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\review\\queue-assignee-filter.tsx": {
+    "mtime": 1789214225.9998596,
+    "ast_hash": "10fe28e2e281a026174f383e3a1735c0",
+    "semantic_hash": "10fe28e2e281a026174f383e3a1735c0"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\review\\queue-scope-toggle.tsx": {
+    "mtime": 1789539510.457698,
+    "ast_hash": "6504a872d172a149aedf61322ff9463b",
+    "semantic_hash": "6504a872d172a149aedf61322ff9463b"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\review\\review-status-line.tsx": {
+    "mtime": 1789730946.0044422,
+    "ast_hash": "35fcdd8cf57da719a378b2897debae41",
+    "semantic_hash": "35fcdd8cf57da719a378b2897debae41"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\review\\review-workspace.tsx": {
+    "mtime": 1790592736.8799572,
+    "ast_hash": "c2e4f8c99888b69ec12cbfbbf129d5bf",
+    "semantic_hash": "c2e4f8c99888b69ec12cbfbbf129d5bf"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\review\\shortcuts-overlay.tsx": {
+    "mtime": 1789214226.0038624,
+    "ast_hash": "1869ed38f05dcf4cfb48176444247fe2",
+    "semantic_hash": "1869ed38f05dcf4cfb48176444247fe2"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\review\\tally-footer.tsx": {
+    "mtime": 1789214226.0058613,
+    "ast_hash": "7f7ec82b44f973769ccc5d4839ddba50",
+    "semantic_hash": "7f7ec82b44f973769ccc5d4839ddba50"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\review\\vendor-autocomplete.tsx": {
+    "mtime": 1789214226.0068622,
+    "ast_hash": "d698674f0d7d44ddf44340a1b7e488f5",
+    "semantic_hash": "d698674f0d7d44ddf44340a1b7e488f5"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\screen-stub.tsx": {
+    "mtime": 1786188324.5958817,
+    "ast_hash": "2199918a49ee08c22aa2fccee2aad30f",
+    "semantic_hash": "2199918a49ee08c22aa2fccee2aad30f"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\settings\\keymap-settings.tsx": {
+    "mtime": 1789214226.0083675,
+    "ast_hash": "16c59514457bd47094284ac49482eca8",
+    "semantic_hash": "16c59514457bd47094284ac49482eca8"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\settings\\master-admin-head-table.tsx": {
+    "mtime": 1789319455.4944286,
+    "ast_hash": "f6ee9867f5ec468d9710d1b8416bfa20",
+    "semantic_hash": "f6ee9867f5ec468d9710d1b8416bfa20"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\settings\\master-department-table.tsx": {
+    "mtime": 1789319406.9513764,
+    "ast_hash": "b4aa037df48eb5536f349c6da0257443",
+    "semantic_hash": "b4aa037df48eb5536f349c6da0257443"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\settings\\master-sub-department-table.tsx": {
+    "mtime": 1789319474.492449,
+    "ast_hash": "00c80744cf644c0bfeec5ffa30198d6b",
+    "semantic_hash": "00c80744cf644c0bfeec5ffa30198d6b"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\settings\\master-zone-table.tsx": {
+    "mtime": 1789319431.6746597,
+    "ast_hash": "6b1207fc9f40408c7e96d56c9c35a3c0",
+    "semantic_hash": "6b1207fc9f40408c7e96d56c9c35a3c0"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\settings\\settings-list.tsx": {
+    "mtime": 1789214226.0093803,
+    "ast_hash": "6ab53b39ae9ee76918b53038217efdfa",
+    "semantic_hash": "6ab53b39ae9ee76918b53038217efdfa"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\settings\\settings-row-help.tsx": {
+    "mtime": 1789214226.0103793,
+    "ast_hash": "986cf256a02d00fe10e989aca99e766c",
+    "semantic_hash": "986cf256a02d00fe10e989aca99e766c"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\settings\\settings-sub-page.tsx": {
+    "mtime": 1789214226.0113924,
+    "ast_hash": "00e7e600a9738a281bfee0a43e7739ab",
+    "semantic_hash": "00e7e600a9738a281bfee0a43e7739ab"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\settings\\sub-department-budget-table.tsx": {
+    "mtime": 1789214226.0123928,
+    "ast_hash": "469d1e84ab6d38a047cca8c0e46db246",
+    "semantic_hash": "469d1e84ab6d38a047cca8c0e46db246"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\settings\\upload-limit-settings.tsx": {
+    "mtime": 1789214226.0153935,
+    "ast_hash": "5d239ccf0e27abc28d55e7c53376e4ea",
+    "semantic_hash": "5d239ccf0e27abc28d55e7c53376e4ea"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\ui\\badge.tsx": {
+    "mtime": 1786201178.0316956,
+    "ast_hash": "995cd3d6399b570cde6e67713c61d0b1",
+    "semantic_hash": "995cd3d6399b570cde6e67713c61d0b1"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\ui\\button.tsx": {
+    "mtime": 1786188291.9039497,
+    "ast_hash": "23eb1b71d1d72ecefda217cefc12c754",
+    "semantic_hash": "23eb1b71d1d72ecefda217cefc12c754"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\ui\\card.tsx": {
+    "mtime": 1786188301.763916,
+    "ast_hash": "75b272185a39ba08ab9ad28af1595074",
+    "semantic_hash": "75b272185a39ba08ab9ad28af1595074"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\ui\\checkbox.tsx": {
+    "mtime": 1789214226.0163937,
+    "ast_hash": "a1937b362376a73e73b6efb53fc7595e",
+    "semantic_hash": "a1937b362376a73e73b6efb53fc7595e"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\ui\\combobox.tsx": {
+    "mtime": 1789214226.0163937,
+    "ast_hash": "075969b1872e0d6ba828aa8fef058d55",
+    "semantic_hash": "075969b1872e0d6ba828aa8fef058d55"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\ui\\dialog.tsx": {
+    "mtime": 1789214226.0179079,
+    "ast_hash": "7a9cf2f540e5be9b613accb6348cbca6",
+    "semantic_hash": "7a9cf2f540e5be9b613accb6348cbca6"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\ui\\dropdown-menu.tsx": {
+    "mtime": 1786192992.312152,
+    "ast_hash": "26cb2c65679d4187ab69b87378f718e6",
+    "semantic_hash": "26cb2c65679d4187ab69b87378f718e6"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\ui\\error-toast.ts": {
+    "mtime": 1789214226.019453,
+    "ast_hash": "1e78cb92c73cada70b0e01792bd9d909",
+    "semantic_hash": "1e78cb92c73cada70b0e01792bd9d909"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\ui\\friendly-error.tsx": {
+    "mtime": 1786624149.38482,
+    "ast_hash": "eb992221edbd330f5642f03d1be2949b",
+    "semantic_hash": "eb992221edbd330f5642f03d1be2949b"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\ui\\input.tsx": {
+    "mtime": 1786188294.085173,
+    "ast_hash": "bb30e94cd53033ea2e89f2e8611b7250",
+    "semantic_hash": "bb30e94cd53033ea2e89f2e8611b7250"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\ui\\label.tsx": {
+    "mtime": 1786188296.812393,
+    "ast_hash": "9e173e4b17d2424c8ef930d77da25f77",
+    "semantic_hash": "9e173e4b17d2424c8ef930d77da25f77"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\ui\\pagination-bar-options.ts": {
+    "mtime": 1789214226.0204513,
+    "ast_hash": "53ea375689d16b134feb689ed90e4519",
+    "semantic_hash": "53ea375689d16b134feb689ed90e4519"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\ui\\pagination-bar.tsx": {
+    "mtime": 1789214226.0204513,
+    "ast_hash": "45d4b2ee777c79b4a174e8b4f6191299",
+    "semantic_hash": "45d4b2ee777c79b4a174e8b4f6191299"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\ui\\popover.tsx": {
+    "mtime": 1786193012.0243597,
+    "ast_hash": "5afb4d7cc9990531842b0ed3591df8f2",
+    "semantic_hash": "5afb4d7cc9990531842b0ed3591df8f2"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\ui\\select-native.tsx": {
+    "mtime": 1786201178.0326982,
+    "ast_hash": "33e269abe4ebbb0f9894ab2855ebd405",
+    "semantic_hash": "33e269abe4ebbb0f9894ab2855ebd405"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\ui\\select.tsx": {
+    "mtime": 1786193008.1721132,
+    "ast_hash": "af96f044c4d43e50fe1abbe1f3a54ed2",
+    "semantic_hash": "af96f044c4d43e50fe1abbe1f3a54ed2"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\ui\\separator.tsx": {
+    "mtime": 1786193025.0346222,
+    "ast_hash": "530662ed20b94535e8959815fcce42bb",
+    "semantic_hash": "530662ed20b94535e8959815fcce42bb"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\ui\\skeleton.tsx": {
+    "mtime": 1786193031.5661118,
+    "ast_hash": "4b1bd9f1c5a34a8202c00fb29314f754",
+    "semantic_hash": "4b1bd9f1c5a34a8202c00fb29314f754"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\ui\\sonner.tsx": {
+    "mtime": 1786201178.0326982,
+    "ast_hash": "0f7503cfb6ae1578d1400b047bc8963c",
+    "semantic_hash": "0f7503cfb6ae1578d1400b047bc8963c"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\ui\\sortable-table-head.tsx": {
+    "mtime": 1789214226.0204513,
+    "ast_hash": "98e6da6270da2667684793d0d566e024",
+    "semantic_hash": "98e6da6270da2667684793d0d566e024"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\ui\\table.tsx": {
+    "mtime": 1789214226.0217404,
+    "ast_hash": "80f173e8a8a4d91513b28b0ea75988eb",
+    "semantic_hash": "80f173e8a8a4d91513b28b0ea75988eb"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\ui\\tabs.tsx": {
+    "mtime": 1789214226.0227413,
+    "ast_hash": "97398fbcb2492b2bb1b54492f3679357",
+    "semantic_hash": "97398fbcb2492b2bb1b54492f3679357"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\ui\\textarea.tsx": {
+    "mtime": 1786201178.033696,
+    "ast_hash": "342b92667d79727c223df6a77fdf89c8",
+    "semantic_hash": "342b92667d79727c223df6a77fdf89c8"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\components\\ui\\tooltip.tsx": {
+    "mtime": 1786193018.5050063,
+    "ast_hash": "7ac2ef8a38c2f9022700ce723dfd0cc2",
+    "semantic_hash": "7ac2ef8a38c2f9022700ce723dfd0cc2"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\eslint.config.mjs": {
+    "mtime": 1786201872.661093,
+    "ast_hash": "ac04ec932299935a284bedccb39f5d5d",
+    "semantic_hash": "ac04ec932299935a284bedccb39f5d5d"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\instrumentation-client.ts": {
+    "mtime": 1786365521.1849024,
+    "ast_hash": "8f5ee979b2c63ae0172432566b356a11",
+    "semantic_hash": "8f5ee979b2c63ae0172432566b356a11"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\instrumentation.ts": {
+    "mtime": 1786365521.1849024,
+    "ast_hash": "9715d607a7c6e6877838794a8c57be79",
+    "semantic_hash": "9715d607a7c6e6877838794a8c57be79"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\actions\\admin.ts": {
+    "mtime": 1789321096.9328387,
+    "ast_hash": "4b997ad18909d2d1a9491b8ed96810ac",
+    "semantic_hash": "4b997ad18909d2d1a9491b8ed96810ac"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\actions\\assignment.ts": {
+    "mtime": 1789214226.047824,
+    "ast_hash": "046b043d2cb502cd6b90c8b12bc70a3c",
+    "semantic_hash": "046b043d2cb502cd6b90c8b12bc70a3c"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\actions\\auth.ts": {
+    "mtime": 1789214226.0492792,
+    "ast_hash": "4ee4c6f2258180f3b37ba4491546e859",
+    "semantic_hash": "4ee4c6f2258180f3b37ba4491546e859"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\actions\\documents.ts": {
+    "mtime": 1790593294.3756082,
+    "ast_hash": "f8ca852b890f96423e54fd6b2ae269fc",
+    "semantic_hash": "f8ca852b890f96423e54fd6b2ae269fc"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\actions\\entries.ts": {
+    "mtime": 1790593274.4152067,
+    "ast_hash": "55b588bc2abedf2101a53fc25a3cf034",
+    "semantic_hash": "55b588bc2abedf2101a53fc25a3cf034"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\actions\\entry-classification-defaults.ts": {
+    "mtime": 1789214226.0532718,
+    "ast_hash": "aeb49c0816cf509d60f85e291944cdd3",
+    "semantic_hash": "aeb49c0816cf509d60f85e291944cdd3"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\actions\\entry-enrichment.ts": {
+    "mtime": 1790593292.1014667,
+    "ast_hash": "74abefe5ddcde25cd3879468833034da",
+    "semantic_hash": "74abefe5ddcde25cd3879468833034da"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\actions\\events.ts": {
+    "mtime": 1789214226.0552843,
+    "ast_hash": "f7f2e9af474fa084d9e04a494f1cf1cb",
+    "semantic_hash": "f7f2e9af474fa084d9e04a494f1cf1cb"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\actions\\exceptions.ts": {
+    "mtime": 1789370343.7629616,
+    "ast_hash": "4a8dba36dfef2e54805b4dc4378365bc",
+    "semantic_hash": "4a8dba36dfef2e54805b4dc4378365bc"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\actions\\flags.ts": {
+    "mtime": 1789214226.058795,
+    "ast_hash": "9e7e6a1c5f53053340e13ae2ae702ae1",
+    "semantic_hash": "9e7e6a1c5f53053340e13ae2ae702ae1"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\actions\\reports.ts": {
+    "mtime": 1789214226.0628002,
+    "ast_hash": "57a7438f4170f37f0afdc2e0da94a44f",
+    "semantic_hash": "57a7438f4170f37f0afdc2e0da94a44f"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\actions\\review.ts": {
+    "mtime": 1790592675.4044623,
+    "ast_hash": "c6aa52dd868e93e1eeb75824354e98b3",
+    "semantic_hash": "c6aa52dd868e93e1eeb75824354e98b3"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\actions\\settings.ts": {
+    "mtime": 1789214226.0657868,
+    "ast_hash": "ad295a761716299e06d5f76e93b7ff08",
+    "semantic_hash": "ad295a761716299e06d5f76e93b7ff08"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\analytics\\fetch.ts": {
+    "mtime": 1789214226.0677998,
+    "ast_hash": "4fc0c45b6877801d3b17d8b6f4726f2f",
+    "semantic_hash": "4fc0c45b6877801d3b17d8b6f4726f2f"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\analytics\\gstin.ts": {
+    "mtime": 1786693529.738443,
+    "ast_hash": "8964dd615df1e49230872c3dbc0b29de",
+    "semantic_hash": "8964dd615df1e49230872c3dbc0b29de"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\analytics\\rules\\compliance.ts": {
+    "mtime": 1786535847.982645,
+    "ast_hash": "68bc8bfd7ab0ead73d1fee9a588b49f9",
+    "semantic_hash": "68bc8bfd7ab0ead73d1fee9a588b49f9"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\analytics\\rules\\vendor-patterns.ts": {
+    "mtime": 1786537059.9465382,
+    "ast_hash": "65b2647b63ef871ba7d83398be3e776b",
+    "semantic_hash": "65b2647b63ef871ba7d83398be3e776b"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\analytics\\tally-recheck.ts": {
+    "mtime": 1789370210.3031619,
+    "ast_hash": "232e09bf4eddcd00754d211821075ab0",
+    "semantic_hash": "232e09bf4eddcd00754d211821075ab0"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\analytics\\thresholds.ts": {
+    "mtime": 1786537017.0028296,
+    "ast_hash": "dbfe7861cb04c7be7b2e7ed7ae34c907",
+    "semantic_hash": "dbfe7861cb04c7be7b2e7ed7ae34c907"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\analytics\\types.ts": {
+    "mtime": 1786535654.208276,
+    "ast_hash": "058f7eb743fa8307bc16a464cefe43ee",
+    "semantic_hash": "058f7eb743fa8307bc16a464cefe43ee"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\api-log.ts": {
+    "mtime": 1786342086.4699378,
+    "ast_hash": "d028d1e748d2873dbb4492cfe7a386ce",
+    "semantic_hash": "d028d1e748d2873dbb4492cfe7a386ce"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\assignment\\queries.ts": {
+    "mtime": 1789214226.0683122,
+    "ast_hash": "3b7285f19fbec385861f6cbda0abd358",
+    "semantic_hash": "3b7285f19fbec385861f6cbda0abd358"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\assignment\\workload.ts": {
+    "mtime": 1789373929.4689066,
+    "ast_hash": "b2c7ccf2a057f2fe90e8969c3d773e8e",
+    "semantic_hash": "b2c7ccf2a057f2fe90e8969c3d773e8e"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\auth\\its.ts": {
+    "mtime": 1786341916.6780186,
+    "ast_hash": "03fdda50b414d9fe3c5c65257d3c3586",
+    "semantic_hash": "03fdda50b414d9fe3c5c65257d3c3586"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\auth\\roles.ts": {
+    "mtime": 1789214226.070335,
+    "ast_hash": "4962bc39b0b38c12edc0391447d7fac8",
+    "semantic_hash": "4962bc39b0b38c12edc0391447d7fac8"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\cache\\reference-data.ts": {
+    "mtime": 1790593011.6772008,
+    "ast_hash": "58b701992f98679e2cd293d73abe1b25",
+    "semantic_hash": "58b701992f98679e2cd293d73abe1b25"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\claude-client.ts": {
+    "mtime": 1789214226.0723348,
+    "ast_hash": "e8bbbad4dd704bd9fbd10bd7568b0264",
+    "semantic_hash": "e8bbbad4dd704bd9fbd10bd7568b0264"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\documents\\bill-kpis.ts": {
+    "mtime": 1789214226.0733364,
+    "ast_hash": "e0852cd11ad04aadb519002dea251b17",
+    "semantic_hash": "e0852cd11ad04aadb519002dea251b17"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\documents\\entry-bill-kpis.ts": {
+    "mtime": 1789214226.0743356,
+    "ast_hash": "c436d80b7e4c87c78cb3187c1bc6c570",
+    "semantic_hash": "c436d80b7e4c87c78cb3187c1bc6c570"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\documents\\entry-bill-variance.ts": {
+    "mtime": 1789214226.0743356,
+    "ast_hash": "c3cbd8d897171878d6f5543032a5b70e",
+    "semantic_hash": "c3cbd8d897171878d6f5543032a5b70e"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\env.server.ts": {
+    "mtime": 1789214226.0763452,
+    "ast_hash": "5889644871bfaf9411a3883666a00edd",
+    "semantic_hash": "5889644871bfaf9411a3883666a00edd"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\env.ts": {
+    "mtime": 1786201463.3870995,
+    "ast_hash": "056d5cb49a67a3e149c684eb00de27a9",
+    "semantic_hash": "056d5cb49a67a3e149c684eb00de27a9"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\events\\current.ts": {
+    "mtime": 1789214226.0798776,
+    "ast_hash": "54ba86f17fa989843b0cac6aac12c086",
+    "semantic_hash": "54ba86f17fa989843b0cac6aac12c086"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\events\\types.ts": {
+    "mtime": 1789214226.080899,
+    "ast_hash": "4510b553173cf1306d02452669febd74",
+    "semantic_hash": "4510b553173cf1306d02452669febd74"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\export\\auth.ts": {
+    "mtime": 1789214226.0828958,
+    "ast_hash": "b908826f97bc2e2fa316183ceb30537d",
+    "semantic_hash": "b908826f97bc2e2fa316183ceb30537d"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\extraction-schema.ts": {
+    "mtime": 1789370082.9832287,
+    "ast_hash": "014a3c2ab2ce8b32ab98b3c3245fd4bc",
+    "semantic_hash": "014a3c2ab2ce8b32ab98b3c3245fd4bc"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\extraction.ts": {
+    "mtime": 1789214226.090428,
+    "ast_hash": "f59090caf9c62901f6ddf5d7a92724a8",
+    "semantic_hash": "f59090caf9c62901f6ddf5d7a92724a8"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\friendly-error.ts": {
+    "mtime": 1789214226.0919116,
+    "ast_hash": "1d2b6839bece8c6c554179ff2255b619",
+    "semantic_hash": "1d2b6839bece8c6c554179ff2255b619"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\generate-password.ts": {
+    "mtime": 1789214226.0939286,
+    "ast_hash": "b3c5ed5e972199807155bd8a1b21073c",
+    "semantic_hash": "b3c5ed5e972199807155bd8a1b21073c"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\gst-recipient-compliance.ts": {
+    "mtime": 1789214226.095927,
+    "ast_hash": "55a6b797b1acabf274e000bde0ed207f",
+    "semantic_hash": "55a6b797b1acabf274e000bde0ed207f"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\import\\assertions.ts": {
+    "mtime": 1786359997.8030858,
+    "ast_hash": "1fac02ffd9edea5b2c30db2e8a58eb9a",
+    "semantic_hash": "1fac02ffd9edea5b2c30db2e8a58eb9a"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\import\\department-budget-parsing.ts": {
+    "mtime": 1789214226.0979257,
+    "ast_hash": "2a05956ff5d84aaba3c4285fcc6643a9",
+    "semantic_hash": "2a05956ff5d84aaba3c4285fcc6643a9"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\import\\portal-mapping.ts": {
+    "mtime": 1789368803.9832344,
+    "ast_hash": "bfe6ef25769fdb316d81affaa5086215",
+    "semantic_hash": "bfe6ef25769fdb316d81affaa5086215"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\import\\run-department-budget-import.ts": {
+    "mtime": 1789214226.1079738,
+    "ast_hash": "2b8d982eda9b56f633710f23254aba90",
+    "semantic_hash": "2b8d982eda9b56f633710f23254aba90"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\import\\run-import.ts": {
+    "mtime": 1789214226.1104996,
+    "ast_hash": "c41556f2b758006ae829ae3d8d99ba04",
+    "semantic_hash": "c41556f2b758006ae829ae3d8d99ba04"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\import\\run-portal-import.ts": {
+    "mtime": 1790593287.8300674,
+    "ast_hash": "4ab248cb8a654a28e3ac8dda19601113",
+    "semantic_hash": "4ab248cb8a654a28e3ac8dda19601113"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\import\\run-sub-department-budget-import.ts": {
+    "mtime": 1789214226.1158419,
+    "ast_hash": "20e4e5413a8a6588c52dffc866406123",
+    "semantic_hash": "20e4e5413a8a6588c52dffc866406123"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\import\\sub-department-budget-parsing.ts": {
+    "mtime": 1789214226.1178572,
+    "ast_hash": "ff0235f59ccead17489bd3bb6d550f6f",
+    "semantic_hash": "ff0235f59ccead17489bd3bb6d550f6f"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\jobs\\batch-custom-id.ts": {
+    "mtime": 1789214226.119391,
+    "ast_hash": "68f47769a13b357363f53f2e9ef4a19b",
+    "semantic_hash": "68f47769a13b357363f53f2e9ef4a19b"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\jobs\\drain.ts": {
+    "mtime": 1789214226.121408,
+    "ast_hash": "87d0549c69dc4d1c5e416066e47133b4",
+    "semantic_hash": "87d0549c69dc4d1c5e416066e47133b4"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\jobs\\handlers\\batch-poll.ts": {
+    "mtime": 1789214226.1234157,
+    "ast_hash": "aaab15992d751acd04d3434cd7c08c32",
+    "semantic_hash": "aaab15992d751acd04d3434cd7c08c32"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\jobs\\handlers\\board-pack.ts": {
+    "mtime": 1789214226.1258702,
+    "ast_hash": "33ac02d1624f31a011e72ab5f369bfbb",
+    "semantic_hash": "33ac02d1624f31a011e72ab5f369bfbb"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\jobs\\handlers\\extract.ts": {
+    "mtime": 1789370090.8290575,
+    "ast_hash": "b57f8933b83b1b01cf1e367c2b52a7ef",
+    "semantic_hash": "b57f8933b83b1b01cf1e367c2b52a7ef"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\jobs\\handlers\\flags-run.ts": {
+    "mtime": 1786611415.293342,
+    "ast_hash": "a45b020f01b526d3812c1e12638987ae",
+    "semantic_hash": "a45b020f01b526d3812c1e12638987ae"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\jobs\\handlers\\rescope-extract.ts": {
+    "mtime": 1789214226.1319458,
+    "ast_hash": "06c33817a2dcccad670f49b0570bf324",
+    "semantic_hash": "06c33817a2dcccad670f49b0570bf324"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\jobs\\poll-backoff.ts": {
+    "mtime": 1789214226.1329668,
+    "ast_hash": "42516ebaeb119e2125d6164d8af0a3ee",
+    "semantic_hash": "42516ebaeb119e2125d6164d8af0a3ee"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\jobs\\queue.ts": {
+    "mtime": 1789214226.1359613,
+    "ast_hash": "5fa49c9d9eb6f982d149969c4b015d69",
+    "semantic_hash": "5fa49c9d9eb6f982d149969c4b015d69"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\jobs\\trigger-worker.ts": {
+    "mtime": 1789214226.1369653,
+    "ast_hash": "8fcd17802c4e807f95b2aa917582276c",
+    "semantic_hash": "8fcd17802c4e807f95b2aa917582276c"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\matching.ts": {
+    "mtime": 1789214226.140496,
+    "ast_hash": "bfa283e0c31f6adaacf016107ca54ada",
+    "semantic_hash": "bfa283e0c31f6adaacf016107ca54ada"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\module-mapping.ts": {
+    "mtime": 1790593095.2331889,
+    "ast_hash": "5c82fb52d38bb7c9859b6ffca2469cb4",
+    "semantic_hash": "5c82fb52d38bb7c9859b6ffca2469cb4"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\normalize.ts": {
+    "mtime": 1786188505.2345488,
+    "ast_hash": "04ae6a99d2e1197bf757a9709cea4d7b",
+    "semantic_hash": "04ae6a99d2e1197bf757a9709cea4d7b"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\pdf-client.ts": {
+    "mtime": 1789214226.1500516,
+    "ast_hash": "3b74b7e469022f16c8e25b29f8c5a82d",
+    "semantic_hash": "3b74b7e469022f16c8e25b29f8c5a82d"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\pdf.ts": {
+    "mtime": 1789214226.1520693,
+    "ast_hash": "15b0107d8110c930776a30629e2c807c",
+    "semantic_hash": "15b0107d8110c930776a30629e2c807c"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\polyfills\\promise-with-resolvers.ts": {
+    "mtime": 1789539520.4690263,
+    "ast_hash": "c88bf0ad18723b8e9c639027430a4b53",
+    "semantic_hash": "c88bf0ad18723b8e9c639027430a4b53"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\reports\\bar-scale.ts": {
+    "mtime": 1786201178.0376954,
+    "ast_hash": "018c949bd519fb07e22f5189487b12dd",
+    "semantic_hash": "018c949bd519fb07e22f5189487b12dd"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\reports\\board-pack\\data.ts": {
+    "mtime": 1790592878.141368,
+    "ast_hash": "eddbc30045aba993c400072354d958ed",
+    "semantic_hash": "eddbc30045aba993c400072354d958ed"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\reports\\board-pack\\pdf.ts": {
+    "mtime": 1789214226.1560717,
+    "ast_hash": "69b56dedb04fa7f57a37a252a9f7158f",
+    "semantic_hash": "69b56dedb04fa7f57a37a252a9f7158f"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\reports\\board-pack\\types.ts": {
+    "mtime": 1789214226.1575916,
+    "ast_hash": "7d7cb57b23fa07724055ed529f702685",
+    "semantic_hash": "7d7cb57b23fa07724055ed529f702685"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\reports\\board-pack\\workbook.ts": {
+    "mtime": 1789214226.1596117,
+    "ast_hash": "dcf255f6da6b2e3afba36634dd22d484",
+    "semantic_hash": "dcf255f6da6b2e3afba36634dd22d484"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\reports\\budget-utilization-pdf.ts": {
+    "mtime": 1789848986.5470212,
+    "ast_hash": "738630813afaa6b4948f2169d694cbe3",
+    "semantic_hash": "738630813afaa6b4948f2169d694cbe3"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\reports\\compare-basis-labels.ts": {
+    "mtime": 1789214226.1621363,
+    "ast_hash": "3ae8c14c7a41a0d850a13f64c9cb17e1",
+    "semantic_hash": "3ae8c14c7a41a0d850a13f64c9cb17e1"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\reports\\compare-basis.ts": {
+    "mtime": 1789214226.166256,
+    "ast_hash": "21d9b4f5f5e3881552b9c941facd39bf",
+    "semantic_hash": "21d9b4f5f5e3881552b9c941facd39bf"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\reports\\csv.ts": {
+    "mtime": 1786201178.0376954,
+    "ast_hash": "d4330754c0008240293d72cda32be1d9",
+    "semantic_hash": "d4330754c0008240293d72cda32be1d9"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\reports\\executive-brief.ts": {
+    "mtime": 1789214226.166256,
+    "ast_hash": "460f299e40b941c4b99ff101444b174c",
+    "semantic_hash": "460f299e40b941c4b99ff101444b174c"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\reports\\format.ts": {
+    "mtime": 1786201178.0376954,
+    "ast_hash": "6882b3a48cd8ad79cb70c9b337eac44b",
+    "semantic_hash": "6882b3a48cd8ad79cb70c9b337eac44b"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\reports\\hero-metrics.ts": {
+    "mtime": 1790592872.605554,
+    "ast_hash": "9c1a806b73aa31f0981621ab6153bfa7",
+    "semantic_hash": "9c1a806b73aa31f0981621ab6153bfa7"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\reports\\pdf-download.ts": {
+    "mtime": 1789214226.1677713,
+    "ast_hash": "cb87bd054cd482280d0df757646003ab",
+    "semantic_hash": "cb87bd054cd482280d0df757646003ab"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\reports\\pins.ts": {
+    "mtime": 1789214226.1687827,
+    "ast_hash": "dd4682bc07e74a2bacd6257088e65f0e",
+    "semantic_hash": "dd4682bc07e74a2bacd6257088e65f0e"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\reports\\search-params.ts": {
+    "mtime": 1789214226.1687827,
+    "ast_hash": "3c42d394d8bb30ca8099dcbda975323b",
+    "semantic_hash": "3c42d394d8bb30ca8099dcbda975323b"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\reports\\sections\\resolve-previous-event.ts": {
+    "mtime": 1789214226.1697862,
+    "ast_hash": "fe1e334f499dfbfa4a426551962a0033",
+    "semantic_hash": "fe1e334f499dfbfa4a426551962a0033"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\reports\\sections\\shared.tsx": {
+    "mtime": 1790592756.6777067,
+    "ast_hash": "2e679f2db7c573143c280a4791bc0fdf",
+    "semantic_hash": "2e679f2db7c573143c280a4791bc0fdf"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\reports\\surface-sections.ts": {
+    "mtime": 1790592750.0500863,
+    "ast_hash": "265633d99fb5980ddecb17c22d005059",
+    "semantic_hash": "265633d99fb5980ddecb17c22d005059"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\reports\\surfaces\\admin-head.ts": {
+    "mtime": 1789315960.127606,
+    "ast_hash": "398b648b589c417ac55d1803be25c636",
+    "semantic_hash": "398b648b589c417ac55d1803be25c636"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\reports\\surfaces\\amount-forensics.ts": {
+    "mtime": 1789214226.1727989,
+    "ast_hash": "ce9000f40267d4e508e480bf8b530f42",
+    "semantic_hash": "ce9000f40267d4e508e480bf8b530f42"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\reports\\surfaces\\budget-structure.ts": {
+    "mtime": 1789214226.1727989,
+    "ast_hash": "5e3efbdcc46cfec1e1e222fd55977ac3",
+    "semantic_hash": "5e3efbdcc46cfec1e1e222fd55977ac3"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\reports\\surfaces\\budget.ts": {
+    "mtime": 1790394338.0430012,
+    "ast_hash": "cf75001aa0ace4196e2d0893fabbeab1",
+    "semantic_hash": "cf75001aa0ace4196e2d0893fabbeab1"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\reports\\surfaces\\duplicate-vendor-risk.ts": {
+    "mtime": 1789214226.1763358,
+    "ast_hash": "e557e1d14e01bf07abc538b9faf05168",
+    "semantic_hash": "e557e1d14e01bf07abc538b9faf05168"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\reports\\surfaces\\entry-type-flow.ts": {
+    "mtime": 1790397282.141117,
+    "ast_hash": "96bcc05471fe12b4552cba02add99d58",
+    "semantic_hash": "96bcc05471fe12b4552cba02add99d58"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\reports\\surfaces\\event-comparison.ts": {
+    "mtime": 1789214226.181897,
+    "ast_hash": "cbedf78ff96d952cad150b2ca8154672",
+    "semantic_hash": "cbedf78ff96d952cad150b2ca8154672"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\reports\\surfaces\\hsn-gst-anomaly.ts": {
+    "mtime": 1789214226.1838956,
+    "ast_hash": "a4e1b399b80323e8cd384b08c0272267",
+    "semantic_hash": "a4e1b399b80323e8cd384b08c0272267"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\reports\\surfaces\\integrity.ts": {
+    "mtime": 1790592828.7978873,
+    "ast_hash": "9170b1a7102649efb63b1be6a827bae1",
+    "semantic_hash": "9170b1a7102649efb63b1be6a827bae1"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\reports\\surfaces\\purchase-tree.ts": {
+    "mtime": 1789214226.1878953,
+    "ast_hash": "56599a4e0e0b356a9a9be4812732bf14",
+    "semantic_hash": "56599a4e0e0b356a9a9be4812732bf14"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\reports\\surfaces\\quantity-zone-price.ts": {
+    "mtime": 1789214226.1908765,
+    "ast_hash": "5d03dfc7f6453c6dbd0e9e7e6406ba28",
+    "semantic_hash": "5d03dfc7f6453c6dbd0e9e7e6406ba28"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\reports\\surfaces\\rate-drift-discount.ts": {
+    "mtime": 1789214226.1932096,
+    "ast_hash": "c30cc64d95da96f6b56d009886614640",
+    "semantic_hash": "c30cc64d95da96f6b56d009886614640"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\reports\\surfaces\\reconciliation-gap.ts": {
+    "mtime": 1789214226.1941962,
+    "ast_hash": "bb26a17accc09210536352e86ee1ae26",
+    "semantic_hash": "bb26a17accc09210536352e86ee1ae26"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\reports\\surfaces\\related-party-gstin.ts": {
+    "mtime": 1789214226.1951993,
+    "ast_hash": "f8817a812bc13f2e4696766aaface8a7",
+    "semantic_hash": "f8817a812bc13f2e4696766aaface8a7"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\reports\\surfaces\\rupee-provenance.ts": {
+    "mtime": 1789214226.1962006,
+    "ast_hash": "311fdd807bb474e6ee47640e6cd200f6",
+    "semantic_hash": "311fdd807bb474e6ee47640e6cd200f6"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\reports\\surfaces\\spend-curve-open-ageing.ts": {
+    "mtime": 1789214226.1962006,
+    "ast_hash": "def6803455def5b3c16ea18e85509c7f",
+    "semantic_hash": "def6803455def5b3c16ea18e85509c7f"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\reports\\surfaces\\threshold-splitting.ts": {
+    "mtime": 1789214226.1977146,
+    "ast_hash": "b92836007805fa91f1b8d6c9cfb7aed4",
+    "semantic_hash": "b92836007805fa91f1b8d6c9cfb7aed4"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\reports\\surfaces\\vendor-dependency.ts": {
+    "mtime": 1789214226.1977146,
+    "ast_hash": "f909587262df652a1888e22649279307",
+    "semantic_hash": "f909587262df652a1888e22649279307"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\reports\\surfaces\\vendor-scorecard.ts": {
+    "mtime": 1789214226.1987808,
+    "ast_hash": "b698048aadafe8f564465d8c9a0639c5",
+    "semantic_hash": "b698048aadafe8f564465d8c9a0639c5"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\reports\\surfaces\\vendors.ts": {
+    "mtime": 1789214226.1987808,
+    "ast_hash": "7a6c4560550ea85530b762cd96a68c5e",
+    "semantic_hash": "7a6c4560550ea85530b762cd96a68c5e"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\reports\\weekly-digest.ts": {
+    "mtime": 1789214226.1997244,
+    "ast_hash": "7808c327c406c091b77a1ab7becf0cad",
+    "semantic_hash": "7808c327c406c091b77a1ab7becf0cad"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\review\\match-candidates.ts": {
+    "mtime": 1789214226.200728,
+    "ast_hash": "e52743f80d07f0d6cefb74278bec6c24",
+    "semantic_hash": "e52743f80d07f0d6cefb74278bec6c24"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\review\\types.ts": {
+    "mtime": 1790592512.517164,
+    "ast_hash": "c7d43c01ccd2a34fcce2bc263c99c7d8",
+    "semantic_hash": "c7d43c01ccd2a34fcce2bc263c99c7d8"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\scrape-token.ts": {
+    "mtime": 1789214226.201724,
+    "ast_hash": "f2c982b98f1121a70af1ae56773ea206",
+    "semantic_hash": "f2c982b98f1121a70af1ae56773ea206"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\settings\\loadBudgetHeads.ts": {
+    "mtime": 1789315839.9090602,
+    "ast_hash": "7de08cac584b58eda90bd91735e995dc",
+    "semantic_hash": "7de08cac584b58eda90bd91735e995dc"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\settings\\loadEvents.ts": {
+    "mtime": 1789214226.203736,
+    "ast_hash": "c2d698bb5a1d7d1b3e5c7a9cabeed20c",
+    "semantic_hash": "c2d698bb5a1d7d1b3e5c7a9cabeed20c"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\settings\\loadMasterData.ts": {
+    "mtime": 1790593037.6853426,
+    "ast_hash": "83c510b488c275f2d7b76d89a8cd39ca",
+    "semantic_hash": "83c510b488c275f2d7b76d89a8cd39ca"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\settings\\loadSubDeptBudgets.ts": {
+    "mtime": 1789214226.204727,
+    "ast_hash": "be6e7686a0e3605910f22b8301c4bf1b",
+    "semantic_hash": "be6e7686a0e3605910f22b8301c4bf1b"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\settings\\loadUsers.ts": {
+    "mtime": 1789214226.2057264,
+    "ast_hash": "83b57fd90043f65f412da55800a15d4b",
+    "semantic_hash": "83b57fd90043f65f412da55800a15d4b"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\settings\\loadVendors.ts": {
+    "mtime": 1789214226.2057264,
+    "ast_hash": "1c7ab42b32322da176826ae09f3c43a3",
+    "semantic_hash": "1c7ab42b32322da176826ae09f3c43a3"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\settings\\page-gate.ts": {
+    "mtime": 1789214226.2067268,
+    "ast_hash": "86aee30716e501b1ff06a91b2461c30c",
+    "semantic_hash": "86aee30716e501b1ff06a91b2461c30c"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\settings\\shape.ts": {
+    "mtime": 1790593017.774925,
+    "ast_hash": "40bd675c27443ca62bfaf67b835ae22d",
+    "semantic_hash": "40bd675c27443ca62bfaf67b835ae22d"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\settings\\summary.ts": {
+    "mtime": 1789214226.207724,
+    "ast_hash": "a5cb4551d438d5c5a6a3d08b01011a9b",
+    "semantic_hash": "a5cb4551d438d5c5a6a3d08b01011a9b"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\shortcuts\\config.ts": {
+    "mtime": 1790592664.0007913,
+    "ast_hash": "faf05bb2769e445a160d09565651cc29",
+    "semantic_hash": "faf05bb2769e445a160d09565651cc29"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\shortcuts\\load.ts": {
+    "mtime": 1789214226.209242,
+    "ast_hash": "9372355ae745be9590d3001707646afb",
+    "semantic_hash": "9372355ae745be9590d3001707646afb"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\split-ranges.ts": {
+    "mtime": 1789214226.2112427,
+    "ast_hash": "d90dcf440f70e6fc70d4af43b56aabaf",
+    "semantic_hash": "d90dcf440f70e6fc70d4af43b56aabaf"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\status-badge.ts": {
+    "mtime": 1790592472.6365566,
+    "ast_hash": "6df5f2910dcc95743b5c39c7416700da",
+    "semantic_hash": "6df5f2910dcc95743b5c39c7416700da"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\storage.ts": {
+    "mtime": 1789630516.4803655,
+    "ast_hash": "b3dd4a04c7d42ed7088e6a4b424363c3",
+    "semantic_hash": "b3dd4a04c7d42ed7088e6a4b424363c3"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\supabase\\admin.ts": {
+    "mtime": 1786201494.734313,
+    "ast_hash": "2f69c3fdb74e026b265267326ecb87f7",
+    "semantic_hash": "2f69c3fdb74e026b265267326ecb87f7"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\supabase\\client.ts": {
+    "mtime": 1786188278.641712,
+    "ast_hash": "32c6d62cbde63f34819d2a295de2110a",
+    "semantic_hash": "32c6d62cbde63f34819d2a295de2110a"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\supabase\\server.ts": {
+    "mtime": 1789214226.2132435,
+    "ast_hash": "febee6b31a678d0a942e574735cbd91a",
+    "semantic_hash": "febee6b31a678d0a942e574735cbd91a"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\upload-limits.ts": {
+    "mtime": 1789214226.2142444,
+    "ast_hash": "af1295a395c55b95ce67bf142266c471",
+    "semantic_hash": "af1295a395c55b95ce67bf142266c471"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\lib\\utils.ts": {
+    "mtime": 1786187794.01902,
+    "ast_hash": "bd7f1534696295bfbab094ac93447322",
+    "semantic_hash": "bd7f1534696295bfbab094ac93447322"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\middleware.ts": {
+    "mtime": 1789214226.215243,
+    "ast_hash": "dfc5bd6e0f5f557d5de23f03aa904d42",
+    "semantic_hash": "dfc5bd6e0f5f557d5de23f03aa904d42"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\next.config.ts": {
+    "mtime": 1789214226.216245,
+    "ast_hash": "7a692f5ce9f81f20706d76641e96588c",
+    "semantic_hash": "7a692f5ce9f81f20706d76641e96588c"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\package.json": {
+    "mtime": 1789214226.2228565,
+    "ast_hash": "b522ecd3b52f6ffacd8f87e4110d26df",
+    "semantic_hash": "b522ecd3b52f6ffacd8f87e4110d26df"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\postcss.config.mjs": {
+    "mtime": 1786187738.6072176,
+    "ast_hash": "ef3ba2a81ba19f8ea5ddf625521e96f0",
+    "semantic_hash": "ef3ba2a81ba19f8ea5ddf625521e96f0"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\public\\bookmarklet\\read-portal.js": {
+    "mtime": 1790593320.9518874,
+    "ast_hash": "db37f950aa0d427446a512c7832e08d7",
+    "semantic_hash": "db37f950aa0d427446a512c7832e08d7"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\public\\pdf.worker.min.mjs": {
+    "mtime": 1789539520.4730446,
+    "ast_hash": "be8296d2573845462e362dbb74fa91aa",
+    "semantic_hash": "be8296d2573845462e362dbb74fa91aa"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\scripts\\empty-invoice-bucket.mjs": {
+    "mtime": 1789214226.2303703,
+    "ast_hash": "d474aaf09f3b38abfd7861268e3302fe",
+    "semantic_hash": "d474aaf09f3b38abfd7861268e3302fe"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\scripts\\export-masters-xlsx.mjs": {
+    "mtime": 1789316421.862676,
+    "ast_hash": "e660270b261804aedd12973b7e0fc90f",
+    "semantic_hash": "e660270b261804aedd12973b7e0fc90f"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\scripts\\wipe-entries-and-pdfs.sql": {
+    "mtime": 1789214226.2313712,
+    "ast_hash": "54ab48038ce84d823817195bd3778dce",
+    "semantic_hash": "54ab48038ce84d823817195bd3778dce"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\scripts\\wipe-pdfs-keep-entries.sql": {
+    "mtime": 1789214226.232371,
+    "ast_hash": "dfd0b1854bdce2e43247d1d36e336d45",
+    "semantic_hash": "dfd0b1854bdce2e43247d1d36e336d45"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\sentry.edge.config.ts": {
+    "mtime": 1786365521.1889038,
+    "ast_hash": "a0a40ee327f14b0fb2de1f257d066ee5",
+    "semantic_hash": "a0a40ee327f14b0fb2de1f257d066ee5"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\sentry.server.config.ts": {
+    "mtime": 1786365521.1889038,
+    "ast_hash": "caaebc574358715d6b3f71240b6a2572",
+    "semantic_hash": "caaebc574358715d6b3f71240b6a2572"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260808000001_extensions.sql": {
+    "mtime": 1786188527.1120257,
+    "ast_hash": "295c3d458faf4adb5fe5d077decca688",
+    "semantic_hash": "295c3d458faf4adb5fe5d077decca688"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260808000002_private_schema_and_helpers.sql": {
+    "mtime": 1786188534.8566399,
+    "ast_hash": "95e72506e8f8024dbabe7006ef99fa2d",
+    "semantic_hash": "95e72506e8f8024dbabe7006ef99fa2d"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260808000003_staff_profile_and_auth_trigger.sql": {
+    "mtime": 1786188543.613381,
+    "ast_hash": "26f43838c909dd70786529fc4fa8e519",
+    "semantic_hash": "26f43838c909dd70786529fc4fa8e519"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260808000004_department.sql": {
+    "mtime": 1786188548.6462693,
+    "ast_hash": "362dec04766518ac93f52fc00a2510df",
+    "semantic_hash": "362dec04766518ac93f52fc00a2510df"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260808000005_head.sql": {
+    "mtime": 1786188553.2044191,
+    "ast_hash": "86ec085885e43372276105d25cbc3b09",
+    "semantic_hash": "86ec085885e43372276105d25cbc3b09"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260808000006_zone.sql": {
+    "mtime": 1786188557.606349,
+    "ast_hash": "7625294555fc0b05f2a0c4435390c9e4",
+    "semantic_hash": "7625294555fc0b05f2a0c4435390c9e4"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260808000007_budget_head.sql": {
+    "mtime": 1786188563.4421747,
+    "ast_hash": "c3958cfc48c23a11be1ce5dbe7012ddb",
+    "semantic_hash": "c3958cfc48c23a11be1ce5dbe7012ddb"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260808000008_vendor_and_alias.sql": {
+    "mtime": 1786188571.2218075,
+    "ast_hash": "0a5b4e91cc168fdf2166d4dd8954f44a",
+    "semantic_hash": "0a5b4e91cc168fdf2166d4dd8954f44a"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260808000009_entry_status.sql": {
+    "mtime": 1786188576.2501798,
+    "ast_hash": "c549d09dc8c089857f0cd7aa8e6bb6db",
+    "semantic_hash": "c549d09dc8c089857f0cd7aa8e6bb6db"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260808000010_hub_status.sql": {
+    "mtime": 1786188582.7818656,
+    "ast_hash": "8116af2346e8e6cd4fd5eaf62428fd0e",
+    "semantic_hash": "8116af2346e8e6cd4fd5eaf62428fd0e"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260808000011_import_batch_and_row_log.sql": {
+    "mtime": 1786188592.5935278,
+    "ast_hash": "332540a9a6b4e47b4fcba29a1d114ab3",
+    "semantic_hash": "332540a9a6b4e47b4fcba29a1d114ab3"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260808000012_status_export_batch.sql": {
+    "mtime": 1786188598.2095022,
+    "ast_hash": "b057381b5f80661c43ac9818df3e0e2a",
+    "semantic_hash": "b057381b5f80661c43ac9818df3e0e2a"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260808000013_entries.sql": {
+    "mtime": 1786188613.775489,
+    "ast_hash": "c6f94dbcd9d4e2264bf69dc59328a31e",
+    "semantic_hash": "c6f94dbcd9d4e2264bf69dc59328a31e"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260808000014_entries_indexes.sql": {
+    "mtime": 1786188629.8895366,
+    "ast_hash": "60e54eb74012f2abc4b901722267a706",
+    "semantic_hash": "60e54eb74012f2abc4b901722267a706"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260808000015_status_export_row.sql": {
+    "mtime": 1786188636.6060276,
+    "ast_hash": "6e43dd6dd089c8f42f3693b7be2a30b4",
+    "semantic_hash": "6e43dd6dd089c8f42f3693b7be2a30b4"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260808000016_budget_allocation.sql": {
+    "mtime": 1786188643.0416749,
+    "ast_hash": "aac433819b8e609ac4d20107dd65f322",
+    "semantic_hash": "aac433819b8e609ac4d20107dd65f322"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260808000017_entry_change_log_and_triggers.sql": {
+    "mtime": 1786188660.945762,
+    "ast_hash": "8d9faea4e3eea4b9dbf1fce5ffb758a6",
+    "semantic_hash": "8d9faea4e3eea4b9dbf1fce5ffb758a6"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260808000018_source_document.sql": {
+    "mtime": 1786188668.369298,
+    "ast_hash": "24a6e603be5c58436007a8c3ea79c462",
+    "semantic_hash": "24a6e603be5c58436007a8c3ea79c462"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260808000019_document_page.sql": {
+    "mtime": 1786188679.3499877,
+    "ast_hash": "d73a194abefe391599f9bf629a078bd2",
+    "semantic_hash": "d73a194abefe391599f9bf629a078bd2"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260808000020_ocr_extraction_run.sql": {
+    "mtime": 1786188686.4151988,
+    "ast_hash": "049e1c730ba8e15cafe936092e1043d9",
+    "semantic_hash": "049e1c730ba8e15cafe936092e1043d9"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260808000021_document_extraction.sql": {
+    "mtime": 1786188695.508335,
+    "ast_hash": "2b0f712b9fa99579e1fc75124a103971",
+    "semantic_hash": "2b0f712b9fa99579e1fc75124a103971"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260808000022_document_extraction_line_item.sql": {
+    "mtime": 1786188704.3673763,
+    "ast_hash": "92ce46cc137db1fd8c1ec0c5ae7d5b90",
+    "semantic_hash": "92ce46cc137db1fd8c1ec0c5ae7d5b90"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260808000023_reconciliation_exception.sql": {
+    "mtime": 1786188712.2775407,
+    "ast_hash": "b77eee452fb433dd7213ed8e9bcfb8a4",
+    "semantic_hash": "b77eee452fb433dd7213ed8e9bcfb8a4"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260808000024_rate_reference.sql": {
+    "mtime": 1786188724.5314226,
+    "ast_hash": "6d72d49c6647970eb7cdd2c271984b8b",
+    "semantic_hash": "6d72d49c6647970eb7cdd2c271984b8b"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260808000025_flags.sql": {
+    "mtime": 1786188738.3853304,
+    "ast_hash": "0b3c8af5b8504d11d5f58ef5f524d071",
+    "semantic_hash": "0b3c8af5b8504d11d5f58ef5f524d071"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260808000026_rls_policies.sql": {
+    "mtime": 1786188794.8262558,
+    "ast_hash": "bdd8e9ada5dadc39c7f5bca9e4371cbe",
+    "semantic_hash": "bdd8e9ada5dadc39c7f5bca9e4371cbe"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260808000027_storage_policies.sql": {
+    "mtime": 1786188804.8693187,
+    "ast_hash": "7083b4453a0d6f60da661c26910ed86c",
+    "semantic_hash": "7083b4453a0d6f60da661c26910ed86c"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260808000028_reporting_views.sql": {
+    "mtime": 1786191579.7235885,
+    "ast_hash": "3d28ad03b0490b6783d0207c7b64c6c8",
+    "semantic_hash": "3d28ad03b0490b6783d0207c7b64c6c8"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260810000001_its_login.sql": {
+    "mtime": 1786341868.4908738,
+    "ast_hash": "eb816857a061e937c293bbfbe1c877f3",
+    "semantic_hash": "eb816857a061e937c293bbfbe1c877f3"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260810000002_auth_login_attempt.sql": {
+    "mtime": 1789214226.234372,
+    "ast_hash": "96aa7a1d11ccc52af19422a27cbcb850",
+    "semantic_hash": "96aa7a1d11ccc52af19422a27cbcb850"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260810000003_api_request_log.sql": {
+    "mtime": 1786342343.0652933,
+    "ast_hash": "e1d0714ed7670bdcd6feb67d0f3b6dd2",
+    "semantic_hash": "e1d0714ed7670bdcd6feb67d0f3b6dd2"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260811000001_admin_head_rename.sql": {
+    "mtime": 1786359710.6181936,
+    "ast_hash": "654694182c0bf898e8248a8c4ba015a9",
+    "semantic_hash": "654694182c0bf898e8248a8c4ba015a9"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260811000002_budget_category.sql": {
+    "mtime": 1786359723.6588066,
+    "ast_hash": "a83d0a8ed8b3b1802dee53a7a4aab3e6",
+    "semantic_hash": "a83d0a8ed8b3b1802dee53a7a4aab3e6"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260811000003_entries_restructure.sql": {
+    "mtime": 1786361269.7061472,
+    "ast_hash": "a6d7b84e2dae1a3f35f1ec3b11e56278",
+    "semantic_hash": "a6d7b84e2dae1a3f35f1ec3b11e56278"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260811000004_reporting_views_update.sql": {
+    "mtime": 1786359864.0150633,
+    "ast_hash": "7d4c38bb0f9616d9721a20c93481b82c",
+    "semantic_hash": "7d4c38bb0f9616d9721a20c93481b82c"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260812000001_claim_next_job.sql": {
+    "mtime": 1786367463.3993294,
+    "ast_hash": "18ea63b89302033dba1dc92391b68c66",
+    "semantic_hash": "18ea63b89302033dba1dc92391b68c66"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260813000001_review_queue_fixes.sql": {
+    "mtime": 1786426135.5585983,
+    "ast_hash": "96965f152b702ebc8d2e75465c342bcb",
+    "semantic_hash": "96965f152b702ebc8d2e75465c342bcb"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260813000002_verify_document_extraction.sql": {
+    "mtime": 1786426135.5585983,
+    "ast_hash": "a5f290758592e84150866bd6280e0f2e",
+    "semantic_hash": "a5f290758592e84150866bd6280e0f2e"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260813000003_reconciliation_exception_insert_policy.sql": {
+    "mtime": 1786426135.5595999,
+    "ast_hash": "8c90188a2081bd7789c87c1366bd536e",
+    "semantic_hash": "8c90188a2081bd7789c87c1366bd536e"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260813000004_cost_center_rename.sql": {
+    "mtime": 1786434364.38966,
+    "ast_hash": "0e2a2c79053e38a6d7b9b54534e0b4ff",
+    "semantic_hash": "0e2a2c79053e38a6d7b9b54534e0b4ff"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260813000005_staff_profile_cascade_delete.sql": {
+    "mtime": 1786448785.8449564,
+    "ast_hash": "009d6300a2e2eabe1739dc37336c4c42",
+    "semantic_hash": "009d6300a2e2eabe1739dc37336c4c42"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260813000006_drop_stale_verify_document_extraction_overload.sql": {
+    "mtime": 1786519448.0272205,
+    "ast_hash": "87cd908b57a8842d44b8984dcc99a5b8",
+    "semantic_hash": "87cd908b57a8842d44b8984dcc99a5b8"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260813000007_pg_trgm_to_extensions_schema.sql": {
+    "mtime": 1786529274.3878539,
+    "ast_hash": "97badd9da4501b16c2b66bfac3ccac17",
+    "semantic_hash": "97badd9da4501b16c2b66bfac3ccac17"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260814000001_item_catalog.sql": {
+    "mtime": 1786535424.044294,
+    "ast_hash": "8a4e63df4044bc82133b4e32b850ad4b",
+    "semantic_hash": "8a4e63df4044bc82133b4e32b850ad4b"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260814000002_instrument_type_and_tax.sql": {
+    "mtime": 1786535457.057943,
+    "ast_hash": "1b9527d71ddc0b46a6a3733e6a619745",
+    "semantic_hash": "1b9527d71ddc0b46a6a3733e6a619745"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260814000003_flags_extend.sql": {
+    "mtime": 1786535693.364597,
+    "ast_hash": "26bcdffd9d839a8397e8a511b4ca2909",
+    "semantic_hash": "26bcdffd9d839a8397e8a511b4ca2909"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260814000004_upsert_flag_security.sql": {
+    "mtime": 1786537281.8102572,
+    "ast_hash": "38208422cf5a8895dbf6e961867b8b67",
+    "semantic_hash": "38208422cf5a8895dbf6e961867b8b67"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260814000005_phase3_portal_ingest.sql": {
+    "mtime": 1786607917.6565135,
+    "ast_hash": "5fbe38a4779aff2803d995fecbb9be4f",
+    "semantic_hash": "5fbe38a4779aff2803d995fecbb9be4f"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260814000006_flags_run_job_type.sql": {
+    "mtime": 1786611448.4963403,
+    "ast_hash": "9994a29e4f9715799e2e7186f0e22c4d",
+    "semantic_hash": "9994a29e4f9715799e2e7186f0e22c4d"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260814000007_analytics_views.sql": {
+    "mtime": 1786611719.5544996,
+    "ast_hash": "4b873ef853c329c45abafa1452ccb109",
+    "semantic_hash": "4b873ef853c329c45abafa1452ccb109"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260814000008_audit_status_labels.sql": {
+    "mtime": 1786620610.2132435,
+    "ast_hash": "6a90806da9560a3ff59608ee8a2dcae2",
+    "semantic_hash": "6a90806da9560a3ff59608ee8a2dcae2"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260814000009_review_queue_add_queue_amount.sql": {
+    "mtime": 1786625218.2286413,
+    "ast_hash": "48dae383bee7048b7ef911d8d48a7b3e",
+    "semantic_hash": "48dae383bee7048b7ef911d8d48a7b3e"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260814000010_document_extraction_vendor_email.sql": {
+    "mtime": 1786693889.0478086,
+    "ast_hash": "d5d2d7f5430a588db2924e15f5294d40",
+    "semantic_hash": "d5d2d7f5430a588db2924e15f5294d40"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260814000011_verify_document_extraction_vendor_email.sql": {
+    "mtime": 1786693487.1358144,
+    "ast_hash": "c146f6f9f974fa07a7b8a184ba35590d",
+    "semantic_hash": "c146f6f9f974fa07a7b8a184ba35590d"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260817000001_entry_status_counts_view.sql": {
+    "mtime": 1789214226.2363765,
+    "ast_hash": "a8d18ed7ee1bc896c03bece4b04d3988",
+    "semantic_hash": "a8d18ed7ee1bc896c03bece4b04d3988"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260817000002_document_extraction_multi_bill.sql": {
+    "mtime": 1789214226.2389996,
+    "ast_hash": "a34d5c7853fb2b1e56329ae1fa71c894",
+    "semantic_hash": "a34d5c7853fb2b1e56329ae1fa71c894"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260817000003_verify_document_extraction_by_id.sql": {
+    "mtime": 1789214226.2399082,
+    "ast_hash": "cafc7aca8fe1654a6ff2dd4000283b6d",
+    "semantic_hash": "cafc7aca8fe1654a6ff2dd4000283b6d"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260817000004_review_queue_multi_bill.sql": {
+    "mtime": 1789214226.240906,
+    "ast_hash": "89184861194394f787ff5ad4305761ed",
+    "semantic_hash": "89184861194394f787ff5ad4305761ed"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260817000005_ocr_leaked_tag_syntax_exception.sql": {
+    "mtime": 1789214226.2419076,
+    "ast_hash": "115ed5f540060307b303afdf2cf702b0",
+    "semantic_hash": "115ed5f540060307b303afdf2cf702b0"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260817000006_page_count_exceptions.sql": {
+    "mtime": 1789214226.2439065,
+    "ast_hash": "931b55ebeb81d887c2372b6ccba809a5",
+    "semantic_hash": "931b55ebeb81d887c2372b6ccba809a5"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260817000007_sweep_job_queue.sql": {
+    "mtime": 1789214226.2469864,
+    "ast_hash": "9640bee6746975ed04839bba464b9037",
+    "semantic_hash": "9640bee6746975ed04839bba464b9037"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260819000001_source_document_canceled_status.sql": {
+    "mtime": 1789214226.2480018,
+    "ast_hash": "002a6774298a6c1f7b98f93465ceed09",
+    "semantic_hash": "002a6774298a6c1f7b98f93465ceed09"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260819000002_manual_entries.sql": {
+    "mtime": 1789214226.2500167,
+    "ast_hash": "2c91f69b20e0b9fe0c046ed7cae7005a",
+    "semantic_hash": "2c91f69b20e0b9fe0c046ed7cae7005a"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260819000003_role_rbac_v2.sql": {
+    "mtime": 1789214226.254019,
+    "ast_hash": "0c88c969e0a43a1281c7eb6d92d670a9",
+    "semantic_hash": "0c88c969e0a43a1281c7eb6d92d670a9"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260820000001_delete_source_document.sql": {
+    "mtime": 1789214226.2550218,
+    "ast_hash": "eeb57c3c2d3fa0d52aa6e1ebeed0b2e8",
+    "semantic_hash": "eeb57c3c2d3fa0d52aa6e1ebeed0b2e8"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260820000002_gstin_checksum_and_page_failure_exceptions.sql": {
+    "mtime": 1789214226.256017,
+    "ast_hash": "171ca4320fbf7089d0f9c92b837270c6",
+    "semantic_hash": "171ca4320fbf7089d0f9c92b837270c6"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260820000003_simplify_line_item_rate_fields.sql": {
+    "mtime": 1789214226.2570164,
+    "ast_hash": "4c195400246f69ae397ed52ee9475765",
+    "semantic_hash": "4c195400246f69ae397ed52ee9475765"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260821000001_uncertain_fields.sql": {
+    "mtime": 1789214226.2580168,
+    "ast_hash": "28184671a83236a05d0ac36dabc08e43",
+    "semantic_hash": "28184671a83236a05d0ac36dabc08e43"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260821000002_entry_id_coalesce_fix.sql": {
+    "mtime": 1789214226.2595499,
+    "ast_hash": "7b1e24c5cab21cefb3b254e535b44d13",
+    "semantic_hash": "7b1e24c5cab21cefb3b254e535b44d13"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260821000003_verify_document_extraction_conflict_check.sql": {
+    "mtime": 1789214226.2615488,
+    "ast_hash": "5708c67660a23924e0a9f397315e1f91",
+    "semantic_hash": "5708c67660a23924e0a9f397315e1f91"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260821000004_document_extraction_line_item_insert_policy.sql": {
+    "mtime": 1789214226.2635534,
+    "ast_hash": "797aab9d8393d64f77b3c1ccc634bca3",
+    "semantic_hash": "797aab9d8393d64f77b3c1ccc634bca3"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260821000005_verify_document_extraction_overload_fix.sql": {
+    "mtime": 1789214226.2640672,
+    "ast_hash": "66c84b0c3f09b64eea28ac39c614c3cf",
+    "semantic_hash": "66c84b0c3f09b64eea28ac39c614c3cf"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260821000006_review_queue_all_view.sql": {
+    "mtime": 1789214226.2655807,
+    "ast_hash": "3ce3b2d242b3796b200c24eb7f87f4d7",
+    "semantic_hash": "3ce3b2d242b3796b200c24eb7f87f4d7"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260821000007_gst_recipient_compliance.sql": {
+    "mtime": 1789214226.2665942,
+    "ast_hash": "71e78ca5ebb8fa7d2f8a120275759e09",
+    "semantic_hash": "71e78ca5ebb8fa7d2f8a120275759e09"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260822000001_department_budget_allocation.sql": {
+    "mtime": 1789214226.270217,
+    "ast_hash": "cf690477185f8070ac1a57c02a8321c2",
+    "semantic_hash": "cf690477185f8070ac1a57c02a8321c2"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260822000002_department_budget_vs_actual_view.sql": {
+    "mtime": 1789214226.271221,
+    "ast_hash": "9a4373e218c9ed74a97b4b13bea501f3",
+    "semantic_hash": "9a4373e218c9ed74a97b4b13bea501f3"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260822000003_staff_keymap_preferences.sql": {
+    "mtime": 1789214226.2733202,
+    "ast_hash": "dc748e642322e8fd1c2ce084580f3dc5",
+    "semantic_hash": "dc748e642322e8fd1c2ce084580f3dc5"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260822000004_page_scoped_reextraction.sql": {
+    "mtime": 1789214226.274332,
+    "ast_hash": "e4e194ceac08241276dad959e462c07e",
+    "semantic_hash": "e4e194ceac08241276dad959e462c07e"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260822000005_event_scoping.sql": {
+    "mtime": 1789214226.2753325,
+    "ast_hash": "a04abefef8ae6226a58fd90e4afa5437",
+    "semantic_hash": "a04abefef8ae6226a58fd90e4afa5437"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260822000006_review_queue_event_scoping.sql": {
+    "mtime": 1789214226.2763367,
+    "ast_hash": "a20e186d661aa95bbb9a55181350ac92",
+    "semantic_hash": "a20e186d661aa95bbb9a55181350ac92"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260822000007_reports_export_event_scoping.sql": {
+    "mtime": 1789214226.2788632,
+    "ast_hash": "d567ea4904fade8fbaff9f58d2c91681",
+    "semantic_hash": "d567ea4904fade8fbaff9f58d2c91681"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260822000008_app_settings.sql": {
+    "mtime": 1789214226.2793746,
+    "ast_hash": "1d18f1f04f7e8907fe97e508a65eeb29",
+    "semantic_hash": "1d18f1f04f7e8907fe97e508a65eeb29"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260822000009_document_extraction_delete_policy.sql": {
+    "mtime": 1789214226.2814045,
+    "ast_hash": "d1f349900f76f67d55646e498199f827",
+    "semantic_hash": "d1f349900f76f67d55646e498199f827"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260822000010_reconciliation_exception_source_document.sql": {
+    "mtime": 1789214226.2814045,
+    "ast_hash": "774e7a92c58785cdf6df93f3c1c3f817",
+    "semantic_hash": "774e7a92c58785cdf6df93f3c1c3f817"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260822000011_analytics_event_scoping.sql": {
+    "mtime": 1789214226.2834027,
+    "ast_hash": "7ea08023573635276b5483084f774557",
+    "semantic_hash": "7ea08023573635276b5483084f774557"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260822000012_housekeeping_cleanup.sql": {
+    "mtime": 1789214226.2844062,
+    "ast_hash": "8f974aae2cd58fadc3b9b1c80ae4dce8",
+    "semantic_hash": "8f974aae2cd58fadc3b9b1c80ae4dce8"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260822000013_extraction_skip_reason_id_document.sql": {
+    "mtime": 1789214226.2864015,
+    "ast_hash": "46dde589066992f50363469e8c1e1e5c",
+    "semantic_hash": "46dde589066992f50363469e8c1e1e5c"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260825000001_ocr_meta_commentary_exception.sql": {
+    "mtime": 1789214226.287912,
+    "ast_hash": "3a2b68800534a45f3a663aecb0393ed2",
+    "semantic_hash": "3a2b68800534a45f3a663aecb0393ed2"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260825000002_sub_department.sql": {
+    "mtime": 1789214226.288923,
+    "ast_hash": "53cfe3eb3985992ab6b6e575b2343f9b",
+    "semantic_hash": "53cfe3eb3985992ab6b6e575b2343f9b"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260825000003_event_sub_department.sql": {
+    "mtime": 1789214226.2904317,
+    "ast_hash": "486493da0c2327c9de0787515bba0fb7",
+    "semantic_hash": "486493da0c2327c9de0787515bba0fb7"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260825000004_entries_sub_department.sql": {
+    "mtime": 1789214226.2914424,
+    "ast_hash": "032387822d487fbfda054e2378e87944",
+    "semantic_hash": "032387822d487fbfda054e2378e87944"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260825000005_sub_department_budget_allocation.sql": {
+    "mtime": 1789214226.2934563,
+    "ast_hash": "b8db9c3e85b25afa311d55075f1babdb",
+    "semantic_hash": "b8db9c3e85b25afa311d55075f1babdb"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260825000006_sub_department_budget_vs_actual_view.sql": {
+    "mtime": 1789214226.2954538,
+    "ast_hash": "435c39709f583ce7af7a5593678f1bd5",
+    "semantic_hash": "435c39709f583ce7af7a5593678f1bd5"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260825000007_entry_enriched_sub_department.sql": {
+    "mtime": 1789214226.2964478,
+    "ast_hash": "9c08da0f5794182c30588bcfd61c7ff2",
+    "semantic_hash": "9c08da0f5794182c30588bcfd61c7ff2"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260827000001_entries_type_detail_tables.sql": {
+    "mtime": 1789214226.2964478,
+    "ast_hash": "c39138af8c8e0a0c55b5931db487b07b",
+    "semantic_hash": "c39138af8c8e0a0c55b5931db487b07b"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260828000001_unify_entry_status.sql": {
+    "mtime": 1789214226.297969,
+    "ast_hash": "57785f15a4ec3b1b6a3ac4c2bc07a2b1",
+    "semantic_hash": "57785f15a4ec3b1b6a3ac4c2bc07a2b1"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260828000002_invoice_against_uplaq.sql": {
+    "mtime": 1789214226.298983,
+    "ast_hash": "f36bcac107d1c909eaeff49870c5b5c6",
+    "semantic_hash": "f36bcac107d1c909eaeff49870c5b5c6"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260828000003_review_queue_tiebreaker.sql": {
+    "mtime": 1789214226.2999873,
+    "ast_hash": "ab43a680bdec374c2a211c373cc4c2ec",
+    "semantic_hash": "ab43a680bdec374c2a211c373cc4c2ec"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260828000004_review_claim_enforcement.sql": {
+    "mtime": 1789214226.3009837,
+    "ast_hash": "7fe5b48b926539e735a4ae22a55c444d",
+    "semantic_hash": "7fe5b48b926539e735a4ae22a55c444d"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260828000005_backfill_auto_status_labels.sql": {
+    "mtime": 1789214226.3024993,
+    "ast_hash": "f7e84b621494fa3e4559006cdc9cc9ec",
+    "semantic_hash": "f7e84b621494fa3e4559006cdc9cc9ec"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260829000001_recipient_identity_exception.sql": {
+    "mtime": 1789214226.3035216,
+    "ast_hash": "c097ccb76e22900c25fd691751003df7",
+    "semantic_hash": "c097ccb76e22900c25fd691751003df7"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260829000002_document_assignment.sql": {
+    "mtime": 1789214226.304519,
+    "ast_hash": "abea5a9594a56b904de60ebe179615e5",
+    "semantic_hash": "abea5a9594a56b904de60ebe179615e5"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260901000001_entry_type_lookup.sql": {
+    "mtime": 1789214226.304519,
+    "ast_hash": "21a5ba60051877344f93e7c77eda0d53",
+    "semantic_hash": "21a5ba60051877344f93e7c77eda0d53"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260901000002_entry_type_counts.sql": {
+    "mtime": 1789214226.304519,
+    "ast_hash": "e7d4ed072425c9f75eedf2eedd5b0b79",
+    "semantic_hash": "e7d4ed072425c9f75eedf2eedd5b0b79"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260903000001_executive_brief_views.sql": {
+    "mtime": 1789214226.3059263,
+    "ast_hash": "06f6a8193b5b0d31bdc6e6b78b7bd1cc",
+    "semantic_hash": "06f6a8193b5b0d31bdc6e6b78b7bd1cc"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260903000002_phase_four_finding_views.sql": {
+    "mtime": 1789214226.3069427,
+    "ast_hash": "2d9d1d36af5a39ac44f1f093fbe36aec",
+    "semantic_hash": "2d9d1d36af5a39ac44f1f093fbe36aec"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260903000003_purchase_tree_view.sql": {
+    "mtime": 1789214226.3079395,
+    "ast_hash": "b0f5b19f58909b8d60ee3a6eba6fb55a",
+    "semantic_hash": "b0f5b19f58909b8d60ee3a6eba6fb55a"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260903000004_rate_drift_discount_views.sql": {
+    "mtime": 1789214226.3079395,
+    "ast_hash": "502eb151b41f40e79fcb55fbc54d8976",
+    "semantic_hash": "502eb151b41f40e79fcb55fbc54d8976"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260903000005_quantity_zone_price_views.sql": {
+    "mtime": 1789214226.3093045,
+    "ast_hash": "0bc5cc52bc9a5e2bf7cac5bc46d39c17",
+    "semantic_hash": "0bc5cc52bc9a5e2bf7cac5bc46d39c17"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260903000006_vendor_scorecard_dormancy_views.sql": {
+    "mtime": 1789214226.3113203,
+    "ast_hash": "6fe4a852886e0faf4eebd796ec057bf7",
+    "semantic_hash": "6fe4a852886e0faf4eebd796ec057bf7"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260903000007_vendor_dependency_views.sql": {
+    "mtime": 1789214226.3123186,
+    "ast_hash": "955bd826617c1c0736746433e4e926ba",
+    "semantic_hash": "955bd826617c1c0736746433e4e926ba"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260903000008_related_party_gstin_views.sql": {
+    "mtime": 1789214226.314754,
+    "ast_hash": "cf319b0ecfe81342237517da7101a9b0",
+    "semantic_hash": "cf319b0ecfe81342237517da7101a9b0"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260903000009_reconciliation_gap_views.sql": {
+    "mtime": 1789214226.315754,
+    "ast_hash": "45c05b7ed25e660388711d494b7eeb33",
+    "semantic_hash": "45c05b7ed25e660388711d494b7eeb33"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260903000010_amount_distribution_views.sql": {
+    "mtime": 1789214226.315754,
+    "ast_hash": "7327ca3c33553022c3280ec45277e070",
+    "semantic_hash": "7327ca3c33553022c3280ec45277e070"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260903000012_rupee_provenance_views.sql": {
+    "mtime": 1789214226.316754,
+    "ast_hash": "5ada52601f5392890d83d5883b3f029f",
+    "semantic_hash": "5ada52601f5392890d83d5883b3f029f"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260903000013_budget_structure_views.sql": {
+    "mtime": 1789214226.318272,
+    "ast_hash": "96a00d8c3079b597361a74f9850dbb92",
+    "semantic_hash": "96a00d8c3079b597361a74f9850dbb92"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260903000014_entry_type_flow_views.sql": {
+    "mtime": 1789214226.3192806,
+    "ast_hash": "345c10c392938b0624a646b8c834811a",
+    "semantic_hash": "345c10c392938b0624a646b8c834811a"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260903000015_spend_curve_open_ageing_views.sql": {
+    "mtime": 1789214226.3212786,
+    "ast_hash": "4f627c9c56b64ad13c2595c004bac792",
+    "semantic_hash": "4f627c9c56b64ad13c2595c004bac792"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260903000016_duplicate_register_vendor_risk_views.sql": {
+    "mtime": 1789214226.3222797,
+    "ast_hash": "18417a3b9a34ecd4e56435d550abfae2",
+    "semantic_hash": "18417a3b9a34ecd4e56435d550abfae2"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260903000017_board_pack.sql": {
+    "mtime": 1789214226.3242786,
+    "ast_hash": "298cd56c43f61c27e9c0f27ed3e2dc8b",
+    "semantic_hash": "298cd56c43f61c27e9c0f27ed3e2dc8b"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260903000018_section7_input_tables.sql": {
+    "mtime": 1789214226.325282,
+    "ast_hash": "5fdfe78faaf0869dfff89d398a21ef8d",
+    "semantic_hash": "5fdfe78faaf0869dfff89d398a21ef8d"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260903000020_hsn_gst_anomaly_view.sql": {
+    "mtime": 1789214226.3277957,
+    "ast_hash": "6aacdb4071abaa93a99b0b8fb58dfa78",
+    "semantic_hash": "6aacdb4071abaa93a99b0b8fb58dfa78"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260904000001_review_queue_perf_rewrite.sql": {
+    "mtime": 1789214226.3314748,
+    "ast_hash": "9924b38949591937a6b9b23a6f568890",
+    "semantic_hash": "9924b38949591937a6b9b23a6f568890"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260905000001_match_candidate_entries.sql": {
+    "mtime": 1789214226.3334737,
+    "ast_hash": "595dea5b05869db2c0e50e997f78126b",
+    "semantic_hash": "595dea5b05869db2c0e50e997f78126b"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260905000002_tax_credit_exposure_bound.sql": {
+    "mtime": 1789214226.3354726,
+    "ast_hash": "c2c42fd2c5dcc1395815f582f80d1712",
+    "semantic_hash": "c2c42fd2c5dcc1395815f582f80d1712"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260905000003_drop_redundant_document_extraction_document_idx.sql": {
+    "mtime": 1789214226.3364751,
+    "ast_hash": "e1c551937961ff9f2ca4c10772806184",
+    "semantic_hash": "e1c551937961ff9f2ca4c10772806184"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260907000001_document_assignment_strict_admin_scope.sql": {
+    "mtime": 1789214226.337987,
+    "ast_hash": "3f5ccbab009f90fc4e70eb29c9cd9ac4",
+    "semantic_hash": "3f5ccbab009f90fc4e70eb29c9cd9ac4"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260907000002_review_queue_retain_unfinished.sql": {
+    "mtime": 1789214226.3400004,
+    "ast_hash": "c0f72de0b1d51f578123b19f4423374d",
+    "semantic_hash": "c0f72de0b1d51f578123b19f4423374d"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260907000003_buyer_gstin_invalid_checksum_exception.sql": {
+    "mtime": 1789214226.3410237,
+    "ast_hash": "81c399048186582e4a960ed993147604",
+    "semantic_hash": "81c399048186582e4a960ed993147604"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260907000004_tax_credit_exposure_buyer_gstin_checksum.sql": {
+    "mtime": 1789214226.3420148,
+    "ast_hash": "db2921e30b6823a06b1839964e4341d3",
+    "semantic_hash": "db2921e30b6823a06b1839964e4341d3"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260907000005_line_item_row_math_mismatch_exception.sql": {
+    "mtime": 1789214226.3440783,
+    "ast_hash": "ffd9fca9735905e362b7113c500ae3aa",
+    "semantic_hash": "ffd9fca9735905e362b7113c500ae3aa"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260907000006_curate_verification_stage_statuses.sql": {
+    "mtime": 1789214226.3460815,
+    "ast_hash": "6ef077841fc33689f82b8d95f4e548ae",
+    "semantic_hash": "6ef077841fc33689f82b8d95f4e548ae"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260908000000_within_tally_tolerance.sql": {
+    "mtime": 1789214226.3475945,
+    "ast_hash": "a39288ffe475f3e70d0c93f2c67588c1",
+    "semantic_hash": "a39288ffe475f3e70d0c93f2c67588c1"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260908000001_entry_bill_link.sql": {
+    "mtime": 1789214226.349607,
+    "ast_hash": "64f28fac98fb8583eea9a2ef888be4b4",
+    "semantic_hash": "64f28fac98fb8583eea9a2ef888be4b4"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260908000002_entry_bill_variance_views.sql": {
+    "mtime": 1789214226.3506072,
+    "ast_hash": "3ac6f0ee7cd3f9764b8077ac56ceed9f",
+    "semantic_hash": "3ac6f0ee7cd3f9764b8077ac56ceed9f"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260908000003_entry_bill_link_readers.sql": {
+    "mtime": 1789214226.3536181,
+    "ast_hash": "b3f6e15b6eee237bdaea1116993c6791",
+    "semantic_hash": "b3f6e15b6eee237bdaea1116993c6791"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260908000004_drop_entry_id_mirrors.sql": {
+    "mtime": 1789214226.3653612,
+    "ast_hash": "48967bf0edf5be31bdb0639c90f55a50",
+    "semantic_hash": "48967bf0edf5be31bdb0639c90f55a50"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260908000005_restore_status_view_security_invoker.sql": {
+    "mtime": 1789214226.370305,
+    "ast_hash": "8d0f4ba1a52e6c65d4c1645b993e42e2",
+    "semantic_hash": "8d0f4ba1a52e6c65d4c1645b993e42e2"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260911000001_department_budget_from_sub_department_sum.sql": {
+    "mtime": 1789214226.3731377,
+    "ast_hash": "a7e340b6a33ea32a6be708439a0f1f2a",
+    "semantic_hash": "a7e340b6a33ea32a6be708439a0f1f2a"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260911000002_place_awaiting_verification_status.sql": {
+    "mtime": 1789214226.3741584,
+    "ast_hash": "2d244cd0179b86f7114d644f643bce88",
+    "semantic_hash": "2d244cd0179b86f7114d644f643bce88"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260911000003_manual_flag_reason_exceptions.sql": {
+    "mtime": 1789214226.377682,
+    "ast_hash": "8e2682baf0b0203dcfc90d2060d46146",
+    "semantic_hash": "8e2682baf0b0203dcfc90d2060d46146"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260912000001_vendor_line_item_template.sql": {
+    "mtime": 1789214226.3792107,
+    "ast_hash": "2caf44063607eecfe893f24739c29c8c",
+    "semantic_hash": "2caf44063607eecfe893f24739c29c8c"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260912000002_cascade_delete_rls_gap.sql": {
+    "mtime": 1789314521.6743968,
+    "ast_hash": "d2d3400b85fd9b4e38d98f0150f88b88",
+    "semantic_hash": "d2d3400b85fd9b4e38d98f0150f88b88"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260912000003_grant_delete_for_skip_page.sql": {
+    "mtime": 1789539510.4782367,
+    "ast_hash": "0b1b978ea4041e9241c36ad181f6b2f7",
+    "semantic_hash": "0b1b978ea4041e9241c36ad181f6b2f7"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260913000001_admin_head_zone_drop_department.sql": {
+    "mtime": 1789316311.1811166,
+    "ast_hash": "441b2fa1de8dc44e0333532e4c19ea34",
+    "semantic_hash": "441b2fa1de8dc44e0333532e4c19ea34"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260914000001_reconciliation_exception_auto_recheck.sql": {
+    "mtime": 1789370135.874288,
+    "ast_hash": "9eb2c60a665558164a608f20527bf750",
+    "semantic_hash": "9eb2c60a665558164a608f20527bf750"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260914000002_skip_page_unlinks_rate_reference.sql": {
+    "mtime": 1789375582.7409225,
+    "ast_hash": "59c02afafcc52b1a5bf2f906026ee609",
+    "semantic_hash": "59c02afafcc52b1a5bf2f906026ee609"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260915000001_review_queue_all_add_classification_columns.sql": {
+    "mtime": 1789539510.47924,
+    "ast_hash": "f2b12c79789704d37be797784c261709",
+    "semantic_hash": "f2b12c79789704d37be797784c261709"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260918000001_review_queue_admin_head_optional.sql": {
+    "mtime": 1789731001.6830258,
+    "ast_hash": "067da0b2800f676c2f50323584800ad6",
+    "semantic_hash": "067da0b2800f676c2f50323584800ad6"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260919000001_entries_void_note_and_missing_exception_type.sql": {
+    "mtime": 1789764713.8418381,
+    "ast_hash": "3553be3777928886da8053c3f4fb5cab",
+    "semantic_hash": "3553be3777928886da8053c3f4fb5cab"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260919000002_entry_enriched_void_note.sql": {
+    "mtime": 1789765396.8530943,
+    "ast_hash": "c905ca9439de27de0bf20cfdaca3aacf",
+    "semantic_hash": "c905ca9439de27de0bf20cfdaca3aacf"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260925000001_invoice_against_uplaq_balance_payable_is_amount.sql": {
+    "mtime": 1790340060.3893461,
+    "ast_hash": "0e5b2f9d49e5350e55318fda91264777",
+    "semantic_hash": "0e5b2f9d49e5350e55318fda91264777"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260926000001_reimbursement_vendor_raw_backfill.sql": {
+    "mtime": 1790391932.6994324,
+    "ast_hash": "cb2f81c92a603b599c55bc7aaf56a94f",
+    "semantic_hash": "cb2f81c92a603b599c55bc7aaf56a94f"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260926000002_link_advance_to_iau_settlement.sql": {
+    "mtime": 1790394576.929049,
+    "ast_hash": "966ff1524218f5058147a2496ad7f72d",
+    "semantic_hash": "966ff1524218f5058147a2496ad7f72d"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260926000003_department_budget_actual_committed_split.sql": {
+    "mtime": 1790394295.679046,
+    "ast_hash": "269f31196d3281beee73157379e7bb61",
+    "semantic_hash": "269f31196d3281beee73157379e7bb61"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260926000004_iau_balance_payable_reapply.sql": {
+    "mtime": 1790395169.20413,
+    "ast_hash": "17ab5dbb6237092815d9321e3e782ef0",
+    "semantic_hash": "17ab5dbb6237092815d9321e3e782ef0"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260926000005_vendor_advance_position.sql": {
+    "mtime": 1790397238.3206432,
+    "ast_hash": "eddb8e588c918c2b62c1d5f3e90d773b",
+    "semantic_hash": "eddb8e588c918c2b62c1d5f3e90d773b"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\migrations\\20260927000001_import_batch_scrape_session_id.sql": {
+    "mtime": 1790513166.2402668,
+    "ast_hash": "71bf6fc73711c0e62c7413dd292fafaf",
+    "semantic_hash": "71bf6fc73711c0e62c7413dd292fafaf"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\supabase\\seed.sql": {
+    "mtime": 1786188858.3908725,
+    "ast_hash": "9272636f05166bf41df815351317e349",
+    "semantic_hash": "9272636f05166bf41df815351317e349"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\tailwind.config.ts": {
+    "mtime": 1786348173.7163286,
+    "ast_hash": "7ec46c65d1e97bd0552001456914051f",
+    "semantic_hash": "7ec46c65d1e97bd0552001456914051f"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\test\\build-gold-from-corrections.ts": {
+    "mtime": 1789214226.383827,
+    "ast_hash": "e938f959373a8739a449b8d948e34828",
+    "semantic_hash": "e938f959373a8739a449b8d948e34828"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\test\\gold-blind-notes.example.json": {
+    "mtime": 1786529509.9339683,
+    "ast_hash": "4353234c5ed01193aa12fd32bb26f542",
+    "semantic_hash": "4353234c5ed01193aa12fd32bb26f542"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\test\\gold-blind-notes.json": {
+    "mtime": 1789214226.3848245,
+    "ast_hash": "7bb5a73c454cde892660eba0764187be",
+    "semantic_hash": "7bb5a73c454cde892660eba0764187be"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\test\\gold.json": {
+    "mtime": 1789214226.3883395,
+    "ast_hash": "4d0bbc9e1d5f9423f1c3971bd0368272",
+    "semantic_hash": "4d0bbc9e1d5f9423f1c3971bd0368272"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\test\\integration\\rls.test.ts": {
+    "mtime": 1789316036.5126848,
+    "ast_hash": "a5ac1deee081c90e2a596045b73baf5f",
+    "semantic_hash": "a5ac1deee081c90e2a596045b73baf5f"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\test\\integration\\setup-env.ts": {
+    "mtime": 1786365556.2728398,
+    "ast_hash": "70aa2fa7cb72d38cdbc8c985db735cca",
+    "semantic_hash": "70aa2fa7cb72d38cdbc8c985db735cca"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\test\\score.ts": {
+    "mtime": 1789214226.3953748,
+    "ast_hash": "60762dc4a9f673ef0e170f49aa008e2e",
+    "semantic_hash": "60762dc4a9f673ef0e170f49aa008e2e"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\test\\unit\\batch-custom-id.test.ts": {
+    "mtime": 1789214226.3999026,
+    "ast_hash": "d69b0162fd102ef8a6a98d797e703423",
+    "semantic_hash": "d69b0162fd102ef8a6a98d797e703423"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\test\\unit\\claude-client-cache-prefix.test.ts": {
+    "mtime": 1789214226.4019186,
+    "ast_hash": "d0a9963b787c647aeaf61a00dc204f28",
+    "semantic_hash": "d0a9963b787c647aeaf61a00dc204f28"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\test\\unit\\compliance-rules.test.ts": {
+    "mtime": 1786535858.4035592,
+    "ast_hash": "55065de7a308c422f1e4f19a6eb4fa08",
+    "semantic_hash": "55065de7a308c422f1e4f19a6eb4fa08"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\test\\unit\\department-budget-import.test.ts": {
+    "mtime": 1789214226.4039187,
+    "ast_hash": "b09d5746c537db12a7a63a62e4c3425d",
+    "semantic_hash": "b09d5746c537db12a7a63a62e4c3425d"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\test\\unit\\document-sort.test.ts": {
+    "mtime": 1789214226.4063773,
+    "ast_hash": "d02cea99ac78ac1efefc0df60cc94007",
+    "semantic_hash": "d02cea99ac78ac1efefc0df60cc94007"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\test\\unit\\entries-query-pagination.test.ts": {
+    "mtime": 1789214226.407679,
+    "ast_hash": "97dff115eaac81d3dae0b3432b40275f",
+    "semantic_hash": "97dff115eaac81d3dae0b3432b40275f"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\test\\unit\\exceptions-bulk.test.ts": {
+    "mtime": 1789214226.4096968,
+    "ast_hash": "c82b2ec43d5f24af6582a8f002f8197c",
+    "semantic_hash": "c82b2ec43d5f24af6582a8f002f8197c"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\test\\unit\\extraction-schema.test.ts": {
+    "mtime": 1789370125.0663545,
+    "ast_hash": "a536e3ae5903a71ce340bd2e50b98ae1",
+    "semantic_hash": "a536e3ae5903a71ce340bd2e50b98ae1"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\test\\unit\\friendly-error.test.ts": {
+    "mtime": 1789214226.413922,
+    "ast_hash": "8cdd7d03734e6b5187b6865e0dd11489",
+    "semantic_hash": "8cdd7d03734e6b5187b6865e0dd11489"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\test\\unit\\gst-recipient-compliance.test.ts": {
+    "mtime": 1789214226.4159222,
+    "ast_hash": "c6ff58ac32199ad53f6b00f382b726ad",
+    "semantic_hash": "c6ff58ac32199ad53f6b00f382b726ad"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\test\\unit\\gstin-state-resolution.test.ts": {
+    "mtime": 1786611352.9904492,
+    "ast_hash": "076de9f68950756376bfe9cf12f5e7b1",
+    "semantic_hash": "076de9f68950756376bfe9cf12f5e7b1"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\test\\unit\\gstin.test.ts": {
+    "mtime": 1786611343.3499591,
+    "ast_hash": "a9217c56c33f2077b34d41f7e9ed0845",
+    "semantic_hash": "a9217c56c33f2077b34d41f7e9ed0845"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\test\\unit\\import-fixture.test.ts": {
+    "mtime": 1786188571.5452874,
+    "ast_hash": "726f0d081be4ad45c98f1ecac3c4d267",
+    "semantic_hash": "726f0d081be4ad45c98f1ecac3c4d267"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\test\\unit\\matching.test.ts": {
+    "mtime": 1789214226.41792,
+    "ast_hash": "775922394cb831af338fcef4b2142103",
+    "semantic_hash": "775922394cb831af338fcef4b2142103"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\test\\unit\\module-mapping.test.ts": {
+    "mtime": 1789214226.4194524,
+    "ast_hash": "4018dbcbd02f3ff5c1683d63b23499b8",
+    "semantic_hash": "4018dbcbd02f3ff5c1683d63b23499b8"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\test\\unit\\normalize.test.ts": {
+    "mtime": 1786188532.2274373,
+    "ast_hash": "9b7cbb13ad205465d0cd3bb69401de27",
+    "semantic_hash": "9b7cbb13ad205465d0cd3bb69401de27"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\test\\unit\\poll-backoff.test.ts": {
+    "mtime": 1789214226.425825,
+    "ast_hash": "7225f0089cd6eac6d1a0b49f8b5a8ea9",
+    "semantic_hash": "7225f0089cd6eac6d1a0b49f8b5a8ea9"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\test\\unit\\portal-linkage.test.ts": {
+    "mtime": 1789214226.4293618,
+    "ast_hash": "6770e425ff8ef39c6b7d29d37de53aef",
+    "semantic_hash": "6770e425ff8ef39c6b7d29d37de53aef"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\test\\unit\\portal-mapping.test.ts": {
+    "mtime": 1789368829.549898,
+    "ast_hash": "f6df66c34e2926a16c56a667d017ac71",
+    "semantic_hash": "f6df66c34e2926a16c56a667d017ac71"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\test\\unit\\run-import.test.ts": {
+    "mtime": 1786201178.0416968,
+    "ast_hash": "c3e988875fc0d14aef2f43f8c54bf054",
+    "semantic_hash": "c3e988875fc0d14aef2f43f8c54bf054"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\test\\unit\\shortcuts-config.test.ts": {
+    "mtime": 1789214226.4338117,
+    "ast_hash": "ed985ea05f2059724425f9bf56879ef2",
+    "semantic_hash": "ed985ea05f2059724425f9bf56879ef2"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\test\\unit\\split-ranges.test.ts": {
+    "mtime": 1789214226.435807,
+    "ast_hash": "a5bc43eb6cad111a9d2a2c88cc609c15",
+    "semantic_hash": "a5bc43eb6cad111a9d2a2c88cc609c15"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\test\\unit\\sub-department-budget-import.test.ts": {
+    "mtime": 1789214226.436811,
+    "ast_hash": "87b93c071657dfa882b5bd1d75c04782",
+    "semantic_hash": "87b93c071657dfa882b5bd1d75c04782"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\test\\unit\\tally-recheck.test.ts": {
+    "mtime": 1789370501.6488194,
+    "ast_hash": "0112e57a293164362bd22ff17e9759b1",
+    "semantic_hash": "0112e57a293164362bd22ff17e9759b1"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\test\\unit\\vendor-patterns.test.ts": {
+    "mtime": 1786537101.6008742,
+    "ast_hash": "5bcc854c1d25967901e450b0eb28d6e9",
+    "semantic_hash": "5bcc854c1d25967901e450b0eb28d6e9"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\tsconfig.json": {
+    "mtime": 1786187701.549869,
+    "ast_hash": "ef71b32c1a053465d5b3fa6d8698ae64",
+    "semantic_hash": "ef71b32c1a053465d5b3fa6d8698ae64"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\vitest.config.ts": {
+    "mtime": 1786365556.2728398,
+    "ast_hash": "f57c69968f98165fd442873e811b568c",
+    "semantic_hash": "f57c69968f98165fd442873e811b568c"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\vitest.integration.config.ts": {
+    "mtime": 1786365556.2728398,
+    "ast_hash": "751b787437084992e8958c087d5ed914",
+    "semantic_hash": "751b787437084992e8958c087d5ed914"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\worker\\index.ts": {
+    "mtime": 1789214226.4389615,
+    "ast_hash": "6ca0c3e7c11ae196f2a67873e6831641",
+    "semantic_hash": "6ca0c3e7c11ae196f2a67873e6831641"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\.coderabbit.yaml": {
+    "mtime": 1786517196.6772914,
+    "ast_hash": "af044f1d9c46da9149dafd9dc51a6a7a",
+    "semantic_hash": "af044f1d9c46da9149dafd9dc51a6a7a"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\.github\\workflows\\worker.yml": {
+    "mtime": 1789214225.6815252,
+    "ast_hash": "1e041440f4f7f747c9caf2cf568ff76d",
+    "semantic_hash": "1e041440f4f7f747c9caf2cf568ff76d"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\Invoice OCR Technical Spec.md": {
+    "mtime": 1786380977.0458672,
+    "ast_hash": "3d40c6b6cd1d92cef74a78553daa0d7e",
+    "semantic_hash": "3d40c6b6cd1d92cef74a78553daa0d7e"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\MASTER-PLAN.md": {
+    "mtime": 1789214225.6910598,
+    "ast_hash": "82a756d9b1c3d4d5c2e5a2677eed6851",
+    "semantic_hash": "82a756d9b1c3d4d5c2e5a2677eed6851"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\PRODUCT.md": {
+    "mtime": 1789369681.6345284,
+    "ast_hash": "79beb4324c9f79d81e6e0e53df912ef4",
+    "semantic_hash": "79beb4324c9f79d81e6e0e53df912ef4"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\docs\\csp-enforcement-readiness.md": {
+    "mtime": 1786365940.8623784,
+    "ast_hash": "49bd7e56020c35af3992ecae5b31131e",
+    "semantic_hash": "49bd7e56020c35af3992ecae5b31131e"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\docs\\db-advisors-report.md": {
+    "mtime": 1786380987.8893328,
+    "ast_hash": "ed76a1e7dcb346b7ea6f6deca15e6ec9",
+    "semantic_hash": "ed76a1e7dcb346b7ea6f6deca15e6ec9"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\docs\\event-scoping-and-review-fixes-plan.md": {
+    "mtime": 1789214226.0237415,
+    "ast_hash": "b14aeff152b0fedc675b2c07533b8f25",
+    "semantic_hash": "b14aeff152b0fedc675b2c07533b8f25"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\docs\\hub-refinements-plan.md": {
+    "mtime": 1789214226.024744,
+    "ast_hash": "508c00d87edbd6b7a04cde78d63678e8",
+    "semantic_hash": "508c00d87edbd6b7a04cde78d63678e8"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\docs\\hub-screen-certification.md": {
+    "mtime": 1789214226.0267591,
+    "ast_hash": "5673dd2f56edf8dfeb1b54327be845e4",
+    "semantic_hash": "5673dd2f56edf8dfeb1b54327be845e4"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\docs\\import-review-ux-checklist.md": {
+    "mtime": 1789214226.028255,
+    "ast_hash": "7d79c82acabf6b458c4f668d776058de",
+    "semantic_hash": "7d79c82acabf6b458c4f668d776058de"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\docs\\import-review-ux-plan.md": {
+    "mtime": 1789214226.0302699,
+    "ast_hash": "9ab3d86853519c04f7919ea30d0803b4",
+    "semantic_hash": "9ab3d86853519c04f7919ea30d0803b4"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\docs\\job-worker-github-actions.md": {
+    "mtime": 1789214226.0312676,
+    "ast_hash": "8e2efa580abcb1d7f4449c2ed0764140",
+    "semantic_hash": "8e2efa580abcb1d7f4449c2ed0764140"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\docs\\ocr-execution-decision.md": {
+    "mtime": 1789214226.0342715,
+    "ast_hash": "5d43cfca602fe9c24998a0171f8b19f1",
+    "semantic_hash": "5d43cfca602fe9c24998a0171f8b19f1"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\docs\\operator-runbook.md": {
+    "mtime": 1789214226.0352705,
+    "ast_hash": "69f6c27a58bfde2fe16ef807966c9a89",
+    "semantic_hash": "69f6c27a58bfde2fe16ef807966c9a89"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\docs\\perf-ux-audit-checklist.md": {
+    "mtime": 1789214226.0362704,
+    "ast_hash": "b070eb00d8b7ed3ca37b1d17e3317d94",
+    "semantic_hash": "b070eb00d8b7ed3ca37b1d17e3317d94"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\docs\\performance-remediation-plan.md": {
+    "mtime": 1789214226.0377848,
+    "ast_hash": "45eaace8ea2500505839cb8c9ef97baa",
+    "semantic_hash": "45eaace8ea2500505839cb8c9ef97baa"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\docs\\pre-deploy-findings-and-plan.md": {
+    "mtime": 1789214226.0398035,
+    "ast_hash": "547c83e74cea8a92e60702541502a596",
+    "semantic_hash": "547c83e74cea8a92e60702541502a596"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\docs\\reporting-blueprint.md": {
+    "mtime": 1789214226.040816,
+    "ast_hash": "5606521c71527d929b561c349a563948",
+    "semantic_hash": "5606521c71527d929b561c349a563948"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\docs\\reports-settings-workload-redesign-plan.md": {
+    "mtime": 1789214226.0418172,
+    "ast_hash": "eeca79ce0e260f979f7f1e0a89ed7353",
+    "semantic_hash": "eeca79ce0e260f979f7f1e0a89ed7353"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\docs\\review-inbox-redesign-plan.md": {
+    "mtime": 1786696903.8367188,
+    "ast_hash": "9685dab5092f1573fc8b73e227167c05",
+    "semantic_hash": "9685dab5092f1573fc8b73e227167c05"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\docs\\review-page-layout-redesign-plan.md": {
+    "mtime": 1789214226.043823,
+    "ast_hash": "e8cd0f32db9200c7fb58a7ec839bfdc2",
+    "semantic_hash": "e8cd0f32db9200c7fb58a7ec839bfdc2"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\graphify-out\\converted\\budget-new_fd6357d0.md": {
+    "mtime": 1790648982.7851932,
+    "ast_hash": "fc3dde1afb167e985ada2c3b4d411186",
+    "semantic_hash": "fc3dde1afb167e985ada2c3b4d411186"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\graphify-out\\converted\\gold-template-2-bills_e28881cd.md": {
+    "mtime": 1790648983.1869013,
+    "ast_hash": "07716770a76f209300610a38dfc35bc9",
+    "semantic_hash": "07716770a76f209300610a38dfc35bc9"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\graphify-out\\converted\\tenant_multiple_budget_6_20260807_102230_080ad034.md": {
+    "mtime": 1790648982.9501429,
+    "ast_hash": "06e899460d1c66b5f3042b72af1c928a",
+    "semantic_hash": "06e899460d1c66b5f3042b72af1c928a"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\plan.md": {
+    "mtime": 1789214226.2238557,
+    "ast_hash": "36db81e94871a1149f023130ca650d59",
+    "semantic_hash": "36db81e94871a1149f023130ca650d59"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\test\\gold.README.md": {
+    "mtime": 1786529558.5192113,
+    "ast_hash": "5170b2521a0a4dbf9bebc157e93c509b",
+    "semantic_hash": "5170b2521a0a4dbf9bebc157e93c509b"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\app\\apple-icon.png": {
+    "mtime": 1786356322.8790276,
+    "ast_hash": "da6a24b17bd0d5c222139b806036a8b1",
+    "semantic_hash": "da6a24b17bd0d5c222139b806036a8b1"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\app\\icon.png": {
+    "mtime": 1786356322.8727863,
+    "ast_hash": "2493d56c4740645b9c8a92807c477954",
+    "semantic_hash": "2493d56c4740645b9c8a92807c477954"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\public\\istifadah_logo_1.jpg": {
+    "mtime": 1786351131.8771396,
+    "ast_hash": "0086bbb4b9975dfd837dade873890c49",
+    "semantic_hash": "0086bbb4b9975dfd837dade873890c49"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\public\\istifadah_logo_1.png": {
+    "mtime": 1786356144.7739453,
+    "ast_hash": "723df986485a0a797d57c7acc4d74769",
+    "semantic_hash": "723df986485a0a797d57c7acc4d74769"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\public\\istifadah_logo_1_alpha.png": {
+    "mtime": 1786356298.7906797,
+    "ast_hash": "bc09fe03ef09639a6a5f25967aa067b7",
+    "semantic_hash": "bc09fe03ef09639a6a5f25967aa067b7"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\public\\istifadah_logo_2.jpg": {
+    "mtime": 1786351140.2936368,
+    "ast_hash": "7b720bf5644508720b03c4ef43c5b5be",
+    "semantic_hash": "7b720bf5644508720b03c4ef43c5b5be"
+  },
+  "M:\\Projects\\Istifadah Ilmiyah\\public\\logo.png": {
+    "mtime": 1780574129.480693,
+    "ast_hash": "6a3a5921cc07d5e37486bf11e26f6f51",
+    "semantic_hash": "6a3a5921cc07d5e37486bf11e26f6f51"
+  }
+}

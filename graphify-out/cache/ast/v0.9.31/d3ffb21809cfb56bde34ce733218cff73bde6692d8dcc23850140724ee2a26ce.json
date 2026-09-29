@@ -1,0 +1,1 @@
+{"nodes": [{"id": "$graphify-root$_supabase_migrations_20260822000009_document_extraction_delete_policy_sql", "label": "20260822000009_document_extraction_delete_policy.sql", "file_type": "code", "source_file": "supabase/migrations/20260822000009_document_extraction_delete_policy.sql", "source_location": null}], "edges": []}

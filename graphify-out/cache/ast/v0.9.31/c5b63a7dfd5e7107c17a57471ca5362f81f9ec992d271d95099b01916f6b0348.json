@@ -1,0 +1,1 @@
+{"nodes": [{"id": "$graphify-root$_supabase_migrations_20260822000012_housekeeping_cleanup_sql", "label": "20260822000012_housekeeping_cleanup.sql", "file_type": "code", "source_file": "supabase/migrations/20260822000012_housekeeping_cleanup.sql", "source_location": null}], "edges": []}
