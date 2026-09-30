@@ -21,6 +21,7 @@
 
 import { describe, it, expect } from 'vitest'
 import * as XLSX from 'xlsx'
+import * as fs from 'node:fs'
 import path from 'node:path'
 import {
   findPortalRowByIdentifier,
@@ -28,6 +29,9 @@ import {
   parsePortalTable,
 } from '@/lib/import/portal-mapping'
 import { parseDepartmentalRow, INITIAL_DEPARTMENTAL_CONTEXT, type DepartmentalRowContext } from '@/lib/module-mapping'
+
+// xlsx >=0.20's ESM build needs fs handed in for readFile/writeFile.
+XLSX.set_fs(fs)
 
 const EXPORT_PATH = path.join(
   process.cwd(),

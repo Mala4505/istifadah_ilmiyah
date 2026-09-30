@@ -1,3 +1,4 @@
+import { createHash, timingSafeEqual } from 'node:crypto'
 import { NextRequest, NextResponse } from 'next/server'
 import { serverEnv } from '@/lib/env.server'
 import { drainJobQueue } from '@/lib/jobs/drain'
@@ -34,8 +35,10 @@ const DRAIN_BUDGET_MS = 50_000
 async function authorize(request: NextRequest): Promise<{ ok: true } | { ok: false; status: number; error: string }> {
   const cronSecret = process.env.CRON_SECRET
   if (cronSecret) {
-    const header = request.headers.get('authorization')
-    if (header === `Bearer ${cronSecret}`) return { ok: true }
+    // Constant-time compare; hashing first gives both sides equal length.
+    const sha = (s: string) => createHash('sha256').update(s).digest()
+    const header = request.headers.get('authorization') ?? ''
+    if (timingSafeEqual(sha(header), sha(`Bearer ${cronSecret}`))) return { ok: true }
   }
 
   const staff = await getStaffContext()
