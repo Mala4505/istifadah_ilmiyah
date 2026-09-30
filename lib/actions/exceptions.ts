@@ -1,7 +1,7 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
-import { createClient } from '@/lib/supabase/server'
+import { createClient, getAuthUser } from '@/lib/supabase/server'
 import { logRawError } from '@/lib/friendly-error'
 import { shapeBatchResolveResult } from '@/components/exceptions/bulk-selection'
 
@@ -32,9 +32,7 @@ export async function resolveException(input: {
   }
 
   const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const user = await getAuthUser(supabase)
   if (!user) {
     return { ok: false, error: 'You must be signed in.' }
   }
@@ -100,9 +98,7 @@ export async function resolveExceptions(input: {
   }
 
   const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const user = await getAuthUser(supabase)
   if (!user) {
     return { ok: false, error: 'You must be signed in.' }
   }

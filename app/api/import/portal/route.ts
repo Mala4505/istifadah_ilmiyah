@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { z } from 'zod'
-import { createClient } from '@/lib/supabase/server'
+import { createClient, getAuthUser } from '@/lib/supabase/server'
 import { withApiLogging } from '@/lib/api-log'
 import { canonicalPayloadHash, runPortalImport, type ScrapePayload } from '@/lib/import/run-portal-import'
 import { recordScrapeTokenUse, verifyScrapeToken } from '@/lib/scrape-token'
@@ -151,9 +151,7 @@ async function handlePOST(request: NextRequest) {
     await recordScrapeTokenUse(verified.tokenId, verified.useCount)
   } else {
     const supabase = await createClient()
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    const user = await getAuthUser(supabase)
 
     if (!user) {
       return json(request, { error: 'Not authenticated.' }, 401)

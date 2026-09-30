@@ -1,6 +1,6 @@
 import 'server-only'
 import type { NextRequest } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { createClient, getAuthUser } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 
 function requestIp(request: NextRequest): string | null {
@@ -70,9 +70,7 @@ export function withApiLogging<H extends (request: NextRequest, ...rest: never[]
     let userId: string | null = null
     try {
       const supabase = await createClient()
-      const {
-        data: { user },
-      } = await supabase.auth.getUser()
+      const user = await getAuthUser(supabase)
       userId = user?.id ?? null
     } catch {
       // Unauthenticated or unavailable session — logged with a null user.

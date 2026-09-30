@@ -3,6 +3,8 @@ import { cookies } from 'next/headers'
 import { cache } from 'react'
 import { publicEnv } from '@/lib/env'
 
+export type MinimalAuthUser = { id: string; email: string | null }
+
 /**
  * Server Supabase client — Server Components and Route Handlers only. Not
  * an admin/service-role client: this reads the same cookie-based session as
@@ -54,6 +56,32 @@ export async function createClient() {
 }
 
 /**
+ * Perf remediation (docs/performance-remediation-plan.md, "Not doing" ->
+ * asymmetric JWT verification, since landed): `getClaims()` verifies the
+ * JWT locally against the project's cached JWKS when the project's signing
+ * keys are asymmetric (ECC/RSA), with no network round trip. Under the
+ * legacy HS256 shared secret it transparently falls back to a network call
+ * identical to `getUser()` -- so this is a no-regression swap regardless of
+ * which signing key mode the project is in, and gets strictly faster the
+ * moment the project's keys are rotated to asymmetric (Supabase dashboard ->
+ * Settings -> JWT Keys -> "Migrate JWT secret" then "Rotate keys"; confirmed
+ * zero-downtime, non-expired tokens under the old secret keep verifying
+ * during rotation).
+ *
+ * Every caller of `getCachedUser`/`getAuthUser` across the app only ever
+ * reads `.id` (and, in one place, `.email`) off the result -- never the rest
+ * of the Supabase Auth `User` shape -- so both return this minimal
+ * `MinimalAuthUser` instead of the full object `getUser()` used to return.
+ */
+export async function getAuthUser(
+  supabase: Awaited<ReturnType<typeof createClient>>
+): Promise<MinimalAuthUser | null> {
+  const { data } = await supabase.auth.getClaims()
+  if (!data) return null
+  return { id: data.claims.sub, email: (data.claims.email as string | undefined) ?? null }
+}
+
+/**
  * Perf audit Phase 1.1 (docs/perf-ux-audit-checklist.md): every layout, page,
  * and `getStaffContext()` call used to run its own `supabase.auth.getUser()`
  * — 3-4 redundant round-trips per navigation, traced on `/entries/[id]` and
@@ -62,14 +90,11 @@ export async function createClient() {
  * this one in the same render gets the first call's answer instead of
  * issuing its own. Takes no `supabase` client argument on purpose — each
  * caller still creates its own client for its own queries, but a fresh
- * `createClient()` call is cheap (no I/O); only `auth.getUser()` itself was
+ * `createClient()` call is cheap (no I/O); only the auth check itself was
  * the redundant network round trip. Does NOT cover `middleware.ts`, which
  * runs in a separate Edge-runtime request lifecycle (see checklist note).
  */
-export const getCachedUser = cache(async () => {
+export const getCachedUser = cache(async (): Promise<MinimalAuthUser | null> => {
   const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-  return user
+  return getAuthUser(supabase)
 })

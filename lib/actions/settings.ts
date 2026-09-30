@@ -14,7 +14,7 @@
  */
 
 import { revalidatePath } from 'next/cache'
-import { createClient } from '@/lib/supabase/server'
+import { createClient, getAuthUser } from '@/lib/supabase/server'
 import { logRawError } from '@/lib/friendly-error'
 import { getStaffContext } from '@/lib/export/auth'
 import { isAdminOrAbove } from '@/lib/auth/roles'
@@ -50,9 +50,7 @@ function hasRequiredModifier(binding: ShortcutBinding): boolean {
 
 export async function saveKeymapPreferences(input: SaveKeymapPreferencesInput): Promise<SimpleActionResult> {
   const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const user = await getAuthUser(supabase)
   if (!user) return { ok: false, error: 'You need to sign in again to save this.' }
 
   const overrides: Partial<Record<ShortcutActionId, ShortcutBinding>> = {}

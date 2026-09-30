@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { z } from 'zod'
-import { createClient } from '@/lib/supabase/server'
+import { createClient, getAuthUser } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { logRawError } from '@/lib/friendly-error'
 import { getSelectedEvent, isEventMutable } from '@/lib/events/current'
@@ -154,9 +154,7 @@ export async function createManualEntry(input: CreateManualEntryInput): Promise<
   const fields = parsed.data
 
   const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const user = await getAuthUser(supabase)
   if (!user) return { ok: false, error: 'You need to sign in to add an entry.' }
 
   const selectedEvent = await getSelectedEvent()
@@ -302,9 +300,7 @@ export async function voidEntries({ entryIds, note }: VoidEntriesInput): Promise
   }
 
   const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const user = await getAuthUser(supabase)
   if (!user) {
     return { success: false, updatedCount: 0, requestedCount, error: 'You must be signed in.' }
   }

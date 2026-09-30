@@ -96,10 +96,17 @@ export async function middleware(request: NextRequest) {
   )
 
   // Do not remove: this is the call that actually refreshes the token.
-  // Reading it via `getUser()` (not `getSession()`) also validates the JWT
-  // against the Supabase Auth server rather than trusting an unverified
-  // cookie value.
-  await supabaseClient.auth.getUser()
+  // `getClaims()` (not `getSession()`) also validates the JWT rather than
+  // trusting an unverified cookie value -- and, per its own doc comment,
+  // refreshes the session first if the access token is close to expiry, the
+  // same trigger `getUser()` relied on here before. Perf remediation
+  // (asymmetric JWT verification, docs/performance-remediation-plan.md):
+  // once the project's JWT signing keys are asymmetric, this verifies
+  // locally against the cached JWKS instead of round-tripping to the Auth
+  // server on every single navigation; under the legacy HS256 secret it
+  // still does that same round trip, so this swap is a no-regression change
+  // either way (lib/supabase/server.ts's `getAuthUser` has the same note).
+  await supabaseClient.auth.getClaims()
 
   response.headers.set(header, csp)
   response.headers.set('Strict-Transport-Security', 'max-age=63072000; includeSubDomains; preload')

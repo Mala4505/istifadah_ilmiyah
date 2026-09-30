@@ -34,14 +34,16 @@ import { createClient } from '@/lib/supabase/server'
  * access token's default 1h lifetime — and middleware, the only place that
  * normally refreshes the session cookie, explicitly excludes `/api/*` in its
  * matcher. `getStaffContext()` below is what saves this route from that: it
- * calls `getCachedUser()` -> `supabase.auth.getUser()` on the session-bound
- * client, which refreshes the access token when it's stale and hands the
- * updated cookie to `setAll` (`lib/supabase/server.ts`) — and because a
- * Route Handler (unlike a Server Component) runs with cookie mutation
- * enabled, that write isn't swallowed; Next merges it onto this handler's
- * response for us. Do not replace this auth check with something that
- * skips `getUser()` (e.g. a raw cookie-presence check) without adding an
- * explicit refresh call in its place, or the inbox's session will start
+ * calls `getCachedUser()` -> `getAuthUser()` -> `supabase.auth.getClaims()`
+ * (asymmetric-JWT perf remediation swap, same refresh behavior `getUser()`
+ * had) on the session-bound client, which refreshes the access token when
+ * it's stale and hands the updated cookie to `setAll`
+ * (`lib/supabase/server.ts`) — and because a Route Handler (unlike a Server
+ * Component) runs with cookie mutation enabled, that write isn't swallowed;
+ * Next merges it onto this handler's response for us. Do not replace this
+ * auth check with something that skips `getClaims()`/`getUser()` (e.g. a raw
+ * cookie-presence check) without adding an explicit refresh call in its
+ * place, or the inbox's session will start
  * failing with un-rescuable 401s partway through a long polling session.
  */
 
