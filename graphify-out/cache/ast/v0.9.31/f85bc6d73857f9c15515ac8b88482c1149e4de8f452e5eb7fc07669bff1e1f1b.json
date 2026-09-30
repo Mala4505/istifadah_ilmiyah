@@ -1,1 +1,0 @@
-{"nodes": [{"id": "$graphify-root$_supabase_migrations_20260908000005_restore_status_view_security_invoker_sql", "label": "20260908000005_restore_status_view_security_invoker.sql", "file_type": "code", "source_file": "supabase/migrations/20260908000005_restore_status_view_security_invoker.sql", "source_location": null}], "edges": []}

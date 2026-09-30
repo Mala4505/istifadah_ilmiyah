@@ -1,1 +1,0 @@
-{"nodes": [{"id": "$graphify-root$_supabase_migrations_20260808000002_private_schema_and_helpers_sql", "label": "20260808000002_private_schema_and_helpers.sql", "file_type": "code", "source_file": "supabase/migrations/20260808000002_private_schema_and_helpers.sql", "source_location": null}], "edges": []}
