@@ -1,1 +1,0 @@
-{"nodes": [{"id": "$graphify-root$_supabase_migrations_20260828000002_invoice_against_uplaq_sql", "label": "20260828000002_invoice_against_uplaq.sql", "file_type": "code", "source_file": "supabase/migrations/20260828000002_invoice_against_uplaq.sql", "source_location": null}], "edges": []}

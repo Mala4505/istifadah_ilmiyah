@@ -1,1 +1,0 @@
-{"nodes": [{"id": "$graphify-root$_supabase_migrations_20260912000003_grant_delete_for_skip_page_sql", "label": "20260912000003_grant_delete_for_skip_page.sql", "file_type": "code", "source_file": "supabase/migrations/20260912000003_grant_delete_for_skip_page.sql", "source_location": null}], "edges": []}

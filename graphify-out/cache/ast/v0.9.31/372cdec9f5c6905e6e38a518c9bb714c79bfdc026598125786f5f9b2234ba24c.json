@@ -1,1 +1,0 @@
-{"nodes": [{"id": "$graphify-root$_supabase_migrations_20260905000003_drop_redundant_document_extraction_document_idx_sql", "label": "20260905000003_drop_redundant_document_extraction_document_idx.sql", "file_type": "code", "source_file": "supabase/migrations/20260905000003_drop_redundant_document_extraction_document_idx.sql", "source_location": null}], "edges": []}
