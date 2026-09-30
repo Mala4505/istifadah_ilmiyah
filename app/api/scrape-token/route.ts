@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { z } from 'zod'
-import { createClient } from '@/lib/supabase/server'
+import { createClient, getAuthUser } from '@/lib/supabase/server'
 import { withApiLogging } from '@/lib/api-log'
 import {
   DEFAULT_TOKEN_TTL_HOURS,
@@ -34,9 +34,7 @@ async function requireAdmin(): Promise<
   { ok: true; userId: string } | { ok: false; response: NextResponse }
 > {
   const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const user = await getAuthUser(supabase)
 
   if (!user) {
     return { ok: false, response: NextResponse.json({ error: 'Not authenticated.' }, { status: 401 }) }

@@ -9,7 +9,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { cookies } from 'next/headers'
-import { createClient } from '@/lib/supabase/server'
+import { createClient, getAuthUser } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { getSignedUrl } from '@/lib/storage'
 import { logRawError } from '@/lib/friendly-error'
@@ -189,9 +189,7 @@ async function resolveOrCreateVendorForVerifiedName(
  */
 export async function saveVerification(input: SaveVerificationInput): Promise<SaveVerificationResult> {
   const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const user = await getAuthUser(supabase)
   if (!user) {
     return { ok: false, error: 'You must be signed in.' }
   }
@@ -414,9 +412,7 @@ export async function claimReviewDocument(
   options: { takeover?: boolean } = {}
 ): Promise<ClaimResult | ClaimBlockedResult | ClaimErrorResult> {
   const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const user = await getAuthUser(supabase)
   if (!user) {
     return { ok: false, error: 'You must be signed in.' }
   }
@@ -513,9 +509,7 @@ export async function claimReviewDocument(
  */
 export async function releaseReviewDocument(sourceDocumentId: number): Promise<SimpleActionResult> {
   const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const user = await getAuthUser(supabase)
   if (!user) {
     return { ok: false, error: 'You must be signed in.' }
   }
@@ -592,9 +586,7 @@ export async function flagReviewException(input: {
   }
 
   const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const user = await getAuthUser(supabase)
   if (!user) {
     return { ok: false, error: 'You must be signed in.' }
   }
@@ -932,9 +924,7 @@ export async function addLineItem(
   }
 
   const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const user = await getAuthUser(supabase)
   if (!user) {
     return { ok: false, error: 'You must be signed in.' }
   }
@@ -1285,9 +1275,7 @@ export async function setPageSkipOverride(input: {
   }
 
   const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const user = await getAuthUser(supabase)
   if (!user) {
     return { ok: false, error: 'You must be signed in.' }
   }

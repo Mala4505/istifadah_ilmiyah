@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { createHash } from 'node:crypto'
 import * as XLSX from 'xlsx'
-import { createClient } from '@/lib/supabase/server'
+import { createClient, getAuthUser } from '@/lib/supabase/server'
 import { runDepartmentBudgetImport } from '@/lib/import/run-department-budget-import'
 import { withApiLogging } from '@/lib/api-log'
 import { isAdminOrAbove } from '@/lib/auth/roles'
@@ -27,9 +27,7 @@ export const maxDuration = 60
  */
 async function handlePOST(request: NextRequest) {
   const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const user = await getAuthUser(supabase)
 
   if (!user) {
     return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 })

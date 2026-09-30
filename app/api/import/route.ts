@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { createHash } from 'node:crypto'
 import * as XLSX from 'xlsx'
-import { createClient } from '@/lib/supabase/server'
+import { createClient, getAuthUser } from '@/lib/supabase/server'
 import { EventNotMutableError, runImport } from '@/lib/import/run-import'
 import { getSelectedEventId } from '@/lib/events/current'
 import { withApiLogging } from '@/lib/api-log'
@@ -42,9 +42,7 @@ export const maxDuration = 180
  */
 async function handlePOST(request: NextRequest) {
   const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const user = await getAuthUser(supabase)
 
   if (!user) {
     return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 })
@@ -149,9 +147,7 @@ async function handlePOST(request: NextRequest) {
  */
 async function handleGET(request: NextRequest) {
   const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const user = await getAuthUser(supabase)
 
   if (!user) {
     return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 })

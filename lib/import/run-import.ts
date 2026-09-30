@@ -793,8 +793,15 @@ export async function runImport(params: RunImportParams): Promise<ImportResult> 
                department_id     = excluded.department_id,
                budget_head_id    = excluded.budget_head_id,
                invoice_number    = excluded.invoice_number,
-               vendor_id         = excluded.vendor_id,
-               vendor_raw        = excluded.vendor_raw,
+               -- The .xlsx export has no Reimburse To column, so a reimbursement
+               -- row's Vendor Name can be blank while the portal scrape already
+               -- set the vendor from Reimburse To. Never blank it here.
+               vendor_id         = case when excluded.type = 'reimbursement'
+                                        then coalesce(excluded.vendor_id, entries.vendor_id)
+                                        else excluded.vendor_id end,
+               vendor_raw        = case when excluded.type = 'reimbursement'
+                                        then coalesce(excluded.vendor_raw, entries.vendor_raw)
+                                        else excluded.vendor_raw end,
                date              = excluded.date,
                amount            = excluded.amount,
                status_id         = excluded.status_id,
@@ -829,8 +836,8 @@ export async function runImport(params: RunImportParams): Promise<ImportResult> 
               department_id: departmentId,
               budget_head_id: budgetHeadId,
               invoice_number: entry.invoiceNumber,
-              vendor_id: vendorId,
-              vendor_raw: entry.vendorRaw,
+              vendor_id: entry.type === 'reimbursement' ? (vendorId ?? existing.vendor_id) : vendorId,
+              vendor_raw: entry.type === 'reimbursement' ? (entry.vendorRaw ?? existing.vendor_raw) : entry.vendorRaw,
               date: invoiceDate,
               amount: entry.invoiceAmount,
               status_id: statusId,

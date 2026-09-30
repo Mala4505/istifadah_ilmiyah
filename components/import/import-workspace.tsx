@@ -8,6 +8,7 @@ import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
+import { Progress } from '@/components/ui/progress'
 import { BatchStatusBadge } from '@/components/import/row-log-badge'
 import { RowLogTable, type RowLogEntry } from '@/components/import/row-log-table'
 import { SummaryBadges } from '@/components/import/summary-badges'
@@ -420,14 +421,18 @@ export function ImportWorkspace({
         {(running === 'dry_run' || running === 'commit') && (
           <div className="flex flex-col gap-2">
             {running === 'commit' && <p className="text-sm text-muted-foreground">{commitLabel}</p>}
-            {chunkProgress && (
-              <p className="text-sm text-muted-foreground">
-                {running === 'commit' ? 'Committing' : 'Previewing'} in batches — chunk{' '}
-                {chunkProgress.chunk} of {chunkProgress.totalChunks} ({chunkProgress.rowsDone.toLocaleString()} of{' '}
-                {chunkProgress.rowsTotal.toLocaleString()} rows sent so far)
-              </p>
+            {chunkProgress ? (
+              <div className="flex flex-col gap-1.5">
+                <Progress value={(chunkProgress.rowsDone / chunkProgress.rowsTotal) * 100} />
+                <p className="text-sm text-muted-foreground">
+                  {running === 'commit' ? 'Committing' : 'Previewing'} in batches — chunk{' '}
+                  {chunkProgress.chunk} of {chunkProgress.totalChunks} ({chunkProgress.rowsDone.toLocaleString()} of{' '}
+                  {chunkProgress.rowsTotal.toLocaleString()} rows sent so far)
+                </p>
+              </div>
+            ) : (
+              <Skeleton className="h-4 w-64" />
             )}
-            <Skeleton className="h-4 w-64" />
             <Skeleton className="h-24 w-full" />
           </div>
         )}

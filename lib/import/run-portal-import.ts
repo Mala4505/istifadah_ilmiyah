@@ -1309,7 +1309,11 @@ async function importDepartmentalRow(
   // and written to entries exactly like every other tab's VENDOR column —
   // upsertDetailTable below reuses this same resolution instead of resolving
   // it a second time.
-  const effectiveVendorRaw = tableKind === 'reimbursement' ? row.reimburseTo : row.vendorRaw
+  // Falls back to a Vendor column if the tab ever renders one and the
+  // Reimburse To cell is blank, so a row is never left vendorless when the
+  // scrape did carry a party name.
+  const effectiveVendorRaw =
+    tableKind === 'reimbursement' ? (row.reimburseTo ?? row.vendorRaw) : row.vendorRaw
   let vendorId: number | null = null
   let vendorCreated = false
   if (effectiveVendorRaw) {

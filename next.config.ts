@@ -28,7 +28,7 @@ const nextConfig: NextConfig = {
   // that are content-addressed by filename change, not by URL (pdf.js's
   // worker script, the bookmarklet). These are also excluded from the
   // middleware matcher (middleware.ts) so the request never triggers CSP
-  // nonce construction or a Supabase auth.getUser() call — see
+  // nonce construction or a Supabase auth call (getClaims()/getUser()) — see
   // docs/performance-remediation-plan.md item 3.2.
   async headers() {
     return [
