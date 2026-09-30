@@ -10,6 +10,10 @@
  */
 import { createClient } from '@supabase/supabase-js'
 import * as XLSX from 'xlsx'
+import * as fs from 'node:fs'
+
+// xlsx >=0.20's ESM build needs fs handed in for readFile/writeFile.
+XLSX.set_fs(fs)
 
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL
 const key = process.env.SUPABASE_SECRET_KEY

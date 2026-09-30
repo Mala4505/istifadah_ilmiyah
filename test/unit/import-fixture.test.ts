@@ -25,7 +25,11 @@
 
 import { beforeAll, describe, expect, it } from 'vitest'
 import * as XLSX from 'xlsx'
+import * as fs from 'node:fs'
 import path from 'node:path'
+
+// xlsx >=0.20's ESM build needs fs handed in for readFile/writeFile.
+XLSX.set_fs(fs)
 
 const FIXTURE_PATH = path.resolve(
   process.cwd(),
