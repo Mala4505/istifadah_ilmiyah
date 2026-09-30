@@ -18,7 +18,7 @@ export async function loadVendors(
 
   const { data: vendorsData } = await supabase
     .from('vendor')
-    .select('id, display_name, normalized_name, gstin, cluster_group_id, is_confirmed, use_line_item_template')
+    .select('id, display_name, normalized_name, gstin, cluster_group_id, is_confirmed, use_line_item_template, bill_not_required')
     .order('display_name')
 
   const vendors: VendorRow[] = (vendorsData ?? []).map((row) => ({
@@ -29,6 +29,7 @@ export async function loadVendors(
     clusterGroupId: row.cluster_group_id as number | null,
     isConfirmed: row.is_confirmed as boolean,
     useLineItemTemplate: row.use_line_item_template as boolean,
+    billNotRequired: row.bill_not_required as boolean,
   }))
 
   return { vendors }

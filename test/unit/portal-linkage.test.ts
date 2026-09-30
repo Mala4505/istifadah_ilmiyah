@@ -11,7 +11,7 @@
  * it is about two external systems neither of us controls — so it is pinned
  * here against BOTH real sources rather than assumed:
  *
- *   - the real Departmental export in Departmental/, read at test time
+ *   - the real Departmental export in test/fixtures/, read at test time
  *   - the Audit portal's real rows, transcribed from the 2026-08-13 screenshot
  *
  * If either side ever renumbers, this test fails with the exact unmatched
@@ -31,7 +31,7 @@ import { parseDepartmentalRow, INITIAL_DEPARTMENTAL_CONTEXT, type DepartmentalRo
 
 const EXPORT_PATH = path.join(
   process.cwd(),
-  'Departmental',
+  'test', 'fixtures',
   'tenant_multiple_budget_6_20260807_102230.xlsx'
 )
 

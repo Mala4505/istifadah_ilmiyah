@@ -535,6 +535,35 @@ export async function setVendorTemplateEnabled(input: {
   return { ok: true }
 }
 
+/**
+ * Marks a vendor as issuing no bills (20260929000001, e.g. Burhani Hospital
+ * Surat). Its entries -- and those of vendors merged into it -- drop out of
+ * "Awaiting bill" and the undocumented-spend report. Admin-only, same posture
+ * as the line-item template toggle above.
+ */
+export async function setVendorBillNotRequired(input: {
+  vendorId: number
+  billNotRequired: boolean
+}): Promise<ActionResult> {
+  const gate = await requireAdminOrAbove()
+  if (!gate.ok) {
+    return { ok: false, error: 'Marking a vendor as needing no bills is an admin-only action.' }
+  }
+
+  const supabase = await createClient()
+
+  const { error } = await supabase
+    .from('vendor')
+    .update({ bill_not_required: input.billNotRequired })
+    .eq('id', input.vendorId)
+
+  if (error) return { ok: false, error: logRawError('admin.setVendorBillNotRequired', error.message) }
+
+  revalidatePath('/settings')
+  revalidatePath('/entries')
+  return { ok: true }
+}
+
 const saveVendorLineItemTemplateSchema = z.object({
   vendorId: z.number().int().positive(),
   descriptions: z

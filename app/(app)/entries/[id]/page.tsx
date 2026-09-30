@@ -448,6 +448,7 @@ export default async function EntryDetailPage({
         documents={linkedDocuments}
         entryAmount={entry.amount}
         variance={linkedDocumentsVariance}
+        billExempt={entry.bill_exempt}
       />
 
       <EntryIssues

@@ -42,6 +42,8 @@ export interface EntryEnriched {
   created_at: string
   updated_at: string
   document_count: number
+  /** Vendor (or its merge root) issues no bills — vendor.bill_not_required (20260929000001). */
+  bill_exempt: boolean
   // Added by supabase/migrations/20260827000001_entries_type_detail_tables.sql
   // — reimbursement_detail / advance_payment_detail 1:1 extension tables.
   reimbursement_sr_no: string | null

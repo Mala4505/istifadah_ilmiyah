@@ -49,11 +49,14 @@ export function LinkedDocuments({
   documents,
   entryAmount,
   variance,
+  billExempt,
 }: {
   entryId: number
   documents: LinkedDocumentView[]
   entryAmount: number | null
   variance: LinkedDocumentsVariance | null
+  /** The vendor issues no bills (vendor.bill_not_required) — an empty card is expected. */
+  billExempt: boolean
 }) {
   const [pendingId, setPendingId] = useState<number | null>(null)
   const [rows, setRows] = useState(documents)
@@ -99,7 +102,9 @@ export function LinkedDocuments({
         <CardTitle className="text-base">Documents</CardTitle>
         <CardDescription>
           {rows.length === 0
-            ? 'No PDF is attached to this entry yet.'
+            ? billExempt
+              ? 'No bill needed — this vendor does not issue bills.'
+              : 'No PDF is attached to this entry yet.'
             : `${rows.length} attached — matched by vendor, amount and date.`}
         </CardDescription>
       </CardHeader>
