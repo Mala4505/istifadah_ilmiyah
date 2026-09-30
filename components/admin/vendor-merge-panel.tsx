@@ -10,7 +10,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { mergeVendor, renameVendor, setVendorConfirmed, unmergeVendor } from '@/lib/actions/admin'
+import { mergeVendor, renameVendor, setVendorBillNotRequired, setVendorConfirmed, unmergeVendor } from '@/lib/actions/admin'
 import { VendorLineItemTemplate } from './vendor-line-item-template'
 
 export type VendorRow = {
@@ -21,6 +21,7 @@ export type VendorRow = {
   clusterGroupId: number | null
   isConfirmed: boolean
   useLineItemTemplate: boolean
+  billNotRequired: boolean
 }
 
 function matchesQuery(vendor: VendorRow, query: string): boolean {
@@ -74,6 +75,20 @@ export function VendorMergePanel({ vendors }: { vendors: VendorRow[] }) {
       const result = await setVendorConfirmed({ vendorId: vendor.id, isConfirmed })
       if (!result.ok) {
         setVendorList((current) => current.map((v) => (v.id === vendor.id ? { ...v, isConfirmed: previous } : v)))
+        toastError(result.error, { context: 'vendor-merge-panel' })
+      }
+    })()
+  }
+
+  function handleBillNotRequiredChange(vendor: VendorRow, billNotRequired: boolean) {
+    const previous = vendor.billNotRequired
+    setVendorList((current) => current.map((v) => (v.id === vendor.id ? { ...v, billNotRequired } : v)))
+    void (async () => {
+      const result = await setVendorBillNotRequired({ vendorId: vendor.id, billNotRequired })
+      if (!result.ok) {
+        setVendorList((current) =>
+          current.map((v) => (v.id === vendor.id ? { ...v, billNotRequired: previous } : v)),
+        )
         toastError(result.error, { context: 'vendor-merge-panel' })
       }
     })()
@@ -139,6 +154,9 @@ export function VendorMergePanel({ vendors }: { vendors: VendorRow[] }) {
             <TableHead>Vendor</TableHead>
             <TableHead>GSTIN</TableHead>
             <TableHead>Confirmed</TableHead>
+            <TableHead title="This vendor issues no bills — its entries are not counted as awaiting a bill.">
+              No bill needed
+            </TableHead>
             <TableHead>Merge status</TableHead>
             <TableHead className="text-right">Actions</TableHead>
           </TableRow>
@@ -146,7 +164,7 @@ export function VendorMergePanel({ vendors }: { vendors: VendorRow[] }) {
         <TableBody>
           {filteredVendors.length === 0 ? (
             <TableRow>
-              <TableCell colSpan={6} className="text-center text-muted-foreground">
+              <TableCell colSpan={7} className="text-center text-muted-foreground">
                 No vendors match &quot;{query}&quot;.
               </TableCell>
             </TableRow>
@@ -228,6 +246,13 @@ export function VendorMergePanel({ vendors }: { vendors: VendorRow[] }) {
                     />
                   </TableCell>
                   <TableCell>
+                    <Checkbox
+                      checked={vendor.billNotRequired}
+                      onCheckedChange={(value) => handleBillNotRequiredChange(vendor, value === true)}
+                      aria-label={`${vendor.displayName} issues no bills`}
+                    />
+                  </TableCell>
+                  <TableCell>
                     {vendor.clusterGroupId !== null ? (
                       <Badge variant="secondary">
                         Merged → {root?.displayName ?? `#${vendor.clusterGroupId}`}
@@ -252,7 +277,7 @@ export function VendorMergePanel({ vendors }: { vendors: VendorRow[] }) {
                 </TableRow>
                 {isExpanded ? (
                   <TableRow>
-                    <TableCell colSpan={6} className="p-0">
+                    <TableCell colSpan={7} className="p-0">
                       <div className="p-3">
                         <VendorLineItemTemplate
                           vendor={vendor}

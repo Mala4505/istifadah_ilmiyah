@@ -15,17 +15,7 @@ import { EntriesExplorer } from '@/components/entries/entries-explorer'
 import { getEntryBillKpis, type EntryBillKpis } from '@/lib/documents/entry-bill-kpis'
 import { Skeleton } from '@/components/ui/skeleton'
 import type { FilterOptions } from '@/components/entries/types'
-import type { EntryStatusCount } from '@/components/entries/status-count-chips'
 import type { StaffRole } from '@/lib/auth/roles'
-
-type EntryStatusCountRow = {
-  dimension: 'status' | 'type'
-  status_id: number | null
-  status_code: string
-  status_label: string
-  sort_order: number
-  entry_count: number
-}
 
 // Screen 3 — Entries list (MASTER-PLAN §5 row 3, §11.1 Day 3). Reads from
 // `v_entry_enriched` (§10.2) rather than assembling joins here. Filter state
@@ -50,8 +40,6 @@ async function loadEntriesPageData(): Promise<{
   options: FilterOptions
   role: StaffRole | null
   ownDepartmentIds: number[]
-  typeCounts: EntryStatusCount[]
-  statusCounts: EntryStatusCount[]
   billKpis: EntryBillKpis
 }> {
   const supabase = await createClient()
@@ -93,7 +81,7 @@ async function loadEntriesPageData(): Promise<{
   const zoneMemberIds = (zoneMembership.data ?? []).map((r) => r.zone_id)
   const userId = user?.id ?? null
 
-  const [departmentRows, bhRows, adminHeadRows, zoneRows, costCenterRows, statusRows, typeRows, statusCountsRes, billKpis] = await Promise.all([
+  const [departmentRows, bhRows, adminHeadRows, zoneRows, costCenterRows, statusRows, typeRows, billKpis] = await Promise.all([
     getCachedDepartments(supabase),
     getCachedBudgetHeads(supabase, userId),
     getCachedAdminHeads(supabase, userId),
@@ -101,15 +89,6 @@ async function loadEntriesPageData(): Promise<{
     getCachedCostCenters(supabase),
     getCachedEntryStatuses(supabase),
     getCachedEntryTypes(supabase),
-    // Status-count chips (docs/hub-screen-certification.md §3.7). Event-scoped
-    // the same way app/(app)/page.tsx scopes this view — a plain
-    // `.eq('event_id', ...)`, since v_entry_status_counts.event_id resolves
-    // through entries.event_id which is `not null` on the base table.
-    supabase
-      .from('v_entry_status_counts')
-      .select('dimension, status_id, status_code, status_label, sort_order, entry_count')
-      .eq('event_id', selectedEventId)
-      .returns<EntryStatusCountRow[]>(),
     // "Waiting on a bill" header KPIs (operator request, 2026-09-07) — the
     // entry-side mirror of the /documents review-progress bar. Event-scoped
     // and RLS-scoped exactly like the list below (same v_entry_enriched).
@@ -161,31 +140,16 @@ async function loadEntriesPageData(): Promise<{
     ownDepartmentIds = (deptRows ?? []).map((d) => d.department_id as number)
   }
 
-  const statusCountRows = statusCountsRes.data ?? []
-  // `type` has no numeric id (entries.type is a CHECK-constrained text
-  // column, not an FK) -- its code is what `/entries` filters on, so its
-  // chips carry `status_code` as `id` instead of the (always-null) status_id.
-  const toStatusCounts = (
-    dimension: EntryStatusCountRow['dimension'],
-    idField: 'status_id' | 'status_code' = 'status_id'
-  ): EntryStatusCount[] =>
-    statusCountRows
-      .filter((r) => r.dimension === dimension)
-      .sort((a, b) => a.sort_order - b.sort_order)
-      .map((r) => ({ id: r[idField], code: r.status_code, label: r.status_label, count: r.entry_count }))
-
   return {
     options,
     role,
     ownDepartmentIds,
-    typeCounts: toStatusCounts('type', 'status_code'),
-    statusCounts: toStatusCounts('status'),
     billKpis,
   }
 }
 
 export default async function EntriesPage() {
-  const { options, role, ownDepartmentIds, typeCounts, statusCounts, billKpis } = await loadEntriesPageData()
+  const { options, role, ownDepartmentIds, billKpis } = await loadEntriesPageData()
 
   return (
     <Suspense fallback={<EntriesPageSkeleton />}>
@@ -193,8 +157,6 @@ export default async function EntriesPage() {
         initialOptions={options}
         initialRole={role}
         initialOwnDepartmentIds={ownDepartmentIds}
-        typeCounts={typeCounts}
-        statusCounts={statusCounts}
         billKpis={billKpis}
       />
     </Suspense>

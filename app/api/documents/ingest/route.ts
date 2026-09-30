@@ -128,6 +128,24 @@ async function handlePOST(request: NextRequest) {
   if (!storagePath) {
     return NextResponse.json({ error: 'A "path" is required — call /api/documents/upload-url first.' }, { status: 400 })
   }
+  // `path` is client-supplied and everything below reads — and on a failed
+  // check, deletes — it through the service-role client. Accept only a fresh
+  // path in upload-url's buildStoragePath() shape that no document owns yet,
+  // so a caller can never point this route at someone else's stored file.
+  if (!/^\d{4}\/\d{2}\/[0-9a-f]{12}-\d+-[A-Za-z0-9._-]{1,120}$/.test(storagePath)) {
+    return NextResponse.json({ error: 'Invalid upload path — call /api/documents/upload-url first.' }, { status: 400 })
+  }
+  const { data: pathOwner, error: pathOwnerError } = await admin
+    .from('source_document')
+    .select('id')
+    .eq('storage_path', storagePath)
+    .maybeSingle()
+  if (pathOwnerError) {
+    return NextResponse.json({ error: 'Could not verify the upload path.' }, { status: 500 })
+  }
+  if (pathOwner) {
+    return NextResponse.json({ error: 'This upload has already been finalized.' }, { status: 409 })
+  }
 
   // The browser already PUT the file straight to storage via the signed URL
   // from /api/documents/upload-url — this downloads it back out so the rest

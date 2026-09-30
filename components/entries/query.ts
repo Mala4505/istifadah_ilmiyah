@@ -60,8 +60,10 @@ export function applyEntriesFilters<T extends EntriesQueryBuilder>(query: T, fil
   // mutually exclusive; filter-bar.tsx clears one when the other is set, so
   // the `document_count = 0 AND document_count > 0` empty result is unreachable
   // from the UI, but a hand-edited URL with both params just returns nothing.
+  // Bill-exempt vendors' entries (vendor.bill_not_required, 20260929000001)
+  // are never waiting on a bill, so they are left out.
   if (filters.awaitingDocument) {
-    q = q.eq('document_count', 0)
+    q = q.eq('document_count', 0).eq('bill_exempt', false)
   }
   // Voided entries are hidden by default (2026-09-24) — see EntriesFilters.showVoided.
   if (!filters.showVoided) {
@@ -94,7 +96,9 @@ const COLUMN_KEY_SELECT_COLUMNS: Record<ColumnKey, readonly string[]> = {
   date: ['date'],
   amount: ['amount'],
   status_label: ['status_label'],
-  document_count: ['document_count'],
+  // bill_exempt rides along so the Docs cell can say "Not needed" instead of
+  // "Awaiting" for a vendor that issues no bills (20260929000001).
+  document_count: ['document_count', 'bill_exempt'],
 }
 
 // Single source of truth for "which raw `v_entry_enriched` columns can the

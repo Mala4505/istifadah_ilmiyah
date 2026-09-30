@@ -13,7 +13,6 @@ import { PaginationBar } from '@/components/ui/pagination-bar'
 import { FilterBar, countActiveFilters } from './filter-bar'
 import { ColumnChooser } from './column-chooser'
 import { EntriesTable } from './entries-table'
-import { StatusCountChips, type EntryStatusCount } from './status-count-chips'
 import { EntryBillKpiBar } from './entry-bill-kpi-bar'
 import type { EntryBillKpis } from '@/lib/documents/entry-bill-kpis'
 import { BulkEnrichmentDialog } from './bulk-enrichment-dialog'
@@ -157,15 +156,11 @@ export function EntriesExplorer({
   initialOptions,
   initialRole,
   initialOwnDepartmentIds,
-  typeCounts,
-  statusCounts,
   billKpis,
 }: {
   initialOptions: FilterOptions
   initialRole: StaffRole | null
   initialOwnDepartmentIds: number[]
-  typeCounts: EntryStatusCount[]
-  statusCounts: EntryStatusCount[]
   billKpis: EntryBillKpis
 }) {
   const supabase = useMemo(() => createClient(), [])
@@ -518,15 +513,6 @@ export function EntriesExplorer({
           <EntryBillKpiBar kpis={billKpis} />
 
           <FilterBar filters={filters} options={options} onChange={handleFilterChange} />
-
-          <StatusCountChips
-            typeCounts={typeCounts}
-            statusCounts={statusCounts}
-            activeType={filters.type}
-            activeStatus={filters.status}
-            onSelectType={(id) => handleFilterChange({ type: id })}
-            onSelectStatus={(id) => handleFilterChange({ status: id })}
-          />
 
           {selected.size > 0 && (
             <div className="flex flex-wrap items-center gap-3 rounded-lg border border-border bg-accent/40 px-3 py-2 text-sm">

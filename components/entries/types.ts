@@ -46,6 +46,8 @@ export type EntryEnriched = {
   created_at: string
   updated_at: string
   document_count: number
+  /** Vendor (or its merge root) issues no bills — vendor.bill_not_required. */
+  bill_exempt: boolean
 }
 
 export type LookupOption = { id: number; label: string; department_id?: number | null; code?: string }

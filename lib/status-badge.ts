@@ -45,6 +45,29 @@ export function semanticStatusState(code: string | null | undefined, label: stri
 }
 
 /**
+ * A distinct hue per known status code, so neighbouring statuses (which the
+ * semantic buckets above collapse to the same amber / grey) are tellable
+ * apart at a glance. Codes and order from 20260911000002_place_awaiting_verification_status.sql.
+ * Anything not listed falls back to the semantic bucket.
+ */
+const STATUS_CODE_BADGE_VARIANT: Record<string, BadgeProps['variant']> = {
+  pending: 'warning',
+  sent_main: 'info',
+  awaiting_verification: 'yellow',
+  good_for_submission: 'teal',
+  subject_to_approval: 'orange',
+  not_verified: 'rose',
+  received: 'cyan',
+  verification_stage_1: 'blue',
+  verification_stage_2: 'indigo',
+  verification_stage_3: 'violet',
+  verification_stage_4: 'purple',
+  approved: 'lime',
+  tax_invoice_upload_pending_paid: 'pink',
+  paid: 'success',
+}
+
+/**
  * The one function every status dimension should call. `code` is preferred
  * (stable, small set); `label` is the fallback for unseen codes.
  */
@@ -52,5 +75,6 @@ export function statusBadgeVariant(
   code: string | null | undefined,
   label: string | null | undefined
 ): BadgeProps['variant'] {
-  return SEMANTIC_STATUS_BADGE_VARIANT[semanticStatusState(code, label)]
+  const byCode = code ? STATUS_CODE_BADGE_VARIANT[code.toLowerCase()] : undefined
+  return byCode ?? SEMANTIC_STATUS_BADGE_VARIANT[semanticStatusState(code, label)]
 }

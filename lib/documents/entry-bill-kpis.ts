@@ -27,7 +27,7 @@ export interface EntryBillKpis {
   total: number
   /** Of `total`: at least one linked document (`document_count > 0`). */
   withDocument: number
-  /** Of `total`: no linked document yet (`total - withDocument`). */
+  /** Of `total`: no linked document yet, excluding bill-exempt vendors. */
   awaitingDocument: number
 }
 
@@ -47,19 +47,28 @@ export async function getEntryBillKpis(
       return q
     }
 
-    const [totalRes, withDocRes] = await Promise.all([base(), base().gt('document_count', 0)])
+    // Awaiting is its own count (not total - withDocument) so bill-exempt
+    // vendors' entries (vendor.bill_not_required, 20260929000001) drop out of
+    // it -- the same predicate the "Awaiting bill" filter in query.ts uses.
+    const [totalRes, withDocRes, awaitingRes] = await Promise.all([
+      base(),
+      base().gt('document_count', 0),
+      base().eq('document_count', 0).eq('bill_exempt', false),
+    ])
 
     for (const [label, res] of [
       ['total', totalRes],
       ['withDocument', withDocRes],
+      ['awaitingDocument', awaitingRes],
     ] as const) {
       if (res.error) logRawError(`entries.getEntryBillKpis:${label}`, res.error.message)
     }
 
     const total = totalRes.count ?? 0
     const withDocument = Math.min(withDocRes.count ?? 0, total)
+    const awaitingDocument = Math.min(awaitingRes.count ?? 0, total - withDocument)
 
-    return { total, withDocument, awaitingDocument: Math.max(0, total - withDocument) }
+    return { total, withDocument, awaitingDocument }
   } catch (err) {
     logRawError('entries.getEntryBillKpis', err instanceof Error ? err.message : String(err))
     return ZERO

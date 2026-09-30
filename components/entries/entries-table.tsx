@@ -212,9 +212,11 @@ function renderCell(row: EntryEnriched, key: ColumnKey) {
     case 'document_count':
       // >0 → the count; 0 on a live entry → it is still waiting for a bill
       // (matches the "Entries awaiting a bill" KPI tile + the "Awaiting bill"
-      // filter); 0 on a void entry → nothing is expected.
+      // filter); 0 on a void entry → nothing is expected; 0 on a bill-exempt
+      // vendor's entry → no bill will ever come.
       if (row.document_count > 0) return row.document_count
       if (row.is_void) return <span className="text-muted-foreground">—</span>
+      if (row.bill_exempt) return <span className="text-muted-foreground">Not needed</span>
       return <Badge variant="warning">Awaiting</Badge>
     default:
       return null
