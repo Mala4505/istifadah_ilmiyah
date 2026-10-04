@@ -4,6 +4,7 @@ import { recheckTallyExceptions, type TallyRecheckInput } from '@/lib/analytics/
 function input(overrides: Partial<TallyRecheckInput> = {}): TallyRecheckInput {
   return {
     subtotal: null,
+    billDiscount: null,
     taxAmount: null,
     totalAmount: null,
     lineItems: [],
@@ -69,5 +70,28 @@ describe('recheckTallyExceptions', () => {
   it('returns null for ocr_total_vs_amount when there is no single linked entry to compare against', () => {
     const result = recheckTallyExceptions(input({ totalAmount: 5000, linkedEntryAmount: null }))
     expect(result.ocr_total_vs_amount).toBeNull()
+  })
+
+  it('accepts a bill whose total is subtotal - bill discount + tax', () => {
+    const result = recheckTallyExceptions(
+      input({ subtotal: 10000, billDiscount: 300, taxAmount: 1800, totalAmount: 11500 })
+    )
+    expect(result.line_item_tally_mismatch).toBe(false)
+  })
+
+  it('reports line_item_tally_mismatch for the same bill when the discount is not captured', () => {
+    const result = recheckTallyExceptions(input({ subtotal: 10000, taxAmount: 1800, totalAmount: 11500 }))
+    expect(result.line_item_tally_mismatch).toBe(true)
+  })
+
+  it('accepts line items minus the bill discount summing to the total when there is no subtotal', () => {
+    const result = recheckTallyExceptions(
+      input({
+        billDiscount: 100,
+        totalAmount: 900,
+        lineItems: [{ description: 'Widget', quantity: 10, rate: 100, discount: null, amount: 1000 }],
+      })
+    )
+    expect(result.line_item_tally_mismatch).toBe(false)
   })
 })

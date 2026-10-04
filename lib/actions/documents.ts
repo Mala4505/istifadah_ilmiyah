@@ -518,6 +518,8 @@ export interface DocumentViewDetail {
   invoiceNumber: string | null
   invoiceDate: string | null
   subtotal: number | null
+  /** Discount on the whole bill (positive rupees), or null. */
+  billDiscount: number | null
   taxAmount: number | null
   totalAmount: number | null
   notes: string | null
@@ -553,7 +555,7 @@ export async function getDocumentViewDetail(
     supabase
       .from('document_extraction')
       .select(
-        'id, bill_index, verified_at, vendor_name_ocr, vendor_name_verified, vendor_gstin_ocr, vendor_gstin_verified, vendor_phone_ocr, vendor_phone_verified, vendor_email_ocr, vendor_email_verified, vendor_address_ocr, vendor_address_verified, buyer_gstin_ocr, buyer_gstin_verified, buyer_name_ocr, buyer_name_verified, invoice_number_ocr, invoice_number_verified, invoice_date_ocr, invoice_date_verified, subtotal_ocr, subtotal_verified, tax_amount_ocr, tax_amount_verified, total_amount_ocr, total_amount_verified, notes_ocr, notes_verified'
+        'id, bill_index, verified_at, vendor_name_ocr, vendor_name_verified, vendor_gstin_ocr, vendor_gstin_verified, vendor_phone_ocr, vendor_phone_verified, vendor_email_ocr, vendor_email_verified, vendor_address_ocr, vendor_address_verified, buyer_gstin_ocr, buyer_gstin_verified, buyer_name_ocr, buyer_name_verified, invoice_number_ocr, invoice_number_verified, invoice_date_ocr, invoice_date_verified, subtotal_ocr, subtotal_verified, bill_discount_ocr, bill_discount_verified, tax_amount_ocr, tax_amount_verified, total_amount_ocr, total_amount_verified, notes_ocr, notes_verified'
       )
       .eq('source_document_id', documentId)
       .order('bill_index'),
@@ -613,6 +615,7 @@ export async function getDocumentViewDetail(
       invoiceNumber: (extraction.invoice_number_verified ?? extraction.invoice_number_ocr) as string | null,
       invoiceDate: (extraction.invoice_date_verified ?? extraction.invoice_date_ocr) as string | null,
       subtotal: (extraction.subtotal_verified ?? extraction.subtotal_ocr) as number | null,
+      billDiscount: (extraction.bill_discount_verified ?? extraction.bill_discount_ocr) as number | null,
       taxAmount: (extraction.tax_amount_verified ?? extraction.tax_amount_ocr) as number | null,
       totalAmount: (extraction.total_amount_verified ?? extraction.total_amount_ocr) as number | null,
       notes: (extraction.notes_verified ?? extraction.notes_ocr) as string | null,

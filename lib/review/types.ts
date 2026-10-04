@@ -54,6 +54,7 @@ export interface HeaderFieldSet<T> {
   invoiceNumber: T
   invoiceDate: T
   subtotal: T
+  billDiscount: T
   taxAmount: T
   totalAmount: T
   notes: T

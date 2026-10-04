@@ -141,6 +141,9 @@ export function BillViewModal({
 
               <div className="flex flex-wrap justify-end gap-x-6 gap-y-1 text-sm">
                 <Amount label="Subtotal" value={detail.subtotal} />
+                {detail.billDiscount != null && detail.billDiscount !== 0 && (
+                  <Amount label="Discount" value={detail.billDiscount} />
+                )}
                 <Amount label="Tax" value={detail.taxAmount} />
                 <Amount label="Total" value={detail.totalAmount} emphasize />
               </div>

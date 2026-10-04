@@ -23,6 +23,8 @@ import { lineItemRowMathMismatches, type LineItemMathInput } from '@/lib/extract
 
 export interface TallyRecheckInput {
   subtotal: number | null
+  /** Discount on the whole bill (positive rupees), or null. */
+  billDiscount: number | null
   taxAmount: number | null
   totalAmount: number | null
   lineItems: LineItemMathInput[]
@@ -53,11 +55,16 @@ export function recheckTallyExceptions(input: TallyRecheckInput): TallyRecheckRe
   const lineTotal = sumLineItems(input.lineItems)
   if (linesShouldSumTo !== null && lineTotal !== null) {
     tallyEvaluated = true
-    if (!tallyWithinTolerance(lineTotal, linesShouldSumTo)) tallyMismatch = true
+    const linesMatch =
+      tallyWithinTolerance(lineTotal, linesShouldSumTo) ||
+      (input.subtotal === null &&
+        input.billDiscount !== null &&
+        tallyWithinTolerance(lineTotal - input.billDiscount, linesShouldSumTo))
+    if (!linesMatch) tallyMismatch = true
   }
   if (input.subtotal !== null && input.totalAmount !== null) {
     tallyEvaluated = true
-    const expected = input.subtotal + (input.taxAmount ?? 0)
+    const expected = input.subtotal - (input.billDiscount ?? 0) + (input.taxAmount ?? 0)
     if (!tallyWithinTolerance(expected, input.totalAmount)) tallyMismatch = true
   }
 

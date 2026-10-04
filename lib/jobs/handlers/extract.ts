@@ -396,6 +396,7 @@ export async function persistExtractionPipelineResult(
       // not at write time.
       place_of_supply_ocr: bill.place_of_supply,
       subtotal_ocr: bill.subtotal,
+      bill_discount_ocr: bill.bill_discount,
       tax_amount_ocr: bill.tax_amount,
       // See buildTaxBreakdown (lib/extraction-schema.ts) for how the
       // three flat cgst/sgst/igst_amount wire fields become this shape.
@@ -673,6 +674,7 @@ export async function persistExtractionPipelineResult(
       entryId: singleEntryId,
       totalAmount: bill.total_amount,
       subtotal: bill.subtotal,
+      billDiscount: bill.bill_discount,
       taxAmount: bill.tax_amount,
       lineTotal: lineItemTotal(bill),
       rowMathMismatches: lineItemRowMathMismatches(bill.line_items),
@@ -1440,6 +1442,9 @@ interface TallyCheckInput {
   entryId: number | null
   totalAmount: number | null
   subtotal: number | null
+  /** Discount on the whole bill (positive rupees), or null — see
+   *  `extractionBillSchema.bill_discount`. */
+  billDiscount: number | null
   taxAmount: number | null
   lineTotal: number | null
   /** Rows whose own quantity x rate (+/- discount) does not reconcile with
@@ -1469,7 +1474,13 @@ async function runTallyChecks(admin: AdminClient, input: TallyCheckInput): Promi
   const linesShouldSumTo = input.subtotal ?? input.totalAmount
   const comparandLabel = input.subtotal !== null ? 'subtotal' : 'total'
   if (linesShouldSumTo !== null && input.lineTotal !== null) {
-    if (!tallyWithinTolerance(input.lineTotal, linesShouldSumTo)) {
+    // With no subtotal, a whole-bill discount sits between the lines and the
+    // total, so the lines may also legitimately equal total + discount.
+    const discountedLines = input.lineTotal - (input.billDiscount ?? 0)
+    const linesMatch =
+      tallyWithinTolerance(input.lineTotal, linesShouldSumTo) ||
+      (input.subtotal === null && input.billDiscount !== null && tallyWithinTolerance(discountedLines, linesShouldSumTo))
+    if (!linesMatch) {
       raised.push('line_item_tally_mismatch')
       exceptions.push({
         document_extraction_id: input.documentExtractionId,
@@ -1484,10 +1495,13 @@ async function runTallyChecks(admin: AdminClient, input: TallyCheckInput): Promi
     }
   }
 
-  // 1b. subtotal + tax vs total — the other half of the same arithmetic, and
-  // the check that actually catches a misread tax or grand total.
+  // 1b. subtotal - bill discount + tax vs total — the other half of the same
+  // arithmetic, and the check that actually catches a misread tax or grand
+  // total. The discount subtracts the same whether the vendor took it before
+  // or after tax, so one formula covers both.
   if (input.subtotal !== null && input.totalAmount !== null) {
-    const expected = input.subtotal + (input.taxAmount ?? 0)
+    const discount = input.billDiscount ?? 0
+    const expected = input.subtotal - discount + (input.taxAmount ?? 0)
     if (!tallyWithinTolerance(expected, input.totalAmount)) {
       raised.push('line_item_tally_mismatch')
       exceptions.push({
@@ -1496,7 +1510,9 @@ async function runTallyChecks(admin: AdminClient, input: TallyCheckInput): Promi
         severity: 'high',
         amount_at_risk: Math.abs(expected - input.totalAmount),
         description:
-          `Subtotal ${input.subtotal.toFixed(2)} plus tax ${(input.taxAmount ?? 0).toFixed(2)} is ` +
+          `Subtotal ${input.subtotal.toFixed(2)}` +
+          (discount !== 0 ? ` less discount ${discount.toFixed(2)}` : '') +
+          ` plus tax ${(input.taxAmount ?? 0).toFixed(2)} is ` +
           `${expected.toFixed(2)}, but the extracted total is ${input.totalAmount.toFixed(2)} ` +
           `(difference ${Math.abs(expected - input.totalAmount).toFixed(2)}).`,
         dedup_key: `subtotal_plus_tax_vs_total:${input.documentExtractionId}:${input.currentRunId}`,

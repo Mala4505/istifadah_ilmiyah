@@ -52,6 +52,10 @@ export interface VerifiedHeaderInput {
   invoice_number: string | null
   invoice_date: string | null
   subtotal: number | null
+  /** Bill-level discount printed on the whole bill ("Less: Discount"), one
+   *  positive rupee amount -- separate from the per-line-item `discount`
+   *  text. total = subtotal - bill_discount + tax. */
+  bill_discount: number | null
   tax_amount: number | null
   total_amount: number | null
   notes: string | null
@@ -333,6 +337,7 @@ export async function saveVerification(input: SaveVerificationInput): Promise<Sa
 
     const recheck = recheckTallyExceptions({
       subtotal: input.header.subtotal,
+      billDiscount: input.header.bill_discount,
       taxAmount: input.header.tax_amount,
       totalAmount: input.header.total_amount,
       lineItems: input.lineItems,

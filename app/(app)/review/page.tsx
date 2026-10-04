@@ -564,7 +564,7 @@ async function loadDocumentDetail(
     supabase
       .from('document_extraction')
       .select(
-        'id, current_extraction_run_id, verified_at, bill_index, page_number_start, page_number_end, vendor_name_ocr, vendor_name_verified, vendor_gstin_ocr, vendor_gstin_verified, vendor_phone_ocr, vendor_phone_verified, vendor_email_ocr, vendor_email_verified, vendor_address_ocr, vendor_address_verified, buyer_gstin_ocr, buyer_gstin_verified, buyer_name_ocr, buyer_name_verified, invoice_number_ocr, invoice_number_verified, invoice_date_ocr, invoice_date_verified, subtotal_ocr, subtotal_verified, tax_amount_ocr, tax_amount_verified, total_amount_ocr, total_amount_verified, notes_ocr, notes_verified, uncertain_fields_ocr, instrument_type_ocr, tax_breakdown_ocr'
+        'id, current_extraction_run_id, verified_at, bill_index, page_number_start, page_number_end, vendor_name_ocr, vendor_name_verified, vendor_gstin_ocr, vendor_gstin_verified, vendor_phone_ocr, vendor_phone_verified, vendor_email_ocr, vendor_email_verified, vendor_address_ocr, vendor_address_verified, buyer_gstin_ocr, buyer_gstin_verified, buyer_name_ocr, buyer_name_verified, invoice_number_ocr, invoice_number_verified, invoice_date_ocr, invoice_date_verified, subtotal_ocr, subtotal_verified, bill_discount_ocr, bill_discount_verified, tax_amount_ocr, tax_amount_verified, total_amount_ocr, total_amount_verified, notes_ocr, notes_verified, uncertain_fields_ocr, instrument_type_ocr, tax_breakdown_ocr'
       )
       .eq('id', documentExtractionId)
       .maybeSingle(),
@@ -1004,6 +1004,7 @@ async function loadDocumentDetail(
       invoiceNumber: { ocr: extraction.invoice_number_ocr, verified: extraction.invoice_number_verified },
       invoiceDate: { ocr: extraction.invoice_date_ocr, verified: extraction.invoice_date_verified },
       subtotal: { ocr: extraction.subtotal_ocr, verified: extraction.subtotal_verified },
+      billDiscount: { ocr: extraction.bill_discount_ocr, verified: extraction.bill_discount_verified },
       taxAmount: { ocr: extraction.tax_amount_ocr, verified: extraction.tax_amount_verified },
       totalAmount: { ocr: extraction.total_amount_ocr, verified: extraction.total_amount_verified },
       notes: { ocr: extraction.notes_ocr, verified: extraction.notes_verified },

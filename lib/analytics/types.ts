@@ -77,6 +77,8 @@ export interface DocumentFacts {
   taxAmount: number | null
   totalAmount: number | null
   roundOff: number | null
+  /** Discount on the whole bill (positive rupees), or null when not printed. */
+  billDiscount: number | null
   taxBreakdown: TaxBreakdown | null
   /** Two-digit GST state code, already resolved from the printed place of supply. */
   placeOfSupplyStateCode: string | null

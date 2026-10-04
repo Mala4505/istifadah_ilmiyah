@@ -242,6 +242,7 @@ export const UNCERTAIN_FIELD_NAMES = [
   'invoice_number',
   'invoice_date',
   'subtotal',
+  'bill_discount',
   'tax_amount',
   'total_amount',
   'line_item_description',
@@ -321,6 +322,13 @@ export const extractionBillSchema = z.object({
    *  code resolution happens downstream (lib/analytics/gstin.ts), not here. */
   place_of_supply: absentTextAsNull,
   subtotal: z.number().nullable(),
+  /** Rupee discount printed on the WHOLE bill ("Less: Discount"), as a positive
+   *  number — not a per-line discount (that is `line_items[].discount`). Applies
+   *  whether the vendor took it before tax or after: either way
+   *  total = subtotal - bill_discount + tax + round_off.
+   *  `.default(null)` so responses/fixtures written before this field existed
+   *  still parse. */
+  bill_discount: z.number().nullable().default(null),
   /** CGST/SGST/IGST amounts — see buildTaxBreakdown below for how these three
    *  flat numbers become the nested tax_breakdown_ocr jsonb shape. Rates are
    *  intentionally not captured (see buildTaxBreakdown's comment). */
@@ -458,6 +466,7 @@ export const extractionToolInputSchema = {
           invoice_date: textField,
           place_of_supply: textField,
           subtotal: nullableNumber,
+          bill_discount: nullableNumber,
           cgst_amount: nullableNumber,
           sgst_amount: nullableNumber,
           igst_amount: nullableNumber,
@@ -537,6 +546,7 @@ export const extractionToolInputSchema = {
           'invoice_date',
           'place_of_supply',
           'subtotal',
+          'bill_discount',
           'cgst_amount',
           'sgst_amount',
           'igst_amount',
@@ -582,6 +592,9 @@ export const EXTRACTION_TOOL_DESCRIPTION =
   'number — write that number once in each field, do not invent a different value for one of them just to ' +
   'make them look distinct. Only fill `discount` (free text) when the invoice itself prints an explicit ' +
   'discount line or note; leave it empty rather than guessing a discount that is not shown. ' +
+  'Fill bill_discount only when the invoice prints an explicit discount on the WHOLE bill (e.g. "Less: ' +
+  'Discount" under the subtotal or the grand total), as the positive rupee amount shown; leave it null for ' +
+  'per-line discounts, or when only a percentage is printed with no rupee amount. ' +
   'For a value you filled in but are not fully confident about — ambiguous handwriting, a smudged digit, ' +
   'overlapping text — add an entry to uncertain_fields naming the field (and, for a line item, its ' +
   'line_order), the page it is on, and an approximate bounding box (bbox_x0/y0 top-left, bbox_x1/y1 ' +

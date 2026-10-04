@@ -40,6 +40,7 @@ export interface HeaderFormState {
   invoiceNumber: string
   invoiceDate: string
   subtotal: string
+  billDiscount: string
   taxAmount: string
   totalAmount: string
   notes: string
@@ -197,6 +198,7 @@ const HEADER_WIRE_FIELD: Partial<Record<keyof HeaderFormState, string>> = {
   invoiceNumber: 'invoice_number',
   invoiceDate: 'invoice_date',
   subtotal: 'subtotal',
+  billDiscount: 'bill_discount',
   taxAmount: 'tax_amount',
   totalAmount: 'total_amount',
 }
@@ -223,6 +225,7 @@ const HEADER_FIELD_LABEL: Record<string, string> = {
   invoice_number: 'Invoice number',
   invoice_date: 'Invoice date',
   subtotal: 'Subtotal',
+  bill_discount: 'Bill discount',
   tax_amount: 'Tax amount',
   total_amount: 'Total amount',
 }
@@ -558,6 +561,11 @@ export const ExtractionForm = memo(forwardRef(function ExtractionForm(
           uncertain={headerUncertainty('subtotal')} uncertainIndex={uncertainIndexOf(headerUncertainty('subtotal'))}
           uncertainOnCurrentPage={isOnCurrentPage(headerUncertainty('subtotal'))}
           edited={headerEdited('subtotal')} error={headerError('subtotal')} onJumpToPage={onJumpToPage} pageLabel={headerPageLabel(headerUncertainty('subtotal'))} />
+        <Field label="Bill discount" inputMode="decimal" money disabled={disabled} onKeyDown={handleEnter}
+          value={header.billDiscount} onChange={(v) => onHeaderChange('billDiscount', v)}
+          uncertain={headerUncertainty('billDiscount')} uncertainIndex={uncertainIndexOf(headerUncertainty('billDiscount'))}
+          uncertainOnCurrentPage={isOnCurrentPage(headerUncertainty('billDiscount'))}
+          edited={headerEdited('billDiscount')} error={headerError('billDiscount')} onJumpToPage={onJumpToPage} pageLabel={headerPageLabel(headerUncertainty('billDiscount'))} />
         <Field label="Tax amount" inputMode="decimal" money disabled={disabled} onKeyDown={handleEnter}
           value={header.taxAmount} onChange={(v) => onHeaderChange('taxAmount', v)}
           uncertain={headerUncertainty('taxAmount')} uncertainIndex={uncertainIndexOf(headerUncertainty('taxAmount'))}
