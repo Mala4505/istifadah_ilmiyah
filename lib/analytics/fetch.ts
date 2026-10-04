@@ -49,6 +49,7 @@ export async function fetchDocumentFacts(admin: AdminClient): Promise<DocumentFa
       tax_amount_ocr, tax_amount_verified,
       total_amount_ocr, total_amount_verified,
       round_off_ocr, round_off_verified,
+      bill_discount_ocr, bill_discount_verified,
       tax_breakdown_ocr, tax_breakdown_verified,
       place_of_supply_ocr, place_of_supply_verified,
       verified_at
@@ -115,6 +116,7 @@ export async function fetchDocumentFacts(admin: AdminClient): Promise<DocumentFa
       taxAmount: preferVerified(row.tax_amount_verified, row.tax_amount_ocr),
       totalAmount: preferVerified(row.total_amount_verified, row.total_amount_ocr),
       roundOff: preferVerified(row.round_off_verified, row.round_off_ocr),
+      billDiscount: preferVerified(row.bill_discount_verified, row.bill_discount_ocr),
       taxBreakdown: preferVerified(
         row.tax_breakdown_verified,
         row.tax_breakdown_ocr

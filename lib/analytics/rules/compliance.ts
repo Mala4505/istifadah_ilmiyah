@@ -183,7 +183,7 @@ export function detectGstinInvalid(doc: DocumentFacts): FlagProposal | null {
 }
 
 /**
- * Subtotal + tax + round-off does not reconcile to the total.
+ * Subtotal - bill discount + tax + round-off does not reconcile to the total.
  *
  * Uses the same tolerance as the existing line-item tally check (§7, §9.4) so a
  * reviewer sees one consistent notion of "within tolerance" across the app
@@ -194,7 +194,8 @@ export function detectTaxMathMismatch(doc: DocumentFacts): FlagProposal | null {
 
   const tax = doc.taxAmount ?? 0
   const roundOff = doc.roundOff ?? 0
-  const computed = doc.subtotal + tax + roundOff
+  const billDiscount = doc.billDiscount ?? 0
+  const computed = doc.subtotal - billDiscount + tax + roundOff
 
   if (tallyWithinTolerance(computed, doc.totalAmount)) return null
 
@@ -208,7 +209,9 @@ export function detectTaxMathMismatch(doc: DocumentFacts): FlagProposal | null {
     vendorId: doc.vendorId,
     amountAtRisk: Math.abs(variance),
     description:
-      `Invoice arithmetic does not reconcile: ${inr(doc.subtotal)} subtotal + ${inr(tax)} tax` +
+      `Invoice arithmetic does not reconcile: ${inr(doc.subtotal)} subtotal` +
+      (billDiscount !== 0 ? ` - ${inr(billDiscount)} discount` : '') +
+      ` + ${inr(tax)} tax` +
       (roundOff !== 0 ? ` + ${inr(roundOff)} round-off` : '') +
       ` = ${inr(computed)}, but the stated total is ${inr(doc.totalAmount)} ` +
       `(${variance > 0 ? 'over' : 'under'} by ${inr(Math.abs(variance))}).`,
@@ -216,6 +219,7 @@ export function detectTaxMathMismatch(doc: DocumentFacts): FlagProposal | null {
       subtotal: doc.subtotal,
       tax_amount: doc.taxAmount,
       round_off: doc.roundOff,
+      bill_discount: doc.billDiscount,
       computed_total: computed,
       stated_total: doc.totalAmount,
       variance,
@@ -228,16 +232,28 @@ export function detectTaxMathMismatch(doc: DocumentFacts): FlagProposal | null {
  *
  * Computed as tax ÷ subtotal rather than read off the invoice, because the
  * printed rate and the charged amount are exactly what can disagree.
+ *
+ * With a bill-level discount the taxable value is ambiguous: vendors either
+ * charge GST on (subtotal - discount) or on the full subtotal and take the
+ * discount off the final total. The tax is accepted if it fits a slab on either
+ * base; the report is always framed against the subtotal.
  */
 export function detectGstRateAnomaly(doc: DocumentFacts): FlagProposal | null {
   if (doc.subtotal == null || doc.subtotal <= 0) return null
   if (doc.taxAmount == null) return null
 
+  const taxAmount = doc.taxAmount
+  const fitsSlab = (base: number) => {
+    const rate = (taxAmount / base) * 100
+    return GST_STANDARD_RATES.some((slab) => Math.abs(rate - slab) <= GST_RATE_TOLERANCE_PCT)
+  }
+  if (fitsSlab(doc.subtotal)) return null
+  if (doc.billDiscount != null && doc.billDiscount > 0) {
+    const discountedBase = doc.subtotal - doc.billDiscount
+    if (discountedBase > 0 && fitsSlab(discountedBase)) return null
+  }
+
   const impliedRate = (doc.taxAmount / doc.subtotal) * 100
-  const matchesSlab = GST_STANDARD_RATES.some(
-    (slab) => Math.abs(impliedRate - slab) <= GST_RATE_TOLERANCE_PCT
-  )
-  if (matchesSlab) return null
 
   // On an exact tie (an implied 15% is equidistant from the 12% and 18% slabs)
   // take the HIGHER slab. The nearest slab is only used to quantify the

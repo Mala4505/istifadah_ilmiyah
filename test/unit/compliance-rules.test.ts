@@ -32,6 +32,7 @@ function facts(overrides: Partial<DocumentFacts> = {}): DocumentFacts {
     taxAmount: null,
     totalAmount: null,
     roundOff: null,
+    billDiscount: null,
     taxBreakdown: null,
     placeOfSupplyStateCode: null,
     verifiedAt: '2026-08-14T00:00:00Z',
@@ -51,6 +52,7 @@ const ADINATH = facts({
   taxAmount: 540,
   totalAmount: 3540,
   roundOff: 0,
+  billDiscount: null,
   taxBreakdown: { igst: { rate: 18, amount: 540 }, cgst: null, sgst: null },
   placeOfSupplyStateCode: '27',
 })
@@ -67,6 +69,7 @@ const CREATIVE_FRAMES = facts({
   taxAmount: 4563,
   totalAmount: 29913,
   roundOff: 0,
+  billDiscount: null,
   taxBreakdown: { igst: { rate: 18, amount: 4563 }, cgst: null, sgst: null },
   placeOfSupplyStateCode: '27',
 })
@@ -83,6 +86,7 @@ const SHABBIR = facts({
   taxAmount: null,
   totalAmount: 92436,
   roundOff: null,
+  billDiscount: null,
   taxBreakdown: null,
   placeOfSupplyStateCode: null,
 })
@@ -228,6 +232,23 @@ describe('detectTaxMathMismatch', () => {
     ).toBeNull()
   })
 
+  it('accounts for a bill-level discount', () => {
+    // 10,000 - 300 discount + 1,800 tax = 11,500.
+    expect(
+      detectTaxMathMismatch(facts({ subtotal: 10000, billDiscount: 300, taxAmount: 1800, totalAmount: 11500 }))
+    ).toBeNull()
+  })
+
+  it('mentions the discount and records it in evidence when the bill still does not reconcile', () => {
+    const flag = detectTaxMathMismatch(
+      facts({ subtotal: 10000, billDiscount: 300, taxAmount: 1800, totalAmount: 12000 })
+    )
+    expect(flag?.flagType).toBe('tax_math_mismatch')
+    expect(flag?.description).toContain('discount')
+    expect(flag?.evidence).toMatchObject({ bill_discount: 300, computed_total: 11500 })
+    expect(flag?.amountAtRisk).toBeCloseTo(500, 2)
+  })
+
   it('abstains when the subtotal was never captured', () => {
     // Handwritten cash memos have a total and nothing else. Treating the missing
     // subtotal as zero would flag every one of them.
@@ -265,6 +286,22 @@ describe('detectGstRateAnomaly', () => {
 
   it('accepts a zero-rated supply', () => {
     expect(detectGstRateAnomaly(facts({ subtotal: 20000, taxAmount: 0 }))).toBeNull()
+  })
+
+  it('accepts a post-tax discount (GST on the full subtotal)', () => {
+    expect(detectGstRateAnomaly(facts({ subtotal: 10000, taxAmount: 1800, billDiscount: 300 }))).toBeNull()
+  })
+
+  it('accepts a pre-tax discount (GST on subtotal minus discount)', () => {
+    // 1,710 is 18% of 9,500 but 17.1% of 10,000.
+    expect(detectGstRateAnomaly(facts({ subtotal: 10000, taxAmount: 1710, billDiscount: 500 }))).toBeNull()
+  })
+
+  it('still flags when the tax fits a slab on neither base', () => {
+    // 2,000 is 20% of 10,000 and ~20.6% of 9,700.
+    const flag = detectGstRateAnomaly(facts({ subtotal: 10000, taxAmount: 2000, billDiscount: 300 }))
+    expect(flag?.flagType).toBe('gst_rate_anomaly')
+    expect(flag?.evidence).toMatchObject({ subtotal: 10000, implied_rate_pct: 20, nearest_slab_pct: 18 })
   })
 
   it('abstains without a taxable value', () => {

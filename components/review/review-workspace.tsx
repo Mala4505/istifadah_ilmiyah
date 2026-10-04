@@ -251,6 +251,7 @@ function buildHeaderState(detail: ReviewDocumentDetail): HeaderFormState {
     invoiceNumber: numToStr(h.invoiceNumber.verified ?? h.invoiceNumber.ocr),
     invoiceDate: numToStr(h.invoiceDate.verified ?? h.invoiceDate.ocr),
     subtotal: numToStr(h.subtotal.verified ?? h.subtotal.ocr),
+    billDiscount: numToStr(h.billDiscount.verified ?? h.billDiscount.ocr),
     taxAmount: numToStr(h.taxAmount.verified ?? h.taxAmount.ocr),
     totalAmount: numToStr(h.totalAmount.verified ?? h.totalAmount.ocr),
     notes: numToStr(h.notes.verified ?? h.notes.ocr),
@@ -354,6 +355,7 @@ export function ReviewWorkspace({
   const [invoiceNumber, setInvoiceNumber] = useState(initialHeader.invoiceNumber)
   const [invoiceDate, setInvoiceDate] = useState(initialHeader.invoiceDate)
   const [subtotal, setSubtotal] = useState(initialHeader.subtotal)
+  const [billDiscount, setBillDiscount] = useState(initialHeader.billDiscount)
   const [taxAmount, setTaxAmount] = useState(initialHeader.taxAmount)
   const [totalAmount, setTotalAmount] = useState(initialHeader.totalAmount)
   const [notes, setNotes] = useState(initialHeader.notes)
@@ -377,6 +379,7 @@ export function ReviewWorkspace({
       invoiceNumber,
       invoiceDate,
       subtotal,
+      billDiscount,
       taxAmount,
       totalAmount,
       notes,
@@ -392,6 +395,7 @@ export function ReviewWorkspace({
       invoiceNumber,
       invoiceDate,
       subtotal,
+      billDiscount,
       taxAmount,
       totalAmount,
       notes,
@@ -436,6 +440,9 @@ export function ReviewWorkspace({
       case 'subtotal':
         subtotalManualRef.current = true
         setSubtotal(value)
+        break
+      case 'billDiscount':
+        setBillDiscount(value)
         break
       case 'taxAmount':
         setTaxAmount(value)
@@ -624,6 +631,7 @@ export function ReviewWorkspace({
     setInvoiceNumber(freshHeader.invoiceNumber)
     setInvoiceDate(freshHeader.invoiceDate)
     setSubtotal(freshHeader.subtotal)
+    setBillDiscount(freshHeader.billDiscount)
     setTaxAmount(freshHeader.taxAmount)
     setTotalAmount(freshHeader.totalAmount)
     setNotes(freshHeader.notes)
@@ -757,10 +765,11 @@ export function ReviewWorkspace({
   const validationHeaderErrors = useMemo<Set<keyof HeaderFormState>>(() => {
     const headerSet = new Set<keyof HeaderFormState>()
     if (isUnparseableAmount(subtotal)) headerSet.add('subtotal')
+    if (isUnparseableAmount(billDiscount)) headerSet.add('billDiscount')
     if (isUnparseableAmount(taxAmount)) headerSet.add('taxAmount')
     if (isUnparseableAmount(totalAmount)) headerSet.add('totalAmount')
     return headerSet
-  }, [subtotal, taxAmount, totalAmount])
+  }, [subtotal, billDiscount, taxAmount, totalAmount])
 
   const validationLineItemErrors = useMemo<Map<number, Set<string>>>(() => {
     const lineItemsMap = new Map<number, Set<string>>()
@@ -1251,6 +1260,7 @@ export function ReviewWorkspace({
         invoice_number: header.invoiceNumber.trim() || null,
         invoice_date: header.invoiceDate.trim() || null,
         subtotal: parseNum(header.subtotal),
+        bill_discount: parseNum(header.billDiscount),
         tax_amount: parseNum(header.taxAmount),
         total_amount: parseNum(header.totalAmount),
         notes: header.notes.trim() || null,
@@ -1750,16 +1760,17 @@ export function ReviewWorkspace({
     setSubtotal(lineItemSum === null ? '' : roundMoney(lineItemSum))
   }, [lineItemSum])
 
-  // Same idea for Total = Subtotal + Tax -- chains off the effect above
-  // (subtotal changing re-fires this one too) and off a direct Tax amount
-  // edit, but leaves Total alone until Subtotal actually parses to a number
-  // and until the reviewer hasn't typed into Total directly.
+  // Same idea for Total = Subtotal - Bill discount + Tax -- chains off the
+  // effect above (subtotal changing re-fires this one too) and off a direct
+  // Bill discount / Tax amount edit, but leaves Total alone until Subtotal
+  // actually parses to a number and until the reviewer hasn't typed into
+  // Total directly. A blank bill discount counts as zero, like a blank tax.
   useEffect(() => {
     if (!hasEditedRef.current || totalAmountManualRef.current) return
     const subtotalNum = parseNum(subtotal)
     if (subtotalNum === null) return
-    setTotalAmount(roundMoney(subtotalNum + (parseNum(taxAmount) ?? 0)))
-  }, [subtotal, taxAmount])
+    setTotalAmount(roundMoney(subtotalNum - (parseNum(billDiscount) ?? 0) + (parseNum(taxAmount) ?? 0)))
+  }, [subtotal, billDiscount, taxAmount])
 
   // Redesign point 2: confidence/model/legibility/edited-count/bill-position
   // used to be five-plus separately-colored pills competing for attention.

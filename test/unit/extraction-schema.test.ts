@@ -108,6 +108,20 @@ describe('extractionResponseSchema — new fields round-trip', () => {
     expect(absent.bills[0]!.round_off).toBeNull()
   })
 
+  it('round-trips bill_discount (0, positive, null) and defaults it to null when omitted', () => {
+    const zero = extractionResponseSchema.parse(baseInput({}, { bill_discount: 0 }))
+    expect(zero.bills[0]!.bill_discount).toBe(0)
+
+    const positive = extractionResponseSchema.parse(baseInput({}, { bill_discount: 500 }))
+    expect(positive.bills[0]!.bill_discount).toBe(500)
+
+    const absent = extractionResponseSchema.parse(baseInput({}, { bill_discount: null }))
+    expect(absent.bills[0]!.bill_discount).toBeNull()
+
+    const omitted = extractionResponseSchema.parse(baseInput())
+    expect(omitted.bills[0]!.bill_discount).toBeNull()
+  })
+
   it('round-trips cgst_amount/sgst_amount/igst_amount independently', () => {
     const parsed = extractionResponseSchema.parse(
       baseInput({}, { cgst_amount: 270, sgst_amount: 270, igst_amount: null })
@@ -536,18 +550,20 @@ describe('extractionToolInputSchema — union-type parameter budget', () => {
   })
 
   it('moving header fields under bills.items.properties does not add new union parameters', () => {
-    // skip_reason (pages.items) = 1; subtotal, tax_amount, total_amount,
-    // cgst_amount, sgst_amount, igst_amount, round_off (bills.items) = 7;
+    // skip_reason (pages.items) = 1; subtotal, bill_discount, tax_amount,
+    // total_amount, cgst_amount, sgst_amount, igst_amount, round_off
+    // (bills.items) = 8;
     // quantity, rate, amount (bills.items.line_items.items) = 3;
-    // line_order (bills.items.uncertain_fields.items) = 1. Total 12 — up
+    // line_order (bills.items.uncertain_fields.items) = 1. Total 13 — up
     // from 11 after uncertain_fields was added (line_order is nullable:
-    // null for a header field, an integer for a line-item field). continues
+    // null for a header field, an integer for a line-item field), then 12 -> 13
+    // for bill_discount. Continues
     // to sit well clear of the 16 ceiling. instrument_type, vendor_*,
     // invoice_number, invoice_date, place_of_supply, notes, discount,
     // uncertain_fields' own `field`/page_number/bbox_* stay plain
     // (non-union) types, none of which are union-typed.
     const count = countUnionTypedProperties(extractionToolInputSchema)
-    expect(count).toBe(12)
+    expect(count).toBe(13)
   })
 })
 
