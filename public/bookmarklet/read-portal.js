@@ -32,6 +32,8 @@
  * import that quietly drops rows 26 to 400 is the worst possible failure here,
  * because nothing about the result looks wrong. So: ask the grid for all of
  * its rows first, and fall back to the DOM only when there is no grid.
+ * "Ask for all of its rows" means walking its pages one draw at a time — see
+ * readViaDataTables for why it no longer switches the grid to "show all".
  * ---------------------------------------------------------------------------
  */
 (function () {
@@ -118,8 +120,9 @@
     var start = Date.now()
     ui(
       SPINNER_CSS +
-        '<div><span class="ih-spinner"></span>' +
+        '<div><span class="ih-spinner"></span><span id="ih-busy-label">' +
         esc(label) +
+        '</span>' +
         ' <span id="ih-elapsed" style="color:#71717a">(0s)</span></div>' +
         '<div id="ih-reassure" style="color:#71717a;margin-top:6px"></div>'
     )
@@ -133,6 +136,12 @@
           'Still working — large imports can take a minute or two. Keep this tab open.'
       }
     }, 1000)
+  }
+
+  /** Swaps the busy label in place, keeping the spinner and its clock running. */
+  function busyLabel(label) {
+    var el = document.getElementById('ih-busy-label')
+    if (el) el.textContent = label
   }
 
   // -------------------------------------------------------------------------
@@ -212,48 +221,19 @@
   }
 
   /**
-   * Reads a DataTables grid in full.
-   *
-   * Rather than reconstruct rows from the API's data objects — whose shape
-   * depends on how the grid was configured, and which carry raw HTML for
-   * rendered columns — this sets the page length to "all", lets the grid
-   * redraw, and then reads the DOM it produced. One code path for the values,
-   * and it works identically for client-side and server-side grids (a
-   * server-side grid fetches the remaining rows on that redraw).
-   *
-   * The original page length is restored afterwards, so the operator's screen
-   * is left as they found it.
+   * Moves a DataTables grid to page `index` and calls back once it has drawn.
+   * `cb(false)` means the grid never drew — a server-side grid that is
+   * offline, slow, or erroring in its own handler must not leave the operator
+   * staring at a spinner.
    */
-  function readViaDataTables(table, api, done) {
-    var originalLength
-    try {
-      originalLength = api.page.len()
-    } catch (e) {
-      originalLength = null
-    }
-
-    var finish = function () {
-      var headers = headerCells(table)
-      var rows = bodyRows(table, headers.length)
-      if (originalLength !== null && originalLength !== -1) {
-        try {
-          api.page.len(originalLength).draw(false)
-        } catch (e) {
-          /* leave it showing everything rather than fail the read */
-        }
-      }
-      done(headers, rows)
-    }
-
-    if (originalLength === -1) return finish()
+  function goToPage(api, index, cb) {
+    if (api.page() === index) return cb(true)
 
     var settled = false
     var guard = setTimeout(function () {
-      // A server-side grid that never fires `draw` (offline, slow, or an error
-      // in its own handler) must not leave the operator staring at a spinner.
       if (!settled) {
         settled = true
-        finish()
+        cb(false)
       }
     }, 15000)
 
@@ -262,19 +242,112 @@
         if (settled) return
         settled = true
         clearTimeout(guard)
-        finish()
+        cb(true)
       })
-      api.page.len(-1).draw(false)
+      api.page(index).draw('page')
     } catch (e) {
       if (!settled) {
         settled = true
         clearTimeout(guard)
-        finish()
+        cb(false)
       }
     }
   }
 
+  /**
+   * Reads a DataTables grid in full, one page at a time.
+   *
+   * Rather than reconstruct rows from the API's data objects — whose shape
+   * depends on how the grid was configured, and which carry raw HTML for
+   * rendered columns — this reads the DOM the grid draws. One code path for
+   * the values, and it works identically for client-side and server-side
+   * grids (a server-side grid fetches each page on its own redraw).
+   *
+   * This used to set the page length to "all" and read a single redraw. On a
+   * large grid (the Department module) that renders thousands of rows into
+   * the DOM at once and freezes the portal tab — the same lag an operator
+   * gets clicking "View all" by hand. Walking the pages at the grid's own
+   * page length keeps every draw as small as the one already on screen.
+   *
+   * The operator's original page is restored afterwards, so their screen is
+   * left as they found it.
+   */
+  function readViaDataTables(table, api, done) {
+    var info
+    try {
+      info = api.page.info()
+    } catch (e) {
+      info = null
+    }
+
+    // Already showing everything (or only one page): the DOM is the table.
+    if (!info || info.length === -1 || info.pages <= 1) {
+      var allHeaders = headerCells(table)
+      return done(allHeaders, bodyRows(table, allHeaders.length))
+    }
+
+    var originalPage = info.page
+    var expected = info.recordsDisplay
+    var headers = null
+    var rows = []
+    var previousFirstRow = null
+
+    function finish(stoppedEarly) {
+      try {
+        if (api.page() !== originalPage) api.page(originalPage).draw('page')
+      } catch (e) {
+        /* leave it on the last page rather than fail the read */
+      }
+      if (rows.length < expected) {
+        window.__ihPartial = {
+          shown: rows.length,
+          total: expected,
+          note: stoppedEarly
+            ? 'The portal stopped responding partway through its pages. Run this again.'
+            : 'Some pages came back short. Run this again.',
+        }
+      }
+      done(headers || headerCells(table), rows)
+    }
+
+    function readPage(index, pageCount) {
+      busyLabel('Reading page ' + (index + 1) + ' of ' + pageCount + '…')
+      goToPage(api, index, function (ok) {
+        if (!ok) return finish(true)
+        if (!headers) headers = headerCells(table)
+        var pageRows = bodyRows(table, headers.length)
+
+        // A server that ignores the requested offset hands back the same page
+        // again; appending it would duplicate rows silently. Stop instead and
+        // let the partial warning say the count is short.
+        var firstRow = pageRows.length ? pageRows[0].join('\u0001') : null
+        if (index > 0 && firstRow !== null && firstRow === previousFirstRow) return finish(true)
+        previousFirstRow = firstRow
+
+        for (var i = 0; i < pageRows.length; i++) rows.push(pageRows[i])
+
+        // Re-read the page count each time: a server-side grid's total can
+        // shift between requests.
+        var now = api.page.info()
+        expected = now.recordsDisplay
+        if (index + 1 < now.pages) {
+          // Yield between pages so the overlay repaints and a client-side
+          // grid's synchronous draws do not stack up into one long freeze.
+          setTimeout(function () {
+            readPage(index + 1, now.pages)
+          }, 0)
+        } else {
+          finish(false)
+        }
+      })
+    }
+
+    readPage(0, info.pages)
+  }
+
   function readTable(done) {
+    // A second run on the same tab must not inherit the last run's warning.
+    window.__ihPartial = null
     var tables = candidateTables()
     if (tables.length === 0) {
       return fail('No table found on this page. Open the entry list first, then run this again.')
@@ -573,7 +646,9 @@
         esc(partial.shown) +
         ' of ' +
         esc(partial.total) +
-        ' rows. Set the page size to show all rows, then run this again.</div>'
+        ' rows. ' +
+        esc(partial.note || 'Set the page size to show all rows, then run this again.') +
+        '</div>'
       : ''
 
     // Nothing is sent yet. Reading the table used to auto-fire a dry run —
