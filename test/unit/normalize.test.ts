@@ -105,6 +105,13 @@ describe('normalizeUnit', () => {
     expect(normalizeUnit('sq ft')).toBe('sqft')
     expect(normalizeUnit('SQ.FT.')).toBe('sqft')
     expect(normalizeUnit('sq.ft')).toBe('sqft')
+    expect(normalizeUnit('sqf')).toBe('sqft')
+  })
+
+  it('collapses ltr variants', () => {
+    expect(normalizeUnit('ltr')).toBe('ltr')
+    expect(normalizeUnit('lts')).toBe('ltr')
+    expect(normalizeUnit('Litre')).toBe('ltr')
   })
 
   it('collapses nos variants', () => {
@@ -130,7 +137,7 @@ describe('normalizeUnit', () => {
   })
 
   it('passes unrecognized units through trimmed and lowercased, without throwing', () => {
-    expect(normalizeUnit('  Litre  ')).toBe('litre')
+    expect(normalizeUnit('  Bags  ')).toBe('bags')
     expect(() => normalizeUnit('bags')).not.toThrow()
     expect(normalizeUnit('bags')).toBe('bags')
   })
