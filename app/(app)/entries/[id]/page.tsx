@@ -427,8 +427,10 @@ export default async function EntryDetailPage({
         <ProvisionalNumberBanner entryId={entry.id} provisionalNumber={entry.ubbl_number} />
       )}
 
-      {/* Assignment (admin head / zone) sits at the top so who
-          owns the entry is the first thing read (2026-10-05 request). */}
+      <ImportFieldsPanel entry={entry} vendorConfirmed={vendorConfirmed} />
+
+      {/* Assignment (admin head / zone) sits directly below the imported
+          data (2026-10-05 request). */}
       <EnrichmentForm
         entryId={entry.id}
         adminHeadOptions={adminHeadOptions}
@@ -437,8 +439,6 @@ export default async function EntryDetailPage({
         initialZoneId={entry.zone_id}
         initialRemark={entry.remark}
       />
-
-      <ImportFieldsPanel entry={entry} vendorConfirmed={vendorConfirmed} />
 
       <LinkedDocuments
         entryId={entry.id}

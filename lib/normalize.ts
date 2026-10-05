@@ -113,6 +113,16 @@ export function normalizeVendorName(raw: string): string {
 /** Controlled vocabulary for line-item units (MASTER-PLAN §3.8, §561). */
 const UNIT_LOOKUP: Record<string, string> = {
   sqft: 'sqft',
+  sqf: 'sqft',
+  sqfeet: 'sqft',
+  ltr: 'ltr',
+  ltrs: 'ltr',
+  lts: 'ltr',
+  lt: 'ltr',
+  litre: 'ltr',
+  litres: 'ltr',
+  liter: 'ltr',
+  liters: 'ltr',
   no: 'nos',
   nos: 'nos',
   numbers: 'nos',
