@@ -9,27 +9,43 @@ import { Input } from '@/components/ui/input'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Button } from '@/components/ui/button'
 import { createDepartment, updateDepartment } from '@/lib/actions/admin'
+import { useTableControls, type ControlColumn } from '@/components/ui/table-controls'
 import type { DepartmentOption } from '@/lib/settings/shape'
 
 export type MasterDepartmentRow = DepartmentOption & { isActive: boolean }
 
+const DEPARTMENT_COLUMNS: ControlColumn<MasterDepartmentRow>[] = [
+  { key: 'name', label: 'Name', value: (d) => d.name },
+  { key: 'active', label: 'Active', value: (d) => d.isActive },
+]
+
 export function MasterDepartmentTable({ departments }: { departments: MasterDepartmentRow[] }) {
+  const controls = useTableControls(departments, {
+    columns: DEPARTMENT_COLUMNS,
+    initialSort: { key: 'name', direction: 'asc' },
+    searchPlaceholder: 'Search departments…',
+    noun: 'department',
+  })
   return (
-    <Table>
-      <TableHeader>
-        <TableRow>
-          <TableHead>Name</TableHead>
-          <TableHead className="w-[90px]">Active</TableHead>
-          <TableHead className="text-right">Save</TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {departments.map((department) => (
-          <DepartmentRowItem key={department.id} department={department} />
-        ))}
-        <NewDepartmentRow />
-      </TableBody>
-    </Table>
+    <div className="flex flex-col gap-2">
+      {controls.toolbar}
+      <Table>
+        <TableHeader>
+          <TableRow>
+            {controls.header('name')}
+            {controls.header('active', { className: 'w-[90px]' })}
+            <TableHead className="text-right">Save</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {controls.pageItems.map((department) => (
+            <DepartmentRowItem key={department.id} department={department} />
+          ))}
+          <NewDepartmentRow />
+        </TableBody>
+      </Table>
+      {controls.pagination}
+    </div>
   )
 }
 

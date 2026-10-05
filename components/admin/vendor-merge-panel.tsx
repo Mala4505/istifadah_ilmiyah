@@ -12,6 +12,7 @@ import { Input } from '@/components/ui/input'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { mergeVendor, renameVendor, setVendorBillNotRequired, setVendorConfirmed, unmergeVendor } from '@/lib/actions/admin'
 import { VendorLineItemTemplate } from './vendor-line-item-template'
+import { useTableControls, type ControlColumn } from '@/components/ui/table-controls'
 
 export type VendorRow = {
   id: number
@@ -67,6 +68,32 @@ export function VendorMergePanel({ vendors }: { vendors: VendorRow[] }) {
     if (!normalizedQuery) return vendorList
     return vendorList.filter((vendor) => matchesQuery(vendor, normalizedQuery))
   }, [vendorList, query])
+
+  const vendorColumns = useMemo<ControlColumn<VendorRow>[]>(
+    () => [
+      { key: 'vendor', label: 'Vendor', value: (v) => v.displayName, filter: false },
+      { key: 'gstin', label: 'GSTIN', value: (v) => v.gstin, filter: false },
+      { key: 'confirmed', label: 'Confirmed', value: (v) => v.isConfirmed },
+      { key: 'noBill', label: 'No bill needed', value: (v) => v.billNotRequired },
+      {
+        key: 'merge',
+        label: 'Merge status',
+        value: (v) =>
+          v.clusterGroupId !== null
+            ? 'Merged'
+            : (childCountByRootId.get(v.id) ?? 0) > 0
+              ? 'Has merged vendors'
+              : 'Independent',
+      },
+    ],
+    [childCountByRootId]
+  )
+  const controls = useTableControls(filteredVendors, {
+    columns: vendorColumns,
+    initialSort: { key: 'vendor', direction: 'asc' },
+    searchPlaceholder: 'Filter these results…',
+    noun: 'vendor',
+  })
 
   function handleConfirmedChange(vendor: VendorRow, isConfirmed: boolean) {
     const previous = vendor.isConfirmed
@@ -147,29 +174,30 @@ export function VendorMergePanel({ vendors }: { vendors: VendorRow[] }) {
         onChange={(event) => setQuery(event.target.value)}
         className="max-w-sm"
       />
+      {controls.toolbar}
       <Table>
         <TableHeader>
           <TableRow>
             <TableHead className="w-8" />
-            <TableHead>Vendor</TableHead>
-            <TableHead>GSTIN</TableHead>
-            <TableHead>Confirmed</TableHead>
-            <TableHead title="This vendor issues no bills — its entries are not counted as awaiting a bill.">
-              No bill needed
-            </TableHead>
-            <TableHead>Merge status</TableHead>
+            {controls.header('vendor')}
+            {controls.header('gstin')}
+            {controls.header('confirmed')}
+            {controls.header('noBill', {
+              label: <span title="This vendor issues no bills — its entries are not counted as awaiting a bill.">No bill needed</span>,
+            })}
+            {controls.header('merge')}
             <TableHead className="text-right">Actions</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
-          {filteredVendors.length === 0 ? (
+          {controls.pageItems.length === 0 ? (
             <TableRow>
               <TableCell colSpan={7} className="text-center text-muted-foreground">
                 No vendors match &quot;{query}&quot;.
               </TableCell>
             </TableRow>
           ) : (
-            filteredVendors.map((vendor) => {
+            controls.pageItems.map((vendor) => {
               const root = vendor.clusterGroupId !== null ? vendorsById.get(vendor.clusterGroupId) : undefined
               const mergedCount = childCountByRootId.get(vendor.id) ?? 0
               const isExpanded = expandedId === vendor.id
@@ -293,6 +321,7 @@ export function VendorMergePanel({ vendors }: { vendors: VendorRow[] }) {
           )}
         </TableBody>
       </Table>
+      {controls.pagination}
       <MergeDialog source={mergeSource} vendors={vendorList} onClose={() => setMergeSource(null)} />
     </div>
   )

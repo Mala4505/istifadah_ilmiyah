@@ -19,7 +19,7 @@ import type { LookupOption } from '@/components/entries/types'
 import { isAdminOrAbove, isSuperadmin } from '@/lib/auth/roles'
 import { getSelectedEventId } from '@/lib/events/current'
 import { getDocumentAssignees, listAssignableStaff, type AssignableStaff } from '@/lib/assignment/queries'
-import { getCachedAdminHeads, getCachedZones, getCachedCostCenters } from '@/lib/cache/reference-data'
+import { getCachedAdminHeads, getCachedZones } from '@/lib/cache/reference-data'
 import { getMaxUploadPages } from '@/lib/upload-limits'
 
 /** A stalled queue is "the oldest queued job has been waiting longer than this" (checklist 2.15, D8) — long enough that a normal extraction backlog doesn't false-positive. */
@@ -369,14 +369,12 @@ export default async function DocumentsPage({
   const [
     adminHeadLookupData,
     zoneLookupData,
-    costCenterLookupData,
     oldestQueuedJobResult,
     billKpis,
     maxUploadPages,
   ] = await Promise.all([
     getCachedAdminHeads(supabase, staff.userId),
     getCachedZones(supabase, staff.userId),
-    getCachedCostCenters(supabase),
     admin
       .from('job_queue')
       .select('created_at')
@@ -406,10 +404,6 @@ export default async function DocumentsPage({
       id: z.id,
       label: `${z.zone_number}. ${z.name}`,
     }))
-  const costCenterOptions: LookupOption[] = costCenterLookupData.map((c) => ({
-    id: c.id,
-    label: c.name,
-  }))
 
   const inboxDocuments: InboxDocumentView[] = docs.map((doc) => {
     const extractions = extractionsByDocId.get(doc.id) ?? []
@@ -547,7 +541,6 @@ export default async function DocumentsPage({
         queueStalled={queueStalled}
         adminHeadOptions={adminHeadOptions}
         zoneOptions={zoneOptions}
-        costCenterOptions={costCenterOptions}
         maxUploadPages={maxUploadPages}
       />
     </PageShell>

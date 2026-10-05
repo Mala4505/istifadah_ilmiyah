@@ -20,8 +20,8 @@
  * allocation, both event-scoped; `entries` is department-scoped by RLS, so a
  * department-scoped reviewer's comparison covers only their departments.
  *
- * cost_center-level comparison is a future extension (the same shape over
- * entries.cost_center_id) -- kept out here to keep the first cut lean, per the
+ * Budget-category-level comparison is a future extension (the same shape over
+ * the derived budget category, as in v_budget_category_mix) -- kept out here to keep the first cut lean, per the
  * blueprint's "it only waits on a second year".
  *
  * Row types live here for now; the parent hoists them into shared.tsx.

@@ -16,7 +16,7 @@ import {
 } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { saveEntryEnrichment } from '@/lib/actions/entry-enrichment'
-import type { AdminHeadOption, CostCenterOption, ZoneOption } from './types'
+import type { AdminHeadOption, ZoneOption } from './types'
 
 const NONE = '__none__'
 
@@ -24,28 +24,21 @@ export function EnrichmentForm({
   entryId,
   adminHeadOptions,
   zoneOptions,
-  costCenterOptions,
   initialAdminHeadId,
   initialZoneId,
-  initialCostCenterId,
   initialRemark,
 }: {
   entryId: number
   adminHeadOptions: AdminHeadOption[]
   zoneOptions: ZoneOption[]
-  costCenterOptions: CostCenterOption[]
   initialAdminHeadId: number | null
   initialZoneId: number | null
-  initialCostCenterId: number | null
   initialRemark: string | null
 }) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const [adminHeadId, setAdminHeadId] = useState<string>(initialAdminHeadId ? String(initialAdminHeadId) : NONE)
   const [zoneId, setZoneId] = useState<string>(initialZoneId ? String(initialZoneId) : NONE)
-  const [costCenterId, setCostCenterId] = useState<string>(
-    initialCostCenterId ? String(initialCostCenterId) : NONE
-  )
   const [remark, setRemark] = useState(initialRemark ?? '')
 
   function handleSave() {
@@ -54,14 +47,13 @@ export function EnrichmentForm({
         entryId,
         adminHeadId: adminHeadId === NONE ? null : Number(adminHeadId),
         zoneId: zoneId === NONE ? null : Number(zoneId),
-        costCenterId: costCenterId === NONE ? null : Number(costCenterId),
         remark: remark || null,
       })
       if (!result.success) {
         toastError(result.error, { title: 'Could not save enrichment fields.', context: 'enrichment-form' })
         return
       }
-      toast.success('Enrichment fields saved.')
+      toast.success('Assignment saved.')
       router.refresh()
     })
   }
@@ -69,10 +61,10 @@ export function EnrichmentForm({
   return (
     <Card>
       <CardHeader className="space-y-0">
-        <CardTitle className="text-base">Enrichment</CardTitle>
+        <CardTitle className="text-base">Assignment</CardTitle>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="admin-head-select">Admin head</Label>
             <Select value={adminHeadId} onValueChange={setAdminHeadId}>
@@ -101,23 +93,6 @@ export function EnrichmentForm({
                 {zoneOptions.map((z) => (
                   <SelectItem key={z.id} value={String(z.id)}>
                     {z.zone_number}. {z.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="cost-center-select">Cost center</Label>
-            <Select value={costCenterId} onValueChange={setCostCenterId}>
-              <SelectTrigger id="cost-center-select">
-                <SelectValue placeholder="Not set" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={NONE}>Not set</SelectItem>
-                {costCenterOptions.map((c) => (
-                  <SelectItem key={c.id} value={String(c.id)}>
-                    {c.name}
                   </SelectItem>
                 ))}
               </SelectContent>

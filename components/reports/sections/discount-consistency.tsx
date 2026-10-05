@@ -13,11 +13,11 @@ import { DISCOUNT_SPREAD_FLAG_PP, type DiscountConsistencyGroup } from '@/lib/re
 
 // reporting-blueprint.md C-06 — "The same vendor giving different discounts
 // to different departments on the same item family." Schema-reality caveat
-// (see the migration header and the loader's own header): discount_pct is
-// only a numeric field on rate_reference, populated by extraction paths this
-// codebase has since retired — the CURRENT save path never writes it. This
-// section is expected to run near-empty against the present corpus, and
-// says so plainly rather than implying full coverage.
+// (see the loader's own header): discount_pct is a numeric field on
+// rate_reference, parsed from the bill line's discount text only when the line
+// amount confirms it was deducted (20261005075123 -- save path + back-fill).
+// Many lines state no discount, so coverage is partial and the section says
+// so plainly rather than implying full coverage.
 
 function inconsistent(groups: DiscountConsistencyGroup[]): DiscountConsistencyGroup[] {
   return groups.filter((g) => g.spreadPp >= DISCOUNT_SPREAD_FLAG_PP)
@@ -139,7 +139,7 @@ export function DiscountConsistencySection({
     <ReportSection
       id="discount-consistency"
       title="Discount consistency"
-      description="The same vendor's discount on the same item family, compared across departments — a captured percentage discount only, from rate_reference.discount_pct, never the free-text discount note on a bill line."
+      description="The same vendor's discount on the same item family, compared across departments — a percentage discount from rate_reference.discount_pct, taken from the bill line only when the line amount confirms it was deducted."
       action={
         <ExportCsvButton
           filename="discount-consistency.csv"
@@ -160,7 +160,7 @@ export function DiscountConsistencySection({
       ) : groups.length === 0 ? (
         <EmptyState
           title="No numeric discount captured yet"
-          description={`Discount consistency needs rate_reference.discount_pct — a discount captured as a number, not the free-text note on a bill line — for the same vendor and item family in two or more departments. ${coverage.total > 0 ? `${formatNumber(coverage.observed)} of ${formatNumber(coverage.total)} comparable purchases this event have one so far.` : 'None of this event’s comparable purchases have one so far.'} It fills in as more bills stating a percentage discount are verified.`}
+          description={`Discount consistency needs rate_reference.discount_pct — a bill line's percentage discount, kept only when the line amount confirms it was deducted — for the same vendor and item family in two or more departments. ${coverage.total > 0 ? `${formatNumber(coverage.observed)} of ${formatNumber(coverage.total)} comparable purchases this event have one so far.` : 'None of this event’s comparable purchases have one so far.'} It fills in as more bills with a confirmed percentage discount are verified.`}
         />
       ) : (
         <>

@@ -1,12 +1,5 @@
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
-import { RowLogBadge } from '@/components/import/row-log-badge'
+import { InteractiveTable } from '@/components/ui/interactive-table'
+import { RowLogBadge, actionDisplay } from '@/components/import/row-log-badge'
 import { FriendlyError } from '@/components/ui/friendly-error'
 import type { RowLogEntry } from '@/components/import/row-log-table'
 import { AMOUNT_KEYS, DEPARTMENT_KEYS, pickField } from '@/lib/import/department-budget-parsing'
@@ -35,33 +28,34 @@ export function DepartmentBudgetRowLogTable({ rows }: { rows: RowLogEntry[] }) {
   }
 
   return (
-    <div className="rounded-md border border-border">
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead className="w-12">Row</TableHead>
-            <TableHead className="w-40">Action</TableHead>
-            <TableHead>Department</TableHead>
-            <TableHead className="text-right">Budget amount</TableHead>
-            <TableHead>Note</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {rows.map((r) => (
-            <TableRow key={r.rowNumber} className={r.action === 'error' ? 'bg-destructive/5' : undefined}>
-              <TableCell className="text-muted-foreground">{r.rowNumber}</TableCell>
-              <TableCell>
-                <RowLogBadge action={r.action} />
-              </TableCell>
-              <TableCell className="max-w-[16rem] truncate">{pickCell(r.rawRow, DEPARTMENT_KEYS)}</TableCell>
-              <TableCell className="text-right tabular-nums">{pickCell(r.rawRow, AMOUNT_KEYS)}</TableCell>
-              <TableCell className="max-w-[22rem] text-xs text-muted-foreground">
-                {r.note ? <FriendlyError message={r.note} /> : '—'}
-              </TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
-    </div>
+    <InteractiveTable
+      noun="row"
+      searchPlaceholder="Search rows…"
+      columns={[
+        { key: 'row', header: 'Row', filterable: false },
+        { key: 'action', header: 'Action' },
+        { key: 'department', header: 'Department', filterable: false },
+        { key: 'amount', header: 'Budget amount', align: 'right', descendingFirst: true },
+        { key: 'note', header: 'Note', filterable: false, wrap: true, className: 'max-w-[22rem] text-xs text-muted-foreground' },
+      ]}
+      rows={rows.map((r) => {
+        const department = pickCell(r.rawRow, DEPARTMENT_KEYS)
+        const amount = pickCell(r.rawRow, AMOUNT_KEYS)
+        return {
+          key: r.rowNumber,
+          className: r.action === 'error' ? 'bg-destructive/5' : undefined,
+          cells: [
+            <span key="n" className="text-muted-foreground">
+              {r.rowNumber}
+            </span>,
+            <RowLogBadge key="a" action={r.action} />,
+            department,
+            amount,
+            r.note ? <FriendlyError key="e" message={r.note} /> : '—',
+          ],
+          texts: [String(r.rowNumber), actionDisplay(r.action).label, department, amount, r.note ?? ''],
+        }
+      })}
+    />
   )
 }

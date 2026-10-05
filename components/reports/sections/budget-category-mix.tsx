@@ -11,20 +11,19 @@ import { formatINR, formatINRCompact, formatNumber, formatPercent } from '@/lib/
 import type { BudgetCategoryMixRow } from '@/lib/reports/surfaces/budget-structure'
 
 // reporting-blueprint.md §8 Phase Six A-07 -- "Where money goes structurally,
-// expressed as SHARE rather than total." Backed by v_budget_category_mix
-// (20260903000013): one row per (cost_center, event). "Budget category" ==
-// the cost_center table.
+// expressed as SHARE rather than total." Backed by v_budget_category_mix:
+// one row per (budget category, event). "Budget category" is derived from
+// the budget head's short_label with spelling variants merged; entries with no
+// budget head fall in key null / 'No budget head'.
 //
-// §6 fix #4: every category figure links to its filtered entries via
-// `/entries?cc=` (the param the entries explorer actually reads).
+// No drill link: a derived category spans several budget heads and the entries
+// explorer has no filter for it.
 
 const MAX_DONUT_SEGMENTS = 6
 
 type Ranked = {
   key: string
-  costCenterId: number | null
   label: string
-  isConfirmed: boolean | null
   entryCount: number
   totalAmount: number
   sharePct: number
@@ -36,10 +35,8 @@ function rank(rows: BudgetCategoryMixRow[]): { ranked: Ranked[]; total: number }
     .filter((r) => r.total_amount > 0)
     .sort((a, b) => b.total_amount - a.total_amount)
     .map((r) => ({
-      key: r.cost_center_id != null ? `c${r.cost_center_id}` : 'cnone',
-      costCenterId: r.cost_center_id,
-      label: r.cost_center_name,
-      isConfirmed: r.cost_center_is_confirmed,
+      key: r.budget_category_key ?? '__none__',
+      label: r.budget_category_label,
       entryCount: r.entry_count,
       totalAmount: r.total_amount,
       sharePct: total > 0 ? (r.total_amount / total) * 100 : 0,
@@ -95,16 +92,10 @@ export function BudgetCategoryMixSection({
     label: r.label,
     value: r.totalAmount,
     note: formatPercent(r.sharePct),
-    href: r.costCenterId != null ? `/entries?cc=${r.costCenterId}` : undefined,
   }))
 
   const columns: DataTableColumn<Ranked>[] = [
     { key: 'category', header: 'Budget category', render: (r) => r.label },
-    {
-      key: 'confirmed',
-      header: 'Confirmed',
-      render: (r) => (r.isConfirmed == null ? '—' : r.isConfirmed ? 'Yes' : 'No'),
-    },
     { key: 'entries', header: 'Entries', align: 'right', render: (r) => formatNumber(r.entryCount) },
     { key: 'amount', header: 'Spend', align: 'right', render: (r) => formatINR(r.totalAmount) },
     { key: 'share', header: 'Share', align: 'right', render: (r) => formatPercent(r.sharePct) },
@@ -112,7 +103,6 @@ export function BudgetCategoryMixSection({
 
   const csv = toCsv(ranked, [
     { header: 'Budget Category', value: (r) => r.label },
-    { header: 'Confirmed', value: (r) => (r.isConfirmed == null ? '' : String(r.isConfirmed)) },
     { header: 'Entries', value: (r) => r.entryCount },
     { header: 'Spend', value: (r) => r.totalAmount },
     { header: 'Share %', value: (r) => r.sharePct },
@@ -132,7 +122,7 @@ export function BudgetCategoryMixSection({
       ) : ranked.length === 0 || total <= 0 ? (
         <EmptyState
           title="No categorised spend yet"
-          description="Spend is grouped by budget category once entries are enriched with a cost centre."
+          description="Spend is grouped by budget category once entries are linked to a budget head."
         />
       ) : (
         <>

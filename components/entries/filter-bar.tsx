@@ -44,7 +44,7 @@ export function clearFilterChip(key: FilterChipKey): Partial<EntriesFilters> {
  * group gets used regularly, so this is a reorganization into four labelled
  * sections, not a removal:
  *   - Status: Type, Status
- *   - Classification: Department, Budget head, Admin head, Zone, Cost center
+ *   - Classification: Department, Budget head, Admin head, Zone
  *   - Search: Vendor, Date from, Date to
  *   - Flags: Missing Main #, Has document, Awaiting bill
  *
@@ -212,17 +212,6 @@ export function FilterBar({
             ))}
           </SelectNative>
         </Field>
-
-        <Field label="Cost center" htmlFor="filter-cost-center">
-          <SelectNative id="filter-cost-center" value={filters.costCenter} onChange={(e) => onChange({ costCenter: e.target.value })}>
-            <option value="">All cost centers</option>
-            {options.costCenters.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.label}
-              </option>
-            ))}
-          </SelectNative>
-        </Field>
       </FilterSection>
 
       <FilterSection label="Search">
@@ -338,7 +327,6 @@ export function buildFilterSummary(filters: EntriesFilters, options: FilterOptio
   pushSelect('budgetHead', filters.budgetHead, options.budgetHeads, 'Budget head')
   pushSelect('adminHead', filters.adminHead, options.adminHeads, 'Admin head')
   pushSelect('zone', filters.zone, options.zones, 'Zone')
-  pushSelect('costCenter', filters.costCenter, options.costCenters, 'Cost center')
 
   if (filters.vendor) parts.push({ key: 'vendor', label: `Vendor: "${filters.vendor}"` })
   if (filters.vendorId) parts.push({ key: 'vendorId', label: 'Vendor (from link)' })

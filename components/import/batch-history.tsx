@@ -14,10 +14,10 @@ import {
   Table,
   TableBody,
   TableCell,
-  TableHead,
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { useTableControls, type ControlColumn } from '@/components/ui/table-controls'
 
 interface ImportBatchRow {
   id: number
@@ -47,6 +47,14 @@ function sourceSystemLabel(sourceSystem: string): string {
       return sourceSystem
   }
 }
+
+const BATCH_COLUMNS: ControlColumn<ImportBatchRow>[] = [
+  { key: 'started', label: 'Started', value: (b) => formatDateTime(b.started_at), sortValue: (b) => new Date(b.started_at).getTime(), filter: false, descendingFirst: true },
+  { key: 'file', label: 'File', value: (b) => b.source_filename, filter: false },
+  { key: 'kind', label: 'Kind', value: (b) => sourceSystemLabel(b.source_system) },
+  { key: 'status', label: 'Status', value: (b) => b.status.replace(/_/g, ' ') },
+  { key: 'rows', label: 'Rows', value: (b) => b.row_count, descendingFirst: true },
+]
 
 function formatDateTime(iso: string): string {
   return new Date(iso).toLocaleString(undefined, {
@@ -128,6 +136,14 @@ export function BatchHistory({ isAdmin, refreshSignal }: { isAdmin: boolean; ref
     }
   }
 
+  const controls = useTableControls(batches ?? [], {
+    columns: BATCH_COLUMNS,
+    initialSort: { key: 'started', direction: 'desc' },
+    initialPageSize: 10,
+    searchPlaceholder: 'Search imports…',
+    noun: 'import',
+  })
+
   if (!isAdmin) return null
 
   return (
@@ -152,19 +168,21 @@ export function BatchHistory({ isAdmin, refreshSignal }: { isAdmin: boolean; ref
         ) : batches.length === 0 ? (
           <p className="text-sm text-muted-foreground">No imports have been committed yet.</p>
         ) : (
+          <div className="flex flex-col gap-2">
+          {controls.toolbar}
           <div className="rounded-md border border-border">
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Started</TableHead>
-                  <TableHead>File</TableHead>
-                  <TableHead>Kind</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead className="text-right">Rows</TableHead>
+                  {controls.header('started')}
+                  {controls.header('file')}
+                  {controls.header('kind')}
+                  {controls.header('status')}
+                  {controls.header('rows', { align: 'right' })}
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {batches.map((b) => (
+                {controls.pageItems.map((b) => (
                   <Fragment key={b.id}>
                     <TableRow
                       className="cursor-pointer"
@@ -204,6 +222,8 @@ export function BatchHistory({ isAdmin, refreshSignal }: { isAdmin: boolean; ref
                 ))}
               </TableBody>
             </Table>
+          </div>
+          {controls.pagination}
           </div>
         )}
       </CardContent>

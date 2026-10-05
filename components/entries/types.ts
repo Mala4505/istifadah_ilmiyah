@@ -36,8 +36,6 @@ export type EntryEnriched = {
   admin_head_name: string | null
   zone_id: number | null
   zone_name: string | null
-  cost_center_id: number | null
-  cost_center_name: string | null
   remark: string | null
   settles_entry_id: number | null
   is_void: boolean
@@ -61,7 +59,6 @@ export type FilterOptions = {
   budgetHeads: LookupOption[]
   adminHeads: LookupOption[]
   zones: LookupOption[]
-  costCenters: LookupOption[]
   statuses: LookupOption[]
   // DB-backed (public.entry_type), not the EntryType TS union below -- so a
   // type added in the database shows up here without a code change.
@@ -76,7 +73,6 @@ export type EntriesFilters = {
   budgetHead: string
   adminHead: string
   zone: string
-  costCenter: string
   status: string
   dateFrom: string
   dateTo: string
@@ -113,7 +109,6 @@ export const DEFAULT_FILTERS: EntriesFilters = {
   budgetHead: '',
   adminHead: '',
   zone: '',
-  costCenter: '',
   status: '',
   dateFrom: '',
   dateTo: '',
@@ -147,6 +142,10 @@ export type SortColumn =
   | 'main_number'
   | 'budget_head_short_label'
   | 'document_count'
+  | 'department_name'
+  | 'admin_head_name'
+  | 'zone_name'
+  | 'invoice_number'
 export type SortDirection = 'asc' | 'desc'
 export type EntriesSort = { column: SortColumn; direction: SortDirection }
 export const DEFAULT_SORT: EntriesSort = { column: 'id', direction: 'desc' }
@@ -159,7 +158,6 @@ export type ColumnKey =
   | 'budget_head_short_label'
   | 'admin_head_name'
   | 'zone_name'
-  | 'cost_center_name'
   | 'vendor_display_name'
   | 'invoice_number'
   | 'date'
@@ -180,11 +178,10 @@ export const ALL_COLUMNS: ColumnDef[] = [
   { key: 'main_number', label: 'Main #', defaultVisible: true },
   { key: 'date', label: 'Date', defaultVisible: true },
   { key: 'vendor_display_name', label: 'Vendor', defaultVisible: true },
-  { key: 'department_name', label: 'Department', defaultVisible: false },
+  { key: 'department_name', label: 'Department', defaultVisible: true },
   { key: 'budget_head_short_label', label: 'Budget head', defaultVisible: true },
   { key: 'admin_head_name', label: 'Admin head', defaultVisible: false },
   { key: 'zone_name', label: 'Zone', defaultVisible: false },
-  { key: 'cost_center_name', label: 'Cost center', defaultVisible: false },
   { key: 'invoice_number', label: 'Invoice #', defaultVisible: false },
   { key: 'amount', label: 'Amount', defaultVisible: true, align: 'right' },
   { key: 'status_label', label: 'Status', defaultVisible: true },

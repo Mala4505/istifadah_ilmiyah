@@ -13,12 +13,13 @@ import { PaginationBar } from '@/components/ui/pagination-bar'
 import { FilterBar, countActiveFilters } from './filter-bar'
 import { ColumnChooser } from './column-chooser'
 import { EntriesTable } from './entries-table'
+import { EntriesGroupedTable, ViewModeSwitch } from './entries-grouped-table'
 import { EntryBillKpiBar } from './entry-bill-kpi-bar'
 import type { EntryBillKpis } from '@/lib/documents/entry-bill-kpis'
 import { BulkEnrichmentDialog } from './bulk-enrichment-dialog'
 import { BulkVoidDialog } from './bulk-void-dialog'
 import { exportEntriesToCsv } from './csv-export'
-import { fetchEntriesPage, fetchAllMatchingIds, type PageCursor } from './query'
+import { fetchEntriesPage, fetchAllMatchingIds, fetchAllMatchingRows, type PageCursor } from './query'
 import { ALL_COLUMNS, DEFAULT_FILTERS, DEFAULT_SORT, PAGE_SIZE } from './types'
 import type { ColumnKey, EntriesFilters, EntriesSort, EntryEnriched, FilterOptions, SortColumn, SortDirection } from './types'
 import { NewEntryDialog } from './new-entry-dialog'
@@ -31,7 +32,6 @@ function filtersToSearchParams(filters: EntriesFilters): URLSearchParams {
   if (filters.budgetHead) sp.set('bh', filters.budgetHead)
   if (filters.adminHead) sp.set('ahead', filters.adminHead)
   if (filters.zone) sp.set('zone', filters.zone)
-  if (filters.costCenter) sp.set('cc', filters.costCenter)
   if (filters.status) sp.set('st', filters.status)
   if (filters.dateFrom) sp.set('from', filters.dateFrom)
   if (filters.dateTo) sp.set('to', filters.dateTo)
@@ -46,7 +46,7 @@ function filtersToSearchParams(filters: EntriesFilters): URLSearchParams {
 }
 
 function searchParamsToFilters(sp: URLSearchParams): EntriesFilters {
-  // The canonical param is the short form (`dept`, `bh`, `zone`, `cc`, `vid`).
+  // The canonical param is the short form (`dept`, `bh`, `zone`, `vid`).
   // The long `*_id` aliases are accepted too so the Reports drill-through links
   // (`/entries?department_id=…`, `?vendor_id=…`, …) land filtered rather than on
   // an unscoped list — the next filter change rewrites the URL to the short form.
@@ -56,7 +56,6 @@ function searchParamsToFilters(sp: URLSearchParams): EntriesFilters {
     budgetHead: sp.get('bh') ?? sp.get('budget_head_id') ?? '',
     adminHead: sp.get('ahead') ?? sp.get('admin_head_id') ?? '',
     zone: sp.get('zone') ?? sp.get('zone_id') ?? '',
-    costCenter: sp.get('cc') ?? sp.get('cost_center_id') ?? '',
     status: sp.get('st') ?? '',
     dateFrom: sp.get('from') ?? '',
     dateTo: sp.get('to') ?? '',
@@ -84,6 +83,10 @@ const SORT_COLUMNS: SortColumn[] = [
   'main_number',
   'budget_head_short_label',
   'document_count',
+  'department_name',
+  'admin_head_name',
+  'zone_name',
+  'invoice_number',
 ]
 
 function sortToSearchParams(sort: EntriesSort): URLSearchParams {
@@ -125,7 +128,12 @@ function onlyVendorChanged(prev: EntriesFilters, next: EntriesFilters): boolean 
   return (Object.keys(next) as (keyof EntriesFilters)[]).every((k) => k === 'vendor' || prev[k] === next[k])
 }
 
-const COLUMNS_STORAGE_KEY = 'entries.visibleColumns.v1'
+const VIEW_MODE_STORAGE_KEY = 'entries.viewMode.v1'
+type ViewMode = 'single' | 'group'
+
+// v2 (2026-10-05): Department became a default column — bumped so a saved
+// v1 choice (which predates it) doesn't keep it hidden.
+const COLUMNS_STORAGE_KEY = 'entries.visibleColumns.v2'
 
 function defaultVisibleColumns(): Set<ColumnKey> {
   return new Set(ALL_COLUMNS.filter((c) => c.defaultVisible).map((c) => c.key))
@@ -195,6 +203,15 @@ export function EntriesExplorer({
   // exportEntriesToCsv's onProgress callback after each sequential batch.
   const [exportProgress, setExportProgress] = useState(0)
 
+  // Single rows vs. grouped-by-vendor accordion (2026-10-05). Group mode
+  // needs every matching row (vendor totals span pages), so it keeps its own
+  // full row set, refetched whenever the filters change.
+  const [viewMode, setViewMode] = useState<ViewMode>('single')
+  const [groupRows, setGroupRows] = useState<EntryEnriched[]>([])
+  const [groupLoading, setGroupLoading] = useState(false)
+  const [groupTruncated, setGroupTruncated] = useState(false)
+  const groupRequestIdRef = useRef(0)
+
   const requestIdRef = useRef(0)
   const isMountRef = useRef(true)
   const prevStateRef = useRef<{ filters: EntriesFilters; sort: EntriesSort }>({ filters, sort })
@@ -217,6 +234,55 @@ export function EntriesExplorer({
       /* private mode / quota — the chooser still works for this session */
     }
   }, [visibleColumns])
+
+  useEffect(() => {
+    try {
+      if (window.localStorage.getItem(VIEW_MODE_STORAGE_KEY) === 'group') setViewMode('group')
+    } catch {
+      /* storage unavailable — stay on Single */
+    }
+  }, [])
+
+  function changeViewMode(mode: ViewMode) {
+    setViewMode(mode)
+    try {
+      window.localStorage.setItem(VIEW_MODE_STORAGE_KEY, mode)
+    } catch {
+      /* storage unavailable — the choice still applies for this visit */
+    }
+  }
+
+  const loadGroupRows = useCallback(
+    async (activeFilters: EntriesFilters) => {
+      const requestId = ++groupRequestIdRef.current
+      setGroupLoading(true)
+      try {
+        const result = await fetchAllMatchingRows(supabase, activeFilters)
+        if (requestId !== groupRequestIdRef.current) return
+        setGroupRows(result.rows)
+        setGroupTruncated(result.truncated)
+      } catch (err) {
+        if (requestId !== groupRequestIdRef.current) return
+        setGroupRows([])
+        toastError(err instanceof Error ? err.message : null, {
+          title: 'Could not load the grouped view.',
+          context: 'entries-explorer',
+        })
+      } finally {
+        if (requestId === groupRequestIdRef.current) setGroupLoading(false)
+      }
+    },
+    [supabase],
+  )
+
+  // Group view: (re)load the full match set when it's switched on or the
+  // filters change. Debounced like the vendor text box so typing doesn't
+  // fire a full fetch per keystroke.
+  useEffect(() => {
+    if (viewMode !== 'group') return
+    const t = setTimeout(() => void loadGroupRows(filters), 300)
+    return () => clearTimeout(t)
+  }, [viewMode, filters, loadGroupRows])
 
   const loadFirstPage = useCallback(
     async (activeFilters: EntriesFilters, activeSort: EntriesSort, limit: number) => {
@@ -381,6 +447,24 @@ export function EntriesExplorer({
     })
   }
 
+  function toggleIds(ids: number[], select: boolean) {
+    setAllMatchingSelected(false)
+    setSelected((prev) => {
+      const next = new Set(prev)
+      for (const id of ids) {
+        if (select) next.add(id)
+        else next.delete(id)
+      }
+      return next
+    })
+  }
+
+  /** Reload whichever view is showing after a create / bulk change. */
+  function reloadAfterChange() {
+    void loadFirstPage(filters, sort, pageSize)
+    if (viewMode === 'group') void loadGroupRows(filters)
+  }
+
   function toggleAllOnPage() {
     setAllMatchingSelected(false)
     setSelected((prev) => {
@@ -472,7 +556,7 @@ export function EntriesExplorer({
               departments={options.departments}
               budgetHeads={options.budgetHeads}
               ownDepartmentIds={ownDepartmentIds}
-              onCreated={() => void loadFirstPage(filters, sort, pageSize)}
+              onCreated={reloadAfterChange}
             />
           )}
           <ColumnChooser visible={visibleColumns} onToggle={toggleColumn} />
@@ -571,36 +655,62 @@ export function EntriesExplorer({
             </Card>
           ) : (
             <>
-              <div ref={tableWrapRef}>
-                <EntriesTable
-                  rows={currentRows}
-                  visibleColumns={visibleColumns}
-                  loading={loading && currentRows.length === 0}
-                  refetching={loading && currentRows.length > 0}
-                  activeFilterCount={activeFilterCount}
-                  onClearFilters={clearAllFilters}
-                  selected={selected}
-                  onToggleRow={toggleRow}
-                  onToggleAll={toggleAllOnPage}
-                  sort={sort}
-                  onSortChange={setSort}
-                />
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-xs text-muted-foreground">
+                  {viewMode === 'group'
+                    ? 'Grouped by vendor — click a vendor row to see its entries.'
+                    : 'Click any row to open the entry.'}
+                </p>
+                <ViewModeSwitch mode={viewMode} onChange={changeViewMode} />
               </div>
 
-              {!(loading && currentRows.length === 0) && (
-                <PaginationBar
-                  rangeStart={rangeStart}
-                  rangeEnd={rangeEnd}
-                  total={total}
-                  pageSize={pageSize}
-                  onPageSizeChange={handlePageSizeChange}
-                  canPrev={!isFirstPage}
-                  canNext={!isLastPage}
-                  onPrev={goPrev}
-                  onNext={() => void goNext()}
-                  disabled={loading}
-                  noun="entry"
-                />
+              {viewMode === 'group' ? (
+                <div ref={tableWrapRef}>
+                  <EntriesGroupedTable
+                    rows={groupRows}
+                    visibleColumns={visibleColumns}
+                    loading={groupLoading && groupRows.length === 0}
+                    truncated={groupTruncated}
+                    selected={selected}
+                    onToggleIds={toggleIds}
+                    sort={sort}
+                    onSortChange={setSort}
+                  />
+                </div>
+              ) : (
+                <>
+                  <div ref={tableWrapRef}>
+                    <EntriesTable
+                      rows={currentRows}
+                      visibleColumns={visibleColumns}
+                      loading={loading && currentRows.length === 0}
+                      refetching={loading && currentRows.length > 0}
+                      activeFilterCount={activeFilterCount}
+                      onClearFilters={clearAllFilters}
+                      selected={selected}
+                      onToggleRow={toggleRow}
+                      onToggleAll={toggleAllOnPage}
+                      sort={sort}
+                      onSortChange={setSort}
+                    />
+                  </div>
+
+                  {!(loading && currentRows.length === 0) && (
+                    <PaginationBar
+                      rangeStart={rangeStart}
+                      rangeEnd={rangeEnd}
+                      total={total}
+                      pageSize={pageSize}
+                      onPageSizeChange={handlePageSizeChange}
+                      canPrev={!isFirstPage}
+                      canNext={!isLastPage}
+                      onPrev={goPrev}
+                      onNext={() => void goNext()}
+                      disabled={loading}
+                      noun="entry"
+                    />
+                  )}
+                </>
               )}
             </>
           )}
@@ -613,11 +723,10 @@ export function EntriesExplorer({
         entryIds={Array.from(selected)}
         adminHeadOptions={options.adminHeads}
         zoneOptions={options.zones}
-        costCenterOptions={options.costCenters}
         onDone={() => {
           clearSelection()
           restoreTableFocus()
-          void loadFirstPage(filters, sort, pageSize)
+          reloadAfterChange()
         }}
       />
 
@@ -628,7 +737,7 @@ export function EntriesExplorer({
         onDone={() => {
           clearSelection()
           restoreTableFocus()
-          void loadFirstPage(filters, sort, pageSize)
+          reloadAfterChange()
         }}
       />
     </div>

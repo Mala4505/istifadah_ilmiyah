@@ -1,6 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { InteractiveTable } from '@/components/ui/interactive-table'
 import { CreateEventForm } from '@/components/events/create-event-form'
 import { EventSwitcher } from '@/components/app-shell/event-switcher'
 import { createClient } from '@/lib/supabase/server'
@@ -67,36 +67,37 @@ export default async function SettingsEventsPage() {
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
           <EventSwitcher events={events} selectedEventId={selectedEventId} />
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Name</TableHead>
-                <TableHead>Hijri year</TableHead>
-                <TableHead>Starts</TableHead>
-                <TableHead>Ends</TableHead>
-                <TableHead>Status</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {events.map((event) => (
-                <TableRow key={event.id}>
-                  <TableCell className="font-medium">{event.name}</TableCell>
-                  <TableCell>{event.hijriYear}</TableCell>
-                  <TableCell>{event.startsOn ?? '—'}</TableCell>
-                  <TableCell>{event.endsOn ?? '—'}</TableCell>
-                  <TableCell>
-                    {event.isCurrent ? (
-                      <span className="text-xs font-medium uppercase tracking-wide text-primary">Current</span>
-                    ) : (
-                      <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                        Past
-                      </span>
-                    )}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+          <InteractiveTable
+            noun="event"
+            searchPlaceholder="Search events…"
+            columns={[
+              { key: 'name', header: 'Name', filterable: false },
+              { key: 'hijri', header: 'Hijri year', descendingFirst: true },
+              { key: 'starts', header: 'Starts', descendingFirst: true },
+              { key: 'ends', header: 'Ends', descendingFirst: true },
+              { key: 'status', header: 'Status' },
+            ]}
+            rows={events.map((event) => ({
+              key: event.id,
+              cells: [
+                <span key="n" className="font-medium">
+                  {event.name}
+                </span>,
+                event.hijriYear,
+                event.startsOn ?? '—',
+                event.endsOn ?? '—',
+                event.isCurrent ? (
+                  <span key="s" className="text-xs font-medium uppercase tracking-wide text-primary">
+                    Current
+                  </span>
+                ) : (
+                  <span key="s" className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                    Past
+                  </span>
+                ),
+              ],
+            }))}
+          />
         </CardContent>
       </Card>
 

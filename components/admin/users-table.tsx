@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { updateStaffProfile } from '@/lib/actions/admin'
+import { useTableControls, type ControlColumn } from '@/components/ui/table-controls'
 import { DepartmentPicker } from '@/components/admin/department-picker'
 import { ResetPasswordDialog } from '@/components/admin/reset-password-dialog'
 
@@ -54,21 +55,37 @@ export function UsersTable({
   currentUserId: string
   canEdit: boolean
 }) {
+  const columns: ControlColumn<StaffRow>[] = [
+    { key: 'name', label: 'Name', value: (r) => r.displayName, filter: false },
+    { key: 'its', label: 'ITS Number', value: (r) => r.itsNumber, filter: false },
+    { key: 'email', label: 'Contact email', value: (r) => r.contactEmail, filter: false },
+    { key: 'role', label: 'Role', value: (r) => ROLE_LABELS[r.role] },
+    { key: 'department', label: 'Department', value: (r) => departmentNames(r.departmentIds, departments) },
+    { key: 'active', label: 'Active', value: (r) => r.isActive },
+  ]
+  const controls = useTableControls(staff, {
+    columns,
+    initialSort: { key: 'name', direction: 'asc' },
+    searchPlaceholder: 'Search users…',
+    noun: 'user',
+  })
   return (
+    <div className="flex flex-col gap-2">
+      {controls.toolbar}
     <Table>
       <TableHeader>
         <TableRow>
-          <TableHead>Name</TableHead>
-          <TableHead>ITS Number</TableHead>
-          <TableHead>Contact email</TableHead>
-          <TableHead>Role</TableHead>
-          <TableHead>Department</TableHead>
-          <TableHead>Active</TableHead>
+          {controls.header('name')}
+          {controls.header('its')}
+          {controls.header('email')}
+          {controls.header('role')}
+          {controls.header('department')}
+          {controls.header('active')}
           <TableHead className="text-right">Actions</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
-        {staff.map((row) => (
+        {controls.pageItems.map((row) => (
           <UserRow
             key={row.id}
             row={row}
@@ -79,6 +96,8 @@ export function UsersTable({
         ))}
       </TableBody>
     </Table>
+      {controls.pagination}
+    </div>
   )
 }
 

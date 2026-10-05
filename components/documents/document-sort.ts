@@ -10,7 +10,7 @@
  */
 import type { InboxDocumentView } from './types'
 
-export type DocumentSortColumn = 'filename' | 'total' | 'status' | 'uploaded'
+export type DocumentSortColumn = 'filename' | 'total' | 'status' | 'uploaded' | 'assignee'
 export type SortDirection = 'asc' | 'desc'
 
 export interface DocumentSort {
@@ -64,6 +64,15 @@ function rawCompare(a: InboxDocumentView, b: InboxDocumentView, column: Document
       return (STATUS_RANK[a.uploadStatus] - STATUS_RANK[b.uploadStatus]) * dir
     case 'uploaded':
       return (toTime(a.uploadedAt) - toTime(b.uploadedAt)) * dir
+    case 'assignee': {
+      // Unassigned documents always sort last, whichever the direction.
+      const na = a.assignees.map((x) => x.displayName).sort().join(', ')
+      const nb = b.assignees.map((x) => x.displayName).sort().join(', ')
+      if (!na && !nb) return 0
+      if (!na) return 1
+      if (!nb) return -1
+      return na.localeCompare(nb, undefined, { sensitivity: 'base' }) * dir
+    }
     case 'total': {
       const va = documentTotal(a)
       const vb = documentTotal(b)

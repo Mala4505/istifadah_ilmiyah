@@ -3,15 +3,8 @@
 import { useMemo, useState } from 'react'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
-import { RowLogBadge } from '@/components/import/row-log-badge'
+import { InteractiveTable } from '@/components/ui/interactive-table'
+import { RowLogBadge, actionDisplay } from '@/components/import/row-log-badge'
 import { FriendlyError } from '@/components/ui/friendly-error'
 
 export interface RowLogEntry {
@@ -112,71 +105,88 @@ export function RowLogTable({ rows }: { rows: RowLogEntry[] }) {
           Every row was unchanged — nothing new to review.
         </div>
       ) : (
-        <div className="rounded-md border border-border">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-12">Row</TableHead>
-                <TableHead className="w-40">Action</TableHead>
-                <TableHead>Budget head</TableHead>
-                <TableHead>Vendor</TableHead>
-                <TableHead>UBBL / Main #</TableHead>
-                <TableHead className="text-right">Invoice amount</TableHead>
-                <TableHead>Status (tenant / main)</TableHead>
-                <TableHead>Changed fields</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {visibleRows.map((r) => (
-                <TableRow key={r.rowNumber} className={r.action === 'error' ? 'bg-destructive/5' : undefined}>
-                  <TableCell className="text-muted-foreground">{r.rowNumber}</TableCell>
-                  <TableCell>
-                    <RowLogBadge action={r.action} />
-                  </TableCell>
-                  <TableCell className="max-w-[16rem] truncate">{pickCell(r.rawRow, BUDGET_HEAD_KEYS)}</TableCell>
-                  <TableCell className="max-w-[14rem] truncate">{pickCell(r.rawRow, VENDOR_KEYS)}</TableCell>
-                  <TableCell className="whitespace-nowrap font-mono text-xs">
-                    {r.entryId !== null ? (
-                      <Link
-                        href={`/entries/${r.entryId}`}
-                        className="text-primary underline-offset-2 hover:underline"
-                      >
-                        {pickCell(r.rawRow, UBBL_KEYS)}
-                      </Link>
-                    ) : (
-                      pickCell(r.rawRow, UBBL_KEYS)
-                    )}
-                    {pickCell(r.rawRow, MAIN_KEYS) !== '—' ? (
-                      <span className="text-muted-foreground"> / {pickCell(r.rawRow, MAIN_KEYS)}</span>
-                    ) : null}
-                  </TableCell>
-                  <TableCell className="text-right tabular-nums">
-                    {pickCell(r.rawRow, INVOICE_AMOUNT_KEYS)}
-                  </TableCell>
-                  <TableCell className="whitespace-nowrap text-muted-foreground">
-                    {pickCell(r.rawRow, STATUS_KEYS)} / {pickCell(r.rawRow, MAIN_STATUS_KEYS)}
-                  </TableCell>
-                  <TableCell className="max-w-[18rem] text-xs text-muted-foreground">
-                    {r.action === 'error' && r.note ? (
-                      <FriendlyError message={r.note} />
-                    ) : r.fieldsChanged && Object.keys(r.fieldsChanged).length > 0 ? (
-                      <ul className="space-y-0.5">
-                        {Object.entries(r.fieldsChanged).map(([field, change]) => (
-                          <li key={field}>
-                            <span className="font-medium text-foreground">{field}</span>:{' '}
-                            {String(change.from ?? '—')} → {String(change.to ?? '—')}
-                          </li>
-                        ))}
-                      </ul>
-                    ) : (
-                      '—'
-                    )}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
+        <InteractiveTable
+          noun="row"
+          searchPlaceholder="Search budget head, vendor, UBBL…"
+          columns={[
+            { key: 'row', header: 'Row', filterable: false },
+            { key: 'action', header: 'Action' },
+            { key: 'head', header: 'Budget head', className: 'max-w-[16rem] truncate' },
+            { key: 'vendor', header: 'Vendor', filterable: false, className: 'max-w-[14rem] truncate' },
+            { key: 'ubbl', header: 'UBBL / Main #', filterable: false, className: 'font-mono text-xs' },
+            { key: 'amount', header: 'Invoice amount', align: 'right', descendingFirst: true },
+            { key: 'status', header: 'Status (tenant / main)', className: 'text-muted-foreground' },
+            {
+              key: 'changes',
+              header: 'Changed fields',
+              filterable: false,
+              wrap: true,
+              className: 'max-w-[18rem] text-xs text-muted-foreground',
+            },
+          ]}
+          rows={visibleRows.map((r) => {
+            const head = pickCell(r.rawRow, BUDGET_HEAD_KEYS)
+            const vendor = pickCell(r.rawRow, VENDOR_KEYS)
+            const ubbl = pickCell(r.rawRow, UBBL_KEYS)
+            const main = pickCell(r.rawRow, MAIN_KEYS)
+            const amount = pickCell(r.rawRow, INVOICE_AMOUNT_KEYS)
+            const status = `${pickCell(r.rawRow, STATUS_KEYS)} / ${pickCell(r.rawRow, MAIN_STATUS_KEYS)}`
+            const changes =
+              r.fieldsChanged && Object.keys(r.fieldsChanged).length > 0
+                ? Object.entries(r.fieldsChanged)
+                    .map(([field, change]) => `${field}: ${String(change.from ?? '—')} → ${String(change.to ?? '—')}`)
+                    .join('; ')
+                : ''
+            return {
+              key: r.rowNumber,
+              className: r.action === 'error' ? 'bg-destructive/5' : undefined,
+              cells: [
+                <span key="n" className="text-muted-foreground">
+                  {r.rowNumber}
+                </span>,
+                <RowLogBadge key="a" action={r.action} />,
+                head,
+                vendor,
+                <span key="u">
+                  {r.entryId !== null ? (
+                    <Link href={`/entries/${r.entryId}`} className="text-primary underline-offset-2 hover:underline">
+                      {ubbl}
+                    </Link>
+                  ) : (
+                    ubbl
+                  )}
+                  {main !== '—' ? <span className="text-muted-foreground"> / {main}</span> : null}
+                </span>,
+                amount,
+                status,
+                r.action === 'error' && r.note ? (
+                  <FriendlyError key="c" message={r.note} />
+                ) : r.fieldsChanged && Object.keys(r.fieldsChanged).length > 0 ? (
+                  <ul key="c" className="space-y-0.5">
+                    {Object.entries(r.fieldsChanged).map(([field, change]) => (
+                      <li key={field}>
+                        <span className="font-medium text-foreground">{field}</span>:{' '}
+                        {String(change.from ?? '—')} → {String(change.to ?? '—')}
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  '—'
+                ),
+              ],
+              texts: [
+                String(r.rowNumber),
+                actionDisplay(r.action).label,
+                head,
+                vendor,
+                main !== '—' ? `${ubbl} / ${main}` : ubbl,
+                amount,
+                status,
+                r.action === 'error' && r.note ? r.note : changes,
+              ],
+            }
+          })}
+        />
       )}
     </div>
   )

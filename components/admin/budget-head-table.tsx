@@ -7,6 +7,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Button } from '@/components/ui/button'
 import { updateBudgetHeadMapping } from '@/lib/actions/admin'
+import { useTableControls, type ControlColumn } from '@/components/ui/table-controls'
 
 export type BudgetHeadRow = {
   id: number
@@ -40,23 +41,43 @@ export function BudgetHeadTable({
   budgetHeads: BudgetHeadRow[]
   heads: HeadOption[]
 }) {
+  const headLabel = new Map(heads.map((h) => [h.id, `${h.headNumber}. ${h.name}`]))
+  const columns: ControlColumn<BudgetHeadRow>[] = [
+    { key: 'raw', label: 'Raw label', value: (b) => b.rawLabel, filter: false },
+    { key: 'short', label: 'Short label', value: (b) => b.shortLabel, filter: false },
+    { key: 'department', label: 'Department', value: (b) => b.departmentName },
+    {
+      key: 'head',
+      label: 'Mapped head',
+      value: (b) => (b.headId === null ? 'Unmapped' : headLabel.get(b.headId) ?? 'Unmapped'),
+    },
+  ]
+  const controls = useTableControls(budgetHeads, {
+    columns,
+    searchPlaceholder: 'Search budget heads…',
+    noun: 'budget head',
+  })
   return (
-    <Table>
-      <TableHeader>
-        <TableRow>
-          <TableHead>Raw label</TableHead>
-          <TableHead>Short label</TableHead>
-          <TableHead>Department</TableHead>
-          <TableHead>Mapped head</TableHead>
-          <TableHead className="text-right">Save</TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {budgetHeads.map((budgetHead) => (
-          <BudgetHeadRowItem key={budgetHead.id} budgetHead={budgetHead} heads={heads} />
-        ))}
-      </TableBody>
-    </Table>
+    <div className="flex flex-col gap-2">
+      {controls.toolbar}
+      <Table>
+        <TableHeader>
+          <TableRow>
+            {controls.header('raw')}
+            {controls.header('short')}
+            {controls.header('department')}
+            {controls.header('head')}
+            <TableHead className="text-right">Save</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {controls.pageItems.map((budgetHead) => (
+            <BudgetHeadRowItem key={budgetHead.id} budgetHead={budgetHead} heads={heads} />
+          ))}
+        </TableBody>
+      </Table>
+      {controls.pagination}
+    </div>
   )
 }
 

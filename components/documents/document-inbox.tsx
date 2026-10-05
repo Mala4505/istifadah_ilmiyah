@@ -69,7 +69,6 @@ export function DocumentInbox({
   queueStalled = false,
   adminHeadOptions,
   zoneOptions,
-  costCenterOptions,
   maxUploadPages,
 }: {
   initialDocuments: InboxDocumentView[]
@@ -83,8 +82,6 @@ export function DocumentInbox({
   /** Passed straight through to DocumentTable → DocumentCard (checklist 5.11's inline zone/head prompt) and to the bulk-attach follow-up dialog below (checklist 5.12). Fetched once in app/(app)/documents/page.tsx rather than per-card. */
   adminHeadOptions: LookupOption[]
   zoneOptions: LookupOption[]
-  /** Only needed for the bulk-attach follow-up dialog (5.12) — the single-attach inline prompt (5.11) doesn't touch cost center. */
-  costCenterOptions: LookupOption[]
   /** Admin-configured page-count ceiling for a single PDF upload, passed
    *  straight through to the upload dropzone's "split before uploading"
    *  panel. Fetched once in app/(app)/documents/page.tsx. */
@@ -666,7 +663,6 @@ export function DocumentInbox({
         entryIds={enrichmentDialogEntryIds}
         adminHeadOptions={adminHeadOptions}
         zoneOptions={zoneOptions}
-        costCenterOptions={costCenterOptions}
         onDone={() => router.refresh()}
       />
 

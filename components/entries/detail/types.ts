@@ -31,8 +31,6 @@ export interface EntryEnriched {
   admin_head_name: string | null
   zone_id: number | null
   zone_name: string | null
-  cost_center_id: number | null
-  cost_center_name: string | null
   remark: string | null
   settles_entry_id: number | null
   is_void: boolean
@@ -55,11 +53,6 @@ export interface EntryEnriched {
 export interface AdminHeadOption {
   id: number
   head_number: number
-  name: string
-}
-
-export interface CostCenterOption {
-  id: number
   name: string
 }
 

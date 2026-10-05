@@ -213,10 +213,29 @@ export function ExceptionsTable({
                 direction={sortDirection}
                 onSort={handleSort}
               />
-              <TableHead>Entry</TableHead>
-              <TableHead className="text-right">Amount at risk</TableHead>
+              <SortableTableHead<QueueSortColumn>
+                columnKey="entry"
+                label="Entry"
+                activeColumn={sortColumn}
+                direction={sortDirection}
+                onSort={handleSort}
+              />
+              <SortableTableHead<QueueSortColumn>
+                columnKey="amount"
+                label="Amount at risk"
+                align="right"
+                activeColumn={sortColumn}
+                direction={sortDirection}
+                onSort={handleSort}
+              />
               <TableHead>Description</TableHead>
-              <TableHead>Status</TableHead>
+              <SortableTableHead<QueueSortColumn>
+                columnKey="status"
+                label="Status"
+                activeColumn={sortColumn}
+                direction={sortDirection}
+                onSort={handleSort}
+              />
               <SortableTableHead<QueueSortColumn>
                 columnKey="detected_at"
                 label="Raised"

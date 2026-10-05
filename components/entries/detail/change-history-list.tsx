@@ -2,6 +2,8 @@ import { Badge } from '@/components/ui/badge'
 import { formatChangeValue, formatDateTime, humanizeFieldName } from './format'
 import type { ChangeLogRow } from './types'
 
+const HIDDEN_FIELDS = new Set(['budget_head_raw'])
+
 const SOURCE_LABEL: Record<string, string> = {
   import: 'Import',
   manual: 'Manual edit',
@@ -27,10 +29,16 @@ export function ChangeHistoryList({
     return <p className="text-sm text-muted-foreground">No changes recorded yet for this entry.</p>
   }
 
+  // The imported budget-head text is an internal matching key, not something
+  // shown on screen — Department + Budget head are the only labels used
+  // (2026-10-05). Its budget_head_id change still shows, resolved to a name.
+  const visibleRows = rows
+    .map((row) => ({ row, fields: Object.entries(row.changes).filter(([field]) => !HIDDEN_FIELDS.has(field)) }))
+    .filter(({ fields }) => fields.length > 0)
+
   return (
     <ol className="flex flex-col gap-3">
-      {rows.map((row) => {
-        const fields = Object.entries(row.changes)
+      {visibleRows.map(({ row, fields }) => {
         return (
           <li key={row.id} className="rounded-md border border-border p-3 text-sm">
             <div className="flex flex-wrap items-center justify-between gap-2">

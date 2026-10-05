@@ -1,22 +1,20 @@
 import { staffInitials } from '@/lib/assignment/queries'
 import type { AssignmentWorkload, StaffWorkload } from '@/lib/assignment/workload'
+import { InteractiveTable, type InteractiveColumn, type InteractiveRow } from '@/components/ui/interactive-table'
 
 /**
  * Superadmin workload board (document assignment, design §06 "Direction C").
- * Read-only, so this is a plain Server Component -- it just lays out the
- * numbers `getAssignmentWorkload` produced. Reassignment itself happens from
- * the inbox (Direction B), not here.
+ * Read-only Server Component laying out the numbers `getAssignmentWorkload`
+ * produced. Reassignment itself happens from the inbox, not here.
  *
- * Redesigned 2026-09-14: the original board packed four different numbers
- * (in progress / verified today / oldest unactioned / a load-comparison bar)
- * onto each card and testers couldn't tell what any of them meant. Replaced
- * with one segmented status bar (not started / in progress / verified) plus
- * a single "last reviewed" recency line.
+ * Redesigned 2026-10-05: one row per admin with BILL totals for the whole
+ * selected event — assigned, pending, reviewing, reviewed, completed — plus
+ * an event-wide totals strip, instead of per-admin cards that only showed
+ * what was still sitting in the inbox.
  */
 
-// Small deterministic avatar tint so columns are visually distinct without
-// pulling in another component. Fixed hex values (not theme tokens) because
-// these are decorative identity colours, same idea as the design mock.
+// Small deterministic avatar tint so rows are visually distinct. Fixed hex
+// values (not theme tokens) because these are decorative identity colours.
 const AVATAR_TONES = ['#8a5a2b', '#4f6d8c', '#6a7d3f', '#7a2438', '#5c6b8a', '#8a6d2b'] as const
 
 function toneFor(id: string): string {
@@ -25,24 +23,31 @@ function toneFor(id: string): string {
   return AVATAR_TONES[hash % AVATAR_TONES.length]!
 }
 
-function ageLabel(days: number | null): string {
-  if (days === null) return '—'
-  if (days === 0) return 'today'
-  return `${days}d`
+function formatDate(iso: string | null): string {
+  if (!iso) return 'Never'
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return '—'
+  return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
 }
 
-/** Coarse "how long ago" for the last-reviewed line -- doesn't need day-level precision. */
-function timeAgo(iso: string | null): string {
-  if (!iso) return 'never'
-  const ms = Date.now() - new Date(iso).getTime()
-  if (Number.isNaN(ms) || ms < 0) return '—'
-  const minutes = Math.floor(ms / 60_000)
-  if (minutes < 1) return 'just now'
-  if (minutes < 60) return `${minutes}m ago`
-  const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `${hours}h ago`
-  const days = Math.floor(hours / 24)
-  return `${days}d ago`
+const fmt = (n: number) => n.toLocaleString('en-IN')
+
+const STAGES = [
+  { key: 'pendingCount', label: 'Pending', hint: 'Not started yet', bar: 'bg-border' },
+  { key: 'reviewingCount', label: 'Reviewing', hint: 'Open with the admin now', bar: 'bg-amber-500' },
+  { key: 'reviewedCount', label: 'Reviewed', hint: 'Verified, not yet connected', bar: 'bg-primary' },
+  { key: 'completedCount', label: 'Completed', hint: 'All review stages done', bar: 'bg-emerald-600' },
+] as const
+
+function StageBar({ s }: { s: Pick<StaffWorkload, (typeof STAGES)[number]['key'] | 'assignedCount'> }) {
+  const total = Math.max(1, s.assignedCount)
+  return (
+    <div className="flex h-2 w-28 overflow-hidden rounded-full bg-muted" aria-hidden="true">
+      {STAGES.map(({ key, bar }) =>
+        s[key] > 0 ? <div key={key} className={`h-full ${bar}`} style={{ width: `${(s[key] / total) * 100}%` }} /> : null
+      )}
+    </div>
+  )
 }
 
 function Avatar({ name, id }: { name: string; id: string }) {
@@ -57,92 +62,124 @@ function Avatar({ name, id }: { name: string; id: string }) {
   )
 }
 
-const STATUS_ROWS = [
-  { key: 'notStartedCount', label: 'not started', dot: 'bg-border' },
-  { key: 'inProgressCount', label: 'in progress', dot: 'bg-primary' },
-  { key: 'verifiedCount', label: 'verified', dot: 'bg-emerald-600' },
-] as const
-
-/** One segmented bar: not-started (muted) / in-progress (primary) / verified (green),
- *  with a one-status-per-line breakdown underneath so labels never wrap or crowd. */
-function StatusBar({ s }: { s: StaffWorkload }) {
-  const total = Math.max(1, s.assignedCount)
-  const pct = (n: number) => `${(n / total) * 100}%`
-
-  return (
-    <div className="flex flex-col gap-2">
-      <div className="flex h-2 overflow-hidden rounded-full bg-muted">
-        {s.notStartedCount > 0 && (
-          <div className="h-full bg-border" style={{ width: pct(s.notStartedCount) }} />
-        )}
-        {s.inProgressCount > 0 && (
-          <div className="h-full bg-primary" style={{ width: pct(s.inProgressCount) }} />
-        )}
-        {s.verifiedCount > 0 && (
-          <div className="h-full bg-emerald-600" style={{ width: pct(s.verifiedCount) }} />
-        )}
-      </div>
-      <div className="flex flex-col gap-1">
-        {STATUS_ROWS.map(({ key, label, dot }) => (
-          <div key={key} className="flex items-center justify-between text-xs text-muted-foreground">
-            <span className="inline-flex items-center gap-1.5">
-              <span className={`h-2 w-2 shrink-0 rounded-full ${dot}`} aria-hidden="true" />
-              {label}
-            </span>
-            <span className="font-mono tabular-nums">{s[key]}</span>
-          </div>
-        ))}
-      </div>
-    </div>
-  )
-}
+const COLUMNS: InteractiveColumn[] = [
+  { key: 'admin', header: 'Admin', filterable: false },
+  { key: 'assigned', header: 'Assigned', align: 'right', descendingFirst: true },
+  { key: 'pending', header: 'Pending', align: 'right', descendingFirst: true },
+  { key: 'reviewing', header: 'Reviewing', align: 'right', descendingFirst: true },
+  { key: 'reviewed', header: 'Reviewed', align: 'right', descendingFirst: true },
+  { key: 'completed', header: 'Completed', align: 'right', descendingFirst: true },
+  { key: 'progress', header: 'Done', align: 'right', descendingFirst: true },
+  { key: 'last', header: 'Last reviewed', descendingFirst: true, filterable: false },
+]
 
 export function WorkloadBoard({ pool, perStaff }: AssignmentWorkload) {
   const assignedStaff = perStaff.filter((s) => s.assignedCount > 0)
 
+  const totals = assignedStaff.reduce(
+    (acc, s) => ({
+      assignedCount: acc.assignedCount + s.assignedCount,
+      pendingCount: acc.pendingCount + s.pendingCount,
+      reviewingCount: acc.reviewingCount + s.reviewingCount,
+      reviewedCount: acc.reviewedCount + s.reviewedCount,
+      completedCount: acc.completedCount + s.completedCount,
+    }),
+    { assignedCount: 0, pendingCount: 0, reviewingCount: 0, reviewedCount: 0, completedCount: 0 }
+  )
+
+  const rows: InteractiveRow[] = assignedStaff.map((s) => {
+    const donePct = s.assignedCount > 0 ? Math.round((s.completedCount / s.assignedCount) * 100) : 0
+    return {
+      key: s.staffId,
+      cells: [
+        <span key="a" className="inline-flex items-center gap-2">
+          <Avatar name={s.displayName} id={s.staffId} />
+          <span>{s.displayName}</span>
+        </span>,
+        fmt(s.assignedCount),
+        fmt(s.pendingCount),
+        fmt(s.reviewingCount),
+        fmt(s.reviewedCount),
+        fmt(s.completedCount),
+        <span key="p" className="inline-flex items-center justify-end gap-2">
+          <StageBar s={s} />
+          <span className="w-9 tabular-nums">{donePct}%</span>
+        </span>,
+        formatDate(s.lastReviewedAt),
+      ],
+      texts: [s.displayName, '', '', '', '', '', `${donePct}%`, formatDate(s.lastReviewedAt)],
+      values: [
+        s.displayName,
+        s.assignedCount,
+        s.pendingCount,
+        s.reviewingCount,
+        s.reviewedCount,
+        s.completedCount,
+        donePct,
+        s.lastReviewedAt ? new Date(s.lastReviewedAt).getTime() : null,
+      ],
+    }
+  })
+
   return (
     <div className="flex flex-col gap-4">
-      <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(220px,1fr))]">
-        {/* Pool column */}
-        <div className="overflow-hidden rounded-lg border border-secondary bg-card">
-          <div className="flex items-center gap-2 border-b border-border bg-muted/60 px-3 py-2.5">
-            <span className="rounded-full border border-dashed border-border px-2 py-0.5 font-mono text-[0.7rem] text-muted-foreground">
-              Pool
-            </span>
-            <span className="ml-auto font-mono text-sm font-medium tabular-nums">{pool.count}</span>
-          </div>
-          <div className="flex flex-col gap-2 px-3 py-3">
-            <div className="flex items-center justify-between font-mono text-xs text-muted-foreground">
-              <span>oldest</span>
-              <span className="tabular-nums">{ageLabel(pool.oldestDays)}</span>
-            </div>
-            <p className="text-xs text-muted-foreground">Unassigned — reassign from the inbox.</p>
-          </div>
-        </div>
+      <p className="text-xs text-muted-foreground">
+        Bill totals for the selected event. Every bill on a document assigned to an admin counts once — a PDF with
+        several bills counts several times.
+      </p>
 
-        {assignedStaff.length === 0 ? (
-          <div className="col-span-full rounded-lg border border-border bg-card px-3 py-6 text-sm text-muted-foreground">
-            No documents assigned yet.
+      <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(150px,1fr))]">
+        <div className="rounded-lg border border-border bg-card px-3 py-2.5">
+          <p className="text-xs text-muted-foreground">Assigned</p>
+          <p className="font-mono text-lg font-semibold tabular-nums">{fmt(totals.assignedCount)}</p>
+          <p className="text-[11px] text-muted-foreground">bills, all admins</p>
+        </div>
+        {STAGES.map(({ key, label, hint, bar }) => (
+          <div key={key} className="rounded-lg border border-border bg-card px-3 py-2.5">
+            <p className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+              <span className={`h-2 w-2 rounded-full ${bar}`} aria-hidden="true" />
+              {label}
+            </p>
+            <p className="font-mono text-lg font-semibold tabular-nums">{fmt(totals[key])}</p>
+            <p className="text-[11px] text-muted-foreground">{hint}</p>
           </div>
-        ) : (
-          assignedStaff.map((s) => (
-            <div key={s.staffId} className="overflow-hidden rounded-lg border border-border bg-card">
-              <div className="flex items-center gap-2 border-b border-border bg-muted/60 px-3 py-2.5">
-                <Avatar name={s.displayName} id={s.staffId} />
-                <span className="truncate text-sm">{s.displayName}</span>
-                <span className="ml-auto font-mono text-sm font-medium tabular-nums">{s.assignedCount}</span>
-              </div>
-              <div className="flex flex-col gap-2.5 px-3 py-3">
-                <StatusBar s={s} />
-                <div className="flex items-center justify-between font-mono text-xs text-muted-foreground">
-                  <span>last reviewed</span>
-                  <span className="tabular-nums">{timeAgo(s.lastReviewedAt)}</span>
-                </div>
-              </div>
-            </div>
-          ))
-        )}
+        ))}
+        <div className="rounded-lg border border-dashed border-border bg-card px-3 py-2.5">
+          <p className="text-xs text-muted-foreground">Unassigned pool</p>
+          <p className="font-mono text-lg font-semibold tabular-nums">{fmt(pool.count)}</p>
+          <p className="text-[11px] text-muted-foreground">
+            {pool.oldestDays === null ? 'empty' : `oldest ${pool.oldestDays === 0 ? 'today' : `${pool.oldestDays}d`}`}
+          </p>
+        </div>
       </div>
+
+      {assignedStaff.length === 0 ? (
+        <div className="rounded-lg border border-border bg-card px-3 py-6 text-sm text-muted-foreground">
+          No documents assigned for this event yet.
+        </div>
+      ) : (
+        <InteractiveTable
+          columns={COLUMNS}
+          rows={rows}
+          initialSort={{ index: 1, direction: 'desc' }}
+          searchPlaceholder="Search admins…"
+          noun="admin"
+          footer={
+            <tr>
+              <td className="px-3 py-2 text-xs uppercase tracking-wide text-muted-foreground">Total</td>
+              {(['assignedCount', 'pendingCount', 'reviewingCount', 'reviewedCount', 'completedCount'] as const).map((k) => (
+                <td key={k} className="px-3 py-2 text-right font-mono tabular-nums">
+                  {fmt(totals[k])}
+                </td>
+              ))}
+              <td className="px-3 py-2 text-right font-mono tabular-nums">
+                {totals.assignedCount > 0 ? Math.round((totals.completedCount / totals.assignedCount) * 100) : 0}%
+              </td>
+              <td />
+            </tr>
+          }
+        />
+      )}
     </div>
   )
 }

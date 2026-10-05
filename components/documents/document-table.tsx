@@ -92,7 +92,7 @@ function matchesFilters(doc: InboxDocumentView, filters: DocumentFilters): boole
 const DOCUMENT_TABLE_PARAM_KEYS = ['q', 'status', 'review', 'from', 'to', 'sort', 'dir'] as const
 const STATUS_FILTER_VALUES: string[] = STATUS_OPTIONS.map((o) => o.value)
 const REVIEW_FILTER_VALUES: string[] = ['reviewed', 'unreviewed']
-const SORT_COLUMN_VALUES: string[] = ['filename', 'total', 'status', 'uploaded']
+const SORT_COLUMN_VALUES: string[] = ['filename', 'total', 'status', 'uploaded', 'assignee']
 
 function paramsToFilters(params: URLSearchParams): DocumentFilters {
   const status = params.get('status')
@@ -441,7 +441,13 @@ export function DocumentTable({
                 direction={sort.direction}
                 onSort={handleSort}
               />
-              <TableHead>Assignee</TableHead>
+              <SortableTableHead
+                columnKey="assignee"
+                label="Assignee"
+                activeColumn={sort.column}
+                direction={sort.direction}
+                onSort={handleSort}
+              />
               <SortableTableHead
                 columnKey="uploaded"
                 label="Uploaded"

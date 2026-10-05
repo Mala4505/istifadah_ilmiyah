@@ -46,7 +46,7 @@
 --   * public.entry_change_log, import_batch, import_row_log, status_export_*,
 --     budget_allocation*, all Hub status history
 --   * every master / reference table -- department, vendor, vendor_alias,
---     budget_head, budget_category, head, zone, admin_head, cost_center,
+--     budget_head, head, zone, admin_head,
 --     hub_status, entry_status, item_catalog/family/alias, event + scoping,
 --     staff_profile/staff_department, app_settings, auth/login/API-log tables
 --

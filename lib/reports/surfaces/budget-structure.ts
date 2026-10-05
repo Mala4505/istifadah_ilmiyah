@@ -6,8 +6,12 @@
  * Backing views (20260903000013_budget_structure_views.sql):
  *   v_budget_revision_history -- one row per budget_allocation snapshot, with
  *     the running revision sequence + per-step deltas.
- *   v_zone_category_matrix    -- one row per (zone, cost_center, event).
- *   v_budget_category_mix     -- one row per (cost_center, event).
+ *   v_zone_category_matrix    -- one row per (zone, budget category, event).
+ *   v_budget_category_mix     -- one row per (budget category, event).
+ *
+ * "Budget category" is derived from the entry's budget head short_label, with
+ * spelling variants merged into one key. Entries
+ * with no budget head land in key null / label 'No budget head'.
  *
  * Each view exposes `event_id` as a plain column; filtered here at the query
  * site against the active event (20260822000007 convention).
@@ -61,26 +65,26 @@ export type BudgetRevisionHistoryRow = {
   is_latest: boolean
 }
 
-/** One row of v_zone_category_matrix -- one (zone, cost_center) cell for an
- *  event. Null zone -> 'Unassigned zone', null cost_center -> 'Uncategorised'
- *  (kept, not dropped, so enrichment gaps stay visible). */
+/** One row of v_zone_category_matrix -- one (zone, budget category) cell for
+ *  an event. Null zone -> 'Unassigned zone', no budget head -> key null /
+ *  label 'No budget head' (kept, not dropped, so enrichment gaps stay
+ *  visible). */
 export type ZoneCategoryMatrixRow = {
   zone_id: number | null
   zone_name: string
   zone_number: number | null
-  cost_center_id: number | null
-  cost_center_name: string
+  budget_category_key: string | null
+  budget_category_label: string
   event_id: number | null
   entry_count: number
   total_amount: number
 }
 
-/** One row of v_budget_category_mix -- a cost_center's entry count + total
- *  spend for an event. */
+/** One row of v_budget_category_mix -- a budget category's entry count +
+ *  total spend for an event. Key null = entries with no budget head. */
 export type BudgetCategoryMixRow = {
-  cost_center_id: number | null
-  cost_center_name: string
-  cost_center_is_confirmed: boolean | null
+  budget_category_key: string | null
+  budget_category_label: string
   event_id: number | null
   entry_count: number
   total_amount: number
@@ -150,7 +154,7 @@ function zoneCategoryMatrixInsight(rows: ZoneCategoryMatrixRow[]): string | null
     agg.total += r.total_amount
     if (r.total_amount > agg.topCategoryAmount) {
       agg.topCategoryAmount = r.total_amount
-      agg.topCategory = r.cost_center_name
+      agg.topCategory = r.budget_category_label
     }
     byZone.set(key, agg)
   }
@@ -178,7 +182,7 @@ function budgetCategoryMixInsight(rows: BudgetCategoryMixRow[]): string | null {
           (ranked.slice(0, 3).reduce((sum, r) => sum + r.total_amount, 0) / total) * 100
         )} of spend.`
       : ''
-  return `${top.cost_center_name} is the largest budget category at ${formatPercent(sharePct)} of ${formatINRCompact(
+  return `${top.budget_category_label} is the largest budget category at ${formatPercent(sharePct)} of ${formatINRCompact(
     total
   )} across ${formatNumber(ranked.length)} categories.${threePart}`
 }
@@ -187,10 +191,10 @@ const REVISION_SELECT =
   'allocation_id, budget_head_id, budget_head_label, department_id, department_name, event_id, import_batch_id, as_of, request_amount, approved_amount, utilised_amount, balance_amount, effective_amount, revision_seq, approved_delta, effective_delta, is_first, is_latest'
 
 const MATRIX_SELECT =
-  'zone_id, zone_name, zone_number, cost_center_id, cost_center_name, event_id, entry_count, total_amount'
+  'zone_id, zone_name, zone_number, budget_category_key, budget_category_label, event_id, entry_count, total_amount'
 
 const MIX_SELECT =
-  'cost_center_id, cost_center_name, cost_center_is_confirmed, event_id, entry_count, total_amount'
+  'budget_category_key, budget_category_label, event_id, entry_count, total_amount'
 
 export async function loadBudgetStructure(
   compareBasis: CompareBasis,

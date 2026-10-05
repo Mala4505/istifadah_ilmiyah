@@ -9,26 +9,43 @@ import { Input } from '@/components/ui/input'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Button } from '@/components/ui/button'
 import { createZone, updateZone } from '@/lib/actions/admin'
+import { useTableControls, type ControlColumn } from '@/components/ui/table-controls'
 import type { ZoneRow } from '@/lib/settings/shape'
 
+const ZONE_COLUMNS: ControlColumn<ZoneRow>[] = [
+  { key: 'no', label: 'No.', value: (z) => z.zoneNumber },
+  { key: 'name', label: 'Name', value: (z) => z.name },
+  { key: 'active', label: 'Active', value: (z) => z.isActive },
+]
+
 export function MasterZoneTable({ zones }: { zones: ZoneRow[] }) {
+  const controls = useTableControls(zones, {
+    columns: ZONE_COLUMNS,
+    initialSort: { key: 'no', direction: 'asc' },
+    searchPlaceholder: 'Search zones…',
+    noun: 'zone',
+  })
   return (
-    <Table>
-      <TableHeader>
-        <TableRow>
-          <TableHead className="w-[90px]">No.</TableHead>
-          <TableHead>Name</TableHead>
-          <TableHead className="w-[90px]">Active</TableHead>
-          <TableHead className="text-right">Save</TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {zones.map((zone) => (
-          <ZoneRowItem key={zone.id} zone={zone} />
-        ))}
-        <NewZoneRow />
-      </TableBody>
-    </Table>
+    <div className="flex flex-col gap-2">
+      {controls.toolbar}
+      <Table>
+        <TableHeader>
+          <TableRow>
+            {controls.header('no', { className: 'w-[90px]' })}
+            {controls.header('name')}
+            {controls.header('active', { className: 'w-[90px]' })}
+            <TableHead className="text-right">Save</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {controls.pageItems.map((zone) => (
+            <ZoneRowItem key={zone.id} zone={zone} />
+          ))}
+          <NewZoneRow />
+        </TableBody>
+      </Table>
+      {controls.pagination}
+    </div>
   )
 }
 
