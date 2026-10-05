@@ -1,12 +1,18 @@
 import type { ReactNode } from 'react'
-import { cn } from '@/lib/utils'
 import { EmptyState } from '@/components/reports/empty-state'
+import { InteractiveTable, type InteractiveColumn, type InteractiveRow } from '@/components/ui/interactive-table'
+import { cellValueOf, nodeText, toCellValue } from '@/lib/table-values'
 
 export type DataTableColumn<T> = {
   key: string
   header: string
   align?: 'left' | 'right'
   render: (row: T) => ReactNode
+  /** Value to sort on when the rendered cell's text isn't enough (a badge
+   *  that renders from props, a label whose order isn't alphabetical). */
+  sortValue?: (row: T) => string | number | null | undefined
+  /** Force the column's filter dropdown on/off (default: automatic). */
+  filterable?: boolean
 }
 
 /** Matches a rendered cell value that reads as a plain number/money/percent
@@ -42,25 +48,32 @@ function columnLooksNumeric<T>(column: DataTableColumn<T>, rows: T[]): boolean {
 }
 
 /**
- * Plain semantic table shared by Reconciliation and Reports (§5 rows 9-10).
- * Deliberately local rather than a components/ui/table primitive — that
- * primitive doesn't exist in this worktree yet and another agent may be
- * adding one in parallel; this stays self-contained to avoid colliding.
+ * Table shared by every Reports section. It resolves each cell here (so it
+ * still works as a Server Component — the `render` functions never cross to
+ * the client) and hands the rendered cells plus their search/sort values to
+ * the client InteractiveTable, which adds search, per-column filters,
+ * click-to-sort on every header, pagination and whole-row click-through
+ * (2026-10-05: "every table has pagination, search, filter and sorting").
  */
 export function DataTable<T>({
   columns,
   rows,
   getRowKey,
+  getRowHref,
   emptyTitle = 'No rows',
   emptyDescription,
   className,
+  pageSize = 25,
 }: {
   columns: DataTableColumn<T>[]
   rows: T[]
   getRowKey: (row: T) => string | number
+  /** Where a click anywhere on the row goes. Defaults to the row's first link. */
+  getRowHref?: (row: T) => string | null | undefined
   emptyTitle?: string
   emptyDescription?: string
   className?: string
+  pageSize?: number
 }) {
   if (rows.length === 0) {
     return <EmptyState title={emptyTitle} description={emptyDescription} />
@@ -72,45 +85,20 @@ export function DataTable<T>({
   // say so (financial tables are read down the column — §6 fix 7).
   const resolvedAligns = columns.map((c) => c.align ?? (columnLooksNumeric(c, rows) ? 'right' : 'left'))
 
-  return (
-    <div className={cn('overflow-x-auto rounded-md border border-border', className)}>
-      <table className="w-full border-collapse text-sm">
-        <thead className="sticky top-0 z-10 bg-card">
-          <tr className="border-b border-border bg-muted/40 text-left text-[11px] uppercase tracking-wide text-muted-foreground">
-            {columns.map((c, i) => (
-              <th
-                key={c.key}
-                className={cn(
-                  // bg-card on the cell itself, not just the thead, so the
-                  // sticky header stays opaque under border-collapse (same
-                  // workaround as components/ui/table.tsx).
-                  'whitespace-nowrap bg-card px-3 py-2 font-medium',
-                  resolvedAligns[i] === 'right' && 'text-right tabular-nums'
-                )}
-              >
-                {c.header}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row) => (
-            <tr key={getRowKey(row)} className="border-b border-border/60 last:border-0 hover:bg-accent/30">
-              {columns.map((c, i) => (
-                <td
-                  key={c.key}
-                  className={cn(
-                    'whitespace-nowrap px-3 py-2 font-mono text-[13px] text-foreground',
-                    resolvedAligns[i] === 'right' && 'text-right tabular-nums'
-                  )}
-                >
-                  {c.render(row)}
-                </td>
-              ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  )
+  const tableColumns: InteractiveColumn[] = columns.map((c, i) => ({
+    key: c.key,
+    header: c.header,
+    align: resolvedAligns[i],
+    filterable: c.filterable,
+    descendingFirst: resolvedAligns[i] === 'right',
+  }))
+
+  const tableRows: InteractiveRow[] = rows.map((row) => {
+    const cells = columns.map((c) => c.render(row))
+    const texts = cells.map((cell) => nodeText(cell))
+    const values = columns.map((c, i) => (c.sortValue ? toCellValue(c.sortValue(row)) : cellValueOf(cells[i])))
+    return { key: getRowKey(row), cells, texts, values, href: getRowHref?.(row) ?? undefined }
+  })
+
+  return <InteractiveTable columns={tableColumns} rows={tableRows} initialPageSize={pageSize} dense className={className} />
 }

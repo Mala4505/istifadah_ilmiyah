@@ -21,11 +21,9 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 export function ImportFieldsPanel({
   entry,
   vendorConfirmed,
-  budgetHeadRaw,
 }: {
   entry: EntryEnriched
   vendorConfirmed: boolean | null
-  budgetHeadRaw: string | null
 }) {
   return (
     <Card>
@@ -41,10 +39,7 @@ export function ImportFieldsPanel({
         <Field label="Type">{entry.type.replace('_', ' ')}</Field>
 
         <Field label="Department">{entry.department_name ?? '—'}</Field>
-        <Field label="Budget head (raw)">
-          {budgetHeadRaw ?? entry.budget_head_raw_label ?? '—'}
-        </Field>
-        <Field label="Budget head (short)">{entry.budget_head_short_label ?? '—'}</Field>
+        <Field label="Budget head">{entry.budget_head_short_label ?? '—'}</Field>
 
         <Field label="Invoice number">{entry.invoice_number ?? '—'}</Field>
         <Field label="Vendor">

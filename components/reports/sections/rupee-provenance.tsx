@@ -190,14 +190,10 @@ function ChainView({ chain }: { chain: RupeeProvenanceChain }) {
   return (
     <ol className="flex flex-col">
       <Step index={1} title="Budget category">
-        {entry.budget_category_id != null ? (
-          <Link href={`/entries?cost_center_id=${entry.budget_category_id}`} className={linkClass()}>
-            {entry.budget_category_label ?? `#${entry.budget_category_id}`}
-          </Link>
+        {entry.budget_category_label != null ? (
+          <span>{entry.budget_category_label}</span>
         ) : (
-          <span className="text-muted-foreground">
-            No budget category assigned{entry.budget_head_short_label ? ` (bill bracket: ${entry.budget_head_short_label})` : ''}
-          </span>
+          <span className="text-muted-foreground">No budget head</span>
         )}
       </Step>
 

@@ -21,7 +21,7 @@ const UNCHANGED = '__unchanged__' // omit this field from the batch update entir
 const CLEAR = '__clear__' // explicitly set this field to null for every selected entry
 
 /**
- * Bulk zone / admin-head / cost-center assignment (hub-refinements-plan.md
+ * Bulk zone / admin-head assignment (hub-refinements-plan.md
  * §5, §6) — the multi-entry counterpart to the single-entry enrichment form
  * (components/entries/detail/enrichment-form.tsx), which keeps working
  * unchanged; this is additive, not a replacement. Mirrors
@@ -30,9 +30,9 @@ const CLEAR = '__clear__' // explicitly set this field to null for every selecte
  * (lib/actions/entry-enrichment.ts) — the same one that owns the RLS/partial-
  * success handling, so this component owns no mutation logic of its own.
  *
- * Each of the three fields defaults to "Don't change" — opt-in per field,
- * not all-or-nothing — because forcing every selected entry to the same cost
- * center just because the caller also wanted to bulk-set zone would be a
+ * Each field defaults to "Don't change" — opt-in per field,
+ * not all-or-nothing — because forcing every selected entry to the same admin
+ * head just because the caller also wanted to bulk-set zone would be a
  * stronger, more destructive claim than the plan asked for (full reasoning
  * in the server action's header comment). "Clear" is a separate, explicit
  * option from "Don't change" so a batch clear is always a deliberate choice,
@@ -48,7 +48,6 @@ export function BulkEnrichmentDialog({
   entryIds,
   adminHeadOptions,
   zoneOptions,
-  costCenterOptions,
   onDone,
 }: {
   open: boolean
@@ -56,18 +55,15 @@ export function BulkEnrichmentDialog({
   entryIds: number[]
   adminHeadOptions: LookupOption[]
   zoneOptions: LookupOption[]
-  costCenterOptions: LookupOption[]
   onDone: () => void
 }) {
   const [adminHead, setAdminHead] = useState(UNCHANGED)
   const [zone, setZone] = useState(UNCHANGED)
-  const [costCenter, setCostCenter] = useState(UNCHANGED)
   const [pending, setPending] = useState(false)
 
   function reset() {
     setAdminHead(UNCHANGED)
     setZone(UNCHANGED)
-    setCostCenter(UNCHANGED)
   }
 
   function resolve(value: string): number | null | undefined {
@@ -77,7 +73,7 @@ export function BulkEnrichmentDialog({
   }
 
   async function handleSubmit() {
-    if (adminHead === UNCHANGED && zone === UNCHANGED && costCenter === UNCHANGED) {
+    if (adminHead === UNCHANGED && zone === UNCHANGED) {
       toast.error('Choose at least one field to set or clear.')
       return
     }
@@ -87,7 +83,6 @@ export function BulkEnrichmentDialog({
         entryIds,
         adminHeadId: resolve(adminHead),
         zoneId: resolve(zone),
-        costCenterId: resolve(costCenter),
       })
       if (!result.success) {
         toastError(result.error, { title: 'Could not update entries.', context: 'bulk-enrichment-dialog' })
@@ -114,7 +109,7 @@ export function BulkEnrichmentDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Bulk assign zone / admin head / cost center</DialogTitle>
+          <DialogTitle>Bulk assign zone / admin head</DialogTitle>
           <DialogDescription>
             Applies to {entryIds.length} selected {entryIds.length === 1 ? 'entry' : 'entries'}. Leave a field on
             &quot;Don&apos;t change&quot; to skip it — only fields you set here are touched, the rest are left as
@@ -131,13 +126,6 @@ export function BulkEnrichmentDialog({
             options={adminHeadOptions}
           />
           <FieldSelect id="bulk-zone" label="Zone" value={zone} onChange={setZone} options={zoneOptions} />
-          <FieldSelect
-            id="bulk-cost-center"
-            label="Cost center"
-            value={costCenter}
-            onChange={setCostCenter}
-            options={costCenterOptions}
-          />
         </div>
 
         <DialogFooter>

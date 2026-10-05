@@ -11,7 +11,8 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { Table, TableBody, TableCell, TableFooter, TableHeader, TableRow } from '@/components/ui/table'
+import { useTableControls, type ControlColumn } from '@/components/ui/table-controls'
 import { toastError } from '@/components/ui/error-toast'
 import { getDocumentViewDetail, type DocumentViewDetail } from '@/lib/actions/documents'
 import { formatINR, formatDate } from '@/lib/reports/format'
@@ -23,6 +24,17 @@ import { formatINR, formatDate } from '@/lib/reports/format'
  * uses) — this is a lookup, not an edit surface, so a formal table reads
  * more clearly than a row of boxes.
  */
+type LineRow = DocumentViewDetail['lineItems'][number] & { lineNo: number }
+
+const LINE_COLUMNS: ControlColumn<LineRow>[] = [
+  { key: 'no', label: '#', value: (l) => l.lineNo, filter: false },
+  { key: 'description', label: 'Description', value: (l) => l.description, filter: false },
+  { key: 'qty', label: 'Qty', value: (l) => l.quantity, filter: false },
+  { key: 'unit', label: 'Unit', value: (l) => l.unit },
+  { key: 'rate', label: 'Rate', value: (l) => l.rate, descendingFirst: true },
+  { key: 'amount', label: 'Amount', value: (l) => l.amount, descendingFirst: true },
+]
+
 export function BillViewModal({
   documentId,
   entryId,
@@ -50,6 +62,17 @@ export function BillViewModal({
       setDetail(result.detail)
     })()
   }, [open, detail, documentId, entryId])
+
+  const lineItems = detail?.lineItems ?? []
+  const lineControls = useTableControls(
+    lineItems.map((item, index) => ({ ...item, lineNo: index + 1 })),
+    {
+      columns: LINE_COLUMNS,
+      initialPageSize: 25,
+      searchPlaceholder: 'Search line items…',
+      noun: 'line item',
+    }
+  )
 
   const lineItemsTotal =
     detail && detail.lineItems.length > 0
@@ -96,16 +119,17 @@ export function BillViewModal({
                 <Field label="Reviewed" value={detail.verifiedAt ? formatDate(detail.verifiedAt) : 'Not yet reviewed'} />
               </div>
 
+              {detail.lineItems.length > 0 && lineControls.toolbar}
               <div className="overflow-x-auto rounded-md border border-border">
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead className="w-10">#</TableHead>
-                      <TableHead>Description</TableHead>
-                      <TableHead>Qty</TableHead>
-                      <TableHead>Unit</TableHead>
-                      <TableHead className="text-right">Rate</TableHead>
-                      <TableHead className="text-right">Amount</TableHead>
+                      {lineControls.header('no', { className: 'w-10' })}
+                      {lineControls.header('description')}
+                      {lineControls.header('qty')}
+                      {lineControls.header('unit')}
+                      {lineControls.header('rate', { align: 'right' })}
+                      {lineControls.header('amount', { align: 'right' })}
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -116,9 +140,9 @@ export function BillViewModal({
                         </TableCell>
                       </TableRow>
                     ) : (
-                      detail.lineItems.map((item, index) => (
+                      lineControls.pageItems.map((item) => (
                         <TableRow key={item.id}>
-                          <TableCell className="text-muted-foreground">{index + 1}</TableCell>
+                          <TableCell className="text-muted-foreground">{item.lineNo}</TableCell>
                           <TableCell className="whitespace-normal">{item.description || '—'}</TableCell>
                           <TableCell>{item.quantity ?? '—'}</TableCell>
                           <TableCell>{item.unit || '—'}</TableCell>
@@ -138,6 +162,7 @@ export function BillViewModal({
                   )}
                 </Table>
               </div>
+              {detail.lineItems.length > 0 && lineControls.pagination}
 
               <div className="flex flex-wrap justify-end gap-x-6 gap-y-1 text-sm">
                 <Amount label="Subtotal" value={detail.subtotal} />

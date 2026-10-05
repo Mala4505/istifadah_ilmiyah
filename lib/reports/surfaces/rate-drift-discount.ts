@@ -20,11 +20,11 @@
  * might query the view directly.
  *
  * C-06 coverage discipline (same as C-03/C-04, per the schema-reality note in
- * the Phase Five shared context): rate_reference.discount_pct is populated
- * only by the retired verify_document_extraction bodies
- * (20260813000002/20260814000011/20260817000003) -- the current one
- * (20260820000003) never writes it -- so against the present corpus this
- * view is expected to return few or zero rows. The loader computes a
+ * the Phase Five shared context): rate_reference.discount_pct is written by
+ * verify_document_extraction since 20261005075123 (and back-filled there),
+ * parsed from the line's discount text only when the line amount confirms
+ * it -- so only lines that state a discount carry one, and coverage is
+ * partial. The loader computes a
  * corpus-wide coverage ratio (family_discount_count / family_observation_count,
  * summed over each DISTINCT (item_family_id, event_id) pair, since those two
  * columns repeat per row within a family) for the section to state plainly,

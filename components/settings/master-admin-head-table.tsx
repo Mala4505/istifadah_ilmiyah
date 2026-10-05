@@ -9,26 +9,43 @@ import { Input } from '@/components/ui/input'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Button } from '@/components/ui/button'
 import { createAdminHead, updateAdminHead } from '@/lib/actions/admin'
+import { useTableControls, type ControlColumn } from '@/components/ui/table-controls'
 import type { HeadRow } from '@/lib/settings/loadMasterData'
 
+const HEAD_COLUMNS: ControlColumn<HeadRow>[] = [
+  { key: 'no', label: 'No.', value: (h) => h.headNumber },
+  { key: 'name', label: 'Name', value: (h) => h.name },
+  { key: 'active', label: 'Active', value: (h) => h.isActive },
+]
+
 export function MasterAdminHeadTable({ heads }: { heads: HeadRow[] }) {
+  const controls = useTableControls(heads, {
+    columns: HEAD_COLUMNS,
+    initialSort: { key: 'no', direction: 'asc' },
+    searchPlaceholder: 'Search admin heads…',
+    noun: 'admin head',
+  })
   return (
-    <Table>
-      <TableHeader>
-        <TableRow>
-          <TableHead className="w-[90px]">No.</TableHead>
-          <TableHead>Name</TableHead>
-          <TableHead className="w-[90px]">Active</TableHead>
-          <TableHead className="text-right">Save</TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {heads.map((head) => (
-          <AdminHeadRowItem key={head.id} head={head} />
-        ))}
-        <NewAdminHeadRow />
-      </TableBody>
-    </Table>
+    <div className="flex flex-col gap-2">
+      {controls.toolbar}
+      <Table>
+        <TableHeader>
+          <TableRow>
+            {controls.header('no', { className: 'w-[90px]' })}
+            {controls.header('name')}
+            {controls.header('active', { className: 'w-[90px]' })}
+            <TableHead className="text-right">Save</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {controls.pageItems.map((head) => (
+            <AdminHeadRowItem key={head.id} head={head} />
+          ))}
+          <NewAdminHeadRow />
+        </TableBody>
+      </Table>
+      {controls.pagination}
+    </div>
   )
 }
 

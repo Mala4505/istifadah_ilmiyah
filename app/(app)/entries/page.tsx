@@ -4,7 +4,6 @@ import { getCachedStaffProfile } from '@/lib/export/auth'
 import { getSelectedEventId } from '@/lib/events/current'
 import {
   getCachedDepartments,
-  getCachedCostCenters,
   getCachedEntryStatuses,
   getCachedAdminHeads,
   getCachedZones,
@@ -26,7 +25,7 @@ import type { StaffRole } from '@/lib/auth/roles'
 // Phase 5 §8.1 (docs/pre-deploy-findings-and-plan.md): Entries used to be the
 // slowest screen in the app (3.7s to settle at 14 entries) because
 // entries-explorer.tsx fired its filter-dropdown lookups (departments,
-// budget heads, admin heads, zones, cost centers, statuses, hub statuses,
+// budget heads, admin heads, zones, statuses, hub statuses,
 // event-membership tables, own role/department) as a client-side useEffect
 // chain *after* mount — several sequential/parallel round trips gating first
 // paint. Those lookups now happen here, server-side, in one Promise.all
@@ -81,12 +80,11 @@ async function loadEntriesPageData(): Promise<{
   const zoneMemberIds = (zoneMembership.data ?? []).map((r) => r.zone_id)
   const userId = user?.id ?? null
 
-  const [departmentRows, bhRows, adminHeadRows, zoneRows, costCenterRows, statusRows, typeRows, billKpis] = await Promise.all([
+  const [departmentRows, bhRows, adminHeadRows, zoneRows, statusRows, typeRows, billKpis] = await Promise.all([
     getCachedDepartments(supabase),
     getCachedBudgetHeads(supabase, userId),
     getCachedAdminHeads(supabase, userId),
     getCachedZones(supabase, userId),
-    getCachedCostCenters(supabase),
     getCachedEntryStatuses(supabase),
     getCachedEntryTypes(supabase),
     // "Waiting on a bill" header KPIs (operator request, 2026-09-07) — the
@@ -121,7 +119,6 @@ async function loadEntriesPageData(): Promise<{
     })),
     adminHeads: adminHead.map((h) => ({ id: h.id, label: `${h.head_number}. ${h.name}` })),
     zones: zone.map((z) => ({ id: z.id, label: `${z.zone_number}. ${z.name}` })),
-    costCenters: costCenterRows.map((c) => ({ id: c.id, label: c.name })),
     statuses: statusRows.map((s) => ({ id: s.id, label: s.label, code: s.code })),
     entryTypes: typeRows.map((t) => ({ id: t.code, label: t.label, code: t.code })),
   }

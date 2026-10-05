@@ -3,7 +3,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 
 /**
  * Perf audit Phase 2 (docs/perf-ux-audit-checklist.md): department, budget
- * head, admin head, zone, cost center, and entry status barely
+ * head, admin head, zone, and entry status barely
  * change (a handful of times a term per the checklist) but were re-queried
  * from Postgres on every navigation. Cached here with a short revalidate
  * window and invalidated eagerly by the admin mutations that change them
@@ -14,7 +14,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
  *
  * RLS split (supabase/migrations/20260808000026_rls_policies.sql,
  * 20260819000003_role_rbac_v2.sql, 20260913000001_admin_head_zone_drop_department.sql)
- * matters here: `department`, `admin_head`, `zone`, `cost_center`,
+ * matters here: `department`, `admin_head`, `zone`,
  * and `entry_status` all gate on `private.is_staff()` only --
  * every authenticated staff member reads the same rows, so one cache entry
  * serves everyone. `budget_head` alone still additionally gates through
@@ -52,7 +52,6 @@ export const REFERENCE_DATA_TAGS = {
   budgetHead: 'ref:budget_head',
   adminHead: 'ref:admin_head',
   zone: 'ref:zone',
-  costCenter: 'ref:cost_center',
   entryStatus: 'ref:entry_status',
   entryType: 'ref:entry_type',
 } as const
@@ -84,11 +83,6 @@ export interface CachedZone {
   is_active: boolean
 }
 
-export interface CachedCostCenter {
-  id: number
-  name: string
-}
-
 export interface CachedEntryStatus {
   id: number
   code: string
@@ -111,17 +105,6 @@ export function getCachedDepartments(supabase: SupabaseClient): Promise<CachedDe
     },
     ['ref-department'],
     { revalidate: REVALIDATE_SECONDS, tags: [REFERENCE_DATA_TAGS.department] }
-  )()
-}
-
-export function getCachedCostCenters(supabase: SupabaseClient): Promise<CachedCostCenter[]> {
-  return unstable_cache(
-    async () => {
-      const { data } = await supabase.from('cost_center').select('id,name').order('name')
-      return (data ?? []) as CachedCostCenter[]
-    },
-    ['ref-cost-center'],
-    { revalidate: REVALIDATE_SECONDS, tags: [REFERENCE_DATA_TAGS.costCenter] }
   )()
 }
 

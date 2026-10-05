@@ -55,10 +55,9 @@ export type RupeeProvenanceEntryRow = {
   budget_head_id: number | null
   budget_head_label: string | null
   budget_head_short_label: string | null
-  /** The blueprint's "budget category" == the table renamed budget_category ->
-   *  cost_center (20260813000004). Resolved via entries.cost_center_id; often
-   *  null (a hub-enrichment field, not import-owned). */
-  budget_category_id: number | null
+  /** The blueprint's "budget category", derived from the budget head's
+   *  short_label (spelling variants merged). Null when the entry has no
+   *  budget head. Plain text -- there is no id / entries filter for it. */
   budget_category_label: string | null
   zone_id: number | null
   zone_name: string | null
@@ -91,8 +90,8 @@ export type RupeeProvenanceLineRow = {
   /** Free-text discount note off the line ("10%+5%") -- NOT a number. */
   discount_note: string | null
   rate_reference_id: number | null
-  /** Numeric discount %, from rate_reference -- populated only by the
-   *  pre-20260820000003 verify bodies, so usually null. */
+  /** Numeric discount %, from rate_reference -- parsed from discount_note
+   *  only when the line amount confirms it (20261005075123), else null. */
   discount_pct: number | null
   item_family_id: number | null
   item_family_label: string | null
@@ -143,7 +142,7 @@ export type RupeeProvenanceSurfaceData = {
 }
 
 const ENTRY_SELECT =
-  'entry_id, ubbl_number, entry_amount, entry_date, entry_type, invoice_number, department_id, department_name, sub_department_id, sub_department_name, admin_head_id, admin_head_name, vendor_id, vendor_display_name, budget_head_id, budget_head_label, budget_head_short_label, budget_category_id, budget_category_label, zone_id, zone_name, source_document_id, document_extraction_id, instrument_type, bill_total_verified, bill_total_ocr, bill_verified_at, has_bill_image, line_item_count, event_id'
+  'entry_id, ubbl_number, entry_amount, entry_date, entry_type, invoice_number, department_id, department_name, sub_department_id, sub_department_name, admin_head_id, admin_head_name, vendor_id, vendor_display_name, budget_head_id, budget_head_label, budget_head_short_label, budget_category_label, zone_id, zone_name, source_document_id, document_extraction_id, instrument_type, bill_total_verified, bill_total_ocr, bill_verified_at, has_bill_image, line_item_count, event_id'
 
 const LINE_SELECT =
   'entry_id, document_extraction_id, line_item_id, line_number, description, hsn_sac, quantity, unit, unit_normalized, net_rate, line_amount, discount_note, rate_reference_id, discount_pct, item_family_id, item_family_label, item_catalog_id, item_catalog_label, benchmark_median_rate, benchmark_observation_count, benchmark_vendor_count, rate_vs_benchmark_pct, department_id, event_id'

@@ -11,17 +11,17 @@
  */
 import { exceptionTypeLabel, severityRank } from '@/components/exceptions/labels'
 
-export type QueueSortColumn = 'severity' | 'detected_at' | 'type'
+export type QueueSortColumn = 'severity' | 'detected_at' | 'type' | 'amount' | 'status' | 'entry'
 export type QueueSortDirection = 'asc' | 'desc'
 
-export const QUEUE_SORT_COLUMNS: readonly QueueSortColumn[] = ['severity', 'detected_at', 'type']
+export const QUEUE_SORT_COLUMNS: readonly QueueSortColumn[] = ['severity', 'detected_at', 'type', 'amount', 'status', 'entry']
 export const DEFAULT_QUEUE_SORT: { column: QueueSortColumn; direction: QueueSortDirection } = {
   column: 'severity',
   direction: 'desc',
 }
 
 /** Columns whose first click should open descending. */
-export const QUEUE_DESCENDING_FIRST = new Set<QueueSortColumn>(['severity', 'detected_at'])
+export const QUEUE_DESCENDING_FIRST = new Set<QueueSortColumn>(['severity', 'detected_at', 'amount'])
 
 export interface QueueSortRow {
   id: number
@@ -29,6 +29,37 @@ export interface QueueSortRow {
   exception_type: string
   amount_at_risk: number | null
   created_at: string
+  status?: string
+  entry_id?: number | null
+  description?: string | null
+}
+
+/** Nulls last regardless of direction. */
+function nullableCompare(a: number | string | null | undefined, b: number | string | null | undefined, dir: number): number {
+  const an = a === null || a === undefined
+  const bn = b === null || b === undefined
+  if (an && bn) return 0
+  if (an) return 1
+  if (bn) return -1
+  if (typeof a === 'number' && typeof b === 'number') return (a - b) * dir
+  return String(a).localeCompare(String(b)) * dir
+}
+
+/**
+ * Free-text search over the queue (2026-10-05: every table gets search).
+ * Matches the description, the exception type (code and label), the status,
+ * and the entry / exception id. Applied in memory like the sort.
+ */
+export function searchQueue<T extends QueueSortRow>(rows: T[], query: string): T[] {
+  const q = query.trim().toLowerCase()
+  if (!q) return rows
+  const bare = q.replace(/^#/, '')
+  return rows.filter((r) =>
+    [r.description, r.exception_type, exceptionTypeLabel(r.exception_type), r.status, r.severity]
+      .some((v) => typeof v === 'string' && v.toLowerCase().includes(q)) ||
+    String(r.entry_id ?? '') === bare ||
+    String(r.id) === bare
+  )
 }
 
 function byId(a: QueueSortRow, b: QueueSortRow): number {
@@ -53,6 +84,18 @@ export function sortQueue<T extends QueueSortRow>(
   copy.sort((a, b) => {
     if (column === 'detected_at') {
       const cmp = a.created_at.localeCompare(b.created_at) * dir
+      return cmp !== 0 ? cmp : byId(a, b)
+    }
+    if (column === 'amount') {
+      const cmp = nullableCompare(a.amount_at_risk, b.amount_at_risk, dir)
+      return cmp !== 0 ? cmp : byId(a, b)
+    }
+    if (column === 'status') {
+      const cmp = nullableCompare(a.status, b.status, dir)
+      return cmp !== 0 ? cmp : byId(a, b)
+    }
+    if (column === 'entry') {
+      const cmp = nullableCompare(a.entry_id, b.entry_id, dir)
       return cmp !== 0 ? cmp : byId(a, b)
     }
     if (column === 'type') {

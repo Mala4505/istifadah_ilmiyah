@@ -34,7 +34,9 @@ import {
   addLineItem,
   claimReviewDocument,
   confirmVendorAlias,
+  createManualBillForPage,
   getVendorLineItemTemplate,
+  reExtractPage,
   reExtractField,
   refreshMatchCandidates,
   releaseReviewDocument,
@@ -551,6 +553,13 @@ export function ReviewWorkspace({
   const handlePdfPageInfoChange = useCallback((pageNumber: number, numPages: number) => {
     setPdfPageInfo({ pageNumber, numPages })
   }, [])
+
+  // 2026-10-05: the PDF page on screen is not skipped but no bill covers it
+  // (PdfViewer's isUnassignedPage). While set, the form pane shows a blank
+  // "no bill yet" panel instead of the current bill's data, so the
+  // reviewer never edits bill N while looking at an unrelated page.
+  const [unassignedPage, setUnassignedPage] = useState<number | null>(null)
+  const [unassignedBusy, setUnassignedBusy] = useState<'ocr' | 'manual' | null>(null)
 
   // Checklist 4.2: the toolbar's "N of M to check" stepper. Fields carry a
   // stable `data-uncertain-index` (their position in detail.uncertainFields,
@@ -1211,6 +1220,46 @@ export function ReviewWorkspace({
     [requestGoToDocument]
   )
 
+  // Unassigned-page panel actions. Both end on the bill that now owns this
+  // page, routed through requestGoToDocument so unsaved edits on the current
+  // bill still get the usual "Leave without saving?" confirm.
+  async function handleOcrUnassignedPage() {
+    if (unassignedPage === null) return
+    const page = unassignedPage
+    setUnassignedBusy('ocr')
+    try {
+      const result = await reExtractPage({ sourceDocumentId: detail.sourceDocumentId, pageNumber: page })
+      if (!result.ok) {
+        toastError(result.error, { context: 'review-workspace' })
+        return
+      }
+      if (result.documentExtractionId === null || result.billCount === 0) {
+        toast.info(`OCR found no bill on page ${page}. You can enter it manually instead.`)
+        router.refresh()
+        return
+      }
+      requestGoToDocument(result.documentExtractionId, page)
+    } finally {
+      setUnassignedBusy(null)
+    }
+  }
+
+  async function handleManualUnassignedPage() {
+    if (unassignedPage === null) return
+    const page = unassignedPage
+    setUnassignedBusy('manual')
+    try {
+      const result = await createManualBillForPage({ sourceDocumentId: detail.sourceDocumentId, pageNumber: page })
+      if (!result.ok) {
+        toastError(result.error, { context: 'review-workspace' })
+        return
+      }
+      requestGoToDocument(result.documentExtractionId, page)
+    } finally {
+      setUnassignedBusy(null)
+    }
+  }
+
   // Guarded entry point for re-extract (checklist 1.6): always confirms
   // first, not just when there are unsaved edits to lose -- forcing a new
   // Sonnet run costs real money on every call regardless of dirty state, so
@@ -1290,6 +1339,10 @@ export function ReviewWorkspace({
   }
 
   function handleSave() {
+    if (unassignedPage !== null) {
+      toast.info('This page has no bill yet. Run OCR or enter it manually first.')
+      return
+    }
     if (claimState === 'blocked') {
       toast.error('Take over the claim before saving.')
       return
@@ -1886,7 +1939,7 @@ export function ReviewWorkspace({
           own thumbnail rail already covers page navigation, and the sibling
           picker was extra, per the design review. */}
       <div className="flex flex-wrap items-center gap-2 rounded-md border border-border bg-background px-2 py-1.5">
-        <Button type="button" size="sm" onClick={handleSave} disabled={isSaving || formDisabled}>
+        <Button type="button" size="sm" onClick={handleSave} disabled={isSaving || formDisabled || unassignedPage !== null}>
           {isSaving ? 'Saving…' : 'Save (Ctrl/Cmd+Enter)'}
         </Button>
         <Button type="button" size="sm" variant="outline" onClick={() => setExceptionOpen(true)} disabled={formDisabled}>
@@ -2142,6 +2195,7 @@ export function ReviewWorkspace({
             onPageInfoChange={handlePdfPageInfoChange}
             billPageRanges={billPageRanges}
             onRequestBillSwitch={handleRequestBillSwitch}
+            onUnassignedPageChange={setUnassignedPage}
           />
         </div>
 
@@ -2163,6 +2217,35 @@ export function ReviewWorkspace({
         )}
 
         <div className="min-h-0 min-w-0 flex-1">
+          {unassignedPage !== null ? (
+            <div className="flex h-full flex-col items-center justify-center gap-3 rounded-md border border-dashed border-amber-300 bg-amber-50/50 p-6 text-center dark:border-amber-800 dark:bg-amber-950/30">
+              <p className="text-sm font-medium text-foreground">Page {unassignedPage} has no bill yet</p>
+              <p className="max-w-sm text-xs text-muted-foreground">
+                This page isn&rsquo;t skipped, but no bill was read from it. Run OCR to read it now, or open a blank
+                bill and type the details in from the page on the left. If it isn&rsquo;t a bill, skip it with the
+                eye button above the page.
+              </p>
+              <div className="flex flex-wrap justify-center gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={() => void handleOcrUnassignedPage()}
+                  disabled={unassignedBusy !== null || formDisabled}
+                >
+                  {unassignedBusy === 'ocr' ? 'Running OCR…' : 'Run OCR on this page'}
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => void handleManualUnassignedPage()}
+                  disabled={unassignedBusy !== null || formDisabled}
+                >
+                  {unassignedBusy === 'manual' ? 'Opening…' : 'Enter manually'}
+                </Button>
+              </div>
+            </div>
+          ) : (
           <ExtractionForm
             ref={formContainerRef}
             keymap={keymap}
@@ -2188,6 +2271,7 @@ export function ReviewWorkspace({
             gstCharged={detail.gstCharged}
             onJumpToPage={onJumpToPage}
           />
+          )}
         </div>
       </div>
 

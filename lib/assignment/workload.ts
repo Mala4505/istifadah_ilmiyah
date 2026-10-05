@@ -5,14 +5,28 @@
  * Supabase client -- same shape as lib/assignment/queries.ts -- so the
  * superadmin-only RSC page can call it directly.
  *
- * Answers one question: is the review work spread sensibly across the admins?
+ * Answers one question: how much of the selected event's review work has
+ * each admin been given, and how far through it are they?
+ *
+ * Redesigned 2026-10-05 (user request): counted in BILLS (document_extraction
+ * rows), not PDFs, and over the WHOLE selected event -- every bill on every
+ * document ever assigned to the admin, including ones that have since left
+ * the inbox -- rather than a snapshot of what is still sitting in the inbox.
+ * Each admin's bills fall into exactly one of four stages, which always sum
+ * to `assignedCount`:
+ *
+ *   pending    not verified, and the admin isn't holding the claim on it
+ *              (includes a document not yet extracted -- one pending bill)
+ *   reviewing  not verified, and the admin currently holds the claim
+ *   reviewed   verified (Review stage 1), but still in `v_review_queue` --
+ *              not yet connected to an entry and/or classified
+ *   completed  cleared every Review stage (no longer in `v_review_queue`)
+ *
+ * `reviewed` / `completed` use the same `v_review_queue` test as the
+ * /documents KPI bar (lib/documents/bill-kpis.ts), so the two screens agree.
+ *
  * Best-effort and defensively coded: a failed sub-query degrades a number to
  * 0 / null rather than failing the page.
- *
- * Kept deliberately simple (redesigned 2026-09-14 after the original
- * in-progress/verified-today/oldest-unactioned trio proved confusing): each
- * admin's assigned pile is split into three statuses that always sum to
- * assignedCount, plus a single "last reviewed" timestamp for recency.
  */
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { getSelectedEventId } from '@/lib/events/current'
@@ -21,27 +35,23 @@ import { logRawError } from '@/lib/friendly-error'
 
 /** The unassigned "pool" -- documents still in the inbox with no assignee rows. */
 export interface WorkloadPool {
-  /** Bills (document_extraction rows) on in-inbox, unassigned documents. A
-   *  document with no extraction yet counts as one pending bill. */
+  /** Bills on in-inbox, unassigned documents. A document with no extraction
+   *  yet counts as one pending bill. */
   count: number
   /** Age in whole days of the oldest such document. Null when the pool is empty. */
   oldestDays: number | null
 }
 
-/** One admin column on the board. Counted in bills, not PDFs -- a multi-bill
- *  document (a batch scan) contributes one unit per bill, not one per file. */
+/** One admin row on the board, counted in bills for the selected event. */
 export interface StaffWorkload {
   staffId: string
   displayName: string
-  /** Total bills across this staff's still-in-inbox assigned documents. A
-   *  document with no extraction yet counts as one pending bill. */
+  /** Every bill on every document assigned to this admin, for the event. */
   assignedCount: number
-  /** Of assignedCount: not yet extracted, or extracted but nobody's claimed it. */
-  notStartedCount: number
-  /** Of assignedCount: this staff holds the claim lock and the bill is unverified. */
-  inProgressCount: number
-  /** Of assignedCount: the bill has been verified. */
-  verifiedCount: number
+  pendingCount: number
+  reviewingCount: number
+  reviewedCount: number
+  completedCount: number
   /** Most recent bill this staff verified, for the selected event. Null if never. */
   lastReviewedAt: string | null
 }
@@ -52,9 +62,31 @@ export interface AssignmentWorkload {
 }
 
 const DAY_MS = 86_400_000
+/** PostgREST caps a response at 1,000 rows by default -- page past it. */
+const PAGE = 1000
+
+type PagedQuery<T> = {
+  range: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>
+}
+
+/** Reads every row of a query, 1,000 at a time. Stops (and logs) on error. */
+async function fetchAllRows<T>(label: string, build: () => PagedQuery<T>): Promise<T[]> {
+  const out: T[] = []
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await build().range(from, from + PAGE - 1)
+    if (error) {
+      logRawError(`assignment.getAssignmentWorkload:${label}`, error.message)
+      break
+    }
+    const rows = data ?? []
+    out.push(...rows)
+    if (rows.length < PAGE) break
+  }
+  return out
+}
 
 /**
- * Workload snapshot for the selected event: the unassigned pool plus one row
+ * Workload totals for the selected event: the unassigned pool plus one row
  * per active admin/superadmin. Every failure path returns zeros rather than
  * throwing -- the board is a monitoring view, not a critical path.
  */
@@ -64,26 +96,34 @@ export async function getAssignmentWorkload(supabase: SupabaseClient): Promise<A
   try {
     const selectedEventId = await getSelectedEventId()
 
-    let docsQuery = supabase
-      .from('source_document')
-      .select('id, uploaded_at, claimed_by')
-      .in('match_status', ['unmatched', 'suggested'])
-    if (selectedEventId !== null) docsQuery = docsQuery.eq('event_id', selectedEventId)
+    type DocRow = { id: number; uploaded_at: string | null; claimed_by: string | null; match_status: string }
+    type BillRow = { id: number; source_document_id: number; verified_at: string | null; verified_by: string | null }
+    type QueueRow = { document_extraction_id: number }
+    type AssigneeRow = { staff_id: string; source_document_id: number }
 
-    let lastReviewedQuery = supabase
-      .from('document_extraction')
-      .select('verified_by, verified_at, source_document!inner(event_id)')
-      .not('verified_by', 'is', null)
-      .order('verified_at', { ascending: false })
-    if (selectedEventId !== null) {
-      lastReviewedQuery = lastReviewedQuery.eq('source_document.event_id', selectedEventId)
-    }
-
-    const [staff, assigneeResult, docsResult, lastReviewedResult] = await Promise.all([
+    const [staff, assigneeRows, docs, bills, queueRows] = await Promise.all([
       listAssignableStaff(supabase),
-      supabase.from('source_document_assignee').select('staff_id, source_document_id'),
-      docsQuery,
-      lastReviewedQuery,
+      fetchAllRows<AssigneeRow>('assignees', () =>
+        supabase.from('source_document_assignee').select('staff_id, source_document_id').order('source_document_id') as unknown as PagedQuery<AssigneeRow>
+      ),
+      fetchAllRows<DocRow>('documents', () => {
+        let q = supabase.from('source_document').select('id, uploaded_at, claimed_by, match_status').order('id')
+        if (selectedEventId !== null) q = q.eq('event_id', selectedEventId)
+        return q as unknown as PagedQuery<DocRow>
+      }),
+      fetchAllRows<BillRow>('bills', () => {
+        let q = supabase
+          .from('document_extraction')
+          .select('id, source_document_id, verified_at, verified_by, source_document!inner(event_id)')
+          .order('id')
+        if (selectedEventId !== null) q = q.eq('source_document.event_id', selectedEventId)
+        return q as unknown as PagedQuery<BillRow>
+      }),
+      fetchAllRows<QueueRow>('queue', () => {
+        let q = supabase.from('v_review_queue').select('document_extraction_id').order('document_extraction_id')
+        if (selectedEventId !== null) q = q.eq('event_id', selectedEventId)
+        return q as unknown as PagedQuery<QueueRow>
+      }),
     ])
 
     const perStaff = new Map<string, StaffWorkload>(
@@ -93,91 +133,72 @@ export async function getAssignmentWorkload(supabase: SupabaseClient): Promise<A
           staffId: s.id,
           displayName: s.displayName,
           assignedCount: 0,
-          notStartedCount: 0,
-          inProgressCount: 0,
-          verifiedCount: 0,
+          pendingCount: 0,
+          reviewingCount: 0,
+          reviewedCount: 0,
+          completedCount: 0,
           lastReviewedAt: null,
         },
       ])
     )
 
-    // Sorted verified_at desc, so the first row seen per staff is their latest.
-    for (const row of lastReviewedResult.data ?? []) {
-      const staffId = row.verified_by as string | null
-      if (!staffId) continue
-      const entry = perStaff.get(staffId)
-      if (entry && entry.lastReviewedAt === null) entry.lastReviewedAt = row.verified_at as string
-    }
+    const docById = new Map(docs.map((d) => [d.id, d]))
+    const inQueue = new Set(queueRows.map((r) => r.document_extraction_id))
 
-    const inboxDocs = docsResult.data ?? []
-    const inboxDocIds = inboxDocs.map((d) => d.id as number)
-    const inboxDocIdSet = new Set(inboxDocIds)
-    const claimedByById = new Map<number, string | null>(
-      inboxDocs.map((d) => [d.id as number, (d.claimed_by as string | null) ?? null])
-    )
-
-    // A bill is "not started" if it's only a placeholder (document not yet
-    // extracted) or extracted-but-unclaimed; claim status only matters once a
-    // real, unverified extraction exists.
-    type Bill = { verifiedAt: string | null; isPlaceholder: boolean }
-
-    // Bills (document_extraction rows) per in-inbox document -- a batch scan
-    // can produce more than one, and each is counted as its own unit below.
+    type Bill = { verifiedAt: string | null; inQueue: boolean; isPlaceholder: boolean }
     const billsByDoc = new Map<number, Bill[]>()
-    if (inboxDocIds.length > 0) {
-      const { data: extractions } = await supabase
-        .from('document_extraction')
-        .select('source_document_id, verified_at')
-        .in('source_document_id', inboxDocIds)
-      for (const row of extractions ?? []) {
-        const docId = row.source_document_id as number
-        const bills = billsByDoc.get(docId) ?? []
-        bills.push({ verifiedAt: row.verified_at as string | null, isPlaceholder: false })
-        billsByDoc.set(docId, bills)
+    for (const b of bills) {
+      const list = billsByDoc.get(b.source_document_id) ?? []
+      list.push({ verifiedAt: b.verified_at, inQueue: inQueue.has(b.id), isPlaceholder: false })
+      billsByDoc.set(b.source_document_id, list)
+
+      // "Last reviewed" -- this admin's most recent verification in the event.
+      if (b.verified_by && b.verified_at) {
+        const entry = perStaff.get(b.verified_by)
+        if (entry && (entry.lastReviewedAt === null || b.verified_at > entry.lastReviewedAt)) {
+          entry.lastReviewedAt = b.verified_at
+        }
       }
     }
     /** Bills on a document, or one placeholder pending bill if it hasn't been extracted yet. */
-    const billsFor = (docId: number): Bill[] => billsByDoc.get(docId) ?? [{ verifiedAt: null, isPlaceholder: true }]
+    const billsFor = (docId: number): Bill[] =>
+      billsByDoc.get(docId) ?? [{ verifiedAt: null, inQueue: true, isPlaceholder: true }]
 
-    const now = Date.now()
-    const ageDays = (iso: string | undefined | null): number | null => {
-      if (!iso) return null
-      const ms = new Date(iso).getTime()
-      if (Number.isNaN(ms)) return null
-      return Math.max(0, Math.floor((now - ms) / DAY_MS))
-    }
-
-    const assigneeRows = assigneeResult.data ?? []
     const assignedDocIds = new Set<number>()
     for (const row of assigneeRows) {
-      const staffId = row.staff_id as string
-      const docId = row.source_document_id as number
-      assignedDocIds.add(docId)
+      const doc = docById.get(row.source_document_id)
+      if (!doc) continue // a different event's document
+      assignedDocIds.add(doc.id)
 
-      const entry = perStaff.get(staffId)
-      if (!entry || !inboxDocIdSet.has(docId)) continue
+      const entry = perStaff.get(row.staff_id)
+      if (!entry) continue
 
-      const isClaimedByThem = claimedByById.get(docId) === staffId
-      for (const bill of billsFor(docId)) {
+      const isClaimedByThem = doc.claimed_by === row.staff_id
+      for (const bill of billsFor(doc.id)) {
         entry.assignedCount += 1
-        if (!bill.isPlaceholder && bill.verifiedAt !== null) {
-          entry.verifiedCount += 1
-        } else if (!bill.isPlaceholder && isClaimedByThem) {
-          entry.inProgressCount += 1
+        if (bill.isPlaceholder || bill.verifiedAt === null) {
+          if (!bill.isPlaceholder && isClaimedByThem) entry.reviewingCount += 1
+          else entry.pendingCount += 1
+        } else if (bill.inQueue) {
+          entry.reviewedCount += 1
         } else {
-          entry.notStartedCount += 1
+          entry.completedCount += 1
         }
       }
     }
 
+    const now = Date.now()
     let oldestPoolDays: number | null = null
     let poolCount = 0
-    for (const doc of inboxDocs) {
-      const docId = doc.id as number
-      if (assignedDocIds.has(docId)) continue
-      poolCount += billsFor(docId).length
-      const age = ageDays(doc.uploaded_at as string)
-      if (age !== null && (oldestPoolDays === null || age > oldestPoolDays)) oldestPoolDays = age
+    for (const doc of docs) {
+      if (assignedDocIds.has(doc.id)) continue
+      if (doc.match_status !== 'unmatched' && doc.match_status !== 'suggested') continue
+      poolCount += billsFor(doc.id).length
+      const ms = doc.uploaded_at ? new Date(doc.uploaded_at).getTime() : NaN
+      if (!Number.isNaN(ms)) {
+        const age = Math.max(0, Math.floor((now - ms) / DAY_MS))
+        if (oldestPoolDays === null || age > oldestPoolDays) oldestPoolDays = age
+      }
     }
 
     return {

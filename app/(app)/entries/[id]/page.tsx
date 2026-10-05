@@ -20,7 +20,6 @@ import {
 import type {
   AdminHeadOption,
   AdvanceEntrySummary,
-  CostCenterOption,
   ChangeLogRow,
   EntryEnriched,
   ZoneOption,
@@ -35,11 +34,7 @@ import { getSelectedEventId } from '@/lib/events/current'
 import { getStaffContext } from '@/lib/export/auth'
 import { isAdminOrAbove } from '@/lib/auth/roles'
 import { ENTRY_DETAIL_SELECT, type EntriesQueryBuilder } from '@/components/entries/query'
-import {
-  getCachedAdminHeads,
-  getCachedZones,
-  getCachedCostCenters,
-} from '@/lib/cache/reference-data'
+import { getCachedAdminHeads, getCachedZones } from '@/lib/cache/reference-data'
 
 export const dynamic = 'force-dynamic'
 
@@ -117,9 +112,7 @@ export default async function EntryDetailPage({
   const [
     cachedAdminHeads,
     cachedZones,
-    cachedCostCenters,
     changeLogResult,
-    entryCoreResult,
     vendorResult,
     linkedAdvanceResult,
     adminHeadMembershipResult,
@@ -127,14 +120,12 @@ export default async function EntryDetailPage({
   ] = await Promise.all([
     getCachedAdminHeads(supabase, user?.id ?? null),
     getCachedZones(supabase, user?.id ?? null),
-    getCachedCostCenters(supabase),
     supabase
       .from('entry_change_log')
       .select('id, entry_id, changed_by, changed_at, source, changes')
       .eq('entry_id', id)
       .order('changed_at', { ascending: false })
       .limit(200),
-    supabase.from('entries').select('budget_head_raw').eq('id', id).maybeSingle(),
     entry.vendor_id
       ? supabase.from('vendor').select('is_confirmed').eq('id', entry.vendor_id).maybeSingle()
       : Promise.resolve({ data: null, error: null }),
@@ -174,10 +165,7 @@ export default async function EntryDetailPage({
   const zoneOptions = scopedZones
     .filter((z) => selectedEventId === null || zoneMemberIds.has(z.id))
     .map((z): ZoneOption => ({ id: z.id, zone_number: z.zone_number, name: z.name }))
-  const costCenterOptions = cachedCostCenters as CostCenterOption[]
   const changeLogRows = (changeLogResult.data ?? []) as ChangeLogRow[]
-  const budgetHeadRaw = (entryCoreResult.data as { budget_head_raw: string | null } | null)
-    ?.budget_head_raw ?? null
   const vendorConfirmed = (vendorResult.data as { is_confirmed: boolean } | null)?.is_confirmed ?? null
   const linkedAdvance = linkedAdvanceResult.data as AdvanceEntrySummary | null
 
@@ -206,12 +194,10 @@ export default async function EntryDetailPage({
 
   const adminHeadById = new Map(adminHeadOptions.map((h) => [h.id, h]))
   const zoneById = new Map(zoneOptions.map((z) => [z.id, z]))
-  const costCenterById = new Map(costCenterOptions.map((c) => [c.id, c]))
 
   function resolveLookup(field: string, value: number): string | null {
     if (field === 'admin_head_id') return adminHeadById.get(value)?.name ?? null
     if (field === 'zone_id') return zoneById.get(value)?.name ?? null
-    if (field === 'cost_center_id') return costCenterById.get(value)?.name ?? null
     return null
   }
 
@@ -441,7 +427,18 @@ export default async function EntryDetailPage({
         <ProvisionalNumberBanner entryId={entry.id} provisionalNumber={entry.ubbl_number} />
       )}
 
-      <ImportFieldsPanel entry={entry} vendorConfirmed={vendorConfirmed} budgetHeadRaw={budgetHeadRaw} />
+      {/* Assignment (admin head / zone) sits at the top so who
+          owns the entry is the first thing read (2026-10-05 request). */}
+      <EnrichmentForm
+        entryId={entry.id}
+        adminHeadOptions={adminHeadOptions}
+        zoneOptions={zoneOptions}
+        initialAdminHeadId={entry.admin_head_id}
+        initialZoneId={entry.zone_id}
+        initialRemark={entry.remark}
+      />
+
+      <ImportFieldsPanel entry={entry} vendorConfirmed={vendorConfirmed} />
 
       <LinkedDocuments
         entryId={entry.id}
@@ -460,23 +457,13 @@ export default async function EntryDetailPage({
 
       {canResolveIssues && !entry.is_void && <VoidEntryControl entryId={entry.id} />}
 
-      <Tabs defaultValue="enrichment">
+      <Tabs defaultValue="details">
         <TabsList>
-          <TabsTrigger value="enrichment">Enrichment</TabsTrigger>
+          <TabsTrigger value="details">Details</TabsTrigger>
           <TabsTrigger value="history">Change history</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="enrichment" className="flex flex-col gap-4">
-          <EnrichmentForm
-            entryId={entry.id}
-            adminHeadOptions={adminHeadOptions}
-            zoneOptions={zoneOptions}
-            costCenterOptions={costCenterOptions}
-            initialAdminHeadId={entry.admin_head_id}
-            initialZoneId={entry.zone_id}
-            initialCostCenterId={entry.cost_center_id}
-            initialRemark={entry.remark}
-          />
+        <TabsContent value="details" className="flex flex-col gap-4">
           {entry.type === 'invoice' && (
             <AdvanceSettlementPicker
               entryId={entry.id}

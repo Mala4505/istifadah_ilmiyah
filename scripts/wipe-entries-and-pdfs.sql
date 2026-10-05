@@ -19,7 +19,7 @@
 -- to it).
 --
 -- NOT touched: master/reference data -- department, vendor, vendor_alias,
--- budget_head, budget_category, head, zone, hub_status, entry_status,
+-- budget_head, head, zone, hub_status, entry_status,
 -- item_catalog/item_family/item_alias, event and its scoping tables,
 -- staff_profile/staff_department, scrape_token, app_settings, and all
 -- auth/login/API-log tables.

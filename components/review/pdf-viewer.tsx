@@ -174,6 +174,11 @@ export const PdfViewer = memo(forwardRef<
     // navigates the whole workspace there (OCR form included) rather than
     // just scrolling this canvas to a page whose data isn't on screen.
     onRequestBillSwitch?: (documentExtractionId: number, pageNumber: number) => void
+    /** Fires with the current page number when that page is NOT skipped but
+     *  no bill covers it (an "unassigned" page), and with null otherwise --
+     *  review-workspace.tsx swaps the form for a blank panel on such a page
+     *  instead of leaving the previous bill's data on screen. */
+    onUnassignedPageChange?: (pageNumber: number | null) => void
   }
 >(function PdfViewer(
   {
@@ -187,6 +192,7 @@ export const PdfViewer = memo(forwardRef<
     onPageInfoChange,
     billPageRanges = [],
     onRequestBillSwitch,
+    onUnassignedPageChange,
   },
   ref
 ) {
@@ -309,6 +315,18 @@ export const PdfViewer = memo(forwardRef<
     return owner?.documentExtractionId ?? documentExtractionId
   }
 
+  // A page that isn't skipped but that no bill's range covers -- usually a
+  // bill page the model never produced a bill for. Clicking it used to fall
+  // through resolveBillForPage's fallback above, leaving the previous bill's
+  // data on the right as if it belonged to this page. Only meaningful once
+  // every range is known (a null range can't rule a page in or out).
+  function isUnassignedPage(n: number): boolean {
+    if (pageStatusByNumber.get(n)?.isFinancialDocument === false) return false
+    if (billPageRanges.length === 0) return false
+    if (billPageRanges.some((r) => r.pageNumberStart === null || r.pageNumberEnd === null)) return false
+    return !billPageRanges.some((r) => n >= (r.pageNumberStart as number) && n <= (r.pageNumberEnd as number))
+  }
+
   function handleThumbnailClick(n: number) {
     const owner = resolveBillForPage(n)
     if (owner !== documentExtractionId && onRequestBillSwitch) {
@@ -323,6 +341,11 @@ export const PdfViewer = memo(forwardRef<
   useEffect(() => {
     onPageInfoChange?.(pageNumber, numPages)
   }, [pageNumber, numPages, onPageInfoChange])
+
+  const currentUnassigned = numPages > 0 && isUnassignedPage(pageNumber)
+  useEffect(() => {
+    onUnassignedPageChange?.(currentUnassigned ? pageNumber : null)
+  }, [currentUnassigned, pageNumber, onUnassignedPageChange])
 
   // Highlight boxes for the page currently on screen, resolved into the
   // rotated viewport's own fraction space. Each field's bbox is captured in
@@ -732,7 +755,9 @@ export const PdfViewer = memo(forwardRef<
   const currentSkipLabel = currentPageStatus?.skipReason ? formatSkipReason(currentPageStatus.skipReason) : null
   const currentStatusText = currentSkipped
     ? `Skipped${currentSkipLabel ? ` · ${currentSkipLabel}` : ''} — not extracted as a bill`
-    : currentVerified
+    : currentUnassigned
+      ? 'No bill on this page yet — run OCR or enter it manually'
+      : currentVerified
       ? 'Completed — bill saved and cleared'
       : 'Included in extraction'
 
@@ -837,6 +862,7 @@ export const PdfViewer = memo(forwardRef<
               // Anything else that isn't skipped still has work outstanding
               // (Verify, Connect and/or Classify) -- amber.
               const needsWork = !skipped && !done
+              const unassigned = isUnassignedPage(n)
               const skipLabel = status?.skipReason ? formatSkipReason(status.skipReason) : null
               // Phase 4 (§2.5): 'manual' once a reviewer has overridden this
               // page's classification via setPageSkipOverride -- distinguishes
@@ -857,7 +883,9 @@ export const PdfViewer = memo(forwardRef<
                   title={
                     skipped
                       ? `Skipped${skipLabel ? `: ${skipLabel}` : ''}${manualOverride ? ' (set by a reviewer)' : ''} -- not extracted as a bill`
-                      : done
+                      : unassigned
+                        ? 'No bill on this page yet -- run OCR or enter it manually'
+                        : done
                         ? 'Done -- Verify, Connect and Classify all complete'
                         : 'Needs work -- Verify, Connect and/or Classify still outstanding'
                   }
@@ -889,6 +917,8 @@ export const PdfViewer = memo(forwardRef<
                     {n}
                     {skipped && skipLabel ? (
                       <div className="truncate text-[8px] text-muted-foreground">{skipLabel}</div>
+                    ) : unassigned ? (
+                      <div className="truncate text-[8px] font-medium text-amber-700 dark:text-amber-400">No bill</div>
                     ) : done ? (
                       <div className="truncate text-[8px] font-medium text-emerald-600">Done</div>
                     ) : null}

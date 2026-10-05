@@ -13,7 +13,7 @@ import { ExceptionsPagination } from '@/components/exceptions/exceptions-paginat
 import { SeverityCountChips } from '@/components/exceptions/severity-count-chips'
 import { SeverityLegend } from '@/components/exceptions/severity-legend'
 import { PAGE_SIZE_OPTIONS } from '@/components/ui/pagination-bar-options'
-import { parseQueueSort, sortQueue } from '@/components/exceptions/queue-sort'
+import { parseQueueSort, searchQueue, sortQueue } from '@/components/exceptions/queue-sort'
 import { SEVERITY_VALUES } from '@/components/exceptions/labels'
 import { isAdminOrAbove } from '@/lib/auth/roles'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -289,6 +289,7 @@ async function loadQueueAndSeverityCounts(params: {
   size: number
   sort: ReturnType<typeof parseQueueSort>['column']
   dir: ReturnType<typeof parseQueueSort>['direction']
+  q: string
 }) {
   const supabase = await createClient()
   const selectedEventId = await getSelectedEventId()
@@ -341,7 +342,7 @@ async function loadQueueAndSeverityCounts(params: {
   }
 
   // --- Queue page ---
-  const exceptions = scopeToEvent(queueFetch.rows)
+  const exceptions = searchQueue(scopeToEvent(queueFetch.rows), params.q)
 
   // §3.2: the user-chosen sort is applied here, after event-scoping, over the
   // assembled list. Severity rank is the default; every branch is
@@ -554,6 +555,7 @@ export default async function ExceptionsPage({
     size?: string
     sort?: string
     dir?: string
+    q?: string
   }>
 }) {
   const params = await searchParams
@@ -566,6 +568,7 @@ export default async function ExceptionsPage({
   const size = parsePageSize(params.size)
   const requestedPage = parsePageNumber(params.page)
   const queueSort = parseQueueSort(params.sort, params.dir)
+  const q = (params.q ?? '').slice(0, 200)
 
   const staff = await getStaffContext()
   if (!staff) {
@@ -607,6 +610,7 @@ export default async function ExceptionsPage({
       size,
       sort: queueSort.column,
       dir: queueSort.direction,
+      q,
     }),
     loadReconciliationReportData(),
   ])
@@ -670,7 +674,7 @@ export default async function ExceptionsPage({
         </TabsList>
 
         <TabsContent value="queue" className="flex flex-col gap-4">
-          <ExceptionsFilters status={status} type={type} severity={severity} />
+          <ExceptionsFilters status={status} type={type} severity={severity} q={q} />
           <SeverityCountChips counts={severityCounts} activeSeverity={severity} />
 
           {queueError ? (

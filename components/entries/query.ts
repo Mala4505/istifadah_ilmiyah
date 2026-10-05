@@ -28,7 +28,6 @@ export function applyEntriesFilters<T extends EntriesQueryBuilder>(query: T, fil
   if (filters.budgetHead) q = q.eq('budget_head_id', filters.budgetHead)
   if (filters.adminHead) q = q.eq('admin_head_id', filters.adminHead)
   if (filters.zone) q = q.eq('zone_id', filters.zone)
-  if (filters.costCenter) q = q.eq('cost_center_id', filters.costCenter)
   if (filters.vendorId) q = q.eq('vendor_id', filters.vendorId)
   if (filters.status) q = q.eq('status_id', filters.status)
   if (filters.dateFrom) q = q.gte('date', filters.dateFrom)
@@ -90,7 +89,6 @@ const COLUMN_KEY_SELECT_COLUMNS: Record<ColumnKey, readonly string[]> = {
   budget_head_short_label: ['budget_head_short_label'],
   admin_head_name: ['admin_head_name'],
   zone_name: ['zone_name'],
-  cost_center_name: ['cost_center_name'],
   vendor_display_name: ['vendor_display_name'],
   invoice_number: ['invoice_number'],
   date: ['date'],
@@ -130,8 +128,8 @@ export const ENTRIES_SELECT = ENTRIES_LIST_SELECT_COLUMNS.join(', ')
 // and left out of ENTRY_DETAIL_EXTRA_COLUMNS below because nothing on this
 // screen needs them: `budget_head_id`, `status_id`, `status_code`,
 // `hub_status_id`, `hub_status_changed_at`, `hub_status_changed_by`,
-// `hub_status_note`, `import_batch_id`, `created_at`, `updated_at`. Four more
-// -- `admin_head_name`, `zone_name`, `cost_center_name`, `document_count` --
+// `hub_status_note`, `import_batch_id`, `created_at`, `updated_at`. Three more
+// -- `admin_head_name`, `zone_name`, `document_count` --
 // are equally unused here but still end up selected anyway, since they ride
 // in via the shared list-select base above; kept that way for the simplicity
 // of one base to extend rather than a second, near-duplicate minimal set.
@@ -149,7 +147,6 @@ const ENTRY_DETAIL_EXTRA_COLUMNS = [
   'status_raw',
   'admin_head_id',
   'zone_id',
-  'cost_center_id',
   'remark',
   'settles_entry_id',
   'is_void',
@@ -362,4 +359,49 @@ export async function fetchAllMatchingIds(
   }
 
   return { ids, truncated }
+}
+
+/**
+ * Every row matching the current filters, for the vendor-grouped view
+ * (2026-10-05) — vendor totals have to cover the whole match set, not just
+ * one page of it. Same keyset batch loop as fetchAllMatchingIds / the CSV
+ * export, with the same 20,000-row safety cap (the documented scale is
+ * 1,000–10,000 entries per event).
+ */
+export async function fetchAllMatchingRows(
+  supabase: SupabaseClient,
+  filters: EntriesFilters,
+  opts?: { batchSize?: number; maxRows?: number }
+): Promise<{ rows: EntryEnriched[]; truncated: boolean }> {
+  const batchSize = opts?.batchSize ?? 1000
+  const maxRows = opts?.maxRows ?? 20000
+  const rows: EntryEnriched[] = []
+  let cursor: number | null = null
+  let truncated = false
+
+  for (;;) {
+    let query = applyEntriesFilters(
+      supabase.from('v_entry_enriched').select(ENTRIES_SELECT) as unknown as EntriesQueryBuilder,
+      filters
+    )
+      .order('id', { ascending: false })
+      .limit(batchSize)
+    if (cursor !== null) query = query.lt('id', cursor)
+
+    const { data, error } = await query
+    if (error) throw error
+    const batch = (data ?? []) as EntryEnriched[]
+    if (batch.length === 0) break
+
+    rows.push(...batch)
+    cursor = batch[batch.length - 1]!.id
+
+    if (batch.length < batchSize) break
+    if (rows.length >= maxRows) {
+      truncated = true
+      break
+    }
+  }
+
+  return { rows, truncated }
 }

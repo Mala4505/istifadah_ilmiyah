@@ -27,11 +27,15 @@ const SORTABLE_COLUMNS = new Set<ColumnKey>([
   'main_number',
   'budget_head_short_label',
   'document_count',
+  'department_name',
+  'admin_head_name',
+  'zone_name',
+  'invoice_number',
 ])
 
 // Columns whose natural first-click direction is descending — newest date,
 // biggest amount, most documents first (§3.2).
-const DESCENDING_FIRST = new Set<SortColumn>(['date', 'amount', 'document_count'])
+export const DESCENDING_FIRST = new Set<SortColumn>(['date', 'amount', 'document_count'])
 
 export function EntriesTable({
   rows,
@@ -172,7 +176,7 @@ export function EntriesTable({
   )
 }
 
-function renderCell(row: EntryEnriched, key: ColumnKey) {
+export function renderCell(row: EntryEnriched, key: ColumnKey) {
   switch (key) {
     case 'type':
       return <Badge variant="outline">{TYPE_LABELS[row.type] ?? row.type}</Badge>
@@ -188,13 +192,11 @@ function renderCell(row: EntryEnriched, key: ColumnKey) {
     case 'department_name':
       return row.department_name ?? '—'
     case 'budget_head_short_label':
-      return row.budget_head_short_label ?? row.budget_head_raw_label ?? '—'
+      return row.budget_head_short_label ?? '—'
     case 'admin_head_name':
       return row.admin_head_name ?? <span className="text-muted-foreground">unassigned</span>
     case 'zone_name':
       return row.zone_name ?? <span className="text-muted-foreground">unassigned</span>
-    case 'cost_center_name':
-      return row.cost_center_name ?? <span className="text-muted-foreground">unassigned</span>
     case 'vendor_display_name':
       return row.vendor_display_name ?? row.vendor_raw ?? '—'
     case 'invoice_number':

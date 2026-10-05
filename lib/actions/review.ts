@@ -188,7 +188,9 @@ async function resolveOrCreateVendorForVerifiedName(
 /**
  * Save (`Enter` per field, `Cmd/Ctrl-Enter` for the whole document). Calls
  * the atomic RPC from 20260813000002_verify_document_extraction.sql -- one
- * transaction writes every `_verified` column AND the rate_reference rows,
+ * transaction writes every `_verified` column AND the rate_reference rows
+ * (replacing any earlier rows for the same line items on a re-save, so a bill
+ * saved twice is not counted twice -- 20261005075123),
  * which a sequence of plain `.update()`/`.insert()` calls cannot guarantee.
  */
 export async function saveVerification(input: SaveVerificationInput): Promise<SaveVerificationResult> {
@@ -866,8 +868,8 @@ async function learnVendorAliasesFromAttach(params: {
  * Cmd/Ctrl-Enter save as everything else (§7's "all three stages commit on
  * the same save" -- see review-workspace.tsx's handleSave). Deliberately
  * NOT saveEntryEnrichment (lib/actions/entry-enrichment.ts): that action
- * unconditionally overwrites cost_center_id and remark on every call, and
- * this screen never touches either -- reusing it would silently clobber
+ * unconditionally overwrites remark on every call, and this screen never
+ * touches it -- reusing it would silently clobber
  * whatever an entry's detail page had set.
  */
 export async function saveEntryClassification(input: {
@@ -1423,6 +1425,91 @@ export async function reExtractPage(input: {
       error: logRawError('review.reExtractPage', err instanceof Error ? err.message : String(err)),
     }
   }
+}
+
+export type CreateManualBillResult = { ok: true; documentExtractionId: number } | { ok: false; error: string }
+
+/**
+ * 2026-10-05: "Enter manually" for a page that is NOT skipped but that no bill
+ * covers (review-workspace.tsx's unassigned-page panel) -- e.g. a bill page
+ * the model classified as financial but never produced a bill for. Without
+ * this the reviewer could see the page but had nowhere to type its data; the
+ * only option was a paid OCR re-run. Creates an empty single-page bill (every
+ * `_ocr` column null) on that page so the normal review form opens blank.
+ *
+ * Admin client, same as reExtractPage above: document_extraction has no
+ * INSERT policy (rows are normally only written by the extraction pipeline).
+ * Visibility is still checked first through the session client, so a
+ * non-superadmin admin can only add a bill to a PDF assigned to them.
+ */
+export async function createManualBillForPage(input: {
+  sourceDocumentId: number
+  pageNumber: number
+}): Promise<CreateManualBillResult> {
+  if (!Number.isInteger(input.sourceDocumentId) || !Number.isInteger(input.pageNumber)) {
+    return { ok: false, error: 'Invalid document or page number.' }
+  }
+
+  const staff = await getStaffContext()
+  if (!staff) return { ok: false, error: 'You must be signed in.' }
+  if (!staff.isActive) return { ok: false, error: 'Your account is pending activation.' }
+  if (!isAdminOrAbove(staff.role)) {
+    return { ok: false, error: 'Adding a bill is an admin action.' }
+  }
+
+  const supabase = await createClient()
+  const { data: visiblePage, error: visibleError } = await supabase
+    .from('document_page')
+    .select('page_number, is_financial_document')
+    .eq('source_document_id', input.sourceDocumentId)
+    .eq('page_number', input.pageNumber)
+    .maybeSingle()
+  if (visibleError) return { ok: false, error: logRawError('review.createManualBillForPage', visibleError.message) }
+  if (!visiblePage) return { ok: false, error: 'This page is no longer visible to you.' }
+  if (visiblePage.is_financial_document === false) {
+    return { ok: false, error: 'This page is skipped. Include it first, then add the bill.' }
+  }
+
+  const admin = createAdminClient()
+  const { data: bills, error: billsError } = await admin
+    .from('document_extraction')
+    .select('id, bill_index, page_number_start, page_number_end')
+    .eq('source_document_id', input.sourceDocumentId)
+  if (billsError) return { ok: false, error: logRawError('review.createManualBillForPage', billsError.message) }
+
+  const existing = (bills ?? []).find(
+    (b) =>
+      b.page_number_start !== null &&
+      b.page_number_end !== null &&
+      (b.page_number_start as number) <= input.pageNumber &&
+      input.pageNumber <= (b.page_number_end as number)
+  )
+  // Someone else (or another tab) already added/OCR'd this page -- just open it.
+  if (existing) {
+    revalidatePath('/review')
+    return { ok: true, documentExtractionId: existing.id as number }
+  }
+
+  const nextBillIndex = (bills ?? []).reduce((max, b) => Math.max(max, b.bill_index as number), -1) + 1
+  const { data: created, error: insertError } = await admin
+    .from('document_extraction')
+    .insert({
+      source_document_id: input.sourceDocumentId,
+      bill_index: nextBillIndex,
+      page_number_start: input.pageNumber,
+      page_number_end: input.pageNumber,
+    })
+    .select('id')
+    .single()
+  if (insertError || !created) {
+    return {
+      ok: false,
+      error: logRawError('review.createManualBillForPage', insertError?.message ?? 'no row returned'),
+    }
+  }
+
+  revalidatePath('/review')
+  return { ok: true, documentExtractionId: created.id as number }
 }
 
 /**

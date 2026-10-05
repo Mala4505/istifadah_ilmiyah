@@ -15,15 +15,16 @@ import type { ZoneCategoryMatrixRow } from '@/lib/reports/surfaces/budget-struct
 
 // reporting-blueprint.md §8 Phase Six A-06 -- "What each site spends on.
 // Reveals sites whose mix is unlike every comparable site." Backed by
-// v_zone_category_matrix (20260903000013): one row per (zone, cost_center,
-// event). "Budget category" == the cost_center table.
+// v_zone_category_matrix: one row per (zone, budget category, event).
+// "Budget category" is derived from the budget head's short_label with
+// spelling variants merged; no budget head -> key null / 'No budget head'.
 //
 // The chart caps to the top MAX_CHART_CATEGORIES categories by total spend for
 // legibility; the full matrix stays in the table twin and the CSV.
 //
-// §6 fix #4: zone and category figures link to their filtered entries via the
-// params the entries explorer actually reads -- `/entries?zone=` and
-// `/entries?cc=` (NOT `zone_id` / `cost_center_id`).
+// §6 fix #4: zone figures link to their filtered entries via the param the
+// entries explorer actually reads -- `/entries?zone=` (NOT `zone_id`). Budget
+// category is plain text: a derived category has no entries filter.
 
 const MAX_CHART_CATEGORIES = 14
 
@@ -33,7 +34,7 @@ function zoneKey(r: ZoneCategoryMatrixRow): string {
   return r.zone_id != null ? `z${r.zone_id}` : 'znone'
 }
 function categoryKey(r: ZoneCategoryMatrixRow): string {
-  return r.cost_center_id != null ? `c${r.cost_center_id}` : 'cnone'
+  return r.budget_category_key ?? '__none__'
 }
 
 function mostConcentratedZone(rows: ZoneCategoryMatrixRow[]): ZoneAgg | null {
@@ -45,7 +46,7 @@ function mostConcentratedZone(rows: ZoneCategoryMatrixRow[]): ZoneAgg | null {
     agg.total += r.total_amount
     if (r.total_amount > agg.topCategoryAmount) {
       agg.topCategoryAmount = r.total_amount
-      agg.topCategory = r.cost_center_name
+      agg.topCategory = r.budget_category_label
     }
     byZone.set(key, agg)
   }
@@ -84,7 +85,7 @@ export function ZoneCategoryMatrixSection({
     const ck = categoryKey(r)
     zoneTotals.set(zk, { label: r.zone_name, total: (zoneTotals.get(zk)?.total ?? 0) + r.total_amount })
     categoryTotals.set(ck, {
-      label: r.cost_center_name,
+      label: r.budget_category_label,
       total: (categoryTotals.get(ck)?.total ?? 0) + r.total_amount,
     })
   }
@@ -99,10 +100,10 @@ export function ZoneCategoryMatrixSection({
   const shownCategoryLabels = new Set(chartCategories.map((c) => c.key))
 
   const chartCells: MatrixCell[] = rows
-    .filter((r) => shownCategoryLabels.has(r.cost_center_name) && r.total_amount > 0)
+    .filter((r) => shownCategoryLabels.has(r.budget_category_label) && r.total_amount > 0)
     .map((r) => ({
       rowKey: r.zone_name,
-      colKey: r.cost_center_name,
+      colKey: r.budget_category_label,
       amount: r.total_amount,
       entryCount: r.entry_count,
     }))
@@ -128,12 +129,10 @@ export function ZoneCategoryMatrixSection({
       key: 'category',
       header: 'Budget category',
       render: (r) =>
-        r.cost_center_id != null ? (
-          <Link href={`/entries?cc=${r.cost_center_id}`} className="text-primary underline-offset-2 hover:underline">
-            {r.cost_center_name}
-          </Link>
+        r.budget_category_key != null ? (
+          r.budget_category_label
         ) : (
-          <span className="text-muted-foreground">{r.cost_center_name}</span>
+          <span className="text-muted-foreground">{r.budget_category_label}</span>
         ),
     },
     { key: 'entries', header: 'Entries', align: 'right', render: (r) => formatNumber(r.entry_count) },
@@ -143,7 +142,7 @@ export function ZoneCategoryMatrixSection({
   const csv = toCsv(rows, [
     { header: 'Zone', value: (r) => r.zone_name },
     { header: 'Zone Number', value: (r) => r.zone_number },
-    { header: 'Budget Category', value: (r) => r.cost_center_name },
+    { header: 'Budget Category', value: (r) => r.budget_category_label },
     { header: 'Entries', value: (r) => r.entry_count },
     { header: 'Spend', value: (r) => r.total_amount },
   ])

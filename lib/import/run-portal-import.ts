@@ -1261,7 +1261,7 @@ export async function retryUnmatchedAuditRows(
  * portal actually shows current between .xlsx imports.
  *
  * Deliberately does not touch budget_head_id, department_id, budget_allocation
- * or any Hub-owned enrichment column (zone_id, admin_head_id, cost_center_id,
+ * or any Hub-owned enrichment column (zone_id, admin_head_id,
  * remark) — see this file's header.
  *
  * `tableKind` is the Dept-module tab this row's batch was scraped from

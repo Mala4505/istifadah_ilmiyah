@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Button } from '@/components/ui/button'
 import { createSubDepartment, updateSubDepartment } from '@/lib/actions/admin'
+import { useTableControls, type ControlColumn } from '@/components/ui/table-controls'
 import type { SubDepartmentRow } from '@/lib/settings/shape'
 
 export type DepartmentChoice = { id: number; name: string }
@@ -30,12 +31,36 @@ export function MasterSubDepartmentTable({
   subDepartments: SubDepartmentRow[]
   departments: DepartmentChoice[]
 }) {
+  const groups = departments.map((department) => ({
+    department,
+    rows: subDepartments.filter((row) => row.departmentId === department.id),
+  }))
+  const controls = useTableControls(groups, {
+    columns: GROUP_COLUMNS,
+    initialSort: { key: 'department', direction: 'asc' },
+    searchPlaceholder: 'Search departments or sub-departments…',
+    noun: 'department',
+  })
+
   return (
     <div className="flex flex-col gap-2">
-      {departments.map((department) => {
-        const rows = subDepartments.filter((row) => row.departmentId === department.id)
+      {controls.toolbar}
+      <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+        <span>Sort by</span>
+        <button type="button" className="hover:text-foreground" onClick={() => controls.toggleSort('department')}>
+          Department {controls.sort?.key === 'department' ? (controls.sort.direction === 'asc' ? '↑' : '↓') : ''}
+        </button>
+        <button type="button" className="hover:text-foreground" onClick={() => controls.toggleSort('count')}>
+          Sub-departments {controls.sort?.key === 'count' ? (controls.sort.direction === 'asc' ? '↑' : '↓') : ''}
+        </button>
+      </div>
+      {controls.pageItems.map(({ department, rows }) => {
         return (
-          <details key={department.id} className="rounded-md border border-border px-3 py-2">
+          <details
+            key={department.id}
+            open={controls.filtered || undefined}
+            className="rounded-md border border-border px-3 py-2"
+          >
             <summary className="cursor-pointer marker:text-muted-foreground">
               <span className="ml-1 inline-flex flex-wrap items-baseline gap-x-2 gap-y-1">
                 <span className="text-sm font-semibold">{department.name}</span>
@@ -64,9 +89,24 @@ export function MasterSubDepartmentTable({
           </details>
         )
       })}
+      {controls.pagination}
     </div>
   )
 }
+
+type DepartmentGroup = { department: DepartmentChoice; rows: SubDepartmentRow[] }
+
+const GROUP_COLUMNS: ControlColumn<DepartmentGroup>[] = [
+  { key: 'department', label: 'Department', value: (g) => g.department.name },
+  {
+    key: 'subs',
+    label: 'Sub-department',
+    value: (g) => g.rows.map((r) => r.name).join(' · '),
+    filter: false,
+    sortable: false,
+  },
+  { key: 'count', label: 'Sub-departments', value: (g) => g.rows.length, descendingFirst: true },
+]
 
 function SubDepartmentRowItem({ row }: { row: SubDepartmentRow }) {
   const router = useRouter()

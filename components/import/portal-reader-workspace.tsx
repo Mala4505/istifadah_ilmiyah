@@ -16,6 +16,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { useTableControls, type ControlColumn } from '@/components/ui/table-controls'
 
 type SourceSystem = 'departmental' | 'audit'
 
@@ -241,6 +242,15 @@ function PortalReaderMintCard({
  * on-screen table straight into the Hub, without ever storing a portal
  * password.
  */
+const TOKEN_COLUMNS: ControlColumn<TokenRow>[] = [
+  { key: 'portal', label: 'Portal', value: (t) => portalName(t.source_system) },
+  { key: 'label', label: 'Label', value: (t) => t.label ?? t.token_prefix + '…', filter: false },
+  { key: 'state', label: 'State', value: (t) => tokenState(t) },
+  { key: 'expires', label: 'Expires', value: (t) => formatDateTime(t.expires_at), sortValue: (t) => (t.expires_at ? new Date(t.expires_at).getTime() : null), filter: false, descendingFirst: true },
+  { key: 'used', label: 'Last used', value: (t) => formatDateTime(t.last_used_at), sortValue: (t) => (t.last_used_at ? new Date(t.last_used_at).getTime() : null), filter: false, descendingFirst: true },
+  { key: 'uses', label: 'Uses', value: (t) => t.use_count, descendingFirst: true },
+]
+
 export function PortalReaderWorkspace({ isAdmin, source, hubUrl }: Props) {
   const [tokens, setTokens] = useState<TokenRow[]>([])
   const [loadingTokens, setLoadingTokens] = useState(false)
@@ -267,6 +277,14 @@ export function PortalReaderWorkspace({ isAdmin, source, hubUrl }: Props) {
   useEffect(() => {
     void loadTokens()
   }, [loadTokens])
+
+  const tokenControls = useTableControls(tokens, {
+    columns: TOKEN_COLUMNS,
+    initialSort: { key: 'expires', direction: 'desc' },
+    initialPageSize: 10,
+    searchPlaceholder: 'Search reader links…',
+    noun: 'link',
+  })
 
   const liveTokenIds = useMemo(() => new Set(tokens.map((t) => t.id)), [tokens])
 
@@ -344,20 +362,22 @@ export function PortalReaderWorkspace({ isAdmin, source, hubUrl }: Props) {
           ) : tokens.length === 0 ? (
             <p className="text-sm text-muted-foreground">No reader links yet.</p>
           ) : (
+            <div className="flex flex-col gap-2">
+            {tokenControls.toolbar}
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Portal</TableHead>
-                  <TableHead>Label</TableHead>
-                  <TableHead>State</TableHead>
-                  <TableHead>Expires</TableHead>
-                  <TableHead>Last used</TableHead>
-                  <TableHead className="text-right">Uses</TableHead>
+                  {tokenControls.header('portal')}
+                  {tokenControls.header('label')}
+                  {tokenControls.header('state')}
+                  {tokenControls.header('expires')}
+                  {tokenControls.header('used')}
+                  {tokenControls.header('uses', { align: 'right' })}
                   <TableHead />
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {tokens.map((row) => (
+                {tokenControls.pageItems.map((row) => (
                   <TableRow key={row.id}>
                     <TableCell>{portalName(row.source_system)}</TableCell>
                     <TableCell>{row.label ?? row.token_prefix + '…'}</TableCell>
@@ -376,6 +396,8 @@ export function PortalReaderWorkspace({ isAdmin, source, hubUrl }: Props) {
                 ))}
               </TableBody>
             </Table>
+            {tokenControls.pagination}
+            </div>
           )}
         </div>
       </CardContent>

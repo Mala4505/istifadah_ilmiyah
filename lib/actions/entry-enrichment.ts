@@ -15,7 +15,6 @@ export interface SaveEntryEnrichmentInput {
   entryId: number
   adminHeadId: number | null
   zoneId: number | null
-  costCenterId: number | null
   remark: string | null
 }
 
@@ -27,7 +26,7 @@ export interface EntryActionResult {
 /**
  * Saves the Hub-owned enrichment fields on `entries` (MASTER-PLAN §3.4,
  * screen inventory row 4 in §5): `admin_head_id`, `zone_id`,
- * `cost_center_id`, `remark`. Never touched by import (§3.6's upsert
+ * `remark`. Never touched by import (§3.6's upsert
  * excludes these columns by construction) — this is the only writer.
  *
  * Uses the session-bound client (`lib/supabase/server.ts`), so
@@ -60,7 +59,6 @@ export async function saveEntryEnrichment(
     .update({
       admin_head_id: input.adminHeadId,
       zone_id: input.zoneId,
-      cost_center_id: input.costCenterId,
       remark: input.remark?.trim() || null,
     })
     .eq('id', entryId)
@@ -93,10 +91,10 @@ export interface SetEntryClassificationInput {
  * Narrow attach-time classification write (import-review-ux-checklist.md
  * 5.11/5.13, import-review-ux-plan.md §8 Z2): sets only `admin_head_id` /
  * `zone_id`. Deliberately NOT `saveEntryEnrichment` above — that function
- * always writes `cost_center_id` and `remark` too, which would silently
- * clear whatever cost center/remark the entry already had the moment a
- * reviewer accepts a zone/head suggestion while attaching a document, a
- * screen that never shows or asks about those other two fields. Same
+ * always writes `remark` too, which would silently clear whatever remark
+ * the entry already had the moment a reviewer accepts a zone/head
+ * suggestion while attaching a document, a screen that never shows or asks
+ * about that field. Same
  * session-bound-client RLS gate (`entries_update`,
  * private.is_admin_or_above(), department-scoped) and 0-rows-as-permission-
  * hint convention as the rest of this file.
@@ -150,7 +148,6 @@ export interface BulkSaveEntryEnrichmentInput {
   // A specific id = "set this column to that value for every selected entry."
   adminHeadId?: number | null
   zoneId?: number | null
-  costCenterId?: number | null
 }
 
 export interface BulkEntryActionResult {
@@ -161,8 +158,8 @@ export interface BulkEntryActionResult {
 }
 
 /**
- * Bulk-sets the Hub-owned enrichment fields (`admin_head_id`, `zone_id`,
- * `cost_center_id`) across many entries in one action (hub-refinements-plan.md
+ * Bulk-sets the Hub-owned enrichment fields (`admin_head_id`, `zone_id`)
+ * across many entries in one action (hub-refinements-plan.md
  * §5/§6: bulk assignment "in addition to" the single-entry form above, which
  * keeps working unchanged). This runs on the session-bound client, so
  * `entries_update` RLS (private.is_admin_or_above(), department-scoped via
@@ -171,12 +168,12 @@ export interface BulkEntryActionResult {
  * result (`updatedCount < requestedCount`) for the caller to toast.
  *
  * Field semantics deliberately differ from `saveEntryEnrichment` above: that
- * single-entry form always writes all three columns, because "leave this
+ * single-entry form always writes every column, because "leave this
  * dropdown at Not set" there is one human's explicit choice for one specific
  * row. Here, a field the caller doesn't include in the input at all means
  * "don't touch this column" for the whole batch — opt-in per field, not
  * all-or-nothing. Forcing every one of N selected entries (which may span
- * several departments/zones already) to the same cost center just because the
+ * several departments/zones already) to the same admin head just because the
  * caller also wanted to bulk-set zone would be a much stronger, more
  * destructive claim than the plan asked for. An explicit `null` is still
  * honoured as "clear this field for all of them" — a deliberate batch clear,
@@ -198,7 +195,6 @@ export async function bulkSaveEntryEnrichment(
   const patch: Record<string, number | null> = {}
   if (input.adminHeadId !== undefined) patch.admin_head_id = input.adminHeadId
   if (input.zoneId !== undefined) patch.zone_id = input.zoneId
-  if (input.costCenterId !== undefined) patch.cost_center_id = input.costCenterId
 
   if (Object.keys(patch).length === 0) {
     return { success: false, updatedCount: 0, requestedCount, error: 'Choose at least one field to set or clear.' }

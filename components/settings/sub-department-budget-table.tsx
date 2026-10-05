@@ -7,6 +7,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { updateSubDepartmentBudget } from '@/lib/actions/admin'
+import { useTableControls, type ControlColumn } from '@/components/ui/table-controls'
 
 export type SubDepartmentBudgetRow = {
   id: number
@@ -15,23 +16,38 @@ export type SubDepartmentBudgetRow = {
   budgetAmount: number | null
 }
 
+const BUDGET_COLUMNS: ControlColumn<SubDepartmentBudgetRow>[] = [
+  { key: 'department', label: 'Department', value: (r) => r.departmentName },
+  { key: 'name', label: 'Sub-department', value: (r) => r.name },
+  { key: 'amount', label: 'Budget amount', value: (r) => r.budgetAmount, descendingFirst: true },
+]
+
 export function SubDepartmentBudgetTable({ rows }: { rows: SubDepartmentBudgetRow[] }) {
+  const controls = useTableControls(rows, {
+    columns: BUDGET_COLUMNS,
+    searchPlaceholder: 'Search sub-departments…',
+    noun: 'sub-department',
+  })
   return (
-    <Table>
-      <TableHeader>
-        <TableRow>
-          <TableHead>Department</TableHead>
-          <TableHead>Sub-department</TableHead>
-          <TableHead className="w-[180px]">Budget amount</TableHead>
-          <TableHead className="text-right">Save</TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {rows.map((row) => (
-          <SubDepartmentBudgetRowItem key={row.id} row={row} />
-        ))}
-      </TableBody>
-    </Table>
+    <div className="flex flex-col gap-2">
+      {controls.toolbar}
+      <Table>
+        <TableHeader>
+          <TableRow>
+            {controls.header('department')}
+            {controls.header('name')}
+            {controls.header('amount', { className: 'w-[180px]' })}
+            <TableHead className="text-right">Save</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {controls.pageItems.map((row) => (
+            <SubDepartmentBudgetRowItem key={row.id} row={row} />
+          ))}
+        </TableBody>
+      </Table>
+      {controls.pagination}
+    </div>
   )
 }
 
