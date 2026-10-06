@@ -1,0 +1,5 @@
+Invoices/
+*.pdf
+node_modules/
+.next/
+tsconfig.tsbuildinfo
