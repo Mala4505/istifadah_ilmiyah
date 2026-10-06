@@ -1,6 +1,10 @@
 # Bill-exempt vendors (Burhani Hospital Surat)
 
 **Date:** 2026-09-29
+
+> **Status (2026-10-06): fully built.** Migration `20260929000001_vendor_bill_not_required.sql`,
+> `setVendorBillNotRequired` (`lib/actions/admin.ts`) behind the Settings → Vendors checkbox,
+> "Not needed" in the Entries Docs cell and "No bill needed" on entry detail.
 **Why:** Burhani Hospital Surat is reimbursed through the Sehhat batch (see the
 "Batch Print Summary" PDF, 12 entries / ₹68,660, 16–20 Sep 2026). The hospital
 issues no bills, so these entries will never have a PDF uploaded or an invoice

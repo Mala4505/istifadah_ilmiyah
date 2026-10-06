@@ -983,7 +983,119 @@ const LEAKED_TAG_PATTERN =
  * `illegible`/`blurry`/`unreadable`, which are strongly scan-condition-only.
  */
 const META_COMMENTARY_PATTERN =
-  /\b(?:illegible|unreadable|indecipherable|obscured|blurry|blurred|smudged|faded|unclear|out of focus|too (?:faint|dark|light|blurry) to read|poorly (?:scanned|photographed|lit|captured)|(?:heavily|partially) (?:skewed|rotated|cropped|obscured)|hard to (?:read|make out)|difficult to (?:read|discern|make out)|cannot be (?:read|determined|discerned|verified|made out)|not (?:clearly|fully) (?:visible|legible))\b|\b(?:appears|seems) to be\b|\blooks like\b/i
+  /\b(?:illegible|unreadable|indecipherable|obscured|blurry|blurred|smudged|faded|unclear|out of focus|too (?:faint|dark|light|blurry) to read|poorly (?:scanned|photographed|lit|captured)|(?:heavily|partially) (?:skewed|rotated|cropped|obscured)|hard to (?:read|make out)|difficult to (?:read|discern|make out)|cannot be (?:read|determined|discerned|verified|made out)|not (?:clearly|fully) (?:visible|legible)|not (?:legible|readable)|(?:partially|barely) (?:visible|legible|readable)|(?:unable|not able) to (?:read|determine|discern|decipher|make out|identify))\b|\b(?:appears|seems) to be\b|\blooks like\b|\bI (?:cannot|can't|can not|could not|couldn't|am unable to|was unable to|am not able to|am not sure)\b/i
+
+/**
+ * Finding 10.1, second half: commentary APPENDED to an otherwise genuine
+ * value, e.g. `"Sharma Traders (name partially visible)"`,
+ * `"INV-2231 (unclear)"`, `"27ABCDE1234F1Z5 [?]"`, `"Ram Stores. Note: name cut
+ * off at the edge"`, `"INV-88, possibly INV-89"`. Blanking the whole field
+ * (META_COMMENTARY_PATTERN's posture) would throw away a value the model DID
+ * read; instead the trailing annotation is stripped and the value is kept as
+ * read -- same "keep it, let the reviewer correct it" posture as a
+ * checksum-failing vendor GSTIN. Each such field is reported in
+ * `ExtractionSanitizeResult.annotationStrippedFields` so it can be flagged for
+ * review.
+ *
+ * Deliberately narrow:
+ * - TRAILING only, and only after whitespace/punctuation. A bracket in the
+ *   middle of a value (`"INV-[illegible]23"`, `"ABC [unclear] Traders"`) is a
+ *   placeholder for a missing character/word -- stripping it would fabricate
+ *   a different value, so it is left for META_COMMENTARY_PATTERN to blank.
+ * - Bracketed content must contain a hedge/legibility word (or be only `?`),
+ *   so real parentheticals -- `"Rice (Basmati)"`, `"ABC Traders (Prop. Ramesh
+ *   Shah)"`, `"Cement (50 kg)"` -- are untouched.
+ * - The unbracketed `Note:` and `, possibly ...` forms only run on short
+ *   identifier fields (IDENTIFIER_ANNOTATION_FIELDS), never `notes`,
+ *   `description` or `vendor_address`, where a printed "Note: goods once sold
+ *   will not be taken back" or "..., maybe ..." is real content.
+ */
+const ANNOTATION_HEDGE_WORDS =
+  'unclear|illegible|unreadable|indecipherable|uncertain|unsure|not sure|not clear|not legible|not readable|not (?:clearly |fully )?visible|' +
+  '(?:partially|partly|barely) (?:visible|legible|readable|cut off|obscured|hidden)|cut off|smudged|faded|blurry|blurred|obscured|' +
+  'possibly|probably|likely|maybe|perhaps|guess(?:ed)?|appears|seems|could be|might be|best (?:guess|reading)|' +
+  'hard to read|difficult to read|cannot read|can\'t read|unable to read|note\\s*:'
+
+const TRAILING_BRACKET_ANNOTATION = new RegExp(
+  `(?:^|\\s+)[(\\[]\\s*(?:\\?+|[^()\\[\\]]*?\\b(?:${ANNOTATION_HEDGE_WORDS})[^()\\[\\]]*)\\s*[)\\]]\\s*$`,
+  'i'
+)
+
+/** `"... Note: ..."` / `"...; possibly ..."` / `"... - unclear"` tails, identifier fields only. */
+// Separator required before the tail (punctuation + whitespace, or a spaced
+// dash) so a value that merely starts with/contains one of these words
+// ("Maybe Enterprises", "a.maybe@x.com") is never touched; only a value that
+// is wholly a `Note: ...` is matched from the start.
+const TRAILING_UNBRACKETED_ANNOTATION =
+  /(?:\s*[.,;:]\s+|\s+[-–—]\s+|\s+(?=\(?\s*note\s*:))(?:\(?\s*note\s*:|(?:or )?(?:possibly|probably|maybe|perhaps|could be|might be)\b|(?:unclear|illegible|uncertain|unreadable)\s*$)[\s\S]*$|^\s*\(?\s*note\s*:[\s\S]*$/i
+
+/** Fields where an unbracketed trailing `Note:`/hedge can only be commentary. */
+const IDENTIFIER_ANNOTATION_FIELDS: ReadonlySet<string> = new Set([
+  'vendor_name',
+  'vendor_gstin',
+  'vendor_phone',
+  'vendor_email',
+  'buyer_gstin',
+  'buyer_name',
+  'invoice_number',
+  'place_of_supply',
+  'hsn_sac_code',
+  'quantity_raw_text',
+  'unit',
+  'discount',
+])
+
+/**
+ * Strips trailing model annotations from one field value (see
+ * TRAILING_BRACKET_ANNOTATION above). Returns the value unchanged when there
+ * is nothing to strip; `''` when the whole value was annotation.
+ */
+export function stripTrailingAnnotations(value: string, field: string): string {
+  const unbracketed = IDENTIFIER_ANNOTATION_FIELDS.has(field)
+  let current = value.trim()
+  // Loop: `"INV-12 (unclear) [?]"` carries two trailing annotations.
+  for (let i = 0; i < 5; i++) {
+    let next = current.replace(TRAILING_BRACKET_ANNOTATION, '')
+    if (unbracketed) next = next.replace(TRAILING_UNBRACKETED_ANNOTATION, '')
+    next = next.trim()
+    if (next === current) break
+    current = next
+  }
+  return current === value.trim() ? value : current
+}
+
+/** Result of stripping annotations from one object's fields. */
+interface AnnotationStripResult<T> {
+  cleaned: T
+  /** Fields that kept a value after the annotation was removed. */
+  strippedFields: string[]
+  /** Fields that were ONLY annotation, now null. */
+  blankedFields: string[]
+}
+
+function stripAnnotationsFromFields<T extends Record<string, unknown>>(
+  obj: T,
+  fields: readonly (keyof T)[]
+): AnnotationStripResult<T> {
+  const cleaned: Record<string, unknown> = { ...obj }
+  const strippedFields: string[] = []
+  const blankedFields: string[] = []
+  for (const field of fields) {
+    const key = field as string
+    const value = cleaned[key]
+    if (typeof value !== 'string') continue
+    const stripped = stripTrailingAnnotations(value, key)
+    if (stripped === value) continue
+    if (stripped === '') {
+      cleaned[key] = null
+      blankedFields.push(key)
+    } else {
+      cleaned[key] = stripped
+      strippedFields.push(key)
+    }
+  }
+  return { cleaned: cleaned as T, strippedFields, blankedFields }
+}
 
 /** Result of scanning one object's string fields against a single pattern. */
 export interface FieldScanResult<T> {
@@ -1057,6 +1169,8 @@ export const HEADER_TEXT_FIELDS_TO_SANITIZE = [
   'vendor_phone',
   'vendor_email',
   'vendor_address',
+  'buyer_gstin',
+  'buyer_name',
   'invoice_number',
   'place_of_supply',
   'notes',
@@ -1085,8 +1199,14 @@ export interface ExtractionSanitizeResult {
   cleaned: ExtractionResponse
   /** Fields blanked by `LEAKED_TAG_PATTERN`, e.g. `['bills[0].vendor_phone']`. Empty when nothing matched. */
   leakedTagFields: string[]
-  /** Fields blanked by `META_COMMENTARY_PATTERN`, e.g. `['bills[0].notes']`. Empty when nothing matched. */
+  /** Fields blanked by `META_COMMENTARY_PATTERN` (or that held nothing but a
+   *  trailing annotation), e.g. `['bills[0].notes']`. Empty when nothing matched. */
   metaCommentaryFields: string[]
+  /** Fields whose value was KEPT but had a trailing model annotation stripped
+   *  (`"INV-2231 (unclear)"` -> `"INV-2231"`), e.g. `['bills[0].invoice_number']`.
+   *  Never overlaps the two lists above. The model doubted these values, so
+   *  they deserve a reviewer's look even though they were not blanked. */
+  annotationStrippedFields: string[]
 }
 
 /**
@@ -1109,39 +1229,44 @@ export interface ExtractionSanitizeResult {
 export function sanitizeExtractionResponse(extraction: ExtractionResponse): ExtractionSanitizeResult {
   const leakedTagFields: string[] = []
   const metaCommentaryFields: string[] = []
+  const annotationStrippedFields: string[] = []
+
+  // Order per object: leaked-tag blank -> trailing-annotation strip -> whole-
+  // field meta-commentary blank. Stripping before the meta pass is what lets
+  // "INV-2231 (unclear)" keep "INV-2231" instead of being blanked for the word
+  // "unclear". A stripped value that the meta pass then blanks anyway (the
+  // remainder is itself commentary) is reported only as meta-commentary.
+  function sanitizeObject<T extends Record<string, unknown>>(
+    obj: T,
+    fields: readonly (keyof T)[],
+    prefix: string
+  ): T {
+    const leaked = sanitizeLeakedTagSyntax(obj, fields)
+    leakedTagFields.push(...leaked.blankedFields.map((field) => `${prefix}${field}`))
+    const annotated = stripAnnotationsFromFields(leaked.cleaned, fields)
+    const meta = sanitizeMetaCommentary(annotated.cleaned, fields)
+    const metaBlanked = new Set([...annotated.blankedFields, ...meta.blankedFields])
+    metaCommentaryFields.push(
+      ...fields.map((f) => f as string).filter((f) => metaBlanked.has(f)).map((field) => `${prefix}${field}`)
+    )
+    annotationStrippedFields.push(
+      ...annotated.strippedFields.filter((f) => !metaBlanked.has(f)).map((field) => `${prefix}${field}`)
+    )
+    return meta.cleaned
+  }
 
   const bills = extraction.bills.map((bill, billIndex) => {
-    const leakedHeader = sanitizeLeakedTagSyntax(bill, HEADER_TEXT_FIELDS_TO_SANITIZE)
-    if (leakedHeader.blankedFields.length > 0) {
-      leakedTagFields.push(...leakedHeader.blankedFields.map((field) => `bills[${billIndex}].${field}`))
-    }
-    const metaHeader = sanitizeMetaCommentary(leakedHeader.cleaned, HEADER_TEXT_FIELDS_TO_SANITIZE)
-    if (metaHeader.blankedFields.length > 0) {
-      metaCommentaryFields.push(...metaHeader.blankedFields.map((field) => `bills[${billIndex}].${field}`))
-    }
-
-    const line_items = bill.line_items.map((item, lineIndex) => {
-      const leakedItem = sanitizeLeakedTagSyntax(item, LINE_ITEM_TEXT_FIELDS_TO_SANITIZE)
-      if (leakedItem.blankedFields.length > 0) {
-        leakedTagFields.push(
-          ...leakedItem.blankedFields.map((field) => `bills[${billIndex}].line_items[${lineIndex}].${field}`)
-        )
-      }
-      const metaItem = sanitizeMetaCommentary(leakedItem.cleaned, LINE_ITEM_TEXT_FIELDS_TO_SANITIZE)
-      if (metaItem.blankedFields.length > 0) {
-        metaCommentaryFields.push(
-          ...metaItem.blankedFields.map((field) => `bills[${billIndex}].line_items[${lineIndex}].${field}`)
-        )
-      }
-      return metaItem.cleaned
-    })
-
-    return { ...metaHeader.cleaned, line_items }
+    const header = sanitizeObject(bill, HEADER_TEXT_FIELDS_TO_SANITIZE, `bills[${billIndex}].`)
+    const line_items = bill.line_items.map((item, lineIndex) =>
+      sanitizeObject(item, LINE_ITEM_TEXT_FIELDS_TO_SANITIZE, `bills[${billIndex}].line_items[${lineIndex}].`)
+    )
+    return { ...header, line_items }
   })
 
   return {
     cleaned: { ...extraction, bills },
     leakedTagFields,
     metaCommentaryFields,
+    annotationStrippedFields,
   }
 }

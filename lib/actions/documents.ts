@@ -8,6 +8,7 @@ import { logRawError } from '@/lib/friendly-error'
 import { rankCandidates, type MatchableEntry } from '@/lib/matching'
 import { normalizeVendorName } from '@/lib/normalize'
 import { getSelectedEventId } from '@/lib/events/current'
+import { computeBillPosition } from '@/lib/review/bill-position'
 import type { CandidateEntryView } from '@/components/documents/types'
 
 /**
@@ -502,6 +503,7 @@ export interface DocumentViewDetail {
   documentExtractionId: number
   originalFilename: string
   pageCount: number | null
+  /** 0-based, contiguous rank among this PDF's bills (display as billIndex + 1). */
   billIndex: number
   billCount: number
   verifiedAt: string | null
@@ -582,6 +584,10 @@ export async function getDocumentViewDetail(
     )
   }
   const extraction = extractions.find((e) => linkedBillIds.has(e.id as number)) ?? extractions[0]!
+  const billPosition = computeBillPosition(
+    extractions.map((e) => ({ id: e.id as number, billIndex: e.bill_index as number })),
+    extraction.id as number
+  )
 
   const { data: lineItemsData, error: lineItemsError } = await supabase
     .from('document_extraction_line_item')
@@ -602,8 +608,10 @@ export async function getDocumentViewDetail(
       documentExtractionId: extraction.id as number,
       originalFilename: sourceDoc.original_filename as string,
       pageCount: sourceDoc.page_count as number | null,
-      billIndex: extraction.bill_index as number,
-      billCount: extractions.length,
+      // §2.2: contiguous 0-based rank among ALL of this PDF's bills, not the
+      // raw (possibly gappy) bill_index -- see lib/review/bill-position.ts.
+      billIndex: billPosition.index,
+      billCount: billPosition.count,
       verifiedAt: extraction.verified_at as string | null,
       vendorName: (extraction.vendor_name_verified ?? extraction.vendor_name_ocr) as string | null,
       vendorGstin: (extraction.vendor_gstin_verified ?? extraction.vendor_gstin_ocr) as string | null,

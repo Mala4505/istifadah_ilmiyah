@@ -2,6 +2,8 @@
 
 **Status:** Tradeoffs only. Nothing built, nothing decided. Written 2026-08-22 at the user's request.
 
+> **Status (2026-10-06).** Superseded: option **C** (GitHub Actions as a genuine executor) is built. Option **A** (chunked continuation) was built and then rolled back on 2026-10-06 by decision, because with the 20-page upload cap and the ~10-minute GitHub worker run a PDF finishes well inside one run. Revisit it only if the page cap is raised a lot. `.github/workflows/cron-tick.yml` has been deleted; `.github/workflows/worker.yml` now runs `worker/index.ts` as a GitHub Actions job (fired by `repository_dispatch` from `lib/jobs/trigger-worker.ts` on upload, plus a sparse schedule and a manual button — setup in `job-worker-github-actions.md`). `INGEST_INLINE_EXTRACTION` defaults to `false`. §0 and §0.1 below describe the 2026-08-22 state.
+
 **2026-09-05 note:** the deployment tier was confirmed as Vercel Hobby (performance-remediation-plan.md 3.5), which changes §1's math — the platform kills any function at 10s regardless of its declared `maxDuration`, so the "15s wall clock" 8-page sample below was already being truncated by the platform, not just approaching a 60s ceiling. `INGEST_INLINE_EXTRACTION` now defaults to `false` (see `import-review-ux-plan.md` §15's supersession note and `lib/env.server.ts`) rather than the `true` this doc's §0.1 describes as current.
 
 Companion to [`event-scoping-and-review-fixes-plan.md`](./event-scoping-and-review-fixes-plan.md). This doc exists because the punch-list plan sequenced "move extraction to the background worker" as high priority, and investigating *which* worker turned up a wrong assumption worth correcting before any work starts.
@@ -9,6 +11,8 @@ Companion to [`event-scoping-and-review-fixes-plan.md`](./event-scoping-and-revi
 ---
 
 ## 0. The correction: GitHub Actions is a scheduler, not a worker
+
+> **2026-10-06: historical.** `cron-tick.yml` no longer exists. It was replaced by `.github/workflows/worker.yml`, which runs the handler code itself inside the Actions job (no Vercel wall clock) — i.e. GitHub Actions *is* now the worker. Its schedule trigger keeps the retry role described below.
 
 `.github/workflows/cron-tick.yml` looks like a background worker and is not one. Its entire job step is:
 
@@ -26,6 +30,8 @@ Two consequences:
 What it *is* good for, and should be kept for: it is the only thing that ever retries a failed or abandoned job. Before it existed, nothing called `/api/jobs/tick` at all. Keep it regardless of which option below is chosen.
 
 ## 0.1 The other correction: instant start is already built
+
+> **2026-10-06: historical.** `INGEST_INLINE_EXTRACTION` now defaults to `false`; instant start comes from the upload firing a `repository_dispatch` to the worker workflow instead.
 
 `INGEST_INLINE_EXTRACTION=true` (default) makes `app/api/documents/ingest/route.ts` run this document's own extraction job synchronously before responding. Page 1 reaches Claude a second or two after the file lands.
 

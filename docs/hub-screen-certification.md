@@ -8,6 +8,10 @@
 
 Companion artifact (same content, presentation form): "Hub Screen Certification".
 
+> **Status (2026-10-06).** Waves 1–4 are built. Added 2026-10-06 (uncommitted): Entries sticky-header fix (4.3, `entries-table.tsx`); multi-select **Status** and **Department** filters (4.11 — `components/ui/multi-select-combobox.tsx`, `filter-bar.tsx`, `types.ts`, `query.ts`), with the old `ast` URL param read as an alias of `st`; macOS `event.code` fallback for Alt/Option shortcuts (`lib/shortcuts/config.ts`).
+> **Superseded by user decision:** 3.7 Entries status chips (built, then deliberately removed 2026-09-30 — commits `29df65c` / `b42c8d2`); every Hub-status sort/filter/display item (Hub status removed app-wide, commit `f908b90`, 2026-09-28). Exceptions has severity chips; per-status chips were not added (would need a full fetch).
+> **Still not built (decision items, §9):** a Review queue drawer, and skipping items claimed by others.
+
 ---
 
 ## 0. How this document is organised
@@ -323,6 +327,8 @@ Adopt on Documents and Exceptions (no sorting at all today), and extend Entries'
 
 ### 3.7 — Status-count tiles above Entries and Exceptions [M]
 
+> **2026-10-06: superseded.** Built, then deliberately removed by the user on 2026-09-30 (commits `29df65c` / `b42c8d2`). Exceptions keeps its severity chips; per-status chips were not added there (would need a full fetch).
+
 `v_entry_status_counts` already exposes `status`, `audit_status` and `hub_status`, and the Dashboard already consumes it (`app/(app)/page.tsx:103`). Nothing on Entries reads it, so this is a **wiring job, not backend work**. Render a compact chip row where each chip applies its own filter.
 
 This closes the outstanding status-count-tiles item from the 2026-08-17 walkthrough, on the screens where it is most useful. See `docs/hub-refinements-plan.md`.
@@ -344,6 +350,8 @@ This closes the outstanding status-count-tiles item from the 2026-08-17 walkthro
 **Fix.** `useId()` + `htmlFor` in `Field`; `aria-label={\`Line ${index+1} ${columnName}\`}` on every table input.
 
 ### 4.3 — Fix the sticky headers [S]
+
+> **2026-10-06:** Entries sticky header fixed in `entries-table.tsx`.
 
 - **Entries:** `components/ui/table.tsx:15` sets `sticky top-0` on `TableHeader`, but `table.tsx:6` wraps every table in `overflow-auto` and `entries-table.tsx:60` adds a *second* `overflow-x-auto` wrapper. `position: sticky` resolves against the nearest scrolling ancestor, which has no height constraint — so it never scrolls vertically and the header scrolls away. Bound the wrapper's height (e.g. `max-h-[calc(100vh-20rem)] overflow-auto`), add `bg-card` to the `<th>` cells, and drop the redundant nested wrapper.
 - **Exceptions:** `exceptions-table.tsx:65` has no sticky positioning at all. On a long severity-grouped list only the group labels repeat while the column names scroll away.
@@ -397,6 +405,8 @@ This closes the outstanding status-count-tiles item from the 2026-08-17 walkthro
 | `optionsLoaded` is dead | `entries-explorer.tsx:121` | Delete |
 
 ### 4.11 — Multi-select filters and removable chips [M]
+
+> **2026-10-06:** built for Status and Department (`components/ui/multi-select-combobox.tsx`; `ast` read as an alias of `st`). Hub status no longer exists (removed `f908b90`).
 
 Every Entries filter is single-select `.eq()` (`query.ts:26-32`). For Status, Hub status and Department, switch to `.in()` with a `Combobox` (already in `components/ui/`) and comma-joined URL values. **This widens the filters; it removes none** — consistent with the standing decision that all 13 stay.
 

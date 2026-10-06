@@ -1,6 +1,6 @@
 # Review Page Layout Redesign — Plan
 
-**Status:** Design decisions locked from a 2026-08-21 walkthrough of `/review`. Items 1-9 and 12 are built and on `master`; see §0 for the rest. Companion artifact (visual mockups, four iterations from the raw current layout through the agreed final pass): [Review Page Redesign](https://claude.ai/code/artifact/c1ae9afa-e8c4-4232-b0e4-d58d84584098).
+**Status:** Design decisions locked from a 2026-08-21 walkthrough of `/review`. Items 1-9 and 12 are built and on `master`; see §0 for the rest. **Status (2026-10-06):** items 10 and 11 are built too — every item in §0 is now done. Companion artifact (visual mockups, four iterations from the raw current layout through the agreed final pass): [Review Page Redesign](https://claude.ai/code/artifact/c1ae9afa-e8c4-4232-b0e4-d58d84584098).
 
 ---
 
@@ -23,8 +23,8 @@
 | 7 | Simplify the suggested-match UI to one line; relabel the fallback control | Built | Small |
 | 8 | Footer: two labeled cards ("Bill math", "Compared to Entries") with plain-English captions | Built | Small |
 | 9 | Add `invoice_number` as a scored matching factor (real gap found — see §9) | Built — weighted factor, not an exact-match short-circuit | Unknown |
-| 10 | Vendor alias/correction memory to raise suggestion confidence over time | **Spec'd 2026-08-22 — see §10** | Medium |
-| 11 | Department-level budget-vs-actual (Excel-imported department budgets, not per budget_head) | **Spec'd 2026-08-22 — see §11** | Large |
+| 10 | Vendor alias/correction memory to raise suggestion confidence over time | **Built** — `vendor_alias` scoring in `lib/actions/documents.ts` (confirmed 2026-10-06; spec §10) | Medium |
+| 11 | Department-level budget-vs-actual (Excel-imported department budgets, not per budget_head) | **Built** — `v_department_budget_vs_actual` (migration `20260822000002`; sub-department view `20260825000006`) (confirmed 2026-10-06; spec §11) | Large |
 | 12 | GST recipient-compliance check (buyer GSTIN, buyer name, invoice number required when GST is charged) | **Done** — see §12 | Medium |
 
 ---

@@ -265,6 +265,7 @@ export async function persistExtractionPipelineResult(
     cleaned: extraction,
     leakedTagFields,
     metaCommentaryFields,
+    annotationStrippedFields,
   } = sanitizeExtractionResponse(final.extraction)
 
   // ---- document_page: the classification gate's per-page verdict (§8 point 3)
@@ -591,6 +592,32 @@ export async function persistExtractionPipelineResult(
             'be) rather than real content extracted from it, so the affected field(s) were left blank ' +
             'instead of written with that commentary. Enter the correct value manually on review.',
           dedup_key: `ocr_meta_commentary:${documentExtractionId}:${currentRunId}:${billIndex}`,
+        },
+        { onConflict: 'dedup_key' }
+      )
+    }
+
+    // Trailing-annotation strip (finding 10.1, second half): unlike the
+    // meta-commentary block above, these fields KEPT their value — only a
+    // trailing model note like "(unclear)" or "[?]" was removed — so the
+    // model itself was unsure of what it read. One low-severity row per bill
+    // naming every such field, so a reviewer checks them against the page.
+    // Reuses the existing 'not_clear' type (the review screen's "Not clear"
+    // flag) rather than adding a new exception_type and migration.
+    const billAnnotationStrippedFields = annotationStrippedFields.filter((field) =>
+      field.startsWith(`bills[${billIndex}].`)
+    )
+    if (billAnnotationStrippedFields.length > 0) {
+      await admin.from('reconciliation_exception').upsert(
+        {
+          document_extraction_id: documentExtractionId,
+          exception_type: 'not_clear',
+          severity: 'low',
+          description:
+            `The reader marked ${billAnnotationStrippedFields.join(', ')} as uncertain (a note such as ` +
+            '"(unclear)" followed the value). The note was removed and the value kept as read — check ' +
+            'these field(s) against the document before saving.',
+          dedup_key: `ocr_annotation_stripped:${documentExtractionId}:${currentRunId}:${billIndex}`,
         },
         { onConflict: 'dedup_key' }
       )

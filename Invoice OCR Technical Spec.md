@@ -3,6 +3,13 @@
 **Prepared for:** Istifadah Ilmiyah event finance/budgeting team
 **Purpose:** Hand-off spec for a developer to build an invoice upload → OCR → database → staff-verification web app
 
+> **Status (2026-10-06).** This is the **original hand-off spec**, kept for reference. The built system differs — see `MASTER-PLAN.md` for what actually exists:
+> - **Claude-only, Haiku by policy** — no Google Document AI / Path A (§2, §5); automatic Sonnet escalation is off.
+> - **Flagging is rule-based**, not an LLM pass: `lib/jobs/handlers/flags-run.ts` with rules in `lib/analytics/rules/` (§4.4's "Claude flag pass" was not built).
+> - **Table names differ** from §3 (e.g. `entries`, `vendor`, `reconciliation_exception`, `document_extraction`).
+> - The flag digest is **in-app** (weekly digest / board pack), not email.
+> - **Vendor clustering** (§4.5) is now proposed through the `v_vendor_cluster_candidate_edges` view and confirmed by staff in Settings → Vendors (migration `20261006110000`, not yet applied) — no auto-merge, as §4.5 asks.
+
 ---
 
 ## 1. Goals

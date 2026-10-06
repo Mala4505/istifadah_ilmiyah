@@ -509,6 +509,146 @@ describe('sanitizeExtractionResponse — meta-commentary backstop (finding 10.1)
     expect(cleaned.bills[0]?.vendor_phone).toBeNull()
     expect(cleaned.bills[0]?.notes).toBeNull()
   })
+
+  it.each([
+    ['I cannot read the amount on this bill.'],
+    ["I can't make out the vendor name."],
+    ['Vendor name not legible.'],
+    ['Unable to read the invoice number.'],
+    ['Name barely visible at the top edge.'],
+  ])('blanks additional first-person / legibility commentary: %s', (text) => {
+    const extraction = extractionWithLineItems({ notes: text })
+    const { cleaned, metaCommentaryFields, annotationStrippedFields } = sanitizeExtractionResponse(extraction)
+    expect(cleaned.bills[0]?.notes).toBeNull()
+    expect(metaCommentaryFields).toEqual(['bills[0].notes'])
+    expect(annotationStrippedFields).toEqual([])
+  })
+})
+
+describe('sanitizeExtractionResponse — trailing annotation strip (finding 10.1)', () => {
+  function bill(overrides: Record<string, unknown>, lineItem: Record<string, unknown> | null = null) {
+    return extractionResponseSchema.parse(
+      baseInput(
+        {},
+        {
+          ...overrides,
+          line_items: lineItem
+            ? [
+                {
+                  page_number: 1,
+                  line_order: 0,
+                  description: 'Chairs',
+                  hsn_sac_code: '9401',
+                  quantity: 4,
+                  quantity_raw_text: '4 nos',
+                  unit: 'NOS',
+                  rate: 500,
+                  discount: '',
+                  amount: 2000,
+                  ...lineItem,
+                },
+              ]
+            : [],
+        }
+      )
+    )
+  }
+
+  it.each([
+    ['invoice_number', 'INV-2231 (unclear)', 'INV-2231'],
+    ['invoice_number', 'INV-2231 [illegible]', 'INV-2231'],
+    ['invoice_number', 'INV-2231 (?)', 'INV-2231'],
+    ['invoice_number', 'INV-88, possibly INV-89', 'INV-88'],
+    ['invoice_number', 'INV-88 - unclear', 'INV-88'],
+    ['vendor_name', 'Sharma Traders (name partially visible)', 'Sharma Traders'],
+    ['vendor_name', 'Sharma Traders (appears to be Sharma; edge cut off)', 'Sharma Traders'],
+    ['vendor_name', 'Ram Stores. Note: name cut off at the edge', 'Ram Stores'],
+    ['vendor_name', 'Ram Stores Note: handwritten', 'Ram Stores'],
+    ['vendor_name', 'Ram Stores (unclear) [?]', 'Ram Stores'],
+    ['vendor_phone', '98250 12345 (last digit uncertain)', '98250 12345'],
+  ])('strips trailing annotation from %s: %s', (field, raw, expected) => {
+    const { cleaned, annotationStrippedFields, metaCommentaryFields } = sanitizeExtractionResponse(
+      bill({ [field]: raw })
+    )
+    expect((cleaned.bills[0] as Record<string, unknown>)[field]).toBe(expected)
+    expect(annotationStrippedFields).toEqual([`bills[0].${field}`])
+    expect(metaCommentaryFields).toEqual([])
+  })
+
+  it('keeps a checksum-failing vendor GSTIN as read, only dropping the annotation', () => {
+    // 24AAKCA3560A1Z8: last char wrong vs the valid 24AAKCA3560A1Z7. Must NOT be
+    // blanked -- the reviewer fixes the one character.
+    const { cleaned, annotationStrippedFields } = sanitizeExtractionResponse(
+      bill({ vendor_gstin: '24AAKCA3560A1Z8 (last character unclear)' })
+    )
+    expect(cleaned.bills[0]?.vendor_gstin).toBe('24AAKCA3560A1Z8')
+    expect(annotationStrippedFields).toEqual(['bills[0].vendor_gstin'])
+  })
+
+  it('strips a trailing annotation from a line-item description, tagged by line', () => {
+    const { cleaned, annotationStrippedFields } = sanitizeExtractionResponse(
+      bill({}, { description: 'Plastic chairs (brand illegible)' })
+    )
+    expect(cleaned.bills[0]?.line_items[0]?.description).toBe('Plastic chairs')
+    expect(annotationStrippedFields).toEqual(['bills[0].line_items[0].description'])
+  })
+
+  it.each([
+    ['vendor_name', '(unclear)'],
+    ['invoice_number', '[illegible]'],
+    ['vendor_name', 'Note: vendor name is not printed'],
+  ])('blanks %s when it is nothing but annotation: %s', (field, raw) => {
+    const { cleaned, metaCommentaryFields, annotationStrippedFields } = sanitizeExtractionResponse(
+      bill({ [field]: raw })
+    )
+    expect((cleaned.bills[0] as Record<string, unknown>)[field]).toBeNull()
+    expect(metaCommentaryFields).toEqual([`bills[0].${field}`])
+    expect(annotationStrippedFields).toEqual([])
+  })
+
+  it('does not strip a mid-value placeholder (would fabricate a different value) -- blanks instead', () => {
+    const { cleaned, metaCommentaryFields, annotationStrippedFields } = sanitizeExtractionResponse(
+      bill({ invoice_number: 'INV-[illegible]23' })
+    )
+    expect(cleaned.bills[0]?.invoice_number).toBeNull()
+    expect(metaCommentaryFields).toEqual(['bills[0].invoice_number'])
+    expect(annotationStrippedFields).toEqual([])
+  })
+
+  it.each([
+    ['vendor_name', 'ABC Traders (Prop. Ramesh Shah)'],
+    ['vendor_name', 'Maybe Enterprises'],
+    ['vendor_name', 'Most Likely Traders'],
+    ['vendor_email', 'a.maybe@example.com'],
+    ['invoice_number', '12'],
+    ['invoice_number', 'A1'],
+    ['vendor_address', 'Shop 4, Possibly Nagar, Surat'],
+    ['notes', 'Note: Goods once sold will not be taken back.'],
+    ['notes', 'Delivery by 5th, maybe earlier'],
+  ])('leaves genuine %s text untouched: %s', (field, raw) => {
+    const { cleaned, annotationStrippedFields, metaCommentaryFields } = sanitizeExtractionResponse(
+      bill({ [field]: raw })
+    )
+    expect((cleaned.bills[0] as Record<string, unknown>)[field]).toBe(raw)
+    expect(annotationStrippedFields).toEqual([])
+    expect(metaCommentaryFields).toEqual([])
+  })
+
+  it('leaves a genuine line-item parenthetical untouched', () => {
+    const { cleaned, annotationStrippedFields } = sanitizeExtractionResponse(
+      bill({}, { description: 'Rice (Basmati) 25 kg' })
+    )
+    expect(cleaned.bills[0]?.line_items[0]?.description).toBe('Rice (Basmati) 25 kg')
+    expect(annotationStrippedFields).toEqual([])
+  })
+
+  it('sanitizes buyer_name too', () => {
+    const { cleaned, annotationStrippedFields } = sanitizeExtractionResponse(
+      bill({ buyer_name: 'Anjuman Trust (partially visible)' })
+    )
+    expect(cleaned.bills[0]?.buyer_name).toBe('Anjuman Trust')
+    expect(annotationStrippedFields).toEqual(['bills[0].buyer_name'])
+  })
 })
 
 describe('extractionToolInputSchema — union-type parameter budget', () => {

@@ -8,6 +8,8 @@ Companion artifacts (same content, presentation form):
 - [Hub Deployment Readiness](https://claude.ai/code/artifact/8b3a8442-91f8-4b87-8e5e-b1b1904482bf) — pass 1, code/schema/data audit
 - [Hub Live UI Audit](https://claude.ai/code/artifact/72ac5043-ae1c-4b22-be6a-ba0344e5c2bb) — pass 2, signed-in walkthrough with screenshots
 
+> **Status (2026-10-06).** Shipped: 0.1, 0.3, 2.1, 2.2, 3.1, 3.3, 3.4, 4.1–4.3, 5.1, 6.1–6.3, 7.5, 8.2, Phase 9, 10.1, 10.2, 10.3. Added 2026-10-06 (uncommitted): **2.2** "Bill N of M" fixed via `lib/review/bill-position.ts` (and the bill-view modal's "Bill 0"); **10.1** sanitiser extended — `stripTrailingAnnotations` in `lib/extraction-schema.ts`, with stripped fields raised as a low-severity `not_clear` exception in `lib/jobs/handlers/extract.ts`. **Phase 11 page ceiling:** chunked extraction was built and then rolled back on 2026-10-06 by decision. The 20-page cap stays in place. **Still open:** 1.1 / 1.2 / 1.4 / 1.5 (ops/data), 5.2, 5.3 (optional), 7.7, 7.8 select-all, 8.1, and `COMMUNITY_GSTIN` as a list. **Superseded:** "Reviewers cannot add a vendor" — by decision, saving a review auto-creates an unconfirmed vendor from the name.
+
 ---
 
 ## 0. How this document is organised
@@ -165,6 +167,8 @@ document_extraction where source_document_id=16:
 **Done when.** Opening any bill of a multi-bill PDF shows that bill's first page, and stepping Prev/Next bill moves the PDF with it.
 
 ### 2.2 — "Bill 4 of 3 in this PDF"
+
+> **2026-10-06: fixed** — `lib/review/bill-position.ts` (also the bill-view modal's "Bill 0").
 
 **What.** An impossible counter, rendering right now. `bill_index` is the bill's **absolute** position in the document; `bill_count` comes from `v_review_queue`, which contains **only unverified** bills. Verify one bill of a four-bill PDF and the denominator drops to 3 while the numerators stay 1, 3, 4.
 
@@ -509,6 +513,8 @@ Measured (production build, local, warm):
 
 ### 10.1 — The model's commentary is landing in a data field
 
+> **2026-10-06: fixed** — `stripTrailingAnnotations` (`lib/extraction-schema.ts`); stripped fields become a low-severity `not_clear` exception (`lib/jobs/handlers/extract.ts`).
+
 **What.** One bill's Notes field contains: *"Document is partially rotated and heavily skewed; significant text is illegible or obscured. Bank of Baroda receipt/document with reference number 11100100253… This appears to be a bank receipt."* Its vendor was read as **"Bank of Baroda"** — the bank on a cheque, not a supplier. The page should have been classified `is_financial_document: false` with `skip_reason: bank_cheque`.
 
 Same class of problem as the leaked-tag-syntax guard already built: prose *about* the document is landing in a field meant for content *from* it.
@@ -556,8 +562,8 @@ No `pan_card`, no `id_document`, no `id_card`. Live data shows 4 pages classifie
 
 | Item | Blocker |
 |---|---|
-| **Reviewers cannot add a vendor** | No create-vendor action exists anywhere in the app — vendors are only auto-created by the Departmental import. Decide: add one to the Review picker, or confirm the rule is "every bill maps to an imported entry so the vendor always exists" and make the picker say so when a search finds nothing. |
-| **Page ceiling** | Measured: 8 pages ≈ 15 s, 20 ≈ 39 s, 28 ≈ 54 s against a 60 s limit. The 20-page cap keeps every upload safe with margin — but there's no room to raise it without either a longer request budget or resumable extraction. Needs one number: the largest bundle your team will realistically upload in a week. |
+| **Reviewers cannot add a vendor** — *superseded 2026-10-06: save auto-creates an unconfirmed vendor from the name* | No create-vendor action exists anywhere in the app — vendors are only auto-created by the Departmental import. Decide: add one to the Review picker, or confirm the rule is "every bill maps to an imported entry so the vendor always exists" and make the picker say so when a search finds nothing. |
+| **Page ceiling** — *2026-10-06: chunked extraction built then rolled back by decision; 20-page cap kept* | Measured: 8 pages ≈ 15 s, 20 ≈ 39 s, 28 ≈ 54 s against a 60 s limit. The 20-page cap keeps every upload safe with margin — but there's no room to raise it without either a longer request budget or resumable extraction. Needs one number: the largest bundle your team will realistically upload in a week. |
 | **Batch manifest — auto-split, tally, exact invoice linking** | `hub-refinements-plan.md` §7. Needs a design pass on the splitting algorithm before it can be scoped. |
 | **Reports special formatting** | Flagged twice across sessions, never specified. |
 | **`COMMUNITY_GSTIN` as a list** | Only relevant if more than one of your own GST IDs can appear as the buyer. |

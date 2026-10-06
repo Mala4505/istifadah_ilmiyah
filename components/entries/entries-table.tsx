@@ -71,9 +71,13 @@ export function EntriesTable({
 
   return (
     // Phase 5 §7.7 (docs/pre-deploy-findings-and-plan.md): contain wide
-    // content to a local horizontal scrollbar rather than pushing the page
-    // body past the viewport.
-    <div className="overflow-x-auto rounded-lg border border-border">
+    // content to a local scrollbar rather than pushing the page body past the
+    // viewport. §4.3: <Table> already wraps itself in an `overflow-auto` div,
+    // and that div is the scroll container the sticky <thead> resolves
+    // against -- so it is the one that gets the height bound (`[&>div]`),
+    // exactly as exceptions-table.tsx does. No second overflow wrapper here:
+    // a nested unbounded scroller is what kept the header from sticking.
+    <div className="rounded-lg border border-border [&>div]:max-h-[calc(100vh-16rem)]">
       <Table>
         <TableHeader>
           <TableRow>

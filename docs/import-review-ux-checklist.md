@@ -189,6 +189,7 @@ Closes the loop: one screen, one keystroke, document verified, entry connected a
 ### Z1 — Zone + head as stage 3 of a visible flow *(plan §8)*
 
 - [x] **5.5** New `StageProgress` component (`components/review/stage-progress.tsx`) renders **1 Verify → 2 Connect → 3 Classify**, done/current/blocked, above the match strip.
+  *(2026-10-06: `stage-progress.tsx` no longer exists — the three-stage UI is now part of `components/review/review-status-line.tsx`, which superseded it.)*
 - [x] **5.6** `loadDocumentDetail` fetches department-scoped `admin_head`/`zone` options (same pattern as `entries/[id]/page.tsx`), keyed off the matched entry's `department_id`.
 - [x] **5.7** Stage 3 sits below the match strip, disabled with "Match this bill to an entry first" until `entryId !== null`; options populate the moment a match lands.
 - [x] **5.8** New `saveEntryClassification` (`lib/actions/review.ts`) — deliberately **not** `saveEntryEnrichment`, which unconditionally overwrites `cost_center_id`/`remark` too. Rides the same `Cmd/Ctrl+Enter` as the rest of the form (`handleSave` calls it right after `saveVerification` when an entry is matched).

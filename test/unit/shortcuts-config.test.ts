@@ -82,6 +82,50 @@ describe('matchLineDigit', () => {
   })
 })
 
+describe('macOS Option combos (event.code fallback, §9)', () => {
+  it('matches Alt+R when macOS reports the composed "®" in event.key', () => {
+    const binding: ShortcutBinding = { key: 'r', alt: true }
+    expect(matchesBinding(fakeEvent({ key: '®', code: 'KeyR', altKey: true }), binding)).toBe(true)
+  })
+
+  it('matches Alt+E when macOS reports a dead key', () => {
+    const binding: ShortcutBinding = { key: 'e', alt: true }
+    expect(matchesBinding(fakeEvent({ key: 'Dead', code: 'KeyE', altKey: true }), binding)).toBe(true)
+  })
+
+  it('matches Alt+? from Option+Shift+/ ("¿")', () => {
+    const binding: ShortcutBinding = { key: '?', alt: true }
+    expect(
+      matchesBinding(fakeEvent({ key: '¿', code: 'Slash', altKey: true, shiftKey: true }), binding),
+    ).toBe(true)
+  })
+
+  it('matches Alt+\\ from Option+\\ ("«")', () => {
+    const binding: ShortcutBinding = { key: '\\', alt: true }
+    expect(matchesBinding(fakeEvent({ key: '«', code: 'Backslash', altKey: true }), binding)).toBe(true)
+  })
+
+  it('does not let the physical code override a real ASCII key (AZERTY Alt+Q on code KeyA)', () => {
+    const binding: ShortcutBinding = { key: 'a', alt: true }
+    expect(matchesBinding(fakeEvent({ key: 'q', code: 'KeyA', altKey: true }), binding)).toBe(false)
+  })
+
+  it('still requires Alt when falling back to the code', () => {
+    const binding: ShortcutBinding = { key: 'r', alt: true }
+    expect(matchesBinding(fakeEvent({ key: '®', code: 'KeyR', altKey: false }), binding)).toBe(false)
+  })
+
+  it('matchLineDigit reads Option+3 ("£") via the code', () => {
+    const binding: ShortcutBinding = { key: '', alt: true }
+    expect(matchLineDigit(fakeEvent({ key: '£', code: 'Digit3', altKey: true }), binding)).toBe(3)
+  })
+
+  it('matchLineDigit ignores Digit0 via the code', () => {
+    const binding: ShortcutBinding = { key: '', alt: true }
+    expect(matchLineDigit(fakeEvent({ key: 'º', code: 'Digit0', altKey: true }), binding)).toBeNull()
+  })
+})
+
 describe('resolveKeymap', () => {
   it('drops an override that is missing alt, falling back to the default', () => {
     const resolved = resolveKeymap({ openException: { key: 'x' } as ShortcutBinding })
