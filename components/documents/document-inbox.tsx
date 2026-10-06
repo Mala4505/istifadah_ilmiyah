@@ -707,7 +707,7 @@ export function DocumentInbox({
             </DialogTitle>
             <DialogDescription>
               This removes the uploaded PDF and everything extracted from it, and stops any extraction still queued
-              for it. It cannot be undone.
+              for it. Linked entries are kept — they just lose their link to this bill. It cannot be undone.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

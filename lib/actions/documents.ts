@@ -25,9 +25,12 @@ type ActionResult = { ok: true } | { ok: false; error: string }
 const PERMISSION_HINT =
   'This usually means a viewer role (reviewer/admin required), or the document is no longer visible to you.'
 
-/** Deletion is admin-only and refuses verified extractions, so its failures need their own hint. */
+/**
+ * Deletion is admin-only; a verified document can only be deleted by a
+ * superadmin (20261006140000), so its failures need their own hint.
+ */
 const DELETE_PERMISSION_HINT =
-  'Deleting needs the admin role, and a document whose extraction has already been verified cannot be deleted — cancel it instead.'
+  'Deleting needs the admin role, and a document that has already been reviewed can only be deleted by a superadmin. Its entries are always kept.'
 
 /**
  * Attaches one document to one entry (§3.8). The inverse of "no entry
@@ -285,7 +288,8 @@ export interface BulkDeleteResult {
  * (20260820000001) rather than `.delete()` from here, because delete is
  * revoked on every table in `public` (20260808000026) and stays revoked — the
  * RPC is the single gated entry point, and it enforces the admin check and the
- * refusal to delete a verified extraction.
+ * refusal to delete a verified extraction (lifted for superadmin by
+ * 20261006140000 — rows derived from the PDF go, entries stay).
  *
  * Storage is cleaned up here rather than in SQL, since Postgres cannot reach
  * the storage bucket. The RPC returns the `storage_path` it deleted precisely
