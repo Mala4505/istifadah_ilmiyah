@@ -55,7 +55,7 @@ async function loadDashboardData() {
   // v_review_queue, v_budget_vs_actual, import_batch, source_document, and
   // v_entry_status_counts. All five now filter the same way Reports'
   // loadReportsData does (app/(app)/reports/page.tsx) -- a plain
-  // `.eq('event_id', selectedEventId)`, not the OR-null form v_open_issues
+  // `.eq('event_id', eventIdFilter)`, not the OR-null form v_open_issues
   // needs, because each resolves event_id through a column that is `not
   // null` on its base table (entries/source_document/import_batch/
   // budget_allocation all got `event_id ... not null` in
@@ -64,13 +64,18 @@ async function loadDashboardData() {
   // a parallel migration (20260822000011_analytics_event_scoping.sql) landing
   // alongside this change -- filtering here assumes it exists.
   const selectedEventId = await getSelectedEventId()
+  // No resolvable event (e.g. an unauthenticated hit, or no `is_current` row)
+  // must not reach PostgREST as `event_id=eq.null` -- Postgres rejects that
+  // with 22P02 (invalid bigint "null"). Ids are positive identity values, so
+  // -1 matches nothing: empty results, zero counts, no error.
+  const eventIdFilter = selectedEventId ?? -1
 
   const [reviewQueueRes, openIssuesRes, budgetRes, importsRes, unmatchedDocsRes, profileRes, statusCountsRes] =
     await Promise.all([
       supabase
         .from('v_review_queue')
         .select('document_extraction_id', { count: 'exact', head: true })
-        .eq('event_id', selectedEventId),
+        .eq('event_id', eventIdFilter),
       selectedEventId === null
         ? supabase.from('v_open_issues').select('amount_at_risk, event_id').returns<OpenIssueRow[]>()
         : supabase
@@ -81,18 +86,18 @@ async function loadDashboardData() {
       supabase
         .from('v_budget_vs_actual')
         .select('budget_head_id, actual_amount, approved_amount, budget_status_note')
-        .eq('event_id', selectedEventId)
+        .eq('event_id', eventIdFilter)
         .returns<BudgetVsActualRow[]>(),
       supabase
         .from('import_batch')
         .select('id, row_count, mode, status')
-        .eq('event_id', selectedEventId)
+        .eq('event_id', eventIdFilter)
         .gte('started_at', startOfToday.toISOString())
         .returns<ImportBatchRow[]>(),
       supabase
         .from('source_document')
         .select('id', { count: 'exact', head: true })
-        .eq('event_id', selectedEventId)
+        .eq('event_id', eventIdFilter)
         .in('match_status', ['unmatched', 'suggested']),
       (async () => {
         const user = await getCachedUser()
@@ -103,7 +108,7 @@ async function loadDashboardData() {
       supabase
         .from('v_entry_status_counts')
         .select('dimension, status_id, status_code, status_label, sort_order, entry_count')
-        .eq('event_id', selectedEventId)
+        .eq('event_id', eventIdFilter)
         .returns<EntryStatusCountRow[]>(),
     ])
 

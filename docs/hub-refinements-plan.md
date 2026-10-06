@@ -2,6 +2,8 @@
 
 **Status:** Decisions locked from a 2026-08-17 review of the live app. **Nothing in this document is built yet** — this is the plan, not a change log. Two items are not implementation-ready (flagged in Outstanding). Companion artifact (stakeholder-facing walkthrough of the same ground): "Hub Walkthrough."
 
+> **Status (2026-10-06).** The "nothing built" line above is out of date. Items **1, 2, 4, 5 and 6 are built** (grouped filter bar with `FilterSection`s, sort-aware pagination in `components/entries/query.ts`, auto-retry of unmatched portal rows in `lib/import/`, OCR text sanitiser in `lib/extraction-schema.ts`, bulk zone/admin-head assignment). Still open: **7** (batch manifest — not implementation-ready) and **11** (reports special formatting — no spec). Note: Hub status was later removed app-wide (commit `f908b90`, 2026-09-28), so the "Hub status" filter/group references below are historical.
+
 ---
 
 ## Context
@@ -14,12 +16,12 @@ A walkthrough of the whole Hub — login to export — surfaced nine areas worth
 
 | # | Item | Status | Size |
 |---|---|---|---|
-| 1 | Group Entries filters into 4 labelled sections | To build | Small |
-| 2 | Add click-to-sort on Entries table columns | To build | Small |
-| 3 | Status-count summary as Dashboard tiles | To build | Small |
-| 4 | Auto-retry unmatched Audit-portal rows on later imports | To build | Small–Medium |
-| 5 | Sanitize leaked tool-call syntax from OCR text fields | To build | Small |
-| 6 | Bulk zone/admin-head assignment (in addition to single) | To build | Small–Medium |
+| 1 | Group Entries filters into 4 labelled sections | ✅ Built | Small |
+| 2 | Add click-to-sort on Entries table columns | ✅ Built | Small |
+| 3 | Status-count summary as Dashboard tiles | Superseded — Entries chips built then removed by user 2026-09-30 (see `hub-screen-certification.md` 3.7) | Small |
+| 4 | Auto-retry unmatched Audit-portal rows on later imports | ✅ Built | Small–Medium |
+| 5 | Sanitize leaked tool-call syntax from OCR text fields | ✅ Built (extended 2026-10-06: trailing annotations) | Small |
+| 6 | Bulk zone/admin-head assignment (in addition to single) | ✅ Built | Small–Medium |
 | 7 | Batch manifest: parse, auto-split, tally, near-exact linking | **Not implementation-ready** — needs more design | Large |
 | 8 | Own-GST-ID exclusion in OCR | **Already built** (2026-08-14) — needs re-test | — |
 | 9 | OCR keyboard shortcuts | Staying as-is, no change | — |

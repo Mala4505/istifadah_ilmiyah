@@ -3,6 +3,8 @@
 This is the regression-harness fixture described in MASTER-PLAN §9.1: 21
 entries, one per real invoice PDF in `Invoices/`.
 
+> **Status (2026-10-06).** `gold.json` now holds **25** entries, not 21. Only **2 are labeled** (`test1.pdf`, `test2.pdf`, hand-labeled); the other 23 are still `labeled: false`. The "21" counts below describe the original plan.
+
 **UPDATED 2026-08-13 (§17.22) — no more hand-typed JSON.** The plan
 originally had you editing this file directly (see "Manual labeling" below,
 kept for the ~10 blind entries only). Decided 2026-08-12: no in-app labeling

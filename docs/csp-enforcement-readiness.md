@@ -1,5 +1,7 @@
 # CSP Enforcement Readiness
 
+> **Status (2026-10-06).** Two things below are out of date: the `force-dynamic` fix is merged (`app/layout.tsx`), and pdf.js is now wired — `pdfjs-dist` is a dependency and `/documents` and `/review` have a real PDF viewer (no longer `ScreenStub`s). **Still open:** (1) re-test `worker-src` / `isEvalSupported: false` under enforced CSP now that the viewer exists; (2) the report-only burn-in in production; (3) flip `CSP_REPORT_ONLY=false`.
+
 Tested `CSP_REPORT_ONLY=false` (enforced CSP, per `middleware.ts` / MASTER-PLAN §4.4b)
 against a production build (`npm run build` + `next start -p 3117`, port 3000 was already
 occupied by another parallel agent's server) on 2026-08-10. Driven with a headless
@@ -14,7 +16,7 @@ Full page sweep, enforced CSP, with browser console + network monitoring:
 interactive check: typing into the `/login` ITS-number field and confirming the value
 lands in the DOM (proof React actually hydrated, not just that the HTML looked clean).
 
-pdf.js is **not wired up yet** — confirmed via `grep` (no `pdfjs-dist`, `workerSrc`, or
+*(2026-10-06: no longer true — see status note at top.)* pdf.js is **not wired up yet** — confirmed via `grep` (no `pdfjs-dist`, `workerSrc`, or
 `isEvalSupported` usage in any `.ts`/`.tsx` file) and the `documents`/`review` pages are
 still `ScreenStub` placeholders (Phase 1B work not landed). The `worker-src`/`img-src blob:`
 concerns §4.4b calls out for pdf.js don't apply yet — nothing to test there.

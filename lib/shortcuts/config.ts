@@ -29,7 +29,8 @@ export type ShortcutActionId =
   | 'saveAndNext'
 
 export interface ShortcutBinding {
-  /** Matched against KeyboardEvent.key (case-insensitive for letters). */
+  /** Matched against KeyboardEvent.key (case-insensitive for letters), with a
+   *  KeyboardEvent.code fallback for macOS Option combos (see keyFromCode). */
   key: string
   alt?: boolean
   shift?: boolean
@@ -198,7 +199,7 @@ export function matchesBinding(event: KeyboardEvent, binding: ShortcutBinding): 
   if (!binding.key) return false
   const key = event.key.length === 1 ? event.key.toLowerCase() : event.key
   const bindingKey = binding.key.length === 1 ? binding.key.toLowerCase() : binding.key
-  if (key !== bindingKey) return false
+  if (key !== bindingKey && keyFromCode(event) !== bindingKey) return false
   if (!!binding.alt !== event.altKey) return false
   // Punctuation keys ('?', '\\', '/') need Shift on some layouts and not
   // others; the key identity already disambiguates them, so Shift is not a
@@ -214,13 +215,52 @@ export function matchesBinding(event: KeyboardEvent, binding: ShortcutBinding): 
 /** For the jumpToLineDigit action: matches a top-row 1-9 press with the
  *  configured modifier, returning the 1-based line index or null. */
 export function matchLineDigit(event: KeyboardEvent, binding: ShortcutBinding): number | null {
-  if (!/^[1-9]$/.test(event.key)) return null
+  const digit = /^[1-9]$/.test(event.key) ? event.key : keyFromCode(event)
+  if (!digit || !/^[1-9]$/.test(digit)) return null
   if (!!binding.alt !== event.altKey) return null
   if (!!binding.shift !== event.shiftKey) return null
   const primaryModifierPressed = event.ctrlKey || event.metaKey
   const primaryModifierExpected = !!binding.ctrl || !!binding.meta
   if (primaryModifierExpected !== primaryModifierPressed) return null
-  return Number(event.key)
+  return Number(digit)
+}
+
+// Physical-key fallback for macOS (docs/hub-screen-certification.md §9): with
+// Option held, macOS reports the *composed* character in `event.key`
+// (Option+R -> '®', Option+2 -> '™', Option+E -> 'Dead'), so a key-identity
+// compare can never match an Alt binding there. `event.code` names the
+// physical key regardless of modifiers, so it recovers the intended key.
+//
+// Only consulted when `event.key` is NOT a plain printable ASCII character:
+// on a non-QWERTY layout (e.g. AZERTY) a real 'q' press sits on code 'KeyA',
+// and letting the code win there would fire the Alt+A action for Alt+Q.
+const CODE_PUNCTUATION: Record<string, { plain: string; shifted: string }> = {
+  Slash: { plain: '/', shifted: '?' },
+  Backslash: { plain: '\\', shifted: '|' },
+  Period: { plain: '.', shifted: '>' },
+  Comma: { plain: ',', shifted: '<' },
+  Semicolon: { plain: ';', shifted: ':' },
+  Quote: { plain: "'", shifted: '"' },
+  BracketLeft: { plain: '[', shifted: '{' },
+  BracketRight: { plain: ']', shifted: '}' },
+  Minus: { plain: '-', shifted: '_' },
+  Equal: { plain: '=', shifted: '+' },
+  Backquote: { plain: '`', shifted: '~' },
+}
+
+/** Lower-cased key recovered from `event.code`, or null when `event.key` is
+ *  already a usable printable ASCII character (or the code is unmapped). */
+export function keyFromCode(event: KeyboardEvent): string | null {
+  const key = event.key ?? ''
+  if (key.length === 1 && key >= ' ' && key <= '~') return null
+  const code = event.code ?? ''
+  const letter = /^Key([A-Z])$/.exec(code)
+  if (letter) return letter[1]!.toLowerCase()
+  const digit = /^Digit([0-9])$/.exec(code)
+  if (digit) return digit[1]!
+  const punct = CODE_PUNCTUATION[code]
+  if (punct) return event.shiftKey ? punct.shifted : punct.plain
+  return null
 }
 
 export function formatBinding(binding: ShortcutBinding): string {

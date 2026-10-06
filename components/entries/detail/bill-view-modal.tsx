@@ -95,7 +95,7 @@ export function BillViewModal({
         <DialogContent className="max-h-[85vh] max-w-3xl overflow-y-auto">
           <DialogTitle>{detail?.originalFilename ?? 'Bill details'}</DialogTitle>
           <DialogDescription>
-            {detail && detail.billCount > 1 ? `Bill ${detail.billIndex} of ${detail.billCount} in this PDF · ` : ''}
+            {detail && detail.billCount > 1 ? `Bill ${detail.billIndex + 1} of ${detail.billCount} in this PDF · ` : ''}
             Read-only — what was read from this bill{detail?.verifiedAt ? ', as verified on Review' : ''}.
           </DialogDescription>
 

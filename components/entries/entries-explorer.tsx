@@ -20,7 +20,7 @@ import { BulkEnrichmentDialog } from './bulk-enrichment-dialog'
 import { BulkVoidDialog } from './bulk-void-dialog'
 import { exportEntriesToCsv } from './csv-export'
 import { fetchEntriesPage, fetchAllMatchingIds, fetchAllMatchingRows, type PageCursor } from './query'
-import { ALL_COLUMNS, DEFAULT_FILTERS, DEFAULT_SORT, PAGE_SIZE } from './types'
+import { ALL_COLUMNS, DEFAULT_FILTERS, DEFAULT_SORT, PAGE_SIZE, parseMultiValue } from './types'
 import type { ColumnKey, EntriesFilters, EntriesSort, EntryEnriched, FilterOptions, SortColumn, SortDirection } from './types'
 import { NewEntryDialog } from './new-entry-dialog'
 import { isAdminOrAbove, type StaffRole } from '@/lib/auth/roles'
@@ -50,13 +50,22 @@ function searchParamsToFilters(sp: URLSearchParams): EntriesFilters {
   // The long `*_id` aliases are accepted too so the Reports drill-through links
   // (`/entries?department_id=…`, `?vendor_id=…`, …) land filtered rather than on
   // an unscoped list — the next filter change rewrites the URL to the short form.
+  //
+  // `dept` and `st` are multi-select (§4.11): comma-joined ids, a single id
+  // being the one-element case, so old single-value links still land right.
+  //
+  // `ast` (docs/hub-screen-certification.md §9) is the Dashboard status
+  // card's reserved "audit status" key. Audit status was merged into the one
+  // `status_id` column by 20260828000001_unify_entry_status.sql, so an
+  // `?ast=` link means the same thing as `?st=` and is read as its alias
+  // rather than silently dropped.
   return {
     type: sp.get('tp') ?? '',
-    department: sp.get('dept') ?? sp.get('department_id') ?? '',
+    department: parseMultiValue(sp.get('dept') ?? sp.get('department_id')).join(','),
     budgetHead: sp.get('bh') ?? sp.get('budget_head_id') ?? '',
     adminHead: sp.get('ahead') ?? sp.get('admin_head_id') ?? '',
     zone: sp.get('zone') ?? sp.get('zone_id') ?? '',
-    status: sp.get('st') ?? '',
+    status: parseMultiValue(sp.get('st') ?? sp.get('ast')).join(','),
     dateFrom: sp.get('from') ?? '',
     dateTo: sp.get('to') ?? '',
     vendor: sp.get('vendor') ?? '',
@@ -376,9 +385,14 @@ export function EntriesExplorer({
   useEffect(() => {
     const incoming = searchParams.toString()
     if (incoming === serializeState(filters, sort)) return
+    const nextFilters = searchParamsToFilters(searchParams)
+    const nextSort = searchParamsToSort(searchParams)
+    // An alias-only difference (`?ast=3` vs `st=3`, `department_id=` vs
+    // `dept=`) parses to the state already loaded — no refetch needed.
+    if (filtersEqual(nextFilters, filters) && sortsEqual(nextSort, sort)) return
     skipUrlWriteRef.current = true // the fetch effect below will refetch; don't re-push
-    setFilters(searchParamsToFilters(searchParams))
-    setSort(searchParamsToSort(searchParams))
+    setFilters(nextFilters)
+    setSort(nextSort)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams])
 

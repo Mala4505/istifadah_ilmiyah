@@ -2,6 +2,8 @@
 
 **Status:** Decisions locked from a 2026-08-22 walkthrough. Phase 0 (schema drift) and Phase 1 (§2.2/§2.3/§2.4/§2.10/§2.11) are done. Everything else is spec'd, not built.
 
+> **Status (2026-10-06).** The line above is stale: **everything in this doc is built** — §1 event scoping (migrations `20260822000005`–`…07`, `…11`; `lib/events/current.ts`), §2.1–§2.12, and Phase 5. The only thing outstanding is the user's **live-browser confirmation of §2.1 and §2.5–§2.9**.
+
 Companion to [`review-page-layout-redesign-plan.md`](./review-page-layout-redesign-plan.md), which this supersedes for the items it touches (that doc's §4 status line, §10 vendor alias).
 
 ---
@@ -206,6 +208,6 @@ The learning half of the fix already exists and works: `learnVendorAliasesFromAt
 | **3** | §2.1 Settings screen + per-user keymap | **Built 2026-08-22**, migration pushed; pending user's live-browser confirmation |
 | **4** | §2.5 manual skip/unskip · §2.6 scoped re-OCR | **Built 2026-08-22**, migration pushed; typecheck/lint/test/build all clean; pending user's live-browser confirmation |
 | **5** | §2.4 steps redesign + vendor consolidation UI | **Already done** — found built while scoping this phase, doc was stale |
-| **6** | §1 event scoping | Schema, every query, imports, exports, reporting |
+| **6** | §1 event scoping | Schema, every query, imports, exports, reporting — **Built** (migrations `20260822000005`–`…07`, `…11`; confirmed 2026-10-06) |
 
 Phase 6 is larger than phases 1–5 combined. It is sequenced last deliberately: every fix above is confined to `/review` and stays valid under event scoping, whereas doing §1 first would mean rewriting each of those screens twice.

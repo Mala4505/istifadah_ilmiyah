@@ -3,6 +3,9 @@ import { VendorMergePanel } from '@/components/admin/vendor-merge-panel'
 import { requireSettingsSuperadminPage } from '@/lib/settings/page-gate'
 import { SettingsSubPage, SettingsGatedState } from '@/components/settings/settings-sub-page'
 import { loadVendors } from '@/lib/settings/loadVendors'
+import { loadVendorClusterProposals } from '@/lib/settings/loadVendorClusterProposals'
+import { VendorClusterProposals } from '@/components/admin/vendor-cluster-proposals'
+import { FriendlyError } from '@/components/ui/friendly-error'
 
 /**
  * /settings/vendors -- the former `<TabsContent value="vendors">` of the
@@ -19,10 +22,31 @@ export default async function SettingsVendorsPage() {
     return <SettingsGatedState reason={gate.reason} title="Vendors" />
   }
 
-  const { vendors } = await loadVendors(gate.supabase)
+  const [{ vendors }, clusterProposals] = await Promise.all([
+    loadVendors(gate.supabase),
+    loadVendorClusterProposals(gate.supabase),
+  ])
 
   return (
     <SettingsSubPage title="Vendors">
+      <Card>
+        <CardHeader>
+          <CardTitle>Possible duplicate vendors</CardTitle>
+          <CardDescription>
+            Vendors that look like the same business: same GSTIN, same PAN inside the GSTIN, same phone,
+            same or very similar address, or a near-identical name. These are suggestions only — nothing
+            is merged until you pick the main vendor and confirm. &quot;Not the same&quot; hides the group
+            for good.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {clusterProposals.error ? (
+            <FriendlyError message={clusterProposals.error} />
+          ) : (
+            <VendorClusterProposals proposals={clusterProposals.proposals} />
+          )}
+        </CardContent>
+      </Card>
       <Card>
         <CardHeader>
           <CardTitle>Vendors</CardTitle>

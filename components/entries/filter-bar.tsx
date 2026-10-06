@@ -8,7 +8,15 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Checkbox } from '@/components/ui/checkbox'
 import { SelectNative } from '@/components/ui/select-native'
-import { DEFAULT_FILTERS, type EntriesFilters, type FilterOptions } from './types'
+import { MultiSelectCombobox } from '@/components/ui/multi-select-combobox'
+import {
+  DEFAULT_FILTERS,
+  joinMultiValue,
+  parseMultiValue,
+  toggleMultiValue,
+  type EntriesFilters,
+  type FilterOptions,
+} from './types'
 
 /**
  * A single removable filter chip. `key` names the field(s) a click on the X
@@ -17,7 +25,9 @@ import { DEFAULT_FILTERS, type EntriesFilters, type FilterOptions } from './type
  * (docs/hub-screen-certification.md §4.11).
  */
 export type FilterChipKey = keyof EntriesFilters | 'dateRange'
-export type FilterChip = { label: string; key: FilterChipKey }
+/** `value` is set only on a multi-select chip (status / department): its X
+ *  then removes just that one id, leaving the rest of the selection. */
+export type FilterChip = { label: string; key: FilterChipKey; value?: string }
 
 /**
  * How many of the filters differ from their default. Exported so
@@ -29,8 +39,12 @@ export function countActiveFilters(filters: EntriesFilters): number {
 }
 
 /** Resets the field(s) a chip's X targets, returning the partial patch. */
-export function clearFilterChip(key: FilterChipKey): Partial<EntriesFilters> {
+export function clearFilterChip(chip: FilterChip, filters: EntriesFilters): Partial<EntriesFilters> {
+  const { key, value } = chip
   if (key === 'dateRange') return { dateFrom: '', dateTo: '' }
+  if (value !== undefined && (key === 'status' || key === 'department')) {
+    return { [key]: joinMultiValue(parseMultiValue(filters[key]).filter((id) => id !== value)) }
+  }
   return { [key]: DEFAULT_FILTERS[key] } as Partial<EntriesFilters>
 }
 
@@ -71,6 +85,8 @@ export function FilterBar({
   // was selected.
   const adminHeadOptions = options.adminHeads
   const zoneOptions = options.zones
+  const statusOptions = options.statuses.map((s) => ({ value: String(s.id), label: s.label }))
+  const departmentOptions = options.departments.map((d) => ({ value: String(d.id), label: d.label }))
 
   const activeCount = countActiveFilters(filters)
   const chips = buildFilterSummary(filters, options)
@@ -79,13 +95,13 @@ export function FilterBar({
     chips.length > 0 ? (
       <div className="flex flex-wrap items-center gap-1.5">
         {chips.map((chip) => (
-          <Badge key={chip.key} variant="secondary" className="gap-1 pr-1 font-normal">
+          <Badge key={`${chip.key}:${chip.value ?? ''}`} variant="secondary" className="gap-1 pr-1 font-normal">
             <span className="truncate">{chip.label}</span>
             <button
               type="button"
               aria-label={`Remove filter: ${chip.label}`}
               className="rounded-full p-0.5 hover:bg-foreground/10"
-              onClick={() => onChange(clearFilterChip(chip.key))}
+              onClick={() => onChange(clearFilterChip(chip, filters))}
             >
               <X className="h-3 w-3" aria-hidden="true" />
             </button>
@@ -153,31 +169,29 @@ export function FilterBar({
         </Field>
 
         <Field label="Status" htmlFor="filter-status">
-          <SelectNative id="filter-status" value={filters.status} onChange={(e) => onChange({ status: e.target.value })}>
-            <option value="">Any status</option>
-            {options.statuses.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.label}
-              </option>
-            ))}
-          </SelectNative>
+          <MultiSelectCombobox
+            id="filter-status"
+            options={statusOptions}
+            values={parseMultiValue(filters.status)}
+            onToggle={(id) => onChange({ status: toggleMultiValue(filters.status, id) })}
+            onClear={() => onChange({ status: '' })}
+            placeholder="Any status"
+            searchPlaceholder="Search statuses…"
+          />
         </Field>
       </FilterSection>
 
       <FilterSection label="Classification">
         <Field label="Department" htmlFor="filter-department">
-          <SelectNative
+          <MultiSelectCombobox
             id="filter-department"
-            value={filters.department}
-            onChange={(e) => onChange({ department: e.target.value, adminHead: '', zone: '' })}
-          >
-            <option value="">All departments</option>
-            {options.departments.map((d) => (
-              <option key={d.id} value={d.id}>
-                {d.label}
-              </option>
-            ))}
-          </SelectNative>
+            options={departmentOptions}
+            values={parseMultiValue(filters.department)}
+            onToggle={(id) => onChange({ department: toggleMultiValue(filters.department, id), adminHead: '', zone: '' })}
+            onClear={() => onChange({ department: '', adminHead: '', zone: '' })}
+            placeholder="All departments"
+            searchPlaceholder="Search departments…"
+          />
         </Field>
 
         <Field label="Budget head" htmlFor="filter-budget-head">
@@ -321,9 +335,17 @@ export function buildFilterSummary(filters: EntriesFilters, options: FilterOptio
     parts.push({ key, label: match ? match.label : fallback })
   }
 
+  // Multi-select (§4.11): one chip per selected id, each removing only itself.
+  const pushMulti = (key: 'status' | 'department', value: string, opts: { id: number; label: string }[], fallback: string) => {
+    for (const id of parseMultiValue(value)) {
+      const match = opts.find((o) => String(o.id) === id)
+      parts.push({ key, value: id, label: match ? match.label : fallback })
+    }
+  }
+
   pushSelect('type', filters.type, options.entryTypes, 'Type')
-  pushSelect('status', filters.status, options.statuses, 'Status')
-  pushSelect('department', filters.department, options.departments, 'Department')
+  pushMulti('status', filters.status, options.statuses, 'Status')
+  pushMulti('department', filters.department, options.departments, 'Department')
   pushSelect('budgetHead', filters.budgetHead, options.budgetHeads, 'Budget head')
   pushSelect('adminHead', filters.adminHead, options.adminHeads, 'Admin head')
   pushSelect('zone', filters.zone, options.zones, 'Zone')
@@ -339,6 +361,7 @@ export function buildFilterSummary(filters: EntriesFilters, options: FilterOptio
   if (filters.hasDocument) parts.push({ key: 'hasDocument', label: 'Has document' })
   if (filters.awaitingDocument) parts.push({ key: 'awaitingDocument', label: 'Awaiting bill' })
   if (filters.showVoided) parts.push({ key: 'showVoided', label: 'Show voided' })
+  if (filters.unassignedBudgetHead) parts.push({ key: 'unassignedBudgetHead', label: 'No budget head' })
 
   return parts
 }

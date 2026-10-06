@@ -21,6 +21,7 @@ import { getBillEntryVariance } from '@/lib/documents/entry-bill-variance'
 import { friendlyErrorMessage } from '@/lib/friendly-error'
 import { isAdminOrAbove, isSuperadmin } from '@/lib/auth/roles'
 import { computeMatchCandidates } from '@/lib/review/match-candidates'
+import { computeBillPosition } from '@/lib/review/bill-position'
 import { loadStaffKeymapPreferences } from '@/lib/shortcuts/load'
 import { formatBinding } from '@/lib/shortcuts/config'
 import { getSelectedEventId } from '@/lib/events/current'
@@ -839,6 +840,10 @@ async function loadDocumentDetail(
       pageNumberEnd: b.page_number_end as number | null,
     }))
     .sort((a, b) => a.billIndex - b.billIndex)
+  const billPosition = computeBillPosition(
+    siblingBills.map((b) => ({ id: b.documentExtractionId, billIndex: b.billIndex })),
+    documentExtractionId
+  )
 
   const lineItems: LineItemDetail[] = (lineItemsRes.data ?? []).map((li) => ({
     id: li.id as number,
@@ -955,12 +960,13 @@ async function loadDocumentDetail(
   return {
     sourceDocumentId,
     documentExtractionId,
-    billIndex: extraction.bill_index as number,
-    // 2.2: sourced from the sibling-bills query above -- every
-    // document_extraction row for this source_document_id, unfiltered by
-    // verified_at, so the denominator never drops as bills get verified
-    // (unlike v_review_queue's bill_count, which excludes verified bills).
-    billCount: (siblingBillsRes.data ?? []).length,
+    // 2.2: numerator AND denominator both come from the sibling-bills query
+    // above -- every document_extraction row for this source_document_id,
+    // unfiltered by verified_at (unlike v_review_queue's bill_count). The
+    // numerator is this bill's contiguous rank in that list, not the raw
+    // bill_index, which can have gaps (skipped single-page bills are deleted).
+    billIndex: billPosition.index,
+    billCount: billPosition.count,
     pageNumberStart: extraction.page_number_start as number | null,
     pageNumberEnd: extraction.page_number_end as number | null,
     originalFilename: sourceDoc.original_filename as string,

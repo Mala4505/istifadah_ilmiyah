@@ -2,6 +2,8 @@
 
 **Status:** Implemented and verified 2026-08-14. `npm run typecheck` clean, `npm run test` 245/245 passing.
 
+> **Status (2026-10-06).** The one outstanding item — the worker deployment decision — is resolved: `.github/workflows/worker.yml` runs `worker/index.ts` as a GitHub Actions job, fired on upload via `repository_dispatch` (`lib/jobs/trigger-worker.ts`) with a sparse schedule as retry net. See `job-worker-github-actions.md`. Nothing on this plan remains open.
+
 This is the final record of the seven-item improvement pass: the original plan, what actually got built (including deviations found during implementation), the fixes made during verification, and the further-simplification ideas raised alongside the [redesign artifact](https://claude.ai/code/artifact/9c050e9e-9d4f-4169-8315-63ee2443a06c). It supersedes the working plan doc it was built from.
 
 ---
@@ -22,7 +24,7 @@ Newly-uploaded PDFs never showed up for review while older ones did. Root cause:
 This can't be fixed from inside the codebase alone — it's an operational fact about what's running. What the plan shipped instead (folded into items 3+5):
 1. Make the real state (uploaded/stuck vs. processing vs. processed/failed, and how long it's been stuck) visible in the Documents inbox.
 2. A manual **"Extract now"** action that bypasses the job queue entirely.
-3. **Still open with the user:** whether `npm run worker` needs to run persistently (or via Task Scheduler) — a deployment decision, not a code change.
+3. **Still open with the user:** *(resolved 2026-10-06 — GitHub Actions worker, see status note)* whether `npm run worker` needs to run persistently (or via Task Scheduler) — a deployment decision, not a code change.
 
 ---
 
@@ -126,4 +128,4 @@ This can't be fixed from inside the codebase alone — it's an operational fact 
 - ~~Set the real `COMMUNITY_GSTIN` value~~ — done.
 - ~~Link the Supabase project~~ — done.
 - ~~Apply the two new migrations~~ — done via `npx supabase db push --linked`; `20260814000010` and `20260814000011` are both confirmed applied remotely (`npx supabase migration list` shows every local migration matched on the remote).
-- **Confirm the worker deployment decision** from the item-3 diagnosis: whether `npm run worker` needs to run persistently, or gets wired to a scheduler, so newly-uploaded PDFs keep reaching `/review` without relying on manual "Extract now" clicks. This is the only item left on this plan.
+- ~~**Confirm the worker deployment decision**~~ *(resolved 2026-10-06: `.github/workflows/worker.yml`)* from the item-3 diagnosis: whether `npm run worker` needs to run persistently, or gets wired to a scheduler, so newly-uploaded PDFs keep reaching `/review` without relying on manual "Extract now" clicks. This is the only item left on this plan.

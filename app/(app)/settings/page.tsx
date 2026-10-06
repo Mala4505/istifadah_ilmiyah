@@ -4,6 +4,7 @@ import { isAdminOrAbove, isSuperadmin } from '@/lib/auth/roles'
 import { getAllEvents, getSelectedEventId } from '@/lib/events/current'
 import { getMaxUploadPages } from '@/lib/upload-limits'
 import { getSettingsSummary } from '@/lib/settings/summary'
+import { getItemCatalogCounts } from '@/lib/settings/loadItemCatalog'
 import { Card, CardContent } from '@/components/ui/card'
 import { EventSwitcher } from '@/components/app-shell/event-switcher'
 import { UploadLimitSettings } from '@/components/settings/upload-limit-settings'
@@ -77,11 +78,12 @@ export default async function SettingsPage() {
   const superadmin = isSuperadmin(staff.role)
   const supabase = await createClient()
 
-  const [events, selectedEventId, maxUploadPages, summary] = await Promise.all([
+  const [events, selectedEventId, maxUploadPages, summary, itemCatalogCounts] = await Promise.all([
     getAllEvents(),
     getSelectedEventId(),
     getMaxUploadPages(supabase),
     superadmin ? getSettingsSummary(supabase) : Promise.resolve(null),
+    superadmin ? getItemCatalogCounts(supabase) : Promise.resolve(null),
   ])
 
   const pastEventCount = summary?.pastEventCount ?? events.filter((event) => !event.isCurrent).length
@@ -136,6 +138,23 @@ export default async function SettingsPage() {
           description:
             'Departments, sub-departments, zones, admin heads and the Hub status lifecycle. Rename, deactivate, or add a row directly here -- zones and admin heads are org-wide reference data, not tied to any department.',
           href: '/settings/master-data',
+        },
+      ],
+    })
+  }
+
+  // Superadmin-only, like the other structural sub-routes. The sub-route
+  // re-runs its own gate.
+  if (itemCatalogCounts) {
+    groups.push({
+      heading: 'Catalog',
+      rows: [
+        {
+          label: 'Item catalog',
+          sublabel: `${itemCatalogCounts.itemCount} items · ${itemCatalogCounts.unconfirmedItems} unconfirmed`,
+          description:
+            'Bill lines are auto-mapped onto catalog items and families by exact wording. Confirm or correct those mappings here -- rename, move to another family, merge duplicates -- and assign lines that matched nothing.',
+          href: '/settings/item-catalog',
         },
       ],
     })

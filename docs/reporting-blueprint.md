@@ -26,6 +26,19 @@ those are operational concerns and do not belong on the analysis surface.
 
 **Companion artifact:** https://claude.ai/code/artifact/9928e2ec-a738-402a-b42d-a751ae8e71eb
 
+> **Status (2026-10-06).** All six build phases (§8) are built: the five surfaces live under
+> `app/(app)/reports` (Brief, Budget, Vendors, Integrity, plus Explore on the index), section
+> wiring in `lib/reports/surface-sections.ts`, the scheduled board pack (`lib/jobs/handlers/board-pack.ts`,
+> `lib/reports/board-pack/`), and Present mode. Still open:
+> - **§7 inputs have schema but no entry UI** (migration `20260903000018`). `approval_threshold` is
+>   only *read* (D-09 runs in concentration mode while it is empty); `zone.people_served` is unused,
+>   so **A-05 cost per head is missing**; `vendor.pan` / `supplier_category` are unused, so **B-02
+>   depth is missing**.
+> - §6 items 1, 3 and 4 have not been individually verified section by section; **8 of 55 sections
+>   still lack an insight sentence** (§6 item 3).
+> - Dead components, no longer imported: `components/reports/sections/department-budget.tsx`,
+>   `components/reports/sections/sub-department-budget.tsx`.
+
 ---
 
 ## Contents
@@ -340,6 +353,9 @@ stay. These are the changes that move the page from competent to persuasive.
 Six inputs unlock reports that are otherwise impossible. Each is small — a lookup table or a
 single column — and each has a named report waiting on it.
 
+*2026-10-06: the approval-threshold, zone and vendor columns now exist in the schema
+(`20260903000018`) but have no entry screen and hold no data — see the status note at the top.*
+
 | Missing input | Unlocks | Effort |
 |---|---|---|
 | **Approval thresholds** — the rupee limits at which sign-off escalates | D-09 threshold splitting | One small table |
@@ -360,6 +376,8 @@ single column — and each has a named report waiting on it.
 
 Ordered so something presentable exists early, and so each phase reuses the views built by the
 one before.
+
+*2026-10-06: all six phases built; §7 input entry UI is the outstanding remainder of Phase Six.*
 
 | Phase | Ships | Result |
 |---|---|---|

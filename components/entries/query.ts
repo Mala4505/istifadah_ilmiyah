@@ -1,5 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { ALL_COLUMNS, type ColumnKey, type EntriesFilters, type EntriesSort, type EntryEnriched } from './types'
+import { ALL_COLUMNS, parseMultiValue, type ColumnKey, type EntriesFilters, type EntriesSort, type EntryEnriched } from './types'
 
 // The exact builder type returned by `supabase.from('v_entry_enriched').select(...)`
 // (and still returned after `.order()`/`.limit()`, since both are typed to return
@@ -23,13 +23,21 @@ export type EntriesQueryBuilder = ReturnType<ReturnType<SupabaseClient['from']>[
 export function applyEntriesFilters<T extends EntriesQueryBuilder>(query: T, filters: EntriesFilters): T {
   let q = query
 
+  // §4.11: Department and Status are multi-select — one id stays a plain
+  // `.eq()`, several become `.in()`.
+  const applyMulti = (column: string, value: string) => {
+    const ids = parseMultiValue(value)
+    if (ids.length === 1) q = q.eq(column, ids[0]!)
+    else if (ids.length > 1) q = q.in(column, ids)
+  }
+
   if (filters.type) q = q.eq('type', filters.type)
-  if (filters.department) q = q.eq('department_id', filters.department)
+  applyMulti('department_id', filters.department)
   if (filters.budgetHead) q = q.eq('budget_head_id', filters.budgetHead)
   if (filters.adminHead) q = q.eq('admin_head_id', filters.adminHead)
   if (filters.zone) q = q.eq('zone_id', filters.zone)
   if (filters.vendorId) q = q.eq('vendor_id', filters.vendorId)
-  if (filters.status) q = q.eq('status_id', filters.status)
+  applyMulti('status_id', filters.status)
   if (filters.dateFrom) q = q.gte('date', filters.dateFrom)
   if (filters.dateTo) q = q.lte('date', filters.dateTo)
   if (filters.vendor.trim()) {

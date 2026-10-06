@@ -1,5 +1,7 @@
 # Supabase DB Advisors Report
 
+> **Status (2026-10-06).** The listed migration-fixable items are resolved: `pg_trgm` moved to the `extensions` schema (`20260813000007_pg_trgm_to_extensions_schema.sql`), and `20260822000012_housekeeping_cleanup.sql` dropped the orphan `budget_head_master` / `budget_head_category` tables (and their unindexed FKs), indexed `entries.audit_status_changed_by`, and revoked `rls_auto_enable()` from `anon`/`authenticated`. **Unverified:** leaked-password protection (a dashboard toggle, not a migration). **Advisors have not been re-run since 2026-08-10** — re-run before relying on this report.
+
 Ran `npx supabase db advisors --linked --type all --level info` against the linked
 production project (`lkxdlnqviftoicjcbswz`, Istifadah_Ilmiyah) on 2026-08-10. Read-only
 check — no `db push`, `db reset`, or migrations were run. Findings below are cross-checked

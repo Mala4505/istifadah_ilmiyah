@@ -69,10 +69,12 @@ export type FilterOptions = {
 // search params so a filtered view is shareable/bookmarkable.
 export type EntriesFilters = {
   type: string
+  /** Comma-joined department ids — multi-select (§4.11, see parseMultiValue). */
   department: string
   budgetHead: string
   adminHead: string
   zone: string
+  /** Comma-joined status ids — multi-select (§4.11, see parseMultiValue). */
   status: string
   dateFrom: string
   dateTo: string
@@ -119,6 +121,35 @@ export const DEFAULT_FILTERS: EntriesFilters = {
   awaitingDocument: false,
   showVoided: false,
   unassignedBudgetHead: false,
+}
+
+/**
+ * Multi-select filters (docs/hub-screen-certification.md §4.11): `status` and
+ * `department` hold a comma-joined list of numeric ids ("3,7"), which is
+ * also exactly how they travel in the URL (`st=3,7`, `dept=3,7`). A single
+ * id is just a one-element list, so every pre-existing single-value link
+ * (`?st=3`, the Dashboard status cards, Reports drill-throughs) keeps
+ * working unchanged. Non-numeric parts are dropped so a hand-edited URL can
+ * never reach PostgREST's `in.(...)` grammar with junk in it.
+ */
+export function parseMultiValue(value: string | null | undefined): string[] {
+  if (!value) return []
+  const out: string[] = []
+  for (const part of value.split(',')) {
+    const id = part.trim()
+    if (/^\d+$/.test(id) && !out.includes(id)) out.push(id)
+  }
+  return out
+}
+
+export function joinMultiValue(ids: readonly string[]): string {
+  return parseMultiValue(ids.join(',')).join(',')
+}
+
+/** Adds `id` to a comma-joined multi value, or removes it when present. */
+export function toggleMultiValue(value: string, id: string): string {
+  const ids = parseMultiValue(value)
+  return joinMultiValue(ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id])
 }
 
 export const PAGE_SIZE = 50
