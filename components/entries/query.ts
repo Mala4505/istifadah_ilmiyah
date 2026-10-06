@@ -116,7 +116,7 @@ const COLUMN_KEY_SELECT_COLUMNS: Record<ColumnKey, readonly string[]> = {
 // and the showVoided filter (query.ts's applyEntriesFilters) — neither is
 // itself a column the chooser lets a user hide.
 export const ENTRIES_LIST_SELECT_COLUMNS: readonly string[] = Array.from(
-  new Set<string>(['id', 'is_void', ...ALL_COLUMNS.flatMap((c) => COLUMN_KEY_SELECT_COLUMNS[c.key])])
+  new Set<string>(['id', 'is_void', 'vendor_id', 'vendor_raw', ...ALL_COLUMNS.flatMap((c) => COLUMN_KEY_SELECT_COLUMNS[c.key])])
 )
 
 export const ENTRIES_SELECT = ENTRIES_LIST_SELECT_COLUMNS.join(', ')

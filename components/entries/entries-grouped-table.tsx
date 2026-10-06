@@ -171,7 +171,7 @@ export function EntriesGroupedTable({
     const map = new Map<string, VendorGroup>()
     for (const r of rows) {
       const label = r.vendor_display_name ?? r.vendor_raw ?? 'No vendor'
-      const key = r.vendor_id !== null ? `v${r.vendor_id}` : `raw:${label.toLowerCase()}`
+      const key = r.vendor_id != null ? `v${r.vendor_id}` : `raw:${label.toLowerCase()}`
       let g = map.get(key)
       if (!g) {
         g = { key, label, rows: [], amount: 0, documents: 0, latestDate: null }
