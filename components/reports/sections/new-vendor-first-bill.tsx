@@ -8,7 +8,7 @@ import { AttentionPill } from '@/components/reports/severity-badge'
 import {
   NewVendorFirstBillChart,
   type NewVendorFirstBillPoint,
-} from '@/components/reports/charts/new-vendor-first-bill-chart'
+} from '@/components/reports/charts/lazy'
 import { toCsv } from '@/lib/reports/csv'
 import { formatDate, formatINR, formatNumber } from '@/lib/reports/format'
 import type { CompareBasis } from '@/lib/reports/compare-basis'

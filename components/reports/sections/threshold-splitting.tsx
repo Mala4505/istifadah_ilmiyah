@@ -7,7 +7,7 @@ import { KpiTile } from '@/components/reports/charts/kpi-tile'
 import {
   AmountHistogramChart,
   type AmountHistogramThreshold,
-} from '@/components/reports/charts/amount-histogram-chart'
+} from '@/components/reports/charts/lazy'
 import { toCsv } from '@/lib/reports/csv'
 import { formatINR, formatINRCompact, formatNumber } from '@/lib/reports/format'
 import type {

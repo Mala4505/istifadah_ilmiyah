@@ -4,11 +4,14 @@ import { cn } from '@/lib/utils'
 // Status-role colors, not the categorical chart palette (dataviz skill,
 // "Status colors are reserved ... never reused for 'series N'"). Sub-3:1
 // light-surface contrast pairs (amber) always ship with the text label next
-// to them here, never color alone.
+// to them here, never color alone. Calm states (low / dismissed) are neutral
+// grey (`muted`), never `secondary` — in this theme `secondary` is the
+// saturated brand gold, which read louder than amber "medium" and didn't match
+// the grey "low" slice in the severity donuts.
 const SEVERITY_STYLES: Record<string, string> = {
   high: 'bg-red-100 text-red-700 dark:bg-red-950/50 dark:text-red-300',
   medium: 'bg-amber-100 text-amber-800 dark:bg-amber-950/50 dark:text-amber-300',
-  low: 'bg-secondary text-secondary-foreground',
+  low: 'bg-muted text-muted-foreground',
 }
 
 export function SeverityBadge({ severity }: { severity: string | null | undefined }) {
@@ -34,7 +37,7 @@ export function SeverityBadge({ severity }: { severity: string | null | undefine
 const CLUSTER_STATUS_STYLES: Record<string, string> = {
   open: 'bg-amber-100 text-amber-800 dark:bg-amber-950/50 dark:text-amber-300',
   confirmed: 'bg-red-100 text-red-700 dark:bg-red-950/50 dark:text-red-300',
-  dismissed: 'bg-secondary text-secondary-foreground',
+  dismissed: 'bg-muted text-muted-foreground',
 }
 
 const CLUSTER_STATUS_LABELS: Record<string, string> = {

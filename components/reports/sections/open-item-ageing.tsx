@@ -4,7 +4,7 @@ import { EmptyState } from '@/components/reports/empty-state'
 import { DataTable, type DataTableColumn } from '@/components/reports/data-table'
 import { ExportCsvButton } from '@/components/reports/export-csv-button'
 import { KpiTile } from '@/components/reports/charts/kpi-tile'
-import { DonutChart } from '@/components/reports/charts/donut-chart'
+import { DonutChart } from '@/components/reports/charts/lazy'
 import { BarList, type BarListItem } from '@/components/reports/bar-list'
 import { SeverityBadge } from '@/components/reports/severity-badge'
 import { toCsv } from '@/lib/reports/csv'
@@ -25,7 +25,9 @@ const UNASSIGNED = 'Unassigned'
 
 const AGE_BUCKET_STYLES: Record<OpenItemAgeingRow['age_bucket'], string> = {
   '0-7': 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300',
-  '8-30': 'bg-secondary text-secondary-foreground',
+  // Neutral, not the brand gold (`secondary`), so the run reads calm →
+  // neutral → amber → red instead of gold looking louder than amber.
+  '8-30': 'bg-muted text-muted-foreground',
   '31-60': 'bg-amber-100 text-amber-800 dark:bg-amber-950/50 dark:text-amber-300',
   '60+': 'bg-red-100 text-red-700 dark:bg-red-950/50 dark:text-red-300',
 }

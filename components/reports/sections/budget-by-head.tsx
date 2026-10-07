@@ -73,11 +73,21 @@ export function BudgetByHeadSection({
       value: r.actual_amount ?? 0,
       marker: r.approved_amount && r.approved_amount > 0 ? r.approved_amount : null,
       markerLabel: r.approved_amount ? `Approved: ${formatINR(r.approved_amount)}` : undefined,
-      note: r.budget_status_note ?? undefined,
+      // Per-row "no approved budget" is noise when no head has one — the
+      // section note below says it once.
+      note: rows.some((x) => x.approved_amount != null && x.approved_amount > 0) ? (r.budget_status_note ?? undefined) : undefined,
       colorClass: budgetStatusColorClass(r.approved_amount, r.actual_amount),
     }))
 
-  const columns: DataTableColumn<BudgetVsActualRow>[] = [
+  // Approved budgets are set per department / sub-department, not per head —
+  // in practice no head carries an approved figure. When none does, this
+  // section is honestly "spend by head": the Approved / Balance / % columns
+  // would be a wall of "no approved budget", so they're dropped and the
+  // reader is pointed at the department budget view instead. Kept generic so
+  // head-level approvals still render if they're ever imported.
+  const hasHeadBudgets = rows.some((r) => r.approved_amount != null && r.approved_amount > 0)
+
+  const allColumns: DataTableColumn<BudgetVsActualRow>[] = [
     {
       key: 'head',
       header: 'Budget Head',
@@ -105,6 +115,11 @@ export function BudgetByHeadSection({
     },
     { key: 'entries', header: 'Entries', align: 'right', render: (r) => formatNumber(r.entry_count) },
   ]
+  const hasUtilised = rows.some((r) => r.utilised_amount != null)
+  const BUDGET_ONLY_KEYS = new Set(['approved', 'balance', 'pct'])
+  const columns = allColumns.filter(
+    (c) => (hasHeadBudgets || !BUDGET_ONLY_KEYS.has(c.key)) && (hasUtilised || c.key !== 'utilised')
+  )
 
   const actualTotal = rows.reduce((s, r) => s + (r.actual_amount ?? 0), 0)
   const previous = compareBasis === 'prior_event' ? previousActualTotal : null
@@ -112,11 +127,13 @@ export function BudgetByHeadSection({
   return (
     <ReportSection
       id="budget-vs-actual"
-      title="Budget vs actual by head"
+      title={hasHeadBudgets ? 'Budget vs actual by head' : 'Spend by budget head'}
       description={
-        rows.some((r) => r.budget_status_note)
-          ? 'Heads with no approved budget show "no approved budget" instead of a −100% figure (§3.5).'
-          : 'Latest allocation snapshot against the sum of amounts per head.'
+        !hasHeadBudgets
+          ? 'Actual spend per budget head. Approved budgets are set per department and sub-department — see Budget vs actual.'
+          : rows.some((r) => r.budget_status_note)
+            ? 'Heads with no approved budget show "no approved budget" instead of a −100% figure (§3.5).'
+            : 'Latest allocation snapshot against the sum of amounts per head.'
       }
       action={
         <ExportCsvButton
@@ -149,8 +166,22 @@ export function BudgetByHeadSection({
             deltaTone="neutral"
           />
           <BarList items={barItems} valueFormatter={formatINRCompact} />
-          <p className="text-sm text-muted-foreground">{insight ?? budgetVsActualSentence(rows)}</p>
-          <BudgetStatusLegend />
+          {hasHeadBudgets ? (
+            <>
+              <p className="text-sm text-muted-foreground">{insight ?? budgetVsActualSentence(rows)}</p>
+              <BudgetStatusLegend />
+            </>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              Budget heads have no approved amounts — budgets are tracked per department and sub-department.{' '}
+              <Link
+                href="/reports/budget?report=department-budget-explorer"
+                className="text-primary underline-offset-2 hover:underline"
+              >
+                See budget vs actual →
+              </Link>
+            </p>
+          )}
           <DataTable columns={columns} rows={grouped} getRowKey={(r) => r.budget_head_id} />
         </>
       )}

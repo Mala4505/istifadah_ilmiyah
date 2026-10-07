@@ -5,7 +5,7 @@ import { DataTable, type DataTableColumn } from '@/components/reports/data-table
 import { BarList, type BarListItem } from '@/components/reports/bar-list'
 import { ExportCsvButton } from '@/components/reports/export-csv-button'
 import { KpiTile } from '@/components/reports/charts/kpi-tile'
-import { DonutChart, type DonutSegment } from '@/components/reports/charts/donut-chart'
+import { DonutChart, type DonutSegment } from '@/components/reports/charts/lazy'
 import { MAX_CATEGORICAL, OTHER_STEP, slotForKey } from '@/components/reports/charts/categorical-palette'
 import { toCsv } from '@/lib/reports/csv'
 import { formatDate, formatINR, formatINRCompact, formatNumber, humanizeCode } from '@/lib/reports/format'

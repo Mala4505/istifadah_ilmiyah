@@ -20,7 +20,7 @@
 import { startOfISOWeek, subWeeks } from 'date-fns'
 import { COMPARE_BASIS_LABELS, type CompareBasis } from '@/lib/reports/compare-basis-labels'
 import { formatINRCompact, formatNumber } from '@/lib/reports/format'
-import type { DonutSegment, DonutValueFormat } from '@/components/reports/charts/donut-chart'
+import type { DonutSegment, DonutValueFormat } from '@/components/reports/charts/lazy'
 
 /** Safety cap on entry-level views at 1k-10k entry volume (blueprint §0). */
 export const ROW_CAP = 1000

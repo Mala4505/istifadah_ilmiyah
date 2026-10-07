@@ -87,8 +87,18 @@ a browser (needs auth + live data). Open follow-ups:
 - Visual pass at desktop + 360px: label collisions (rate-drift end labels,
   bar-end labels, related-party-network on phones), light-mode grey 1.0×
   zone-matrix cell is faint.
-- Bundle: /reports routes now 354–424 kB first load (other pages 230–290 kB)
-  — Recharts. Lazy-load chart modules per section if this matters.
+- ~~Bundle~~ — done: every Recharts chart is imported via
+  components/reports/charts/lazy.tsx (next/dynamic, ssr:false, height-matched
+  skeleton). First-load JS: /reports 425→267 kB, brief 366→235, budget
+  369→239, integrity 354→225, vendors 383→233 — in line with other pages.
+- Budgets exist only on departments / sub-departments (not heads or zones):
+  "Budget vs Actual" is now the department explorer with a bullet chart that
+  writes "₹actual of ₹budget · %" per row (budget-vs-actual-chart.tsx); the
+  by-head section is "Spend by Budget Head" (budget columns hidden when no
+  head has one); Budget overview tiles + dashboard Budget tile read
+  department budgets. Reports tab lands on department-budget-explorer.
+- Calm badges (low severity, dismissed, 8–30d ageing, Benford neutral) use
+  `muted` grey, not `secondary` (= saturated brand gold).
 - Two near-duplicate tooltip helpers: charts/chart-tooltip-panel.tsx (custom
   SVG charts) and recharts-kit.tsx / tooltip-value-row.tsx (Recharts) — merge.
 - ~~Spend-pace budget totals differ between pages~~ — resolved: budget heads

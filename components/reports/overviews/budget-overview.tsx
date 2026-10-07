@@ -105,19 +105,24 @@ async function BudgetHeroRow({
 }) {
   const data = await getBudgetSurface(compareBasis, selectedEvent)
 
-  if (data.byHead.error) {
-    return <EmptyState title="Couldn't load the budget figures" description={data.byHead.error} />
+  // Approved budgets live on departments / sub-departments only — budget heads
+  // and zones carry no amounts — so every tile here reads the department
+  // level (whose budget_amount is itself the sum of its sub-departments'
+  // allocations). Reading heads made "Approved budget" ₹0 and "% of approved"
+  // permanently "no approved budget on record".
+  const deptError = data.byDepartment.error
+  if (deptError) {
+    return <EmptyState title="Couldn't load the budget figures" description={deptError} />
   }
 
-  const heads = data.byHead.rows
-  const deptError = data.byDepartment.error
-  const deptsWithBudget = data.byDepartment.rows.filter((r) => r.budget_amount != null && r.budget_amount > 0)
+  const depts = data.byDepartment.rows
+  const deptsWithBudget = depts.filter((r) => r.budget_amount != null && r.budget_amount > 0)
   const overBudgetCount = deptsWithBudget.filter((r) => (r.pct_of_budget ?? 0) > 100).length
 
-  const approvedTotal = heads.reduce((s, r) => s + (r.approved_amount ?? 0), 0)
-  const actualTotal = heads.reduce((s, r) => s + (r.actual_amount ?? 0), 0)
+  const approvedTotal = depts.reduce((s, r) => s + (r.budget_amount ?? 0), 0)
+  const actualTotal = depts.reduce((s, r) => s + (r.actual_amount ?? 0), 0)
   const overallPct = approvedTotal > 0 ? (actualTotal / approvedTotal) * 100 : null
-  const previousActual = compareBasis === 'prior_event' ? data.byHead.previousActualTotal : null
+  const previousActual = compareBasis === 'prior_event' ? data.byDepartment.previousActualTotal : null
 
   return (
     <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -131,20 +136,14 @@ async function BudgetHeroRow({
       <KpiTile
         label="% of approved budget"
         value={overallPct != null ? formatPercent(overallPct) : '—'}
-        delta={overallPct != null ? 'actual against approved, all heads' : 'no approved budget on record'}
+        delta={overallPct != null ? 'actual against department budgets' : 'no department budgets set'}
         deltaTone={overallPct != null && overallPct > 100 ? 'bad' : 'neutral'}
       />
       <KpiTile
         label="Departments over budget"
-        value={deptError ? '—' : formatNumber(overBudgetCount)}
-        delta={
-          deptError
-            ? 'department figures unavailable'
-            : deptsWithBudget.length > 0
-              ? `of ${deptsWithBudget.length} with a budget set`
-              : 'no department budgets set'
-        }
-        deltaTone={!deptError && overBudgetCount > 0 ? 'bad' : 'neutral'}
+        value={formatNumber(overBudgetCount)}
+        delta={deptsWithBudget.length > 0 ? `of ${deptsWithBudget.length} with a budget set` : 'no department budgets set'}
+        deltaTone={overBudgetCount > 0 ? 'bad' : 'neutral'}
       />
     </div>
   )
