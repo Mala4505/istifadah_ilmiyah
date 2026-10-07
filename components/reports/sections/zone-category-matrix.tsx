@@ -168,7 +168,7 @@ export function ZoneCategoryMatrixSection({
               deltaTone="neutral"
             />
           )}
-          <ZoneCategoryMatrixChart rows={chartZones} columns={chartCategories} cells={chartCells} />
+          <ZoneCategoryMatrixChart rows={chartZones} columns={chartCategories} cells={chartCells} tableTwin={false} />
           {categoryAxisAll.length > MAX_CHART_CATEGORIES && (
             <p className="text-xs text-muted-foreground">
               Chart shows the {MAX_CHART_CATEGORIES} largest categories of {formatNumber(categoryAxisAll.length)} — the

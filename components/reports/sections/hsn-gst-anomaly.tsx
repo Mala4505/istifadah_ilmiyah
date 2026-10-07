@@ -189,7 +189,7 @@ export function HsnGstAnomalySection({
             <KpiTile
               label="Billed spend carrying an HSN/SAC code"
               value={coveragePct == null ? '—' : formatPercent(coveragePct)}
-              delta={coveragePct == null ? undefined : formatDeltaVs(compareBasis, coveragePct, previous, 'count')}
+              delta={coveragePct == null ? undefined : formatDeltaVs(compareBasis, coveragePct, previous, 'pp')}
               deltaTone={deltaToneHigherIsGood(coveragePct ?? 0, previous)}
             />
             {hsnRateTableEmpty ? (

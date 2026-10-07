@@ -28,6 +28,7 @@ import {
   type ZoneSpendRow,
 } from '@/lib/reports/sections/shared'
 import { resolvePreviousEvent } from '@/lib/reports/sections/resolve-previous-event'
+import { rollUpZoneSpend } from '@/lib/reports/zone-spend-rollup'
 
 export type BudgetSurfaceData = {
   eventName: string | null
@@ -179,6 +180,8 @@ export async function loadBudgetSurface(compareBasis: CompareBasis, selectedEven
     }
   }
 
+  const zoneRows = rollUpZoneSpend(zoneRes.data ?? []).slice(0, ROW_CAP)
+
   return {
     eventName: selectedEvent?.name ?? null,
     previousEventName: previousEvent?.name ?? null,
@@ -201,10 +204,10 @@ export async function loadBudgetSurface(compareBasis: CompareBasis, selectedEven
       insight: subDepartmentBudgetInsight(subDeptRes.data ?? []),
     },
     byZone: {
-      rows: (zoneRes.data ?? []).slice(0, ROW_CAP),
+      rows: zoneRows,
       error: friendlyDataError(zoneRes.error, 'reports:budget:zone'),
       previousTotal: prior.zoneTotal,
-      insight: zoneSpendInsight((zoneRes.data ?? []).slice(0, ROW_CAP)),
+      insight: zoneSpendInsight(zoneRows),
     },
   }
 }

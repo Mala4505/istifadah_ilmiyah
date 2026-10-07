@@ -3,8 +3,10 @@ import { EmptyState } from '@/components/reports/empty-state'
 import { ExportCsvButton } from '@/components/reports/export-csv-button'
 import { KpiTile } from '@/components/reports/charts/kpi-tile'
 import { ConcentrationCurveChart } from '@/components/reports/charts/concentration-curve-chart'
+import { DonutChart, type DonutSegment } from '@/components/reports/charts/donut-chart'
+import { CATEGORICAL_PALETTE, OTHER_STEP } from '@/components/reports/charts/categorical-palette'
 import { toCsv } from '@/lib/reports/csv'
-import { formatNumber, formatPercent } from '@/lib/reports/format'
+import { formatINRCompact, formatNumber, formatPercent } from '@/lib/reports/format'
 import type { CompareBasis } from '@/lib/reports/compare-basis'
 import { deltaToneHigherIsBad, formatDeltaVs, type ConcentrationPoint } from '@/lib/reports/sections/shared'
 
@@ -14,6 +16,47 @@ import { deltaToneHigherIsBad, formatDeltaVs, type ConcentrationPoint } from '@/
 
 const HALF_SHARE = 50
 const HEADLINE_VENDOR_COUNT = 8
+const DONUT_BAND = 5
+
+/**
+ * Headline donut (visual-optimisation plan Phase 3.5): the curve answers "how
+ * steep is the dependence" for analysts, but the leadership question is a
+ * share -- so lead with three bands, Top 5 / Next 5 / Everyone else, in ₹.
+ * Two categorical hues + the neutral "Other" step; bands that would be empty
+ * (an event with ≤ 5 or ≤ 10 vendors) are simply omitted. `points` arrives
+ * ranked largest-first (rank 1 = biggest).
+ */
+export function concentrationBands(points: ConcentrationPoint[]): DonutSegment[] {
+  const sum = (from: number, to: number) => points.slice(from, to).reduce((s, p) => s + p.spend, 0)
+  const top = Math.min(DONUT_BAND, points.length)
+  const next = Math.min(DONUT_BAND * 2, points.length) - top
+  const rest = points.length - top - next
+  const bands: DonutSegment[] = [
+    {
+      key: 'top',
+      label: `Top ${formatNumber(top)} vendors`,
+      value: sum(0, top),
+      colorClass: CATEGORICAL_PALETTE[0]!.strokeClass,
+      hex: CATEGORICAL_PALETTE[0]!.hex,
+    },
+    {
+      key: 'next',
+      label: `Next ${formatNumber(next)} vendors`,
+      value: sum(top, top + next),
+      colorClass: CATEGORICAL_PALETTE[1]!.strokeClass,
+      hex: CATEGORICAL_PALETTE[1]!.hex,
+    },
+    {
+      key: 'rest',
+      label: `Everyone else (${formatNumber(rest)} vendors)`,
+      value: sum(top + next, points.length),
+      colorClass: OTHER_STEP.strokeClass,
+      hex: OTHER_STEP.hex,
+    },
+  ]
+  // An empty band sums to 0 — drop it rather than draw a ₹0 legend line.
+  return bands.filter((b) => b.value > 0)
+}
 
 /** The fewest top-ranked vendors whose combined spend clears `threshold`%. */
 export function vendorsToReachShare(points: ConcentrationPoint[], threshold: number): number | null {
@@ -48,6 +91,8 @@ export function VendorConcentrationSection({
   const topCount = Math.min(HEADLINE_VENDOR_COUNT, n)
   const topShare = n > 0 ? points[topCount - 1]!.cumulativeSharePct : 0
   const previous = compareBasis === 'prior_event' ? previousTopShare : null
+  const bands = concentrationBands(points)
+  const totalSpend = points.reduce((s, p) => s + p.spend, 0)
 
   return (
     <ReportSection
@@ -78,10 +123,14 @@ export function VendorConcentrationSection({
           <KpiTile
             label={`Top ${topCount} vendors' share of spend`}
             value={formatPercent(topShare)}
-            delta={formatDeltaVs(compareBasis, topShare, previous, 'count')}
+            delta={formatDeltaVs(compareBasis, topShare, previous, 'pp')}
             deltaTone={deltaToneHigherIsBad(topShare, previous)}
           />
           <p className="text-sm text-muted-foreground">{concentrationSentence(points)}</p>
+          {bands.length > 1 && (
+            <DonutChart segments={bands} centerLabel={formatINRCompact(totalSpend)} valueFormat="inr-compact" />
+          )}
+          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Full curve</p>
           <ConcentrationCurveChart points={points} />
         </>
       )}

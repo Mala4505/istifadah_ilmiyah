@@ -2,9 +2,10 @@ import Link from 'next/link'
 import { ReportSection } from '@/components/reports/report-section'
 import { EmptyState } from '@/components/reports/empty-state'
 import { DataTable, type DataTableColumn } from '@/components/reports/data-table'
-import { BarList, type BarListItem } from '@/components/reports/bar-list'
 import { ExportCsvButton } from '@/components/reports/export-csv-button'
 import { KpiTile } from '@/components/reports/charts/kpi-tile'
+import { DonutChart } from '@/components/reports/charts/donut-chart'
+import { shareSegments } from '@/components/reports/charts/share-segments'
 import { toCsv } from '@/lib/reports/csv'
 import { formatINRCompact, formatNumber, formatPercent } from '@/lib/reports/format'
 import type { CompareBasis } from '@/lib/reports/compare-basis'
@@ -22,7 +23,12 @@ import type { AdminHeadAccountabilityRow } from '@/lib/reports/surfaces/admin-he
 // now shows only what it can measure directly for a head: spend, entry
 // volume, and document coverage.
 
-const BAR_LIMIT = 12
+//
+// "Share of event" is part-to-whole, so the chart is a donut of each head's
+// share (visual-optimisation plan Phase 3.4): top 5 heads + a neutral "Other"
+// when there are more than 6. It replaces the top-12 BarList, which repeated
+// the table's spend + share figures at the same grain; the table keeps every
+// head, the exact figures and the /entries?ahead= drill links.
 
 /** §6 fix #3 — one computed sentence under the chart. "N heads account for
  *  ₹X this event — led by {head} at ₹Y ({share}%)." */
@@ -53,16 +59,12 @@ export function AdminHeadAccountabilitySection({
   const spendThroughHeads = rows.reduce((sum, r) => sum + r.totalAmount, 0)
   const previous = compareBasis === 'prior_event' ? previousSpendTotal : null
 
-  const barItems: BarListItem[] = rows
-    .filter((r) => r.totalAmount > 0)
-    .slice(0, BAR_LIMIT)
-    .map((r) => ({
-      key: r.adminHeadId,
-      label: r.adminHeadName,
-      value: r.totalAmount,
-      href: `/entries?ahead=${r.adminHeadId}`,
-      note: `${formatPercent(r.shareOfEventPct)} of event`,
-    }))
+  const donutSegments = shareSegments(
+    rows
+      .map((r) => ({ key: String(r.adminHeadId), label: r.adminHeadName, value: r.totalAmount }))
+      .sort((a, b) => b.value - a.value),
+    { otherNoun: 'heads' }
+  )
 
   const columns: DataTableColumn<AdminHeadAccountabilityRow>[] = [
     {
@@ -115,7 +117,9 @@ export function AdminHeadAccountabilitySection({
             delta={formatDeltaVs(compareBasis, spendThroughHeads, previous, 'inr')}
             deltaTone="neutral"
           />
-          <BarList items={barItems} valueFormatter={formatINRCompact} />
+          {donutSegments.length > 0 && (
+            <DonutChart segments={donutSegments} centerLabel={formatINRCompact(spendThroughHeads)} valueFormat="inr-compact" />
+          )}
           <p className="text-sm text-muted-foreground">{insight ?? adminHeadAccountabilitySentence(rows)}</p>
           <DataTable columns={columns} rows={rows} getRowKey={(r) => r.adminHeadId} />
         </>

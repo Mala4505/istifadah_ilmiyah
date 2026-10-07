@@ -4,19 +4,23 @@ import { useMemo, useState, type PointerEvent } from 'react'
 import Link from 'next/link'
 import { cn } from '@/lib/utils'
 import { formatINRCompact, formatNumber } from '@/lib/reports/format'
-import { barLeftClass } from '@/lib/reports/bar-scale'
 import { DataTable, type DataTableColumn } from '@/components/reports/data-table'
 import { Button } from '@/components/ui/button'
+import { useChartWidth } from '@/components/reports/charts/use-chart-width'
+import { ChartTooltipPanel, ChartTooltipRow } from '@/components/reports/charts/chart-tooltip-panel'
 import type { VendorCluster, VendorSharedIdentityEdgeRow } from '@/lib/reports/surfaces/related-party-gstin'
 
 // reporting-blueprint.md B-07 (flagship): "Best drawn as a network — the
 // shape *is* the finding, and a table hides it." No external graph library:
 // a small deterministic layout — each cluster's vendors placed evenly around
 // a circle sized by vendor count, clusters tiled left-to-right/top-to-bottom
-// in a grid. Structurally mirrors attention-map-chart.tsx / heatmap-matrix-chart.tsx:
-// inline SVG with real numeric attributes (exempt from this app's style-src
-// CSP constraint — see lib/reports/bar-scale.ts), a pointer-move nearest-node
-// hover lookup, and a required "View as table" twin.
+// in a grid. The grid is laid out at the card's measured width
+// (useChartWidth, scale 1): as many columns as fit at MIN_CELL wide, cells
+// stretched up to MAX_CELL, ring radius shrunk to fit a narrow cell — so 11px
+// node labels stay 11px on a phone (2 columns) instead of the whole drawing
+// scaling down. Deterministic, no force simulation. Real numeric attributes,
+// a pointer-move nearest-node hover lookup with a shadcn-styled tooltip
+// (chart-tooltip-panel.tsx), and a required "View as table" twin.
 //
 // Kept readable at <= MAX_VENDORS vendors by capping to the largest clusters
 // (by combined spend) that fit — a cluster is never split across the cap, so
@@ -24,8 +28,10 @@ import type { VendorCluster, VendorSharedIdentityEdgeRow } from '@/lib/reports/s
 // mid-shape. The caption below the chart states the cap when it bites.
 
 const MAX_VENDORS = 40
-const CELL = 176
-const PAD = 24
+const FALLBACK_WIDTH = 576
+const MIN_CELL = 150
+const MAX_CELL = 240
+const PAD = 16
 const MIN_NODE_R = 5
 const MAX_NODE_R = 17
 const MIN_CLUSTER_R = 30
@@ -54,7 +60,7 @@ type LaidOutEdge = {
   vendorIdB: number
 }
 
-function layoutClusters(clusters: VendorCluster[]) {
+function layoutClusters(clusters: VendorCluster[], containerWidth: number) {
   const shown: VendorCluster[] = []
   let vendorCount = 0
   for (const cluster of clusters) {
@@ -64,9 +70,22 @@ function layoutClusters(clusters: VendorCluster[]) {
     if (vendorCount >= MAX_VENDORS) break
   }
 
-  const cols = Math.max(1, Math.ceil(Math.sqrt(shown.length)))
+  // As many columns as fit at MIN_CELL, never more than there are clusters.
+  const usable = Math.max(MIN_CELL, containerWidth - PAD * 2)
+  const cols = Math.max(1, Math.min(shown.length, Math.floor(usable / MIN_CELL)))
   const rows = Math.max(1, Math.ceil(shown.length / cols))
+  const cellW = Math.min(MAX_CELL, usable / cols)
+  // Row pitch: room for the ring plus the 11px label under the bottom node.
+  const cellH = Math.max(MIN_CELL, Math.min(cellW, 200))
+  // Ring radius must leave room for the largest node and its label in a
+  // narrow cell.
+  const maxRingR = Math.max(MIN_CLUSTER_R, Math.min(cellW, cellH) / 2 - MAX_NODE_R - 14)
+  const offsetX = Math.max(PAD, (containerWidth - cols * cellW) / 2)
   const maxSpend = Math.max(1, ...shown.flatMap((c) => c.vendors.map((v) => v.spend)), 1)
+  // Shorter node labels in a narrow cell so neighbouring rings' labels
+  // don't collide (11px ≈ 6.3px per character).
+  const labelChars = cellW < 180 ? 11 : 14
+  const labelW = labelChars * 6.3 + 8
 
   const nodes: LaidOutNode[] = []
   const edges: LaidOutEdge[] = []
@@ -74,10 +93,15 @@ function layoutClusters(clusters: VendorCluster[]) {
   shown.forEach((cluster, i) => {
     const col = i % cols
     const row = Math.floor(i / cols)
-    const cx = PAD + CELL / 2 + col * CELL
-    const cy = PAD + CELL / 2 + row * CELL
+    const cx = offsetX + cellW / 2 + col * cellW
+    const cy = PAD + cellH / 2 + row * cellH
     const n = cluster.vendors.length
-    const clusterR = n <= 2 ? MIN_CLUSTER_R : Math.min(MAX_CLUSTER_R, MIN_CLUSTER_R + (n - 2) * 7)
+    // 3+ nodes: widen the ring until neighbouring nodes sit at least one
+    // label-width apart, so their centred labels don't overprint.
+    const clusterR =
+      n <= 2
+        ? MIN_CLUSTER_R
+        : Math.min(MAX_CLUSTER_R, maxRingR, Math.max(MIN_CLUSTER_R + (n - 2) * 7, labelW / (2 * Math.sin(Math.PI / n))))
     const posById = new Map<number, { x: number; y: number }>()
 
     cluster.vendors.forEach((v, vi) => {
@@ -107,13 +131,14 @@ function layoutClusters(clusters: VendorCluster[]) {
     })
   })
 
-  const width = PAD * 2 + cols * CELL
-  const height = PAD * 2 + rows * CELL
+  const width = Math.max(containerWidth, offsetX * 2 + cols * cellW)
+  const height = PAD * 2 + rows * cellH
   const cappedVendorCount = clusters.reduce((s, c) => s + c.vendors.length, 0) - vendorCount
 
   return {
     nodes,
     edges,
+    labelChars,
     width,
     height,
     shownClusterCount: shown.length,
@@ -131,8 +156,9 @@ const SHARED_ON_LABEL: Record<VendorSharedIdentityEdgeRow['shared_on'], string> 
 export function RelatedPartyNetworkChart({ clusters }: { clusters: VendorCluster[] }) {
   const [hoverId, setHoverId] = useState<number | null>(null)
   const [showTable, setShowTable] = useState(false)
+  const [wrapRef, containerWidth] = useChartWidth(FALLBACK_WIDTH)
 
-  const layout = useMemo(() => layoutClusters(clusters), [clusters])
+  const layout = useMemo(() => layoutClusters(clusters, containerWidth), [clusters, containerWidth])
 
   if (layout.nodes.length === 0) return null
 
@@ -153,8 +179,9 @@ export function RelatedPartyNetworkChart({ clusters }: { clusters: VendorCluster
 
   function handlePointerMove(e: PointerEvent<SVGSVGElement>) {
     const rect = e.currentTarget.getBoundingClientRect()
-    const relX = ((e.clientX - rect.left) / rect.width) * layout.width
-    const relY = ((e.clientY - rect.top) / rect.height) * layout.height
+    // Scale 1: one viewBox unit per CSS pixel.
+    const relX = e.clientX - rect.left
+    const relY = e.clientY - rect.top
     setHoverId(nearestNode(relX, relY)?.id ?? null)
   }
 
@@ -176,11 +203,11 @@ export function RelatedPartyNetworkChart({ clusters }: { clusters: VendorCluster
   ]
 
   return (
-    <div className="flex flex-col gap-3">
-      <div className="relative w-full overflow-x-auto">
+    <div className="flex flex-col gap-3 motion-safe:animate-chart-in">
+      <div ref={wrapRef} className="relative w-full overflow-x-auto">
         <svg
           viewBox={`0 0 ${layout.width} ${layout.height}`}
-          width="100%"
+          width={layout.width}
           height={layout.height}
           role="img"
           aria-label={`Related-party network — ${formatNumber(layout.shownClusterCount)} vendor cluster${
@@ -233,11 +260,11 @@ export function RelatedPartyNetworkChart({ clusters }: { clusters: VendorCluster
                 />
                 <text
                   x={n.x}
-                  y={n.y + n.r + 10}
+                  y={n.y + n.r + 12}
                   textAnchor="middle"
-                  className={cn('fill-muted-foreground text-[8px]', isHovered && 'fill-foreground font-medium')}
+                  className={cn('fill-muted-foreground text-[11px]', isHovered && 'fill-foreground font-medium')}
                 >
-                  {n.name.length > 14 ? `${n.name.slice(0, 13)}…` : n.name}
+                  {n.name.length > layout.labelChars ? `${n.name.slice(0, layout.labelChars - 1)}…` : n.name}
                 </text>
               </Link>
             )
@@ -245,22 +272,14 @@ export function RelatedPartyNetworkChart({ clusters }: { clusters: VendorCluster
         </svg>
 
         {hoverNode && (
-          <div
-            className={cn(
-              'pointer-events-none absolute top-1 z-10 min-w-[10rem] -translate-x-1/2 rounded-md border border-border bg-popover px-2.5 py-1.5 text-xs text-popover-foreground shadow-md',
-              barLeftClass(tooltipLeftPct)
-            )}
-          >
-            <p className="mb-1 font-medium text-foreground">{hoverNode.name}</p>
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-muted-foreground">Spend (this event)</span>
-              <span className="font-mono font-semibold text-foreground">{formatINRCompact(hoverNode.spend)}</span>
-            </div>
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-muted-foreground">Cluster</span>
-              <span className="font-mono font-semibold text-foreground">#{hoverNode.clusterId}</span>
-            </div>
-          </div>
+          <ChartTooltipPanel leftPct={tooltipLeftPct} className="min-w-[10rem]" title={hoverNode.name}>
+            <ChartTooltipRow
+              label="Spend (this event)"
+              value={formatINRCompact(hoverNode.spend)}
+              indicatorClass="bg-[#2a78d6] dark:bg-[#3987e5]"
+            />
+            <ChartTooltipRow label="Cluster" value={`#${hoverNode.clusterId}`} />
+          </ChartTooltipPanel>
         )}
       </div>
 

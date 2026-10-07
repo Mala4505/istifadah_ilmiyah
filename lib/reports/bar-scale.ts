@@ -1,6 +1,12 @@
 // Snaps a 0-100 percentage to a 5% step and looks up a *literal* Tailwind
 // class name for it.
 //
+// NOTE (2026-10-07): the CSP rationale below is historical — middleware.ts
+// now ships `style-src 'self' 'unsafe-inline'` in every environment, which is
+// what lets the Recharts/shadcn charts (components/ui/chart.tsx) use inline
+// styles. These class helpers still work and are kept for the existing
+// HTML bar lists; new chart code doesn't need to route through them.
+//
 // Why not `style={{ width: `${pct}%` }}`: middleware.ts's production CSP
 // (§4.4b) ships `style-src 'self' 'nonce-…'` with no `'unsafe-inline'`. A
 // script/style nonce only covers <script>/<style> elements, never the

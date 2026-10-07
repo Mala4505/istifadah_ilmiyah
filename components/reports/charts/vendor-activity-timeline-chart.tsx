@@ -3,10 +3,11 @@
 import { useState, type KeyboardEvent, type PointerEvent } from 'react'
 import { cn } from '@/lib/utils'
 import { formatDate, formatINR, formatINRCompact, formatNumber } from '@/lib/reports/format'
-import { barLeftClass } from '@/lib/reports/bar-scale'
 import { DataTable, type DataTableColumn } from '@/components/reports/data-table'
 import { AttentionPill } from '@/components/reports/severity-badge'
 import { Button } from '@/components/ui/button'
+import { useChartWidth } from '@/components/reports/charts/use-chart-width'
+import { ChartTooltipNote, ChartTooltipPanel, ChartTooltipRow } from '@/components/reports/charts/chart-tooltip-panel'
 
 // reporting-blueprint.md B-09: "First and last invoice per vendor, and the
 // gaps. Surfaces vendors that appear once for a large amount and are never
@@ -16,10 +17,11 @@ import { Button } from '@/components/ui/button'
 // shape rather than colour alone (§6 fix #6). X axis = calendar weeks of the
 // event.
 //
-// Structurally mirrors strip-plot-chart.tsx: inline SVG with real numeric
-// attributes for every data-driven mark (exempt from this app's style-src
-// CSP constraint — see lib/reports/bar-scale.ts), a pointer-move nearest-row
-// hover lookup, keyboard nav across lanes, role="img" + aria-label, and a
+// Structurally mirrors strip-plot-chart.tsx: hand-drawn SVG laid out at the
+// card's measured width (useChartWidth, scale 1, 11px labels), real numeric
+// attributes for every data-driven mark, a pointer-move nearest-row hover
+// lookup with a shadcn-styled tooltip (chart-tooltip-panel.tsx), keyboard nav
+// across lanes, role="img" + aria-label, and a
 // required "View as table" twin so every value the chart conveys is also
 // plain text. One accent hue (the screen's normal blue) for an ordinary
 // vendor's span; a single-appearance vendor gets the reserved warning colour
@@ -45,9 +47,9 @@ export type ActivityLaneVendor = {
   isMaterialSingleAppearance: boolean
 }
 
-const VIEW_WIDTH = 640
-const ROW_HEIGHT = 26
-const PAD = { left: 150, right: 20, top: 22, bottom: 34 }
+const FALLBACK_WIDTH = 640
+const ROW_HEIGHT = 28
+const PAD = { right: 28, top: 22, bottom: 36 }
 const MAX_LANES = 30
 const HOVER_RADIUS_PX = 14
 
@@ -97,6 +99,7 @@ export function VendorActivityTimelineChart({
 }) {
   const [hoverIndex, setHoverIndex] = useState<number | null>(null)
   const [showTable, setShowTable] = useState(false)
+  const [wrapRef, viewWidth] = useChartWidth(FALLBACK_WIDTH)
 
   if (vendors.length === 0) return null
 
@@ -108,25 +111,37 @@ export function VendorActivityTimelineChart({
   const domainEndMs = Math.max(domainEndMsRaw, domainStartMs + MS_PER_DAY)
   const domainRangeMs = domainEndMs - domainStartMs
 
-  const innerWidth = VIEW_WIDTH - PAD.left - PAD.right
+  // Width-derived layout: narrower lane-label gutter on a phone.
+  const narrow = viewWidth < 480
+  const padLeft = narrow ? 112 : 160
+  const labelChars = narrow ? 15 : 22
+  const innerWidth = viewWidth - padLeft - PAD.right
   const plotHeight = rows.length * ROW_HEIGHT
   const viewHeight = PAD.top + plotHeight + PAD.bottom
 
   const xFor = (iso: string) => {
     const t = toUtcDate(iso).getTime()
     const clamped = Math.max(domainStartMs, Math.min(domainEndMs, t))
-    return PAD.left + ((clamped - domainStartMs) / domainRangeMs) * innerWidth
+    return padLeft + ((clamped - domainStartMs) / domainRangeMs) * innerWidth
   }
   const rowCentre = (i: number) => PAD.top + i * ROW_HEIGHT + ROW_HEIGHT / 2
 
-  const ticks = weekTicks(domainStart, domainEnd)
-  // Thin the week labels so they don't collide — show at most ~8 across the
-  // width, always including the first and last tick.
-  const labelStride = Math.max(1, Math.ceil(ticks.length / 8))
+  // Week starts before the domain would be clamped onto its left edge (a
+  // gridline at the wrong date, its label colliding with the next one), so
+  // drop them; keep at least one tick.
+  const inDomain = weekTicks(domainStart, domainEnd).filter((t) => t.getTime() >= domainStartMs)
+  const ticks = inDomain.length > 0 ? inDomain : [toUtcDate(domainStart)]
+  // Thin the week labels so they don't collide — roughly one label per 96px
+  // of plot width (an 11px "29 Jun 2026" label is ~70px), always including
+  // the first and last tick.
+  const maxLabels = Math.max(2, Math.floor(innerWidth / 96))
+  const labelStride = Math.max(1, Math.ceil(ticks.length / maxLabels))
+  const lastTick = ticks.length - 1
 
   function handlePointerMove(e: PointerEvent<SVGSVGElement>) {
     const rect = e.currentTarget.getBoundingClientRect()
-    const relY = ((e.clientY - rect.top) / rect.height) * viewHeight
+    // Scale 1: one viewBox unit per CSS pixel.
+    const relY = e.clientY - rect.top
     const idx = Math.floor((relY - PAD.top) / ROW_HEIGHT)
     if (idx >= 0 && idx < rows.length && relY >= PAD.top - HOVER_RADIUS_PX && relY <= PAD.top + plotHeight + HOVER_RADIUS_PX) {
       setHoverIndex(idx)
@@ -147,7 +162,7 @@ export function VendorActivityTimelineChart({
   }
 
   const hoverRow = hoverIndex != null ? rows[hoverIndex]! : null
-  const tooltipPct = hoverRow ? ((xFor(hoverRow.firstDate) + xFor(hoverRow.lastDate)) / 2 / VIEW_WIDTH) * 100 : 50
+  const tooltipPct = hoverRow ? ((xFor(hoverRow.firstDate) + xFor(hoverRow.lastDate)) / 2 / viewWidth) * 100 : 50
 
   const tableColumns: DataTableColumn<ActivityLaneVendor>[] = [
     { key: 'vendor', header: 'Vendor', render: (r) => r.vendorName },
@@ -165,11 +180,11 @@ export function VendorActivityTimelineChart({
   ]
 
   return (
-    <div className="flex flex-col gap-3">
-      <div className="relative w-full overflow-x-auto">
+    <div className="flex flex-col gap-3 motion-safe:animate-chart-in">
+      <div ref={wrapRef} className="relative w-full overflow-x-auto">
         <svg
-          viewBox={`0 0 ${VIEW_WIDTH} ${viewHeight}`}
-          width="100%"
+          viewBox={`0 0 ${viewWidth} ${viewHeight}`}
+          width={viewWidth}
           height={viewHeight}
           role="img"
           aria-label={`Vendor activity timeline — ${formatNumber(rows.length)} vendors, one lane each, spanning from their first to last entry across the event's calendar weeks. Dots mark each active day; a diamond marks a vendor with only one entry. See the table view below for exact values.`}
@@ -183,12 +198,19 @@ export function VendorActivityTimelineChart({
           {ticks.map((t, i) => {
             const iso = t.toISOString().slice(0, 10)
             const x = xFor(iso)
-            const showLabel = i % labelStride === 0 || i === ticks.length - 1
+            // A strided label too close to the forced last label is skipped.
+            const showLabel = i === lastTick || (i % labelStride === 0 && lastTick - i >= labelStride)
             return (
               <g key={iso}>
                 <line x1={x} x2={x} y1={PAD.top} y2={PAD.top + plotHeight} className="stroke-border" strokeWidth={1} />
                 {showLabel && (
-                  <text x={x} y={PAD.top + plotHeight + 14} textAnchor="middle" className="fill-muted-foreground text-[9px]">
+                  // Pin a label near the right edge inward so it isn't clipped.
+                  <text
+                    x={x}
+                    y={PAD.top + plotHeight + 16}
+                    textAnchor={x + 36 > viewWidth ? 'end' : 'middle'}
+                    className="fill-muted-foreground text-[11px]"
+                  >
                     {formatDate(iso)}
                   </text>
                 )}
@@ -209,8 +231,8 @@ export function VendorActivityTimelineChart({
               <g key={row.vendorId}>
                 {i > 0 && (
                   <line
-                    x1={PAD.left}
-                    x2={VIEW_WIDTH - PAD.right}
+                    x1={padLeft}
+                    x2={viewWidth - PAD.right}
                     y1={PAD.top + i * ROW_HEIGHT}
                     y2={PAD.top + i * ROW_HEIGHT}
                     className="stroke-border/60"
@@ -218,13 +240,13 @@ export function VendorActivityTimelineChart({
                   />
                 )}
                 <text
-                  x={PAD.left - 10}
+                  x={padLeft - 10}
                   y={cy}
                   textAnchor="end"
                   dominantBaseline="middle"
-                  className={cn('text-[10px]', isHovered ? 'fill-foreground font-medium' : 'fill-foreground')}
+                  className={cn('text-[11px]', isHovered ? 'fill-foreground font-medium' : 'fill-foreground')}
                 >
-                  {truncate(row.vendorName, 20)}
+                  {truncate(row.vendorName, labelChars)}
                 </text>
 
                 <title>
@@ -257,35 +279,21 @@ export function VendorActivityTimelineChart({
         </svg>
 
         {hoverRow && (
-          <div
-            className={cn(
-              'pointer-events-none absolute top-1 z-10 min-w-[13rem] -translate-x-1/2 rounded-md border border-border bg-popover px-2.5 py-1.5 text-xs text-popover-foreground shadow-md',
-              barLeftClass(tooltipPct)
-            )}
-          >
-            <p className="mb-1 font-medium text-foreground">{hoverRow.vendorName}</p>
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-muted-foreground">First → last</span>
-              <span className="font-mono font-semibold text-foreground">
-                {formatDate(hoverRow.firstDate)} → {formatDate(hoverRow.lastDate)}
-              </span>
-            </div>
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-muted-foreground">Active days</span>
-              <span className="font-mono font-semibold text-foreground">{formatNumber(hoverRow.distinctActiveDays)}</span>
-            </div>
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-muted-foreground">Max gap</span>
-              <span className="font-mono font-semibold text-foreground">{formatNumber(hoverRow.maxGapDays)} days</span>
-            </div>
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-muted-foreground">Spend</span>
-              <span className="font-mono font-semibold text-foreground">{formatINRCompact(hoverRow.totalSpend)}</span>
-            </div>
+          <ChartTooltipPanel leftPct={tooltipPct} className="min-w-[13rem]" title={hoverRow.vendorName}>
+            <ChartTooltipRow
+              label="First → last"
+              value={`${formatDate(hoverRow.firstDate)} → ${formatDate(hoverRow.lastDate)}`}
+              indicatorClass={
+                hoverRow.isMaterialSingleAppearance ? 'bg-amber-500 dark:bg-amber-400' : 'bg-[#2a78d6] dark:bg-[#3987e5]'
+              }
+            />
+            <ChartTooltipRow label="Active days" value={formatNumber(hoverRow.distinctActiveDays)} />
+            <ChartTooltipRow label="Max gap" value={`${formatNumber(hoverRow.maxGapDays)} days`} />
+            <ChartTooltipRow label="Spend" value={formatINRCompact(hoverRow.totalSpend)} />
             {hoverRow.singleAppearance && (
-              <p className="mt-1 font-medium text-amber-700 dark:text-amber-400">Single appearance</p>
+              <ChartTooltipNote className="font-medium text-amber-700 dark:text-amber-400">⚠ Single appearance</ChartTooltipNote>
             )}
-          </div>
+          </ChartTooltipPanel>
         )}
       </div>
 

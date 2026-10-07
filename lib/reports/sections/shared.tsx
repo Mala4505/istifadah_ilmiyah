@@ -20,7 +20,7 @@
 import { startOfISOWeek, subWeeks } from 'date-fns'
 import { COMPARE_BASIS_LABELS, type CompareBasis } from '@/lib/reports/compare-basis-labels'
 import { formatINRCompact, formatNumber } from '@/lib/reports/format'
-import type { DonutSegment } from '@/components/reports/charts/donut-chart'
+import type { DonutSegment, DonutValueFormat } from '@/components/reports/charts/donut-chart'
 
 /** Safety cap on entry-level views at 1k-10k entry volume (blueprint §0). */
 export const ROW_CAP = 1000
@@ -564,12 +564,18 @@ export function formatDeltaVs(
   compareBasis: CompareBasis,
   current: number,
   previous: number | null,
-  kind: 'inr' | 'count'
+  /** 'pp' for a percentage KPI: the delta is percentage points, 1 decimal. */
+  kind: 'inr' | 'count' | 'pp'
 ): string | undefined {
   if (previous == null || compareBasis === 'none') return undefined
   const delta = current - previous
   const sign = delta > 0 ? '+' : delta < 0 ? '−' : '±'
-  const magnitude = kind === 'inr' ? formatINRCompact(Math.abs(delta)) : formatNumber(Math.abs(delta))
+  const magnitude =
+    kind === 'inr'
+      ? formatINRCompact(Math.abs(delta))
+      : kind === 'pp'
+        ? `${formatNumber(Math.round(Math.abs(delta) * 10) / 10)} pp`
+        : formatNumber(Math.abs(delta))
   return `${sign}${magnitude} ${COMPARE_BASIS_LABELS[compareBasis]}`
 }
 
@@ -662,7 +668,7 @@ export function BudgetStatusLegend() {
 }
 
 // ---------------------------------------------------------------------------
-// Severity donut segments -- shared by Open Issues and Compliance.
+// Severity donut -- shared by Open Issues, Compliance and Open-item ageing.
 // ---------------------------------------------------------------------------
 
 const SEVERITY_DONUT_COLOR: Record<'high' | 'medium' | 'low', string> = {
@@ -671,18 +677,44 @@ const SEVERITY_DONUT_COLOR: Record<'high' | 'medium' | 'low', string> = {
   low: 'stroke-muted-foreground',
 }
 
-export function severitySegments(rows: { severity: string | null }[]): DonutSegment[] {
+export type SeverityDonut = {
+  segments: DonutSegment[]
+  centerLabel: string
+  valueFormat: DonutValueFormat
+}
+
+/**
+ * Severity split for Open Issues, Compliance and Open-item ageing. Those
+ * sections are titled and ranked by ₹ at risk, so the donut is weighted by
+ * ₹ at risk too -- a count-weighted ring next to a ₹ KPI read as "high
+ * severity is X% of the money" when it was X% of the rows. Falls back to a
+ * row count only when no row carries a ₹ figure, and then the centre label
+ * says "by count" so the two readings can't be confused. A severity with
+ * rows but ₹0 still gets a legend line (₹0 · 0%) rather than vanishing.
+ * Colours stay the reserved status colours (state, not identity).
+ */
+export function severityDonut(
+  rows: { severity: string | null; amount_at_risk?: number | null }[],
+  countNoun: string
+): SeverityDonut {
   const counts: Record<'high' | 'medium' | 'low', number> = { high: 0, medium: 0, low: 0 }
+  const atRisk: Record<'high' | 'medium' | 'low', number> = { high: 0, medium: 0, low: 0 }
   for (const r of rows) {
     const k = r.severity === 'high' || r.severity === 'medium' ? r.severity : 'low'
     counts[k] += 1
+    atRisk[k] += Math.max(0, r.amount_at_risk ?? 0)
   }
-  return (['high', 'medium', 'low'] as const)
+  const totalAtRisk = atRisk.high + atRisk.medium + atRisk.low
+  const byInr = totalAtRisk > 0
+  const segments = (['high', 'medium', 'low'] as const)
     .filter((k) => counts[k] > 0)
     .map((k) => ({
       key: k,
       label: k === 'high' ? 'High severity' : k === 'medium' ? 'Medium severity' : 'Low severity',
-      value: counts[k],
+      value: byInr ? atRisk[k] : counts[k],
       colorClass: SEVERITY_DONUT_COLOR[k],
     }))
+  return byInr
+    ? { segments, centerLabel: `${formatINRCompact(totalAtRisk)} at risk`, valueFormat: 'inr-compact' }
+    : { segments, centerLabel: `${formatNumber(rows.length)} ${countNoun} by count`, valueFormat: 'number' }
 }

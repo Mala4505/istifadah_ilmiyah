@@ -118,6 +118,10 @@ export type ExecutiveBrief = {
     spendVsBudgetTone: 'good' | 'bad' | 'neutral'
     projectedLandingValue: string
     projectedLandingTone: 'good' | 'bad' | 'neutral'
+    /** The budget total the % figures above divide by (sum of department
+     *  budgets), or null when none is set. The brief's spend-pace chart draws
+     *  its budget line from this so line and "projects to land at X%" agree. */
+    totalBudget: number | null
     vendorConcentrationValue: string
     vendorConcentrationLabel: string
     aboveMedianSpendValue: string
@@ -302,6 +306,7 @@ export async function loadExecutiveBrief(
     spendVsBudgetTone: !hasBudget ? 'neutral' : pctOfBudget! > 100 ? 'bad' : 'neutral',
     projectedLandingValue: projectedLandingPct != null ? formatPercent(projectedLandingPct) : '—',
     projectedLandingTone: projectedLandingPct == null ? 'neutral' : projectedLandingPct > 100 ? 'bad' : 'good',
+    totalBudget: hasBudget ? totalBudget : null,
     vendorConcentrationValue: topVendors.length > 0 ? formatPercent(concentrationPct) : '—',
     vendorConcentrationLabel: `Top ${topVendors.length || CONCENTRATION_VENDOR_COUNT} vendors' share of spend`,
     aboveMedianSpendValue: formatINRCompact(aboveMedianSpend),

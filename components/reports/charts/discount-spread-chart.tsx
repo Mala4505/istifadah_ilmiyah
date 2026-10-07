@@ -3,9 +3,10 @@
 import { useMemo, useState, type KeyboardEvent, type PointerEvent } from 'react'
 import { cn } from '@/lib/utils'
 import { formatNumber, formatPercent } from '@/lib/reports/format'
-import { barLeftClass } from '@/lib/reports/bar-scale'
 import { DataTable, type DataTableColumn } from '@/components/reports/data-table'
 import { Button } from '@/components/ui/button'
+import { useChartWidth } from '@/components/reports/charts/use-chart-width'
+import { ChartTooltipPanel, ChartTooltipRow } from '@/components/reports/charts/chart-tooltip-panel'
 
 // reporting-blueprint.md C-06: "The same vendor giving different discounts
 // to different departments on the same item family." A dumbbell / range
@@ -23,11 +24,11 @@ import { Button } from '@/components/ui/button'
 // (sorted by spread, widest first) stay in the required "View as table"
 // twin rather than cluttering the plot.
 //
-// Structurally mirrors strip-plot-chart.tsx: inline SVG with real numeric
-// attributes for every data-driven mark (exempt from this app's style-src
-// CSP constraint — see lib/reports/bar-scale.ts), a pointer-move nearest-dot
-// hover lookup, keyboard nav across dots, role="img" + aria-label, and the
-// table twin.
+// Structurally mirrors strip-plot-chart.tsx: hand-drawn SVG laid out at the
+// card's measured width (useChartWidth, scale 1, 11px labels), real numeric
+// attributes for every data-driven mark, a pointer-move nearest-dot hover
+// lookup with a shadcn-styled tooltip (chart-tooltip-panel.tsx), keyboard nav
+// across dots, role="img" + aria-label, and the table twin.
 
 export type DiscountSpreadChartGroup = {
   key: string
@@ -38,9 +39,9 @@ export type DiscountSpreadChartGroup = {
 }
 
 const MAX_ROWS = 12
-const VIEW_WIDTH = 620
+const FALLBACK_WIDTH = 620
 const ROW_HEIGHT = 32
-const PAD = { left: 168, right: 24, top: 20, bottom: 30 }
+const PAD = { right: 24, top: 20, bottom: 40 }
 const HOVER_RADIUS_SQ = 20 * 20
 
 // Muted categorical hues — same family as rate-drift-chart.tsx's series
@@ -53,6 +54,15 @@ const DEPT_DOT_FILL_CLASSES = [
   'fill-[#9553a6] dark:fill-[#b57bc4]',
   'fill-[#767b3f] dark:fill-[#9ba35a]',
   'fill-[#6b6f76] dark:fill-[#9aa0a8]',
+] as const
+// Same hues as HTML backgrounds, for the tooltip's colour indicator.
+const DEPT_DOT_BG_CLASSES = [
+  'bg-[#2a78d6] dark:bg-[#5b9be8]',
+  'bg-[#c0742d] dark:bg-[#e0975a]',
+  'bg-[#3f8f7a] dark:bg-[#5cae98]',
+  'bg-[#9553a6] dark:bg-[#b57bc4]',
+  'bg-[#767b3f] dark:bg-[#9ba35a]',
+  'bg-[#6b6f76] dark:bg-[#9aa0a8]',
 ] as const
 
 function niceNum(range: number, round: boolean): number {
@@ -90,9 +100,17 @@ type PlacedDot = {
   cy: number
 }
 
-export function DiscountSpreadChart({ groups }: { groups: DiscountSpreadChartGroup[] }) {
+export function DiscountSpreadChart({
+  groups,
+  tableTwin = true,
+}: {
+  groups: DiscountSpreadChartGroup[]
+  /** false when the host section already renders every pair as a table. */
+  tableTwin?: boolean
+}) {
   const [hoverKey, setHoverKey] = useState<string | null>(null)
   const [showTable, setShowTable] = useState(false)
+  const [wrapRef, viewWidth] = useChartWidth(FALLBACK_WIDTH)
 
   const allRows = useMemo(() => [...groups].sort((a, b) => b.spreadPp - a.spreadPp), [groups])
   const rows = allRows.slice(0, MAX_ROWS)
@@ -114,11 +132,18 @@ export function DiscountSpreadChart({ groups }: { groups: DiscountSpreadChartGro
   const ticks = niceTicks(0, Math.max(5, ...allPct), 4)
   const domainMax = ticks[ticks.length - 1]!
 
-  const innerWidth = VIEW_WIDTH - PAD.left - PAD.right
+  // Width-derived layout: narrower row-label gutter on a phone.
+  const narrow = viewWidth < 480
+  // ~6px per 11px glyph: "vendor · family" must fit padLeft - 10 or the
+  // overflow-x-auto wrapper clips its first characters.
+  const padLeft = narrow ? 128 : 196
+  const vendorChars = narrow ? 9 : 14
+  const familyChars = narrow ? 7 : 12
+  const innerWidth = viewWidth - padLeft - PAD.right
   const plotHeight = rows.length * ROW_HEIGHT
   const viewHeight = PAD.top + plotHeight + PAD.bottom
 
-  const xFor = (pct: number) => PAD.left + (Math.min(pct, domainMax) / domainMax) * innerWidth
+  const xFor = (pct: number) => padLeft + (Math.min(pct, domainMax) / domainMax) * innerWidth
   const rowCentre = (i: number) => PAD.top + i * ROW_HEIGHT + ROW_HEIGHT / 2
 
   const placed: PlacedDot[] = rows.flatMap((g, rowIndex) =>
@@ -154,8 +179,9 @@ export function DiscountSpreadChart({ groups }: { groups: DiscountSpreadChartGro
 
   function handlePointerMove(e: PointerEvent<SVGSVGElement>) {
     const rect = e.currentTarget.getBoundingClientRect()
-    const relX = ((e.clientX - rect.left) / rect.width) * VIEW_WIDTH
-    const relY = ((e.clientY - rect.top) / rect.height) * viewHeight
+    // Scale 1: one viewBox unit per CSS pixel.
+    const relX = e.clientX - rect.left
+    const relY = e.clientY - rect.top
     setHoverKey(nearestKey(relX, relY))
   }
   function handleKeyDown(e: KeyboardEvent<SVGSVGElement>) {
@@ -173,7 +199,7 @@ export function DiscountSpreadChart({ groups }: { groups: DiscountSpreadChartGro
   }
 
   const hoverDot = hoverKey != null ? (placed.find((p) => dotKey(p) === hoverKey) ?? null) : null
-  const tooltipPct = hoverDot ? (hoverDot.cx / VIEW_WIDTH) * 100 : 50
+  const tooltipPct = hoverDot ? (hoverDot.cx / viewWidth) * 100 : 50
 
   const tableColumns: DataTableColumn<{
     vendor: string
@@ -202,11 +228,11 @@ export function DiscountSpreadChart({ groups }: { groups: DiscountSpreadChartGro
   )
 
   return (
-    <div className="flex flex-col gap-3">
-      <div className="relative w-full overflow-x-auto">
+    <div className="flex flex-col gap-3 motion-safe:animate-chart-in">
+      <div ref={wrapRef} className="relative w-full overflow-x-auto">
         <svg
-          viewBox={`0 0 ${VIEW_WIDTH} ${viewHeight}`}
-          width="100%"
+          viewBox={`0 0 ${viewWidth} ${viewHeight}`}
+          width={viewWidth}
           height={viewHeight}
           className="overflow-visible"
           role="img"
@@ -219,12 +245,12 @@ export function DiscountSpreadChart({ groups }: { groups: DiscountSpreadChartGro
           {ticks.map((t) => (
             <g key={`x-${t}`}>
               <line x1={xFor(t)} x2={xFor(t)} y1={PAD.top} y2={PAD.top + plotHeight} className="stroke-border" strokeWidth={1} />
-              <text x={xFor(t)} y={PAD.top + plotHeight + 16} textAnchor="middle" className="fill-muted-foreground text-[9px]">
+              <text x={xFor(t)} y={PAD.top + plotHeight + 17} textAnchor="middle" className="fill-muted-foreground text-[11px]">
                 {t.toFixed(0)}%
               </text>
             </g>
           ))}
-          <text x={PAD.left + innerWidth / 2} y={viewHeight - 8} textAnchor="middle" className="fill-muted-foreground text-[9px]">
+          <text x={padLeft + innerWidth / 2} y={viewHeight - 8} textAnchor="middle" className="fill-muted-foreground text-[11px]">
             Average discount by department
           </text>
 
@@ -235,17 +261,17 @@ export function DiscountSpreadChart({ groups }: { groups: DiscountSpreadChartGro
               <g key={g.key}>
                 {i > 0 && (
                   <line
-                    x1={PAD.left}
-                    x2={VIEW_WIDTH - PAD.right}
+                    x1={padLeft}
+                    x2={viewWidth - PAD.right}
                     y1={PAD.top + i * ROW_HEIGHT}
                     y2={PAD.top + i * ROW_HEIGHT}
                     className="stroke-border/60"
                     strokeWidth={1}
                   />
                 )}
-                <text x={PAD.left - 10} y={rowCentre(i)} textAnchor="end" dominantBaseline="middle" className="fill-foreground text-[10px]">
-                  <tspan>{g.vendorName.length > 16 ? `${g.vendorName.slice(0, 15)}…` : g.vendorName}</tspan>
-                  <tspan className="fill-muted-foreground"> · {g.familyLabel.length > 14 ? `${g.familyLabel.slice(0, 13)}…` : g.familyLabel}</tspan>
+                <text x={padLeft - 10} y={rowCentre(i)} textAnchor="end" dominantBaseline="middle" className="fill-foreground text-[11px]">
+                  <tspan>{g.vendorName.length > vendorChars ? `${g.vendorName.slice(0, vendorChars - 1)}…` : g.vendorName}</tspan>
+                  <tspan className="fill-muted-foreground"> · {g.familyLabel.length > familyChars ? `${g.familyLabel.slice(0, familyChars - 1)}…` : g.familyLabel}</tspan>
                 </text>
                 <line
                   x1={xFor(minPct)}
@@ -278,25 +304,19 @@ export function DiscountSpreadChart({ groups }: { groups: DiscountSpreadChartGro
         </svg>
 
         {hoverDot && (
-          <div
-            className={cn(
-              'pointer-events-none absolute top-1 z-10 min-w-[12rem] -translate-x-1/2 rounded-md border border-border bg-popover px-2.5 py-1.5 text-xs text-popover-foreground shadow-md',
-              barLeftClass(tooltipPct)
-            )}
+          <ChartTooltipPanel
+            leftPct={tooltipPct}
+            className="min-w-[12rem]"
+            title={hoverDot.departmentName}
+            subtitle={`${hoverDot.vendorName} · ${hoverDot.familyLabel}`}
           >
-            <p className="font-medium text-foreground">{hoverDot.departmentName}</p>
-            <p className="mb-1 text-[11px] text-muted-foreground">
-              {hoverDot.vendorName} · {hoverDot.familyLabel}
-            </p>
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-muted-foreground">Avg. discount</span>
-              <span className="font-mono font-semibold text-foreground">{formatPercent(hoverDot.avgDiscountPct)}</span>
-            </div>
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-muted-foreground">Observations</span>
-              <span className="font-mono font-semibold text-foreground">{formatNumber(hoverDot.observationCount)}</span>
-            </div>
-          </div>
+            <ChartTooltipRow
+              label="Avg. discount"
+              value={formatPercent(hoverDot.avgDiscountPct)}
+              indicatorClass={DEPT_DOT_BG_CLASSES[hoverDot.colorIndex]}
+            />
+            <ChartTooltipRow label="Observations" value={formatNumber(hoverDot.observationCount)} />
+          </ChartTooltipPanel>
         )}
       </div>
 
@@ -318,13 +338,17 @@ export function DiscountSpreadChart({ groups }: { groups: DiscountSpreadChartGro
         </p>
       )}
 
-      <div>
-        <Button variant="outline" size="sm" onClick={() => setShowTable((v) => !v)}>
-          {showTable ? 'Hide table' : 'View as table'}
-        </Button>
-      </div>
-      {showTable && (
-        <DataTable columns={tableColumns} rows={tableRows} getRowKey={(r) => `${r.vendor}::${r.family}::${r.department}`} />
+      {tableTwin && (
+        <>
+          <div>
+            <Button variant="outline" size="sm" onClick={() => setShowTable((v) => !v)}>
+              {showTable ? 'Hide table' : 'View as table'}
+            </Button>
+          </div>
+          {showTable && (
+            <DataTable columns={tableColumns} rows={tableRows} getRowKey={(r) => `${r.vendor}::${r.family}::${r.department}`} />
+          )}
+        </>
       )}
     </div>
   )

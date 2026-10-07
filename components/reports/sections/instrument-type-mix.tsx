@@ -5,6 +5,7 @@ import { DataTable, type DataTableColumn } from '@/components/reports/data-table
 import { ExportCsvButton } from '@/components/reports/export-csv-button'
 import { KpiTile } from '@/components/reports/charts/kpi-tile'
 import { InstrumentMixChart, type InstrumentMixDept } from '@/components/reports/charts/instrument-mix-chart'
+import { DonutChart, type DonutSegment } from '@/components/reports/charts/donut-chart'
 import { toCsv } from '@/lib/reports/csv'
 import { formatINR, formatINRCompact, formatPercent } from '@/lib/reports/format'
 import type { CompareBasis } from '@/lib/reports/compare-basis'
@@ -39,6 +40,20 @@ const GROUPS: { key: string; label: string; types: string[] }[] = [
   { key: 'no_document', label: 'No supporting bill', types: ['no_document'] },
 ]
 
+// Event-wide headline donut (visual-optimisation plan Phase 3.2) — the five
+// tiers as a share of all spend, before the per-department bars. Stroke twins
+// of instrument-mix-chart.tsx's GROUP_META bar hexes, in the same best→worst
+// order, so a tier is the same colour in the donut and the bars. Duplicated,
+// not imported: that chart is a 'use client' module (no runtime value may
+// cross into this Server Component). Keep in sync with GROUP_META.
+const GROUP_STROKE: Record<string, string> = {
+  tax_invoice: 'stroke-[#184f95] dark:stroke-[#184f95]',
+  bill_of_supply: 'stroke-[#2a78d6] dark:stroke-[#256abf]',
+  other_bill: 'stroke-[#5598e7] dark:stroke-[#3987e5]',
+  unclassified: 'stroke-[#86b6ef] dark:stroke-[#6da7ec]',
+  no_document: 'stroke-muted-foreground/40',
+}
+
 const TYPE_TO_GROUP = new Map<string, string>()
 for (const g of GROUPS) for (const t of g.types) TYPE_TO_GROUP.set(t, g.key)
 
@@ -61,6 +76,15 @@ export function instrumentTypeMixSentence(rows: InstrumentTypeMixRow[]): string 
   return `${formatINRCompact(weak)} of spend (${formatPercent(
     pct
   )}) is backed only by a letterhead bill, a cash memo, an as-yet-unclassified document, or no bill at all — not a tax invoice or bill of supply.`
+}
+
+function eventWideSegments(departments: InstrumentMixDept[]): DonutSegment[] {
+  return GROUPS.map((g) => ({
+    key: g.key,
+    label: g.label,
+    value: departments.reduce((s, d) => s + (d.values[g.key] ?? 0), 0),
+    colorClass: GROUP_STROKE[g.key]!,
+  })).filter((seg) => seg.value > 0)
 }
 
 function buildDepartments(rows: InstrumentTypeMixRow[]): InstrumentMixDept[] {
@@ -96,6 +120,7 @@ export function InstrumentTypeMixSection({
   insight?: string | null
 }) {
   const departments = buildDepartments(rows)
+  const donutSegments = eventWideSegments(departments)
   const totalSpend = rows.reduce((s, r) => s + r.total_amount, 0)
   const backedSpend = rows
     .filter((r) => ITC_BACKED_INSTRUMENT_TYPES.has(r.instrument_type))
@@ -156,11 +181,13 @@ export function InstrumentTypeMixSection({
           <KpiTile
             label="Backed by tax invoice"
             value={formatPercent(backedPct)}
-            delta={formatDeltaVs(compareBasis, backedPct, previous, 'count')}
+            delta={formatDeltaVs(compareBasis, backedPct, previous, 'pp')}
             deltaTone={deltaToneHigherIsGood(backedPct, previous)}
           />
           <p className="text-sm text-muted-foreground">{insight ?? instrumentTypeMixSentence(rows)}</p>
-          <InstrumentMixChart departments={departments} />
+          <DonutChart segments={donutSegments} centerLabel={formatINRCompact(totalSpend)} valueFormat="inr-compact" />
+          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">By department</p>
+          <InstrumentMixChart departments={departments} tableTwin={false} />
           <DataTable columns={columns} rows={departments} getRowKey={(d) => d.key} />
         </>
       )}

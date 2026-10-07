@@ -3,26 +3,42 @@
 import { useMemo, useState, type KeyboardEvent, type PointerEvent } from 'react'
 import { cn } from '@/lib/utils'
 import { formatINR, formatNumber } from '@/lib/reports/format'
-import { barLeftClass } from '@/lib/reports/bar-scale'
 import { DataTable, type DataTableColumn } from '@/components/reports/data-table'
 import { Button } from '@/components/ui/button'
+import { useChartWidth } from '@/components/reports/charts/use-chart-width'
+import {
+  MATRIX_CELL_H,
+  MATRIX_PAD_BOTTOM,
+  matrixColLabelHeight,
+  matrixLayout,
+  truncateLabel,
+} from '@/components/reports/charts/matrix-layout'
+import { ChartTooltipNote, ChartTooltipPanel, ChartTooltipRow } from '@/components/reports/charts/chart-tooltip-panel'
 
 // reporting-blueprint.md C-08: "Rate paid for the same item at different
 // sites. Two zones buying the same ceiling at different rates is a finding no
 // total will ever show." Matrix — item_family rows × zone columns, each cell
-// shaded sequential single-hue by (cell rate ÷ family median rate): darker
-// means paid MORE than our own norm for that item, not just "more rupees" —
-// unlike a plain amount heatmap, 1.0x (right at the family's own median) is
-// the reference point, not zero, so the bins below are centred on 1.0x rather
-// than starting at 0. Blank cell (hairline stroke-border box, never
-// coloured) where that family wasn't billed in that zone at all — the view
-// itself only carries families billed in 2+ zones, so a blank cell here
-// still means "not this zone," never "zero rate."
+// coloured by (cell rate ÷ family median rate), where 1.0× is the family's own
+// norm.
 //
-// Structurally identical to heatmap-matrix-chart.tsx (D-01's exception heat
-// map): inline SVG with real numeric attributes for every data-driven mark,
-// a pointer/keyboard hover layer, an SVG <title> per cell as a no-JS
-// fallback, and a required "View as table" twin.
+// DIVERGING scale centred on 1.0× (dataviz skill: polarity → two hues + a
+// neutral grey midpoint, equal steps per arm). Cool blue arm = paid LESS than
+// the family median, a neutral grey bin around 1.0× = at the norm, warm orange
+// arm = paid MORE. Orange, not red: red is the app's reserved status colour.
+// (The earlier sequential single-hue ramp made "paid less than median" look
+// like "near zero" — a ratio's reference point is 1, not 0.) Five discrete
+// bins, symmetric in % terms: < 0.85×, 0.85–0.95×, 0.95–1.05×, 1.05–1.15×,
+// > 1.15× (1.15 matches the section's 15% wide-spread headline).
+//
+// Blank cell (hairline stroke-border box, never coloured) where that family
+// wasn't billed in that zone at all — the view itself only carries families
+// billed in 2+ zones, so a blank cell still means "not this zone," never
+// "zero rate."
+//
+// Laid out at the card's measured width (useChartWidth + matrix-layout.ts,
+// scale 1) so labels stay 11px on a phone; inline SVG with real numeric
+// attributes, a pointer/keyboard hover layer, an SVG <title> per cell as a
+// no-JS fallback, and a required "View as table" twin.
 
 export type ZoneEconomicsAxisItem = { key: string; label: string }
 export type ZoneEconomicsCell = {
@@ -33,37 +49,68 @@ export type ZoneEconomicsCell = {
   observationCount: number
 }
 
-// Five discrete bins centred on 1.0x (at the family's own median), not on the
-// observed max — a ratio chart's natural reference point is 1, unlike an
-// amount heatmap's natural reference point of 0. Same sequential single-hue
-// ramp as heatmap-matrix-chart.tsx (references/palette.md) so "darker /
-// brighter = more" reads consistently across every matrix in this app.
-const RATIO_THRESHOLDS = [0.95, 1.05, 1.15, 1.3] as const
-const BIN_FILL_CLASSES = [
-  'fill-[#cde2fb] dark:fill-[#123a63]',
-  'fill-[#9ec5f4] dark:fill-[#1a5388]',
-  'fill-[#6da7ec] dark:fill-[#2f6fbf]',
-  'fill-[#3e8ae0] dark:fill-[#5b9be8]',
-  'fill-[#184f95] dark:fill-[#93bff1]',
+// Bin edges, in ratio-to-family-median. A ratio of exactly 0.95 or 1.05
+// counts as "near the median" (bin 2).
+const LOW_STRONG = 0.85
+const LOW_MILD = 0.95
+const HIGH_MILD = 1.05
+const HIGH_STRONG = 1.15
+
+// Diverging steps. Validated with the dataviz skill's validator
+// (scripts/validate_palette.js), each arm as an --ordinal ramp and the full
+// set --pairs all for cross-bin separation:
+//   light  cool #3987e5,#86b6ef | neutral #f0efec | warm #ee9a7c,#d95926
+//          arms: ALL CHECKS PASS (light ends 2.06:1 / 2.14:1 vs #fcfcfb);
+//          all-pairs CVD ΔE 14.3, normal-vision ΔE 15.5 — PASS
+//   dark   cool #5598e7,#1c5cab | neutral #383835 | warm #9c390b,#eb6834
+//          arms: ALL CHECKS PASS (inner steps 2.63:1 / 2.49:1 vs #1a1a19);
+//          all-pairs CVD ΔE 10.8, normal-vision ΔE 19.1 — PASS
+// Matched lightness per arm (cool and warm steps share OKLCH L) so neither
+// side reads as heavier. Band/chroma "FAIL"s from the categorical checks are
+// expected for a ramp (the neutral is grey by design); the sub-3:1 inner
+// steps are relieved by the per-cell tooltip, <title> and table twin.
+const BINS = [
+  {
+    fill: 'fill-[#3987e5] dark:fill-[#5598e7]',
+    bg: 'bg-[#3987e5] dark:bg-[#5598e7]',
+    label: `< ${LOW_STRONG}×`,
+    meaning: 'well below median',
+  },
+  {
+    fill: 'fill-[#86b6ef] dark:fill-[#1c5cab]',
+    bg: 'bg-[#86b6ef] dark:bg-[#1c5cab]',
+    label: `${LOW_STRONG}–${LOW_MILD}×`,
+    meaning: 'below median',
+  },
+  {
+    fill: 'fill-[#f0efec] dark:fill-[#383835]',
+    bg: 'bg-[#f0efec] dark:bg-[#383835]',
+    label: `${LOW_MILD}–${HIGH_MILD}×`,
+    meaning: 'at median',
+  },
+  {
+    fill: 'fill-[#ee9a7c] dark:fill-[#9c390b]',
+    bg: 'bg-[#ee9a7c] dark:bg-[#9c390b]',
+    label: `${HIGH_MILD}–${HIGH_STRONG}×`,
+    meaning: 'above median',
+  },
+  {
+    fill: 'fill-[#d95926] dark:fill-[#eb6834]',
+    bg: 'bg-[#d95926] dark:bg-[#eb6834]',
+    label: `> ${HIGH_STRONG}×`,
+    meaning: 'well above median',
+  },
 ] as const
 
-const CELL_W = 46
-const CELL_H = 30
-const ROW_LABEL_W = 150
-const COL_LABEL_H = 96
-const PAD_RIGHT = 12
-const PAD_BOTTOM = 6
-
-function truncate(s: string, n: number): string {
-  return s.length > n ? `${s.slice(0, n - 1)}…` : s
-}
+const COL_LABEL_CHARS = 16
 
 /** Bin index 0..4 for a cell's rate-vs-family-median ratio. */
 function binOf(ratio: number): number {
-  for (let i = 0; i < RATIO_THRESHOLDS.length; i += 1) {
-    if (ratio <= RATIO_THRESHOLDS[i]!) return i
-  }
-  return RATIO_THRESHOLDS.length
+  if (ratio < LOW_STRONG) return 0
+  if (ratio < LOW_MILD) return 1
+  if (ratio <= HIGH_MILD) return 2
+  if (ratio <= HIGH_STRONG) return 3
+  return 4
 }
 
 export function ZoneEconomicsMatrixChart({
@@ -77,6 +124,7 @@ export function ZoneEconomicsMatrixChart({
 }) {
   const [active, setActive] = useState<{ r: number; c: number } | null>(null)
   const [showTable, setShowTable] = useState(false)
+  const [wrapRef, containerWidth] = useChartWidth(600)
 
   const cellByKey = useMemo(() => {
     const m = new Map<string, ZoneEconomicsCell>()
@@ -86,8 +134,9 @@ export function ZoneEconomicsMatrixChart({
 
   if (rows.length === 0 || columns.length === 0) return null
 
-  const width = ROW_LABEL_W + columns.length * CELL_W + PAD_RIGHT
-  const height = COL_LABEL_H + rows.length * CELL_H + PAD_BOTTOM
+  const { rowLabelW, rowLabelChars, cellW, svgWidth } = matrixLayout(containerWidth, columns.length)
+  const colLabelH = matrixColLabelHeight(COL_LABEL_CHARS)
+  const height = colLabelH + rows.length * MATRIX_CELL_H + MATRIX_PAD_BOTTOM
 
   const lookup = (r: number, c: number) => cellByKey.get(`${rows[r]!.key}||${columns[c]!.key}`) ?? null
   const ratioOf = (cell: ZoneEconomicsCell) => (cell.familyMedianRate > 0 ? cell.medianRate / cell.familyMedianRate : 1)
@@ -110,17 +159,19 @@ export function ZoneEconomicsMatrixChart({
   }
 
   function handlePointerMove(e: PointerEvent<SVGSVGElement>) {
+    // Scale 1: one viewBox unit per CSS pixel.
     const rect = e.currentTarget.getBoundingClientRect()
-    const relX = ((e.clientX - rect.left) / rect.width) * width
-    const relY = ((e.clientY - rect.top) / rect.height) * height
-    const c = Math.floor((relX - ROW_LABEL_W) / CELL_W)
-    const r = Math.floor((relY - COL_LABEL_H) / CELL_H)
+    const relX = e.clientX - rect.left
+    const relY = e.clientY - rect.top
+    const c = Math.floor((relX - rowLabelW) / cellW)
+    const r = Math.floor((relY - colLabelH) / MATRIX_CELL_H)
     if (r >= 0 && r < rows.length && c >= 0 && c < columns.length) setActive({ r, c })
     else setActive(null)
   }
 
   const activeCell = active ? lookup(active.r, active.c) : null
-  const tooltipLeftPct = active ? ((ROW_LABEL_W + active.c * CELL_W + CELL_W / 2) / width) * 100 : 50
+  const activeBin = activeCell ? binOf(ratioOf(activeCell)) : -1
+  const tooltipLeftPct = active ? ((rowLabelW + active.c * cellW + cellW / 2) / containerWidth) * 100 : 50
 
   const tableColumns: DataTableColumn<ZoneEconomicsCell>[] = [
     { key: 'family', header: 'Item family', render: (cell) => cell.rowKey },
@@ -133,16 +184,16 @@ export function ZoneEconomicsMatrixChart({
   const tableRows = [...cells].sort((a, b) => ratioOf(b) - ratioOf(a))
 
   return (
-    <div className="flex flex-col gap-3">
-      <div className="relative w-full overflow-x-auto">
+    <div className="flex flex-col gap-3 motion-safe:animate-chart-in">
+      <div ref={wrapRef} className="relative w-full overflow-x-auto">
         <svg
-          viewBox={`0 0 ${width} ${height}`}
-          width="100%"
+          viewBox={`0 0 ${svgWidth} ${height}`}
+          width={svgWidth}
           height={height}
           role="img"
           aria-label={`Unit economics by zone — ${formatNumber(rows.length)} item families down the rows, ${formatNumber(
             columns.length
-          )} zones across the columns, each cell shaded darker the more its median rate exceeds that family's own median rate across every zone. See the table view below for exact values.`}
+          )} zones across the columns. Each cell is coloured by its median rate against that family's own median across every zone: blue below the median, grey near it (0.95× to 1.05×), orange above it, deeper colour the further away. See the table view below for exact values.`}
           tabIndex={0}
           className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           onPointerMove={handlePointerMove}
@@ -150,36 +201,42 @@ export function ZoneEconomicsMatrixChart({
           onKeyDown={handleKeyDown}
         >
           {columns.map((col, c) => {
-            const x = ROW_LABEL_W + c * CELL_W + CELL_W / 2
+            const x = rowLabelW + c * cellW + cellW / 2
             return (
               <text
                 key={col.key}
                 x={x}
-                y={COL_LABEL_H - 8}
+                y={colLabelH - 8}
                 textAnchor="start"
-                transform={`rotate(-40 ${x} ${COL_LABEL_H - 8})`}
-                className="fill-muted-foreground text-[10px]"
+                transform={`rotate(-40 ${x} ${colLabelH - 8})`}
+                className="fill-muted-foreground text-[11px]"
               >
-                {truncate(col.label, 16)}
+                {truncateLabel(col.label, COL_LABEL_CHARS)}
               </text>
             )
           })}
 
           {rows.map((row, r) => {
-            const y = COL_LABEL_H + r * CELL_H
+            const y = colLabelH + r * MATRIX_CELL_H
             return (
               <g key={row.key}>
-                <text x={ROW_LABEL_W - 8} y={y + CELL_H / 2} textAnchor="end" dominantBaseline="middle" className="fill-foreground text-[10px]">
-                  {truncate(row.label, 22)}
+                <text
+                  x={rowLabelW - 8}
+                  y={y + MATRIX_CELL_H / 2}
+                  textAnchor="end"
+                  dominantBaseline="middle"
+                  className="fill-foreground text-[11px]"
+                >
+                  {truncateLabel(row.label, rowLabelChars)}
                 </text>
                 {columns.map((col, c) => {
-                  const x = ROW_LABEL_W + c * CELL_W
+                  const x = rowLabelW + c * cellW
                   const cell = lookup(r, c)
                   const ratio = cell ? ratioOf(cell) : null
                   const bin = ratio != null ? binOf(ratio) : -1
                   const isActive = active?.r === r && active?.c === c
                   const titleText = cell
-                    ? `${row.label} · ${col.label}: ${formatINR(cell.medianRate)} (${ratio!.toFixed(2)}× the ${formatINR(cell.familyMedianRate)} family median), ${formatNumber(cell.observationCount)} observation${cell.observationCount === 1 ? '' : 's'}`
+                    ? `${row.label} · ${col.label}: ${formatINR(cell.medianRate)} (${ratio!.toFixed(2)}× the ${formatINR(cell.familyMedianRate)} family median — ${BINS[bin]!.meaning}), ${formatNumber(cell.observationCount)} observation${cell.observationCount === 1 ? '' : 's'}`
                     : `${row.label} · ${col.label}: not billed in this zone`
                   return (
                     <g key={col.key}>
@@ -187,11 +244,11 @@ export function ZoneEconomicsMatrixChart({
                       <rect
                         x={x + 1}
                         y={y + 1}
-                        width={CELL_W - 2}
-                        height={CELL_H - 2}
+                        width={cellW - 2}
+                        height={MATRIX_CELL_H - 2}
                         rx={2}
                         strokeWidth={1}
-                        className={cn(bin >= 0 ? BIN_FILL_CLASSES[bin] : 'fill-none stroke-border', isActive && 'stroke-foreground')}
+                        className={cn(bin >= 0 ? BINS[bin]!.fill : 'fill-none stroke-border', isActive && 'stroke-foreground')}
                       />
                     </g>
                   )
@@ -201,58 +258,45 @@ export function ZoneEconomicsMatrixChart({
           })}
         </svg>
 
-        {activeCell || active ? (
-          <div
-            className={cn(
-              'pointer-events-none absolute top-1 z-10 min-w-[13rem] -translate-x-1/2 rounded-md border border-border bg-popover px-2.5 py-1.5 text-xs text-popover-foreground shadow-md',
-              barLeftClass(tooltipLeftPct)
-            )}
+        {active ? (
+          <ChartTooltipPanel
+            leftPct={tooltipLeftPct}
+            className="min-w-[13rem]"
+            title={`${rows[active.r]!.label} · ${columns[active.c]!.label}`}
           >
-            <p className="mb-1 font-medium text-foreground">
-              {rows[active!.r]!.label} · {columns[active!.c]!.label}
-            </p>
             {activeCell ? (
               <>
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-muted-foreground">Zone median rate</span>
-                  <span className="font-mono font-semibold text-foreground">{formatINR(activeCell.medianRate)}</span>
-                </div>
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-muted-foreground">Family median (all zones)</span>
-                  <span className="font-mono font-semibold text-foreground">{formatINR(activeCell.familyMedianRate)}</span>
-                </div>
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-muted-foreground">vs family median</span>
-                  <span className="font-mono font-semibold text-foreground">{ratioOf(activeCell).toFixed(2)}×</span>
-                </div>
+                <ChartTooltipRow label="Zone median rate" value={formatINR(activeCell.medianRate)} indicatorClass={BINS[activeBin]!.bg} />
+                <ChartTooltipRow label="Family median (all zones)" value={formatINR(activeCell.familyMedianRate)} />
+                <ChartTooltipRow label="vs family median" value={`${ratioOf(activeCell).toFixed(2)}×`} />
+                <ChartTooltipNote>{BINS[activeBin]!.meaning}</ChartTooltipNote>
               </>
             ) : (
-              <p className="text-muted-foreground">Not billed in this zone</p>
+              <ChartTooltipNote>Not billed in this zone</ChartTooltipNote>
             )}
-          </div>
+          </ChartTooltipPanel>
         ) : null}
       </div>
 
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-muted-foreground">
-        <span className="flex items-center gap-1.5">
-          <svg width={12} height={12} aria-hidden="true">
-            <rect x={0.5} y={0.5} width={11} height={11} rx={2} className="fill-none stroke-border" strokeWidth={1} />
-          </svg>
-          Not billed in this zone
-        </span>
-        {BIN_FILL_CLASSES.map((fillClass, i) => {
-          const lower = i === 0 ? null : RATIO_THRESHOLDS[i - 1]!
-          const upper = i < RATIO_THRESHOLDS.length ? RATIO_THRESHOLDS[i]! : null
-          const label = lower == null ? `≤ ${upper}×` : upper == null ? `> ${lower}×` : `${lower}×–${upper}×`
-          return (
-            <span key={fillClass} className="flex items-center gap-1.5">
-              <svg width={12} height={12} aria-hidden="true">
-                <rect x={0} y={0} width={12} height={12} rx={2} className={fillClass} />
-              </svg>
-              {label} of family median
+      {/* Legend: the five bins in order, cool → neutral → warm, with their
+          ranges, plus the blank-cell state. */}
+      <div className="flex flex-col gap-1.5 text-xs text-muted-foreground">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
+          <span>Rate vs family median:</span>
+          {BINS.map((bin) => (
+            <span key={bin.label} className="flex items-center gap-1.5">
+              <span className={cn('h-3 w-3 shrink-0 rounded-[2px]', bin.bg)} aria-hidden="true" />
+              {bin.label}
             </span>
-          )
-        })}
+          ))}
+          <span className="flex items-center gap-1.5">
+            <svg width={12} height={12} aria-hidden="true">
+              <rect x={0.5} y={0.5} width={11} height={11} rx={2} className="fill-none stroke-border" strokeWidth={1} />
+            </svg>
+            Not billed in this zone
+          </span>
+        </div>
+        <p>Blue = paid less than the family&rsquo;s own median, grey = about the median, orange = paid more.</p>
       </div>
 
       <div>

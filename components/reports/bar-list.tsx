@@ -60,7 +60,7 @@ export function BarList({
                 )}
               </span>
             </div>
-            <div className="relative h-1.5 w-full overflow-hidden rounded-full bg-secondary">
+            <div className="relative h-1.5 w-full overflow-hidden rounded-full bg-muted">
               {/* Width/position come from a build-time Tailwind class, never an
                   inline style attribute — see lib/reports/bar-scale.ts for why:
                   production CSP's style-src has no 'unsafe-inline'. */}

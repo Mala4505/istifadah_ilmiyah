@@ -1,27 +1,37 @@
 'use client'
 
-import { useState, type PointerEvent, type KeyboardEvent } from 'react'
+import { useState } from 'react'
 import Link from 'next/link'
-import { cn } from '@/lib/utils'
+import { useRouter } from 'next/navigation'
+import { Bar, BarChart, CartesianGrid, LabelList, XAxis, YAxis } from 'recharts'
 import { formatINR, formatINRCompact, formatNumber } from '@/lib/reports/format'
-import { barLeftClass } from '@/lib/reports/bar-scale'
 import { DataTable, type DataTableColumn } from '@/components/reports/data-table'
 import { Button } from '@/components/ui/button'
+import { ChartContainer, ChartTooltip, ChartTooltipContent, useChartAnimation, type ChartConfig } from '@/components/ui/chart'
+import {
+  AXIS_TICK,
+  BAR_PX,
+  CategoryTick,
+  GRID_STROKE,
+  SERIES_BLUE,
+  TooltipRow,
+  barEndLabel,
+  horizontalChartHeight,
+  truncate,
+  useCompactChart,
+} from './recharts-kit'
 
 // reporting-blueprint.md B-04: "Vendors serving exactly one department,
 // especially at high value. Not wrong in itself — but it is where a
 // relationship, rather than a market, is setting the price." One horizontal
-// bar per single-department vendor, ranked by spend, each labeled with the
-// one department it serves. One accent hue throughout — this isn't a
+// bar per single-department vendor, ranked by spend, each labelled at its end
+// with the one department it serves. One accent hue throughout — this isn't a
 // good/bad finding the way B-03's threshold is, so it gets the plain series
 // colour rather than the reserved status palette.
 //
-// Structurally mirrors funnel-chart.tsx's simple bar geometry plus
-// attention-map-chart.tsx's pointer/keyboard/table scaffolding: inline SVG
-// with real numeric attributes for every data-driven mark (exempt from this
-// app's style-src CSP constraint — see lib/reports/bar-scale.ts), a
-// pointer-move row lookup, arrow-key row navigation, an SVG <title> per bar
-// as a no-JS fallback, and a required "View as table" twin.
+// shadcn chart (Recharts 3), vertical layout: height grows with row count;
+// vendor names are focusable drill links on the category axis (a click on the
+// bar goes to the same place); required "View as table" twin.
 
 export type VendorExclusivityBar = {
   key: number
@@ -32,47 +42,17 @@ export type VendorExclusivityBar = {
   spend: number
 }
 
-const VIEW_WIDTH = 600
-const ROW_HEIGHT = 32
-const BAR_HEIGHT = 14
 const MAX_ROWS = 12
-const PAD = { left: 156, right: 16, top: 6, bottom: 26 }
 
-function niceNum(range: number, round: boolean): number {
-  const safeRange = range || 1
-  const exponent = Math.floor(Math.log10(safeRange))
-  const fraction = safeRange / 10 ** exponent
-  const niceFraction = round
-    ? fraction < 1.5
-      ? 1
-      : fraction < 3
-        ? 2
-        : fraction < 7
-          ? 5
-          : 10
-    : fraction <= 1
-      ? 1
-      : fraction <= 2
-        ? 2
-        : fraction <= 5
-          ? 5
-          : 10
-  return niceFraction * 10 ** exponent
-}
-
-function niceTicks(min: number, max: number, tickCount = 4): number[] {
-  if (min === max) return [0, min]
-  const step = niceNum((max - min) / (tickCount - 1), true)
-  const niceMin = 0
-  const niceMax = Math.ceil(max / step) * step
-  const ticks: number[] = []
-  for (let v = niceMin; v <= niceMax + step / 2; v += step) ticks.push(Math.round(v * 1e6) / 1e6)
-  return ticks
-}
+const chartConfig = {
+  spend: { label: 'Total spend', theme: SERIES_BLUE },
+} satisfies ChartConfig
 
 export function VendorExclusivityChart({ bars }: { bars: VendorExclusivityBar[] }) {
-  const [activeIndex, setActiveIndex] = useState<number | null>(null)
   const [showTable, setShowTable] = useState(false)
+  const router = useRouter()
+  const anim = useChartAnimation()
+  const [wrapRef, compact] = useCompactChart()
 
   if (bars.length === 0) return null
 
@@ -80,38 +60,8 @@ export function VendorExclusivityChart({ bars }: { bars: VendorExclusivityBar[] 
   const rows = sorted.slice(0, MAX_ROWS)
   const hiddenCount = sorted.length - rows.length
 
-  const innerWidth = VIEW_WIDTH - PAD.left - PAD.right
-  const plotHeight = rows.length * ROW_HEIGHT
-  const viewHeight = PAD.top + plotHeight + PAD.bottom
-
-  const maxSpend = Math.max(...rows.map((r) => r.spend))
-  const ticks = niceTicks(0, maxSpend, 4)
-  const domainMax = ticks[ticks.length - 1] || 1
-
-  const xFor = (spend: number) => PAD.left + (Math.max(0, spend) / domainMax) * innerWidth
-  const rowTop = (i: number) => PAD.top + i * ROW_HEIGHT
-  const rowCentre = (i: number) => rowTop(i) + ROW_HEIGHT / 2
-
-  function handlePointerMove(e: PointerEvent<SVGSVGElement>) {
-    const rect = e.currentTarget.getBoundingClientRect()
-    const relY = ((e.clientY - rect.top) / rect.height) * viewHeight
-    const idx = Math.floor((relY - PAD.top) / ROW_HEIGHT)
-    setActiveIndex(idx >= 0 && idx < rows.length ? idx : null)
-  }
-  function handleKeyDown(e: KeyboardEvent<SVGSVGElement>) {
-    if (e.key === 'ArrowDown') {
-      e.preventDefault()
-      setActiveIndex((i) => Math.min(rows.length - 1, (i ?? -1) + 1))
-    } else if (e.key === 'ArrowUp') {
-      e.preventDefault()
-      setActiveIndex((i) => Math.max(0, (i ?? rows.length) - 1))
-    } else if (e.key === 'Escape') {
-      setActiveIndex(null)
-    }
-  }
-
-  const activeBar = activeIndex != null ? rows[activeIndex]! : null
-  const tooltipPct = activeIndex != null ? (xFor(rows[activeIndex]!.spend) / VIEW_WIDTH) * 100 : 50
+  const data = rows.map((r) => ({ ...r, rowKey: String(r.key) }))
+  const byKey = new Map(data.map((d) => [d.rowKey, d]))
 
   const tableColumns: DataTableColumn<VendorExclusivityBar>[] = [
     {
@@ -141,93 +91,95 @@ export function VendorExclusivityChart({ bars }: { bars: VendorExclusivityBar[] 
     { key: 'spend', header: 'Total spend', align: 'right', render: (r) => formatINR(r.spend) },
   ]
 
+  const EndLabel = barEndLabel((i) => {
+    const row = data[i]
+    if (!row) return null
+    return (
+      <text dy={4} fontSize={11} className="fill-muted-foreground">
+        <title>{row.departmentLabel}</title>
+        {truncate(row.departmentLabel, compact ? 10 : 20)}
+      </text>
+    )
+  })
+
   return (
-    <div className="flex flex-col gap-3">
-      <div className="relative w-full">
-        <svg
-          viewBox={`0 0 ${VIEW_WIDTH} ${viewHeight}`}
-          width="100%"
-          height={viewHeight}
-          className="overflow-visible"
-          role="img"
-          aria-label={`Vendor exclusivity — vendors serving exactly one department, ranked by spend, each bar labeled with its sole department. See the table view below for exact values.`}
-          tabIndex={0}
-          onPointerMove={handlePointerMove}
-          onPointerLeave={() => setActiveIndex(null)}
-          onKeyDown={handleKeyDown}
+    <div ref={wrapRef} className="flex flex-col gap-3">
+      <ChartContainer
+        config={chartConfig}
+        className="aspect-auto w-full"
+        style={{ height: horizontalChartHeight(data.length, 28) }}
+        role="img"
+        aria-label="Vendor exclusivity — vendors serving exactly one department, ranked by spend, each bar labelled with its sole department. See the table view below for exact values."
+      >
+        <BarChart
+          data={data}
+          layout="vertical"
+          margin={{ top: 4, right: compact ? 72 : 132, bottom: 0, left: 0 }}
+          barSize={BAR_PX}
         >
-          {ticks.map((t) => (
-            <g key={`x-${t}`}>
-              <line x1={xFor(t)} x2={xFor(t)} y1={PAD.top} y2={PAD.top + plotHeight} className="stroke-border" strokeWidth={1} />
-              <text x={xFor(t)} y={PAD.top + plotHeight + 16} textAnchor="middle" className="fill-muted-foreground text-[9px]">
-                {formatINRCompact(t)}
-              </text>
-            </g>
-          ))}
-
-          {rows.map((row, i) => {
-            const barW = Math.max(0, xFor(row.spend) - PAD.left)
-            const isActive = activeIndex === i
-            return (
-              <g key={row.key}>
-                <title>{`${row.vendorLabel} — ${formatINR(row.spend)}, sole department: ${row.departmentLabel}`}</title>
-                {i > 0 && (
-                  <line
-                    x1={PAD.left}
-                    x2={VIEW_WIDTH - PAD.right}
-                    y1={rowTop(i)}
-                    y2={rowTop(i)}
-                    className="stroke-border/60"
-                    strokeWidth={1}
-                  />
+          <CartesianGrid horizontal={false} stroke={GRID_STROKE} />
+          <XAxis
+            type="number"
+            tickFormatter={(v: number) => formatINRCompact(v)}
+            tickLine={false}
+            axisLine={false}
+            tick={AXIS_TICK}
+            tickCount={compact ? 3 : 5}
+          />
+          <YAxis
+            type="category"
+            dataKey="rowKey"
+            width={compact ? 104 : 160}
+            tickLine={false}
+            axisLine={false}
+            interval={0}
+            tick={
+              <CategoryTick
+                maxChars={compact ? 14 : 22}
+                lookup={(k) => {
+                  const r = byKey.get(k)
+                  return r ? { label: r.vendorLabel, href: r.vendorHref } : undefined
+                }}
+              />
+            }
+          />
+          <ChartTooltip
+            cursor={false}
+            content={
+              <ChartTooltipContent
+                hideIndicator
+                labelFormatter={(_, payload) => {
+                  const r = payload[0]?.payload as (typeof data)[number] | undefined
+                  return r ? (
+                    <div>
+                      <p>{r.vendorLabel}</p>
+                      <p className="font-normal text-muted-foreground">Sole department: {r.departmentLabel}</p>
+                    </div>
+                  ) : null
+                }}
+                formatter={(value) => (
+                  <TooltipRow color="var(--color-spend)" name="Total spend" value={formatINRCompact(Number(value))} />
                 )}
-                <text
-                  x={PAD.left - 10}
-                  y={rowCentre(i)}
-                  textAnchor="end"
-                  dominantBaseline="middle"
-                  className="fill-foreground text-[10px]"
-                >
-                  {row.vendorLabel.length > 22 ? `${row.vendorLabel.slice(0, 21)}…` : row.vendorLabel}
-                </text>
-                <rect
-                  x={PAD.left}
-                  y={rowCentre(i) - BAR_HEIGHT / 2}
-                  width={barW}
-                  height={BAR_HEIGHT}
-                  rx={2}
-                  strokeWidth={isActive ? 1.5 : 0}
-                  className={cn('fill-[#2a78d6] dark:fill-[#3987e5]', isActive && 'stroke-foreground')}
-                />
-                <text
-                  x={PAD.left + barW + 8}
-                  y={rowCentre(i)}
-                  dominantBaseline="middle"
-                  className="fill-muted-foreground text-[9px]"
-                >
-                  {row.departmentLabel.length > 20 ? `${row.departmentLabel.slice(0, 19)}…` : row.departmentLabel}
-                </text>
-              </g>
-            )
-          })}
-        </svg>
-
-        {activeBar && (
-          <div
-            className={cn(
-              'pointer-events-none absolute top-1 z-10 min-w-[12rem] -translate-x-1/2 rounded-md border border-border bg-popover px-2.5 py-1.5 text-xs text-popover-foreground shadow-md',
-              barLeftClass(tooltipPct)
-            )}
+              />
+            }
+          />
+          <Bar
+            dataKey="spend"
+            name="spend"
+            fill="var(--color-spend)"
+            radius={[0, 4, 4, 0]}
+            minPointSize={2}
+            className={data.some((d) => d.vendorHref) ? 'cursor-pointer' : undefined}
+            onClick={(entry) => {
+              const href = (entry.payload as (typeof data)[number] | undefined)?.vendorHref
+              if (href) router.push(href)
+            }}
+            {...anim}
           >
-            <p className="font-medium text-foreground">{activeBar.vendorLabel}</p>
-            <p className="mb-1 text-[11px] text-muted-foreground">{activeBar.departmentLabel}</p>
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-muted-foreground">Total spend</span>
-              <span className="font-mono font-semibold text-foreground">{formatINRCompact(activeBar.spend)}</span>
-            </div>
-          </div>
-        )}
-      </div>
+            <LabelList dataKey="spend" content={EndLabel} />
+          </Bar>
+        </BarChart>
+      </ChartContainer>
 
       {hiddenCount > 0 && (
         <p className="text-xs text-muted-foreground">

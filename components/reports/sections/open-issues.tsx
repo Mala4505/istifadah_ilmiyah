@@ -9,7 +9,7 @@ import { SeverityBadge } from '@/components/reports/severity-badge'
 import { toCsv } from '@/lib/reports/csv'
 import { formatDate, formatINR, formatINRCompact, formatNumber, humanizeCode } from '@/lib/reports/format'
 import type { CompareBasis } from '@/lib/reports/compare-basis'
-import { deltaToneHigherIsBad, formatDeltaVs, severitySegments, type OpenIssueRow } from '@/lib/reports/sections/shared'
+import { deltaToneHigherIsBad, formatDeltaVs, severityDonut, type OpenIssueRow } from '@/lib/reports/sections/shared'
 
 // Open issues digest (blueprint Integrity surface). Ported verbatim from the
 // former app/(app)/reports/page.tsx section of the same id.
@@ -70,7 +70,7 @@ export function OpenIssuesSection({
   previousAtRisk: number | null
   insight?: string | null
 }) {
-  const severity = severitySegments(rows)
+  const severity = severityDonut(rows, 'issues')
 
   return (
     <ReportSection
@@ -105,7 +105,9 @@ export function OpenIssuesSection({
             series={series}
           />
           <p className="text-sm text-muted-foreground">{insight ?? openIssuesSentence(rows)}</p>
-          {severity.length > 0 && <DonutChart segments={severity} centerLabel={`${rows.length} issues`} />}
+          {severity.segments.length > 0 && (
+            <DonutChart segments={severity.segments} centerLabel={severity.centerLabel} valueFormat={severity.valueFormat} />
+          )}
           <DataTable
             columns={issueColumns}
             rows={rows}

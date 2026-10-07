@@ -9,7 +9,7 @@ import { SeverityBadge } from '@/components/reports/severity-badge'
 import { toCsv } from '@/lib/reports/csv'
 import { formatDateTime, formatINR, formatINRCompact, formatNumber, humanizeCode } from '@/lib/reports/format'
 import type { CompareBasis } from '@/lib/reports/compare-basis'
-import { deltaToneHigherIsBad, formatDeltaVs, severitySegments, type ComplianceRow } from '@/lib/reports/sections/shared'
+import { deltaToneHigherIsBad, formatDeltaVs, severityDonut, type ComplianceRow } from '@/lib/reports/sections/shared'
 
 // Compliance & leakage (blueprint Integrity surface). Ported verbatim from
 // the former app/(app)/reports/page.tsx section of the same id.
@@ -83,7 +83,7 @@ export function ComplianceSection({
   previousAtRisk: number | null
   insight?: string | null
 }) {
-  const severity = severitySegments(rows)
+  const severity = severityDonut(rows, 'flags')
 
   return (
     <ReportSection
@@ -141,7 +141,9 @@ export function ComplianceSection({
             ))}
           </div>
           <p className="text-sm text-muted-foreground">{insight ?? complianceSentence(rows, byType, atRiskTotal)}</p>
-          {severity.length > 0 && <DonutChart segments={severity} centerLabel={`${rows.length} flags`} />}
+          {severity.segments.length > 0 && (
+            <DonutChart segments={severity.segments} centerLabel={severity.centerLabel} valueFormat={severity.valueFormat} />
+          )}
           <DataTable columns={complianceColumns} rows={rows} getRowKey={(r) => r.id} />
         </>
       )}

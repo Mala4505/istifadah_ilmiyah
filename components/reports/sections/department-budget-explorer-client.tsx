@@ -7,9 +7,9 @@ import { ReportSection } from '@/components/reports/report-section'
 import { EmptyState } from '@/components/reports/empty-state'
 import { DataTable, type DataTableColumn } from '@/components/reports/data-table'
 import { BarList, type BarListItem } from '@/components/reports/bar-list'
-import { DonutChart, type DonutSegment } from '@/components/reports/charts/donut-chart'
+import { DonutChart } from '@/components/reports/charts/donut-chart'
 import { KpiTile } from '@/components/reports/charts/kpi-tile'
-import { ORDINAL_RAMP } from '@/components/reports/charts/ordinal-ramp'
+import { shareSegments } from '@/components/reports/charts/share-segments'
 import { ExportCsvButton } from '@/components/reports/export-csv-button'
 import { ExportPdfButton } from '@/components/reports/export-pdf-button'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -38,7 +38,6 @@ import {
 // department-budget-explorer.tsx and handed in here as ready bytes, the same
 // split that component's PDF button already uses.
 
-const MAX_DONUT_SEGMENTS = 6
 type ChartStyle = 'donut' | 'bars'
 
 type ScopedItem = {
@@ -121,26 +120,14 @@ export function DepartmentBudgetExplorerClient({
   const overCount = withBudget.filter((x) => (x.pctOfBudget ?? 0) > 100).length
   const previousActual = !selectedDept && compareBasis === 'prior_event' ? previousDeptActualTotal : null
 
-  // Donut caps at 6 named segments -- past that, hue alone stops working
-  // (the same threshold budget-category-mix.tsx's donut already uses).
-  const donutSegments: DonutSegment[] = []
-  items.slice(0, MAX_DONUT_SEGMENTS).forEach((it, i) => {
-    donutSegments.push({
-      key: String(it.id),
-      label: it.name,
-      value: it.actual ?? 0,
-      colorClass: ORDINAL_RAMP[i % ORDINAL_RAMP.length]!.strokeClass,
-    })
-  })
-  const restItems = items.slice(MAX_DONUT_SEGMENTS)
-  if (restItems.length > 0) {
-    donutSegments.push({
-      key: 'other',
-      label: `Other (${formatNumber(restItems.length)} ${selectedDept ? 'divisions' : 'departments'})`,
-      value: restItems.reduce((s, x) => s + (x.actual ?? 0), 0),
-      colorClass: 'stroke-muted-foreground',
-    })
-  }
+  // Donut caps at 6 slices -- past that, hue alone stops working. Categorical
+  // hues (departments are unordered identities; the old one-hue ordinal ramp
+  // cycled `i % 4`, so slices 5-6 repeated slices 1-2's colour). The tail
+  // folds into a neutral "Other". The Bars view keeps budget-status colours.
+  const donutSegments = shareSegments(
+    items.map((it) => ({ key: String(it.id), label: it.name, value: it.actual ?? 0 })),
+    { otherNoun: selectedDept ? 'divisions' : 'departments' }
+  )
 
   const barItems: BarListItem[] = items
     .filter((x) => (x.actual ?? 0) > 0)
@@ -206,7 +193,7 @@ export function DepartmentBudgetExplorerClient({
   ]
 
   const onSelectFromChart = (key: string) => {
-    if (key === 'other') return
+    if (key === '__other__') return
     setSelectedDeptId(Number(key))
   }
 
@@ -260,21 +247,24 @@ export function DepartmentBudgetExplorerClient({
       )}
 
       {!selectedDept && deptItems.length > 1 && (
-        <SelectNative
-          aria-label="Jump to department"
-          className="w-fit"
-          value=""
-          onChange={(e) => {
-            if (e.target.value) setSelectedDeptId(Number(e.target.value))
-          }}
-        >
-          <option value="">Jump to a department…</option>
-          {deptItems.map((d) => (
-            <option key={d.id} value={d.id}>
-              {d.name}
-            </option>
-          ))}
-        </SelectNative>
+        // w-fit on the wrapper, not the <select>: SelectNative's chevron is
+        // positioned against its full-width wrapper div.
+        <div className="w-fit max-w-full">
+          <SelectNative
+            aria-label="Jump to department"
+            value=""
+            onChange={(e) => {
+              if (e.target.value) setSelectedDeptId(Number(e.target.value))
+            }}
+          >
+            <option value="">Jump to a department…</option>
+            {deptItems.map((d) => (
+              <option key={d.id} value={d.id}>
+                {d.name}
+              </option>
+            ))}
+          </SelectNative>
+        </div>
       )}
 
       {error ? (
@@ -312,7 +302,7 @@ export function DepartmentBudgetExplorerClient({
               segments={donutSegments}
               centerLabel={formatINRCompact(totalActual)}
               onSelect={selectedDept ? undefined : onSelectFromChart}
-              valueFormatter={formatINRCompact}
+              valueFormat="inr-compact"
             />
           ) : (
             <BarList items={barItems} valueFormatter={formatINRCompact} />

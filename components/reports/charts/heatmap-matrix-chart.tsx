@@ -3,9 +3,17 @@
 import { useMemo, useState, type KeyboardEvent, type PointerEvent } from 'react'
 import { cn } from '@/lib/utils'
 import { formatINR, formatINRCompact, formatNumber } from '@/lib/reports/format'
-import { barLeftClass } from '@/lib/reports/bar-scale'
 import { DataTable, type DataTableColumn } from '@/components/reports/data-table'
 import { Button } from '@/components/ui/button'
+import { useChartWidth } from '@/components/reports/charts/use-chart-width'
+import {
+  MATRIX_CELL_H,
+  MATRIX_PAD_BOTTOM,
+  matrixColLabelHeight,
+  matrixLayout,
+  truncateLabel,
+} from '@/components/reports/charts/matrix-layout'
+import { ChartTooltipNote, ChartTooltipPanel, ChartTooltipRow } from '@/components/reports/charts/chart-tooltip-panel'
 
 // reporting-blueprint.md D-01 (flagship): "Matrix — type down, department
 // across, shaded by rupees at risk. Sequential single-hue shading, never a
@@ -20,11 +28,13 @@ import { Button } from '@/components/ui/button'
 // hairline `stroke-border` box, never a coloured one, so zero is visibly not
 // "a little".
 //
-// Structurally mirrors attention-map-chart.tsx: inline SVG with real numeric
-// attributes for every data-driven mark (exempt from this app's style-src CSP
-// constraint — see lib/reports/bar-scale.ts), a pointer/keyboard hover layer,
-// an SVG <title> per cell as a no-JS fallback, and a required "View as table"
-// twin so every value the chart conveys is also plain text.
+// Stays hand-drawn SVG (not Recharts — it has no matrix form): laid out at the
+// card's measured width (useChartWidth + matrix-layout.ts, scale 1) so 11px
+// labels stay 11px on a phone and cell width is capped on wide screens; real
+// numeric attributes for every data-driven mark, a pointer/keyboard hover
+// layer with a shadcn-styled tooltip (chart-tooltip-panel.tsx), an SVG <title>
+// per cell as a no-JS fallback, and a required "View as table" twin so every
+// value the chart conveys is also plain text.
 
 export type HeatmapAxisItem = { key: string; label: string }
 export type HeatmapCell = {
@@ -47,18 +57,17 @@ const BIN_FILL_CLASSES = [
   'fill-[#3e8ae0] dark:fill-[#5b9be8]',
   'fill-[#184f95] dark:fill-[#93bff1]',
 ] as const
+// Same steps as HTML backgrounds, for the tooltip's colour indicator.
+const BIN_BG_CLASSES = [
+  'bg-[#cde2fb] dark:bg-[#123a63]',
+  'bg-[#9ec5f4] dark:bg-[#1a5388]',
+  'bg-[#6da7ec] dark:bg-[#2f6fbf]',
+  'bg-[#3e8ae0] dark:bg-[#5b9be8]',
+  'bg-[#184f95] dark:bg-[#93bff1]',
+] as const
 const BIN_COUNT = BIN_FILL_CLASSES.length
 
-const CELL_W = 46
-const CELL_H = 30
-const ROW_LABEL_W = 150
-const COL_LABEL_H = 96
-const PAD_RIGHT = 12
-const PAD_BOTTOM = 6
-
-function truncate(s: string, n: number): string {
-  return s.length > n ? `${s.slice(0, n - 1)}…` : s
-}
+const COL_LABEL_CHARS = 16
 
 /** Bin index 0..BIN_COUNT-1 for a cell that has open issues, or -1 for a cell
  *  with none (rendered as an empty stroke-border box). A cell that has issues
@@ -80,6 +89,7 @@ export function HeatmapMatrixChart({
 }) {
   const [active, setActive] = useState<{ r: number; c: number } | null>(null)
   const [showTable, setShowTable] = useState(false)
+  const [wrapRef, containerWidth] = useChartWidth(600)
 
   const cellByKey = useMemo(() => {
     const m = new Map<string, HeatmapCell>()
@@ -91,8 +101,9 @@ export function HeatmapMatrixChart({
 
   if (rows.length === 0 || columns.length === 0) return null
 
-  const width = ROW_LABEL_W + columns.length * CELL_W + PAD_RIGHT
-  const height = COL_LABEL_H + rows.length * CELL_H + PAD_BOTTOM
+  const { rowLabelW, rowLabelChars, cellW, svgWidth } = matrixLayout(containerWidth, columns.length)
+  const colLabelH = matrixColLabelHeight(COL_LABEL_CHARS)
+  const height = colLabelH + rows.length * MATRIX_CELL_H + MATRIX_PAD_BOTTOM
 
   const lookup = (r: number, c: number) => cellByKey.get(`${rows[r]!.key}||${columns[c]!.key}`) ?? null
 
@@ -114,17 +125,18 @@ export function HeatmapMatrixChart({
   }
 
   function handlePointerMove(e: PointerEvent<SVGSVGElement>) {
+    // Scale 1: one viewBox unit per CSS pixel.
     const rect = e.currentTarget.getBoundingClientRect()
-    const relX = ((e.clientX - rect.left) / rect.width) * width
-    const relY = ((e.clientY - rect.top) / rect.height) * height
-    const c = Math.floor((relX - ROW_LABEL_W) / CELL_W)
-    const r = Math.floor((relY - COL_LABEL_H) / CELL_H)
+    const relX = e.clientX - rect.left
+    const relY = e.clientY - rect.top
+    const c = Math.floor((relX - rowLabelW) / cellW)
+    const r = Math.floor((relY - colLabelH) / MATRIX_CELL_H)
     if (r >= 0 && r < rows.length && c >= 0 && c < columns.length) setActive({ r, c })
     else setActive(null)
   }
 
   const activeCell = active ? lookup(active.r, active.c) : null
-  const tooltipLeftPct = active ? ((ROW_LABEL_W + active.c * CELL_W + CELL_W / 2) / width) * 100 : 50
+  const tooltipLeftPct = active ? ((rowLabelW + active.c * cellW + cellW / 2) / containerWidth) * 100 : 50
 
   const tableColumns: DataTableColumn<HeatmapCell>[] = [
     { key: 'type', header: 'Issue type', render: (cell) => cell.rowKey },
@@ -135,11 +147,11 @@ export function HeatmapMatrixChart({
   const tableRows = [...cells].sort((a, b) => b.amountAtRisk - a.amountAtRisk)
 
   return (
-    <div className="flex flex-col gap-3">
-      <div className="relative w-full overflow-x-auto">
+    <div className="flex flex-col gap-3 motion-safe:animate-chart-in">
+      <div ref={wrapRef} className="relative w-full overflow-x-auto">
         <svg
-          viewBox={`0 0 ${width} ${height}`}
-          width="100%"
+          viewBox={`0 0 ${svgWidth} ${height}`}
+          width={svgWidth}
           height={height}
           role="img"
           aria-label={`Exception heat map — ${formatNumber(rows.length)} open issue types down the rows, ${formatNumber(
@@ -153,37 +165,37 @@ export function HeatmapMatrixChart({
         >
           {/* Column headers (departments), angled for legibility. */}
           {columns.map((col, c) => {
-            const x = ROW_LABEL_W + c * CELL_W + CELL_W / 2
+            const x = rowLabelW + c * cellW + cellW / 2
             return (
               <text
                 key={col.key}
                 x={x}
-                y={COL_LABEL_H - 8}
+                y={colLabelH - 8}
                 textAnchor="start"
-                transform={`rotate(-40 ${x} ${COL_LABEL_H - 8})`}
-                className="fill-muted-foreground text-[10px]"
+                transform={`rotate(-40 ${x} ${colLabelH - 8})`}
+                className="fill-muted-foreground text-[11px]"
               >
-                {truncate(col.label, 16)}
+                {truncateLabel(col.label, COL_LABEL_CHARS)}
               </text>
             )
           })}
 
           {rows.map((row, r) => {
-            const y = COL_LABEL_H + r * CELL_H
+            const y = colLabelH + r * MATRIX_CELL_H
             return (
               <g key={row.key}>
                 {/* Row header (issue type). */}
                 <text
-                  x={ROW_LABEL_W - 8}
-                  y={y + CELL_H / 2}
+                  x={rowLabelW - 8}
+                  y={y + MATRIX_CELL_H / 2}
                   textAnchor="end"
                   dominantBaseline="middle"
-                  className="fill-foreground text-[10px]"
+                  className="fill-foreground text-[11px]"
                 >
-                  {truncate(row.label, 22)}
+                  {truncateLabel(row.label, rowLabelChars)}
                 </text>
                 {columns.map((col, c) => {
-                  const x = ROW_LABEL_W + c * CELL_W
+                  const x = rowLabelW + c * cellW
                   const cell = lookup(r, c)
                   const bin = cell ? binOf(cell.amountAtRisk, maxAmount) : -1
                   const isActive = active?.r === r && active?.c === c
@@ -198,8 +210,8 @@ export function HeatmapMatrixChart({
                       <rect
                         x={x + 1}
                         y={y + 1}
-                        width={CELL_W - 2}
-                        height={CELL_H - 2}
+                        width={cellW - 2}
+                        height={MATRIX_CELL_H - 2}
                         rx={2}
                         strokeWidth={1}
                         className={cn(
@@ -215,31 +227,25 @@ export function HeatmapMatrixChart({
           })}
         </svg>
 
-        {activeCell || active ? (
-          <div
-            className={cn(
-              'pointer-events-none absolute top-1 z-10 min-w-[12rem] -translate-x-1/2 rounded-md border border-border bg-popover px-2.5 py-1.5 text-xs text-popover-foreground shadow-md',
-              barLeftClass(tooltipLeftPct)
-            )}
+        {active ? (
+          <ChartTooltipPanel
+            leftPct={tooltipLeftPct}
+            className="min-w-[12rem]"
+            title={`${rows[active.r]!.label} · ${columns[active.c]!.label}`}
           >
-            <p className="mb-1 font-medium text-foreground">
-              {rows[active!.r]!.label} · {columns[active!.c]!.label}
-            </p>
             {activeCell ? (
               <>
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-muted-foreground">₹ at risk</span>
-                  <span className="font-mono font-semibold text-foreground">{formatINR(activeCell.amountAtRisk)}</span>
-                </div>
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-muted-foreground">Open issues</span>
-                  <span className="font-mono font-semibold text-foreground">{formatNumber(activeCell.issueCount)}</span>
-                </div>
+                <ChartTooltipRow
+                  label="₹ at risk"
+                  value={formatINR(activeCell.amountAtRisk)}
+                  indicatorClass={BIN_BG_CLASSES[binOf(activeCell.amountAtRisk, maxAmount)]}
+                />
+                <ChartTooltipRow label="Open issues" value={formatNumber(activeCell.issueCount)} />
               </>
             ) : (
-              <p className="text-muted-foreground">No open issues</p>
+              <ChartTooltipNote>No open issues</ChartTooltipNote>
             )}
-          </div>
+          </ChartTooltipPanel>
         ) : null}
       </div>
 

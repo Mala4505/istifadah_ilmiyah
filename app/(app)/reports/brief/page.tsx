@@ -70,7 +70,7 @@ export default async function ExecutiveBriefPage({
   const hero = await loadHeroMetrics(eventId)
   const brief = await loadExecutiveBrief(eventId, hero.kpi.totalSpend, hero.kpi.openAmountAtRisk)
 
-  const spendTrendPoints = hero.spendTrend.map((p) => ({ label: p.weekLabel, actual: p.actual, target: p.target }))
+  const spendTrendPoints = hero.spendTrend.map((p) => ({ label: p.weekLabel, actual: p.actual, target: p.target, forecast: p.forecast }))
 
   const attentionPoints: AttentionMapPoint[] = brief.attentionPoints.map((p) => ({ key: p.key, label: p.label, x: p.x, y: p.y }))
 
@@ -206,14 +206,17 @@ export default async function ExecutiveBriefPage({
           )}
         </ReportSection>
 
-        <ReportSection title="Spend pace" description="Cumulative spend against an even-pace target line, this event.">
+        <ReportSection
+          title="Spend pace"
+          description="Cumulative spend this event, against an even-pace target, the budget line, and where the current pace lands."
+        >
           {hero.errors.spendTrend ? (
             <EmptyState title="Couldn't load spend pace" description={hero.errors.spendTrend} />
           ) : spendTrendPoints.length === 0 ? (
             <EmptyState title="Not enough data yet" description="Needs at least one entry, or an event with start/end dates set." />
           ) : (
             <div className="flex flex-col gap-2">
-              <TrendChart points={spendTrendPoints} valueFormat="inr-compact" />
+              <TrendChart points={spendTrendPoints} valueFormat="inr-compact" budget={brief.kpi.totalBudget ?? hero.spendBudget} />
               {brief.kpi.projectedLandingValue !== '—' && (
                 <p className="text-xs text-muted-foreground">
                   At the current pace, this event projects to land at {brief.kpi.projectedLandingValue} of budget.

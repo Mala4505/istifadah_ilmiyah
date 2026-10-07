@@ -2,9 +2,10 @@ import Link from 'next/link'
 import { ReportSection } from '@/components/reports/report-section'
 import { EmptyState } from '@/components/reports/empty-state'
 import { DataTable, type DataTableColumn } from '@/components/reports/data-table'
-import { BarList, type BarListItem } from '@/components/reports/bar-list'
 import { ExportCsvButton } from '@/components/reports/export-csv-button'
 import { KpiTile } from '@/components/reports/charts/kpi-tile'
+import { DonutChart } from '@/components/reports/charts/donut-chart'
+import { shareSegments } from '@/components/reports/charts/share-segments'
 import { toCsv } from '@/lib/reports/csv'
 import { formatINR, formatINRCompact, formatNumber, formatPercent } from '@/lib/reports/format'
 import type { CompareBasis } from '@/lib/reports/compare-basis'
@@ -12,6 +13,12 @@ import { formatDeltaVs, type ZoneSpendRow } from '@/lib/reports/sections/shared'
 
 // Spend by zone (blueprint A-05). Ported verbatim from the former
 // app/(app)/reports/page.tsx section of the same id.
+//
+// "Which zone takes what share" is a part-to-whole question, so it's a donut
+// (visual-optimisation plan Phase 3.3): every zone gets its own categorical
+// hue when there are ≤ 6, else the top 5 + a neutral "Other". The BarList that
+// used to sit here repeated the table's exact figures at the same grain, so
+// it's gone -- the table below keeps every amount and the /entries drill links.
 
 export function zoneSpendSentence(rows: ZoneSpendRow[], total: number): string {
   const withSpend = rows.filter((r) => (r.total_amount ?? 0) > 0)
@@ -34,13 +41,12 @@ export function ZoneSpendSection({
   previousTotal: number | null
   insight?: string | null
 }) {
-  const barItems: BarListItem[] = rows
-    .filter((r) => (r.total_amount ?? 0) > 0)
-    .map((r) => ({
-      key: r.zone_id ?? 'unassigned',
-      label: r.zone_name,
-      value: r.total_amount ?? 0,
-    }))
+  const donutSegments = shareSegments(
+    rows
+      .map((r) => ({ key: r.zone_id != null ? String(r.zone_id) : 'unassigned', label: r.zone_name, value: r.total_amount ?? 0 }))
+      .sort((a, b) => b.value - a.value),
+    { otherNoun: 'zones' }
+  )
 
   const columns: DataTableColumn<ZoneSpendRow>[] = [
     {
@@ -91,7 +97,9 @@ export function ZoneSpendSection({
             delta={formatDeltaVs(compareBasis, spendTotal, previous, 'inr')}
             deltaTone="neutral"
           />
-          <BarList items={barItems} valueFormatter={formatINRCompact} />
+          {donutSegments.length > 0 && (
+            <DonutChart segments={donutSegments} centerLabel={formatINRCompact(spendTotal)} valueFormat="inr-compact" />
+          )}
           <p className="text-sm text-muted-foreground">{insight ?? zoneSpendSentence(rows, spendTotal)}</p>
           <DataTable columns={columns} rows={rows} getRowKey={(r) => r.zone_id ?? 'unassigned'} />
         </>

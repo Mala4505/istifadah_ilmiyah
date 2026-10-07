@@ -22,12 +22,9 @@ import { Button } from '@/components/ui/button'
 // flag history. A supplier rating you could put in front of the supplier."
 //
 // Rendered as a compact row grid, not a full SVG axis chart, on purpose: the
-// task brief itself names `barWidthClass` for the spend bar, and this app's
-// existing bar-list.tsx is exactly that pattern — an HTML bar built from a
-// literal Tailwind width class rather than an inline `style` attribute
-// (lib/reports/bar-scale.ts's header explains why: production CSP's
-// style-src carries no 'unsafe-inline', so a computed width has to come from
-// the compiled class list, not a style prop). A second axis-based chart
+// spend bar uses `barWidthClass`, the same literal-Tailwind-width pattern as
+// bar-list.tsx (CSP style-src is now 'unsafe-inline', so that is a
+// consistency choice rather than a hard requirement). A second axis-based chart
 // would only re-plot the same one number (spend) this pattern already
 // renders; the value this component adds over bar-list.tsx is the row of
 // status pills next to each bar. Interactivity per the dataviz skill still
@@ -152,7 +149,7 @@ export function VendorScorecardGrid({ vendors }: { vendors: ScorecardGridVendor[
   ]
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex flex-col gap-3 motion-safe:animate-chart-in">
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-xs text-muted-foreground">Sort by</span>
         {(['spend', 'price', 'flags'] as const).map((key) => (
@@ -186,11 +183,11 @@ export function VendorScorecardGrid({ vendors }: { vendors: ScorecardGridVendor[
                   <span className="flex shrink-0 items-baseline gap-1.5 font-mono text-muted-foreground">
                     {formatINRCompact(v.spend)}
                     {v.sharePct != null && (
-                      <span className="text-[10px] font-sans text-muted-foreground/80">({formatPercent(v.sharePct)})</span>
+                      <span className="font-sans text-[11px] text-muted-foreground/80">({formatPercent(v.sharePct)})</span>
                     )}
                   </span>
                 </div>
-                <div className="relative h-1.5 w-full overflow-hidden rounded-full bg-secondary">
+                <div className="relative h-1.5 w-full overflow-hidden rounded-full bg-muted">
                   <div className={cn('h-full rounded-full bg-[#2a78d6] dark:bg-[#3987e5]', barWidthClass(pct))} />
                 </div>
                 <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]">

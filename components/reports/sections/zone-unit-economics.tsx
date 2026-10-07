@@ -135,7 +135,7 @@ export function ZoneUnitEconomicsSection({
     <ReportSection
       id="zone-unit-economics"
       title="Unit economics by zone"
-      description="The rate paid for the same item family at different sites. Only families billed in two or more zones appear here — each cell shaded darker the more it paid above that family's own median rate across every zone."
+      description="The rate paid for the same item family at different sites. Only families billed in two or more zones appear here — each cell coloured against that family's own median rate across every zone: blue paid less, grey about the median, orange paid more."
       action={
         <ExportCsvButton
           filename="zone-unit-economics.csv"

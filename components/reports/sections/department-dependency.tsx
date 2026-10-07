@@ -127,7 +127,7 @@ export function DepartmentDependencySection({
             deltaTone={deltaToneHigherIsBad(overThresholdCount, previous)}
           />
           <p className="text-sm text-muted-foreground">{insight ?? departmentDependencySentence(rows)}</p>
-          <DepartmentDependencyChart bars={bars} />
+          <DepartmentDependencyChart bars={bars} tableTwin={false} />
           <DataTable
             columns={columns}
             rows={tableRows}

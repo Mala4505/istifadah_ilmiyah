@@ -27,6 +27,10 @@ import type { PurchaseTreeRow } from '@/lib/reports/surfaces/purchase-tree'
 // since the disclosure triangle glyph alone conveys nothing to a screen
 // reader. A bill node with a resolvable entry_id renders as a next/link
 // instead of a button — it has nothing left to expand, only somewhere to go.
+//
+// Stays custom HTML (not Recharts): an expandable tree has no chart form, and
+// it already reflows with its card, so the only visual-pass change is the
+// shared mount animation (motion-safe:animate-chart-in).
 
 type TreeLevel = 'family' | 'catalog' | 'vendor' | 'bill'
 
@@ -192,7 +196,7 @@ function TreeRowLabel({ node, grandTotal, expanded }: { node: TreeNode; grandTot
           <span className={cn('block h-full rounded-full bg-[#2a78d6] dark:bg-[#3987e5]', barWidthClass(pct))} />
         </span>
       </span>
-      <span className="w-16 shrink-0 text-right font-mono text-xs tabular-nums text-muted-foreground">
+      <span className="w-20 shrink-0 text-right sm:w-32 sm:whitespace-nowrap font-mono text-xs tabular-nums text-muted-foreground">
         {childCountLabel(node)}
       </span>
       <span className="w-24 shrink-0 text-right font-mono text-sm font-semibold tabular-nums text-foreground">
@@ -329,11 +333,11 @@ export function PurchaseTreeChart({ rows }: { rows: PurchaseTreeRow[] }) {
   ]
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex flex-col gap-3 motion-safe:animate-chart-in">
       <div className="flex items-center gap-2 border-b border-border pb-1.5 text-[11px] uppercase tracking-wide text-muted-foreground">
         <span className="flex-1">Family → catalogue item → vendor → bill</span>
         <span className="hidden w-16 text-right sm:block">Share</span>
-        <span className="w-16 text-right">Children</span>
+        <span className="w-20 text-right sm:w-32">Children</span>
         <span className="w-24 text-right">Spend</span>
       </div>
       <ul role="tree" aria-label="Purchase tree — family, catalogue item, vendor, then bill; expand a row to drill down" className="flex flex-col">
