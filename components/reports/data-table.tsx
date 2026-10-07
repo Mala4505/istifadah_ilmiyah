@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { cloneElement, isValidElement, type ReactNode } from 'react'
 import { EmptyState } from '@/components/reports/empty-state'
 import { InteractiveTable, type InteractiveColumn, type InteractiveRow } from '@/components/ui/interactive-table'
 import { cellValueOf, nodeText, toCellValue } from '@/lib/table-values'
@@ -97,7 +97,14 @@ export function DataTable<T>({
     const cells = columns.map((c) => c.render(row))
     const texts = cells.map((cell) => nodeText(cell))
     const values = columns.map((c, i) => (c.sortValue ? toCellValue(c.sortValue(row)) : cellValueOf(cells[i])))
-    return { key: getRowKey(row), cells, texts, values, href: getRowHref?.(row) ?? undefined }
+    // `cells` crosses to the client as an array; a Server Component element in
+    // it (e.g. <SeverityBadge>) is rendered during RSC serialisation, where an
+    // unkeyed element in an array trips React's "unique key" warning. Key each
+    // element by its column — after texts/values are read from the raw nodes.
+    const keyedCells = cells.map((cell, i) =>
+      isValidElement(cell) && cell.key == null ? cloneElement(cell, { key: columns[i]!.key }) : cell
+    )
+    return { key: getRowKey(row), cells: keyedCells, texts, values, href: getRowHref?.(row) ?? undefined }
   })
 
   return <InteractiveTable columns={tableColumns} rows={tableRows} initialPageSize={pageSize} dense className={className} />

@@ -176,7 +176,7 @@ export function DiscountConsistencySection({
             complete as that number.
           </p>
           <p className="text-sm text-muted-foreground">{insight ?? discountConsistencySentence(groups, coverage)}</p>
-          {chartGroups.length > 0 && <DiscountSpreadChart groups={chartGroups} />}
+          {chartGroups.length > 0 && <DiscountSpreadChart groups={chartGroups} tableTwin={false} />}
           <DataTable
             columns={columns}
             rows={tableRows}

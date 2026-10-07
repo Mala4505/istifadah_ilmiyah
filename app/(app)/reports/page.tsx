@@ -184,7 +184,7 @@ export default async function ReportsPage({
   const entryDelta = seriesDelta(hero.kpi.weeklyEntrySeries)
   const riskDelta = seriesDelta(hero.kpi.weeklyAtRiskSeries)
 
-  const spendTrendPoints = hero.spendTrend.map((p) => ({ label: p.weekLabel, actual: p.actual, target: p.target }))
+  const spendTrendPoints = hero.spendTrend.map((p) => ({ label: p.weekLabel, actual: p.actual, target: p.target, forecast: p.forecast }))
 
   return (
     <div className="flex flex-col gap-4">
@@ -241,13 +241,13 @@ export default async function ReportsPage({
         </p>
 
         <div className="grid gap-4 lg:grid-cols-[1.4fr_1fr]">
-          <ReportSection id="spend-pace" title="Spend pace" description="Cumulative spend for this event against an even-pace target line.">
+          <ReportSection id="spend-pace" title="Spend pace" description="Cumulative spend for this event against an even-pace target, the budget line, and where the current pace lands.">
             {hero.errors.spendTrend ? (
               <EmptyState title="Couldn't load spend pace" description={hero.errors.spendTrend} />
             ) : spendTrendPoints.length === 0 ? (
               <EmptyState title="Not enough data yet" description="Needs at least one entry, or an event with start/end dates set." />
             ) : (
-              <TrendChart points={spendTrendPoints} valueFormat="inr-compact" />
+              <TrendChart points={spendTrendPoints} valueFormat="inr-compact" budget={hero.spendBudget} />
             )}
           </ReportSection>
 

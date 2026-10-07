@@ -55,6 +55,18 @@ const config: Config = {
         md: 'calc(var(--radius) - 2px)',
         sm: 'calc(var(--radius) - 4px)',
       },
+      // Entry animation for the hand-built report charts that stay outside
+      // Recharts — matches useChartAnimation() in components/ui/chart.tsx
+      // (one ~450ms ease-out on mount). Use as `motion-safe:animate-chart-in`.
+      keyframes: {
+        'chart-in': {
+          from: { opacity: '0', transform: 'translateY(4px)' },
+          to: { opacity: '1', transform: 'translateY(0)' },
+        },
+      },
+      animation: {
+        'chart-in': 'chart-in 450ms ease-out both',
+      },
     },
   },
   plugins: [],

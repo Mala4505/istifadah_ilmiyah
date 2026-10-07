@@ -3,10 +3,11 @@
 import { useMemo, useState, type PointerEvent, type KeyboardEvent } from 'react'
 import Link from 'next/link'
 import { cn } from '@/lib/utils'
-import { formatINR, formatNumber } from '@/lib/reports/format'
-import { barLeftClass } from '@/lib/reports/bar-scale'
+import { formatINR, formatINRCompact, formatNumber } from '@/lib/reports/format'
 import { DataTable, type DataTableColumn } from '@/components/reports/data-table'
 import { Button } from '@/components/ui/button'
+import { useChartWidth } from '@/components/reports/charts/use-chart-width'
+import { ChartTooltipPanel, ChartTooltipRow } from '@/components/reports/charts/chart-tooltip-panel'
 
 // reporting-blueprint.md B-06: "For each item we buy repeatedly: who charges
 // what, ranked. Turns purchasing from a habit into a choice." One item family
@@ -17,9 +18,11 @@ import { Button } from '@/components/ui/button'
 // a min–max whisker per vendor, the dot itself sized by how many observations
 // back that median, and the family's own median rate as a vertical rule.
 //
-// Structurally mirrors strip-plot-chart.tsx: inline SVG with real numeric
+// Structurally mirrors strip-plot-chart.tsx: hand-drawn SVG laid out at the
+// card's measured width (useChartWidth, scale 1, 11px labels), real numeric
 // attributes for every data-driven mark, a pointer-move nearest-row hover
-// lookup, keyboard nav across vendors, role="img" + aria-label, and a
+// lookup with a shadcn-styled tooltip (chart-tooltip-panel.tsx), keyboard nav
+// across vendors, role="img" + aria-label, and a
 // required "View as table" twin scoped to the selected family (the table
 // shows exactly what the chart draws, not every family at once).
 
@@ -45,9 +48,9 @@ type FamilyGroup = {
   familyMedianRate: number | null
 }
 
-const VIEW_WIDTH = 600
+const FALLBACK_WIDTH = 600
 const ROW_HEIGHT = 32
-const PAD = { left: 150, right: 24, top: 28, bottom: 34 }
+const PAD = { right: 28, top: 30, bottom: 40 }
 const MIN_DOT_R = 4
 const MAX_DOT_R = 10
 const HOVER_RADIUS_SQ = 24 * 24
@@ -90,6 +93,7 @@ export function VendorPriceRankingChart({ dots }: { dots: VendorPriceDot[] }) {
   const [selectedKey, setSelectedKey] = useState<string | null>(groups[0]?.key ?? null)
   const [hoverVendorId, setHoverVendorId] = useState<number | null>(null)
   const [showTable, setShowTable] = useState(false)
+  const [wrapRef, viewWidth] = useChartWidth(FALLBACK_WIDTH)
 
   if (groups.length === 0) return null
 
@@ -107,16 +111,21 @@ export function VendorPriceRankingChart({ dots }: { dots: VendorPriceDot[] }) {
   const xTicks = niceTicks(0, dataMax, 4)
   const domainMax = xTicks[xTicks.length - 1] ?? (dataMax || 1)
 
-  const innerWidth = VIEW_WIDTH - PAD.left - PAD.right
+  // Width-derived layout: narrower row-label gutter on a phone.
+  const narrow = viewWidth < 480
+  const padLeft = narrow ? 112 : 160
+  const labelChars = narrow ? 15 : 22
+  const innerWidth = viewWidth - padLeft - PAD.right
   const plotHeight = rows.length * ROW_HEIGHT
   const viewHeight = PAD.top + plotHeight + PAD.bottom
-  const xFor = (v: number) => PAD.left + (Math.min(v, domainMax) / domainMax) * innerWidth
+  const xFor = (v: number) => padLeft + (Math.min(v, domainMax) / domainMax) * innerWidth
   const rowCentre = (i: number) => PAD.top + i * ROW_HEIGHT + ROW_HEIGHT / 2
 
   function handlePointerMove(e: PointerEvent<SVGSVGElement>) {
     const rect = e.currentTarget.getBoundingClientRect()
-    const relX = ((e.clientX - rect.left) / rect.width) * VIEW_WIDTH
-    const relY = ((e.clientY - rect.top) / rect.height) * viewHeight
+    // Scale 1: one viewBox unit per CSS pixel.
+    const relX = e.clientX - rect.left
+    const relY = e.clientY - rect.top
     let bestId: number | null = null
     let bestSq = Infinity
     rows.forEach((r, i) => {
@@ -146,7 +155,7 @@ export function VendorPriceRankingChart({ dots }: { dots: VendorPriceDot[] }) {
 
   const hoverRow = hoverVendorId != null ? (rows.find((r) => r.vendorId === hoverVendorId) ?? null) : null
   const hoverIndex = hoverRow ? rows.indexOf(hoverRow) : -1
-  const tooltipLeftPct = hoverRow ? (xFor(hoverRow.medianRate) / VIEW_WIDTH) * 100 : 50
+  const tooltipLeftPct = hoverRow ? (xFor(hoverRow.medianRate) / viewWidth) * 100 : 50
 
   const medianX = familyMedian != null ? xFor(familyMedian) : null
 
@@ -170,7 +179,7 @@ export function VendorPriceRankingChart({ dots }: { dots: VendorPriceDot[] }) {
   ]
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex flex-col gap-3 motion-safe:animate-chart-in">
       <label className="flex flex-col gap-1 text-xs text-muted-foreground sm:max-w-sm">
         Item family
         <select
@@ -190,10 +199,10 @@ export function VendorPriceRankingChart({ dots }: { dots: VendorPriceDot[] }) {
         </select>
       </label>
 
-      <div className="relative w-full">
+      <div ref={wrapRef} className="relative w-full">
         <svg
-          viewBox={`0 0 ${VIEW_WIDTH} ${viewHeight}`}
-          width="100%"
+          viewBox={`0 0 ${viewWidth} ${viewHeight}`}
+          width={viewWidth}
           height={viewHeight}
           className="overflow-visible"
           role="img"
@@ -208,19 +217,19 @@ export function VendorPriceRankingChart({ dots }: { dots: VendorPriceDot[] }) {
           {xTicks.map((t) => (
             <g key={`x-${t}`}>
               <line x1={xFor(t)} x2={xFor(t)} y1={PAD.top - 4} y2={PAD.top + plotHeight} className="stroke-border" strokeWidth={1} />
-              <text x={xFor(t)} y={PAD.top + plotHeight + 16} textAnchor="middle" className="fill-muted-foreground text-[9px]">
-                {formatINR(t)}
+              <text x={xFor(t)} y={PAD.top + plotHeight + 17} textAnchor="middle" className="fill-muted-foreground text-[11px]">
+                {narrow ? formatINRCompact(t) : formatINR(t)}
               </text>
             </g>
           ))}
-          <text x={PAD.left + innerWidth / 2} y={viewHeight - 6} textAnchor="middle" className="fill-muted-foreground text-[9px]">
+          <text x={padLeft + innerWidth / 2} y={viewHeight - 6} textAnchor="middle" className="fill-muted-foreground text-[11px]">
             Net rate
           </text>
 
           {medianX != null && (
             <>
               <line x1={medianX} x2={medianX} y1={PAD.top - 12} y2={PAD.top + plotHeight} className="stroke-foreground/60" strokeWidth={1.5} />
-              <text x={medianX} y={PAD.top - 16} textAnchor="middle" className="fill-foreground text-[9px] font-medium">
+              <text x={medianX} y={PAD.top - 16} textAnchor="middle" className="fill-foreground text-[11px] font-medium">
                 family median
               </text>
             </>
@@ -234,10 +243,10 @@ export function VendorPriceRankingChart({ dots }: { dots: VendorPriceDot[] }) {
             return (
               <g key={r.vendorId}>
                 {i > 0 && (
-                  <line x1={PAD.left} x2={VIEW_WIDTH - PAD.right} y1={PAD.top + i * ROW_HEIGHT} y2={PAD.top + i * ROW_HEIGHT} className="stroke-border/60" strokeWidth={1} />
+                  <line x1={padLeft} x2={viewWidth - PAD.right} y1={PAD.top + i * ROW_HEIGHT} y2={PAD.top + i * ROW_HEIGHT} className="stroke-border/60" strokeWidth={1} />
                 )}
-                <text x={PAD.left - 10} y={cy} textAnchor="end" dominantBaseline="middle" className="fill-foreground text-[10px]">
-                  {r.vendorLabel.length > 22 ? `${r.vendorLabel.slice(0, 21)}…` : r.vendorLabel}
+                <text x={padLeft - 10} y={cy} textAnchor="end" dominantBaseline="middle" className="fill-foreground text-[11px]">
+                  {r.vendorLabel.length > labelChars ? `${r.vendorLabel.slice(0, labelChars - 1)}…` : r.vendorLabel}
                 </text>
                 <title>{`${r.vendorLabel}: ${formatINR(r.medianRate)} median across ${formatNumber(r.observationCount)} observation${r.observationCount === 1 ? '' : 's'}`}</title>
                 {x2 > x1 && <line x1={x1} x2={x2} y1={cy} y2={cy} className="stroke-muted-foreground/50" strokeWidth={2} />}
@@ -254,29 +263,16 @@ export function VendorPriceRankingChart({ dots }: { dots: VendorPriceDot[] }) {
         </svg>
 
         {hoverRow && (
-          <div
-            className={cn(
-              'pointer-events-none absolute top-1 z-10 min-w-[12rem] -translate-x-1/2 rounded-md border border-border bg-popover px-2.5 py-1.5 text-xs text-popover-foreground shadow-md',
-              barLeftClass(tooltipLeftPct)
-            )}
+          <ChartTooltipPanel
+            leftPct={tooltipLeftPct}
+            className="min-w-[12rem]"
+            title={hoverRow.vendorLabel}
+            subtitle={`Rank #${hoverIndex + 1} of ${rows.length}`}
           >
-            <p className="font-medium text-foreground">{hoverRow.vendorLabel}</p>
-            <p className="mb-1 text-[11px] text-muted-foreground">Rank #{hoverIndex + 1} of {rows.length}</p>
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-muted-foreground">Median rate</span>
-              <span className="font-mono font-semibold text-foreground">{formatINR(hoverRow.medianRate)}</span>
-            </div>
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-muted-foreground">Range</span>
-              <span className="font-mono font-semibold text-foreground">
-                {formatINR(hoverRow.minRate)} – {formatINR(hoverRow.maxRate)}
-              </span>
-            </div>
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-muted-foreground">Observations</span>
-              <span className="font-mono font-semibold text-foreground">{formatNumber(hoverRow.observationCount)}</span>
-            </div>
-          </div>
+            <ChartTooltipRow label="Median rate" value={formatINR(hoverRow.medianRate)} indicatorClass="bg-[#2a78d6] dark:bg-[#3987e5]" />
+            <ChartTooltipRow label="Range" value={`${formatINR(hoverRow.minRate)} – ${formatINR(hoverRow.maxRate)}`} />
+            <ChartTooltipRow label="Observations" value={formatNumber(hoverRow.observationCount)} />
+          </ChartTooltipPanel>
         )}
       </div>
 

@@ -50,8 +50,12 @@ type ExtractionJoinRow = {
   verified_at: string | null
 }
 
-type BudgetApprovedRow = {
-  approved_amount: number | null
+// v_department_budget_vs_actual's budget_amount is itself the sum of that
+// department's latest sub-department allocations (20260911000001), so summing
+// it across departments IS the department + sub-department total — adding
+// sub-department rows on top would double-count.
+type DepartmentBudgetRow = {
+  budget_amount: number | null
 }
 
 export type EventDatesRow = {
@@ -73,7 +77,15 @@ export type HeroMetrics = {
     weeklyAvgDaysSeries: number[]
   }
   pipeline: { key: string; label: string; count: number }[]
-  spendTrend: { weekLabel: string; weekStart: string; actual: number; target: number | null }[]
+  /**
+   * `actual` is null for weeks after the current one (the event is still
+   * running — there is no spend-to-date to plot there yet). `forecast` is the
+   * dotted run-rate extension (see computeSpendTrend), null outside it.
+   */
+  spendTrend: { weekLabel: string; weekStart: string; actual: number | null; target: number | null; forecast: number | null }[]
+  /** Total approved budget for the event (the spend-pace chart's ceiling
+   *  line), or null when none is set. Same figure the target pace divides. */
+  spendBudget: number | null
   errors: { kpi: string | null; pipeline: string | null; spendTrend: string | null }
 }
 
@@ -150,9 +162,9 @@ function bucketWeekly<T, R>(
  *    from the start of the plotted range through week N," not a per-week
  *    delta -- this feeds an area chart of spend-to-date, not a bar chart of
  *    weekly spend.
- *  - Target: total approved budget for the event (v_budget_vs_actual's
- *    `approved_amount`, summed across budget heads -- reused rather than
- *    re-derived from `budget_allocation` directly) divided evenly across the
+ *  - Target: total budget for the event -- the department + sub-department
+ *    total (v_department_budget_vs_actual's `budget_amount`, summed across
+ *    departments; budget heads carry no amounts) -- divided evenly across the
  *    number of ISO weeks between the event's starts_on and ends_on, then
  *    accumulated the same way as actual. "Evenly across weeks" is the
  *    simplest possible pace model -- it has no notion of seasonal spend
@@ -166,11 +178,23 @@ function bucketWeekly<T, R>(
  *    known; it falls back to the entries' own min/max date only when the
  *    event has no dates at all, so an event with real dates always plots its
  *    full official span even before spend has started.
+ *  - While the event is running (both dates known, `referenceDate` inside the
+ *    plotted range), weeks after the current one get `actual: null` -- a
+ *    flat running total across future weeks would read as "spending stopped".
+ *  - Forecast: the dotted "at the current pace" extension. It reuses
+ *    computeProjectedLanding (the exact figure behind the Brief's "projects
+ *    to land at X%" sentence), so the line ends on that projected total at
+ *    the event's end. Week i's forecast is projectedTotal × the fraction of
+ *    the event elapsed by the end of week i (clamped to ends_on) -- a straight
+ *    line at the event's average daily run rate. Anchored at the current
+ *    week's actual. Null everywhere when there's no projection (dates
+ *    missing, event not started, or already over).
  */
 export function computeSpendTrend(
   entryRows: EntryRow[],
   eventDates: EventDatesRow | null,
-  approvedBudgetTotal: number | null
+  approvedBudgetTotal: number | null,
+  referenceDate: Date = new Date()
 ): HeroMetrics['spendTrend'] {
   let rangeStart: Date | null = eventDates?.starts_on ? new Date(eventDates.starts_on) : null
   let rangeEnd: Date | null = eventDates?.ends_on ? new Date(eventDates.ends_on) : null
@@ -203,14 +227,38 @@ export function computeSpendTrend(
     (rs) => rs.reduce((s, r) => s + (r.amount ?? 0), 0)
   )
 
+  // Current week within the event's own range (-1 when there are no event
+  // dates, or "now" sits before/after the plotted weeks).
+  const hasEventDates = eventDates?.starts_on != null && eventDates?.ends_on != null
+  const currentKey = format(startOfISOWeek(referenceDate), 'yyyy-MM-dd')
+  const currentIdx = hasEventDates ? buckets.findIndex((b) => b.key === currentKey) : -1
+
+  // Same actual-to-date figure the Brief projects from (all non-void entries).
+  const totalSpend = entryRows.reduce((s, r) => s + (r.amount ?? 0), 0)
+  const landing = currentIdx >= 0 ? computeProjectedLanding(totalSpend, eventDates, referenceDate) : null
+  const hasForecast = landing != null && landing.fractionElapsed < 1 && currentIdx < buckets.length - 1
+  const startMs = hasEventDates ? new Date(eventDates!.starts_on!).getTime() : 0
+  const endMs = hasEventDates ? new Date(eventDates!.ends_on!).getTime() : 0
+
   let running = 0
   return buckets.map((b, i) => {
     running += weeklyTotals[i] ?? 0
+    const isFuture = currentIdx >= 0 && i > currentIdx
+    let forecast: number | null = null
+    if (hasForecast) {
+      if (i === currentIdx) {
+        forecast = round2(running)
+      } else if (i > currentIdx) {
+        const weekEndMs = Math.min(endMs, addWeeks(b.start, 1).getTime())
+        forecast = round2(landing!.projectedTotal * ((weekEndMs - startMs) / (endMs - startMs)))
+      }
+    }
     return {
       weekLabel: b.label,
       weekStart: b.key,
-      actual: round2(running),
+      actual: isFuture ? null : round2(running),
       target: hasTarget ? round2(perWeekTarget * (i + 1)) : null,
+      forecast,
     }
   })
 }
@@ -275,7 +323,14 @@ export async function loadHeroMetrics(
           .or(`event_id.eq.${eventId},event_id.is.null`)
           .limit(OPEN_ISSUES_ROW_CAP)
           .returns<OpenIssueAmountRow[]>(),
-    supabase.from('v_budget_vs_actual').select('approved_amount').eq('event_id', eventId).returns<BudgetApprovedRow[]>(),
+    // Budget heads carry no amounts in practice; the event's budget lives on
+    // departments / sub-departments, so the target pace and budget line use
+    // that total (same figure the Executive Brief's % of budget divides by).
+    supabase
+      .from('v_department_budget_vs_actual')
+      .select('budget_amount')
+      .eq('event_id', eventId)
+      .returns<DepartmentBudgetRow[]>(),
     supabase
       .from('source_document')
       .select('id, match_status, upload_status, uploaded_at')
@@ -396,8 +451,8 @@ export async function loadHeroMetrics(
 
   // ---- Weekly spend trend ------------------------------------------------
 
-  const approvedBudgetTotal = budgetRows.reduce((sum, r) => sum + (r.approved_amount ?? 0), 0)
-  const hasApprovedBudget = budgetRows.some((r) => r.approved_amount !== null) && approvedBudgetTotal > 0
+  const approvedBudgetTotal = budgetRows.reduce((sum, r) => sum + (r.budget_amount ?? 0), 0)
+  const hasApprovedBudget = budgetRows.some((r) => r.budget_amount !== null) && approvedBudgetTotal > 0
 
   const spendTrend = computeSpendTrend(entryRows, eventDates, hasApprovedBudget ? approvedBudgetTotal : null)
 
@@ -414,6 +469,7 @@ export async function loadHeroMetrics(
     },
     pipeline,
     spendTrend,
+    spendBudget: hasApprovedBudget ? round2(approvedBudgetTotal) : null,
     errors: {
       kpi: entriesErr ?? issuesErr ?? sourceDocErr ?? extractionErr,
       pipeline: sourceDocErr ?? extractionErr,

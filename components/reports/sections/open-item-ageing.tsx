@@ -11,7 +11,7 @@ import { toCsv } from '@/lib/reports/csv'
 import { cn } from '@/lib/utils'
 import { formatINR, formatINRCompact, formatNumber, formatDate, humanizeCode } from '@/lib/reports/format'
 import type { CompareBasis } from '@/lib/reports/compare-basis'
-import { deltaToneHigherIsBad, formatDeltaVs, severitySegments } from '@/lib/reports/sections/shared'
+import { deltaToneHigherIsBad, formatDeltaVs, severityDonut } from '@/lib/reports/sections/shared'
 import type { OpenItemAgeingRow } from '@/lib/reports/surfaces/spend-curve-open-ageing'
 
 // reporting-blueprint.md D-03 — "Exceptions and flags by days open and
@@ -152,7 +152,7 @@ export function OpenItemAgeingSection({
 }) {
   const matrix = buildAgeSeverityMatrix(rows)
   const ranking = buildDepartmentRanking(rows).filter((d) => d.agedAtRisk > 0 || d.oldestDays > 30)
-  const severity = severitySegments(rows)
+  const severity = severityDonut(rows, 'open items')
 
   const rankItems: BarListItem[] = ranking.slice(0, 12).map((d) => ({
     key: d.key,
@@ -256,7 +256,9 @@ export function OpenItemAgeingSection({
             </table>
           </div>
 
-          {severity.length > 0 && <DonutChart segments={severity} centerLabel={`${rows.length} open`} />}
+          {severity.segments.length > 0 && (
+            <DonutChart segments={severity.segments} centerLabel={severity.centerLabel} valueFormat={severity.valueFormat} />
+          )}
 
           {rankItems.length > 0 && (
             <div className="flex flex-col gap-2">

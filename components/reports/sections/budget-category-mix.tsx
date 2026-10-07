@@ -3,9 +3,8 @@ import { EmptyState } from '@/components/reports/empty-state'
 import { DataTable, type DataTableColumn } from '@/components/reports/data-table'
 import { ExportCsvButton } from '@/components/reports/export-csv-button'
 import { KpiTile } from '@/components/reports/charts/kpi-tile'
-import { DonutChart, type DonutSegment } from '@/components/reports/charts/donut-chart'
-import { BarList, type BarListItem } from '@/components/reports/bar-list'
-import { ORDINAL_RAMP } from '@/components/reports/charts/ordinal-ramp'
+import { DonutChart } from '@/components/reports/charts/donut-chart'
+import { shareSegments } from '@/components/reports/charts/share-segments'
 import { toCsv } from '@/lib/reports/csv'
 import { formatINR, formatINRCompact, formatNumber, formatPercent } from '@/lib/reports/format'
 import type { BudgetCategoryMixRow } from '@/lib/reports/surfaces/budget-structure'
@@ -18,8 +17,6 @@ import type { BudgetCategoryMixRow } from '@/lib/reports/surfaces/budget-structu
 //
 // No drill link: a derived category spans several budget heads and the entries
 // explorer has no filter for it.
-
-const MAX_DONUT_SEGMENTS = 6
 
 type Ranked = {
   key: string
@@ -68,31 +65,13 @@ export function BudgetCategoryMixSection({
 }) {
   const { ranked, total } = rank(rows)
 
-  const donutSegments: DonutSegment[] = []
-  ranked.slice(0, MAX_DONUT_SEGMENTS).forEach((r, i) => {
-    donutSegments.push({
-      key: r.key,
-      label: r.label,
-      value: r.totalAmount,
-      colorClass: ORDINAL_RAMP[i % ORDINAL_RAMP.length]!.strokeClass,
-    })
+  // Categorical hues (budget categories are unordered identities, not ordinal
+  // stages) — at most 6 slices, the tail folded into a neutral "Other".
+  // Phase 6 dedup: the BarList that repeated these exact numbers is gone; the
+  // donut answers "share", the table below carries every exact figure.
+  const donutSegments = shareSegments(ranked.map((r) => ({ key: r.key, label: r.label, value: r.totalAmount })), {
+    otherNoun: 'categories',
   })
-  const rest = ranked.slice(MAX_DONUT_SEGMENTS)
-  if (rest.length > 0) {
-    donutSegments.push({
-      key: 'other',
-      label: `Other (${formatNumber(rest.length)} categories)`,
-      value: rest.reduce((sum, r) => sum + r.totalAmount, 0),
-      colorClass: 'stroke-muted-foreground',
-    })
-  }
-
-  const barItems: BarListItem[] = ranked.map((r) => ({
-    key: r.key,
-    label: r.label,
-    value: r.totalAmount,
-    note: formatPercent(r.sharePct),
-  }))
 
   const columns: DataTableColumn<Ranked>[] = [
     { key: 'category', header: 'Budget category', render: (r) => r.label },
@@ -134,8 +113,7 @@ export function BudgetCategoryMixSection({
               deltaTone="neutral"
             />
           )}
-          <DonutChart segments={donutSegments} centerLabel={formatINRCompact(total)} />
-          <BarList items={barItems} valueFormatter={formatINRCompact} />
+          <DonutChart segments={donutSegments} centerLabel={formatINRCompact(total)} valueFormat="inr-compact" />
           <p className="text-sm text-muted-foreground">{insight ?? budgetCategoryMixSentence(rows)}</p>
           <DataTable columns={columns} rows={ranked} getRowKey={(r) => r.key} />
         </>

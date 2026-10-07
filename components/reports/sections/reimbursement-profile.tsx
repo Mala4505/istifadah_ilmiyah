@@ -6,7 +6,7 @@ import { BarList, type BarListItem } from '@/components/reports/bar-list'
 import { ExportCsvButton } from '@/components/reports/export-csv-button'
 import { KpiTile } from '@/components/reports/charts/kpi-tile'
 import { DonutChart, type DonutSegment } from '@/components/reports/charts/donut-chart'
-import { ORDINAL_RAMP } from '@/components/reports/charts/ordinal-ramp'
+import { MAX_CATEGORICAL, OTHER_STEP, slotForKey } from '@/components/reports/charts/categorical-palette'
 import { toCsv } from '@/lib/reports/csv'
 import { formatDate, formatINR, formatINRCompact, formatNumber, humanizeCode } from '@/lib/reports/format'
 import type { CompareBasis } from '@/lib/reports/compare-basis'
@@ -24,7 +24,9 @@ import {
 // links them (documented in the view header).
 
 const TOP_BAR_COUNT = 12
-const DONUT_TOP_TYPES = 4
+// v_reimbursement_by_type folds blank types into this literal (migration
+// 20260903000014) -- it isn't an identity, so it never takes a hue.
+const UNSPECIFIED_TYPE = '(unspecified)'
 
 /** "{reimbursee} is the largest reimbursee at ₹X; {type} is the dominant
  *  reimbursement type." (§6 fix #3) */
@@ -44,24 +46,37 @@ export function reimbursementProfileSentence(
   )} this event; ${lead.reimbursee_name} is the largest at ${formatINRCompact(lead.total_amount)}${typeBit}.`
 }
 
+// Colour follows the reimbursement TYPE, not its rank (dataviz: colour follows
+// the entity): reimbursement_type is free text with no fixed code list, so
+// hues are keyed off the type codes in alphabetical order. A type keeps its
+// hue when its ₹ total overtakes another's -- the old reversed ordinal ramp
+// repainted every slice whenever the ranking shifted. Past 6 named types the
+// smallest fold into a neutral "Other" (alphabetical slots then apply to the
+// 5 kept), and "(unspecified)" always sits in that neutral bucket.
 function donutSegments(byType: ReimbursementByTypeRow[]): DonutSegment[] {
-  const sorted = [...byType].filter((r) => (r.total_amount ?? 0) > 0).sort((a, b) => b.total_amount - a.total_amount)
-  if (sorted.length === 0) return []
-  const head = sorted.slice(0, DONUT_TOP_TYPES)
-  const tail = sorted.slice(DONUT_TOP_TYPES)
-  const segments: DonutSegment[] = head.map((r, i) => ({
+  const positive = byType.filter((r) => (r.total_amount ?? 0) > 0)
+  const named = positive
+    .filter((r) => r.reimbursement_type !== UNSPECIFIED_TYPE)
+    .sort((a, b) => b.total_amount - a.total_amount)
+  if (positive.length === 0) return []
+  const kept = named.length <= MAX_CATEGORICAL ? named : named.slice(0, MAX_CATEGORICAL - 1)
+  const tail = positive.filter((r) => !kept.includes(r))
+  const order = kept.map((r) => r.reimbursement_type).sort((a, b) => a.localeCompare(b))
+  const segments: DonutSegment[] = kept.map((r) => ({
     key: r.reimbursement_type,
     label: humanizeCode(r.reimbursement_type),
     value: r.total_amount,
-    // Largest share = darkest step (magnitude encoding, one hue).
-    colorClass: ORDINAL_RAMP[Math.max(0, ORDINAL_RAMP.length - 1 - i)]!.strokeClass,
+    colorClass: slotForKey(r.reimbursement_type, order).strokeClass,
+    hex: slotForKey(r.reimbursement_type, order).hex,
   }))
   if (tail.length > 0) {
+    const onlyUnspecified = tail.length === 1 && tail[0]!.reimbursement_type === UNSPECIFIED_TYPE
     segments.push({
       key: '__other__',
-      label: `Other (${tail.length})`,
+      label: onlyUnspecified ? 'Unspecified' : `Other (${formatNumber(tail.length)} types)`,
       value: tail.reduce((s, r) => s + r.total_amount, 0),
-      colorClass: ORDINAL_RAMP[0]!.strokeClass,
+      colorClass: OTHER_STEP.strokeClass,
+      hex: OTHER_STEP.hex,
     })
   }
   return segments
@@ -187,7 +202,7 @@ export function ReimbursementProfileSection({
           {byTypeError ? (
             <p className="text-xs text-muted-foreground">Reimbursement-type mix unavailable: {byTypeError}</p>
           ) : (
-            segments.length > 0 && <DonutChart segments={segments} centerLabel="Type mix" />
+            segments.length > 0 && <DonutChart segments={segments} centerLabel="Type mix" valueFormat="inr-compact" />
           )}
           <DataTable columns={columns} rows={ranked} getRowKey={(r) => r.reimbursee_key} />
         </>

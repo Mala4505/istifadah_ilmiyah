@@ -1,63 +1,136 @@
-import { formatNumber } from '@/lib/reports/format'
+'use client'
+
+import { Bar, BarChart, Cell, LabelList, XAxis, YAxis } from 'recharts'
+import { formatNumber, formatPercent } from '@/lib/reports/format'
+import { ChartContainer, ChartTooltip, ChartTooltipContent, useChartAnimation, type ChartConfig } from '@/components/ui/chart'
 import { ORDINAL_RAMP } from './ordinal-ramp'
+import {
+  CategoryTick,
+  TooltipRow,
+  barEndLabel,
+  horizontalChartHeight,
+  useCompactChart,
+} from './recharts-kit'
 
-// A fixed internal coordinate space for the bars' SVG geometry — real
-// numeric attributes computed from data, not CSS, so this is unaffected by
-// the CSP constraint that governs HTML width/position (see
-// lib/reports/bar-scale.ts). `width="100%"` on the <svg> itself is a static
-// Tailwind class, not a runtime-computed one, so that's fine too.
-const VIEW_WIDTH = 1000
-const BAR_HEIGHT = 22 // <=24px per the dataviz skill's bar-thickness cap
-const RADIUS = 4 // 4px rounded data-ends, per the same spec
+// Document pipeline funnel — presentational only (a click-through belongs to
+// whatever hosts this, same as bar-list's `href` does for its rows). One
+// horizontal bar per stage, left-anchored on a shared count axis, so every
+// later stage reads as "share of the top of the funnel." Stage colour is
+// ORDINAL_RAMP (position in a fixed sequence: one hue, monotone steps — never
+// a per-stage hue); stages past the ramp's length hold its last step rather
+// than cycling. Drop-off between consecutive stages is computed against the
+// immediately preceding stage (the number a reader means by "drop-off") and
+// labelled at the bar end next to the count.
+//
+// shadcn chart (Recharts 3). 'use client' because Recharts is; the props are
+// plain serialisable data, so Server Component hosts can keep rendering it.
 
-/**
- * Horizontal, center-anchored funnel — presentational only (no click
- * handling; a click-through belongs to whatever hosts this, same as
- * bar-list's `href` does for its rows). Widest = first stage = 100%; every
- * later stage is scaled relative to that first stage's count, not its own
- * predecessor, so the bars read as "share of the top of the funnel."
- * Drop-off between consecutive stages is still computed against the
- * immediately preceding stage, since that's the number a reader means by
- * "drop-off."
- */
+type FunnelStage = { key: string; label: string; count: number }
+
+const chartConfig = Object.fromEntries(
+  ORDINAL_RAMP.map((step, i) => [`s${i}`, { label: `Stage ${i + 1}`, theme: step.hex }])
+) satisfies ChartConfig
+
+function stepKey(i: number): string {
+  return `s${Math.min(i, ORDINAL_RAMP.length - 1)}`
+}
+
 export function FunnelChart({ stages }: { stages: { key: string; label: string; count: number }[] }) {
+  const anim = useChartAnimation()
+  const [wrapRef, compact] = useCompactChart()
   if (stages.length === 0) return null
+
   const base = Math.max(1, stages[0]!.count) // stages.length > 0, checked above
+  const data = stages.map((stage, i) => {
+    const prev = i > 0 ? stages[i - 1]! : null
+    const dropOffPct = prev && prev.count > 0 ? ((prev.count - stage.count) / prev.count) * 100 : null
+    return { ...stage, dropOffPct, shareOfTop: (stage.count / base) * 100, fillKey: stepKey(i) }
+  })
+  const byKey = new Map<string, FunnelStage>(data.map((d) => [d.key, d]))
+
+  const EndLabel = barEndLabel((i) => {
+    const d = data[i]
+    if (!d) return null
+    return (
+      <text dy={4} fontSize={11}>
+        <tspan className="fill-foreground font-medium">{formatNumber(d.count)}</tspan>
+        {d.dropOffPct != null && d.dropOffPct > 0.05 && (
+          <tspan className="fill-muted-foreground"> · &minus;{d.dropOffPct.toFixed(0)}% drop-off</tspan>
+        )}
+      </text>
+    )
+  })
 
   return (
-    <div className="flex flex-col gap-2">
-      {stages.map((stage, i) => {
-        const fraction = Math.max(0, Math.min(1, stage.count / base))
-        const barWidth = fraction * VIEW_WIDTH
-        const barX = (VIEW_WIDTH - barWidth) / 2
-        const ramp = ORDINAL_RAMP[i % ORDINAL_RAMP.length]! // modulo is always a valid index into the ramp
-        const prev = i > 0 ? stages[i - 1] : null
-        const dropOffPct = prev && prev.count > 0 ? ((prev.count - stage.count) / prev.count) * 100 : null
-
-        return (
-          <div key={stage.key} className="flex flex-col gap-1">
-            {dropOffPct != null && dropOffPct > 0.05 && (
-              <p className="text-center text-[10px] uppercase tracking-wide text-muted-foreground">
-                &minus;{dropOffPct.toFixed(0)}% drop-off
-              </p>
-            )}
-            <div className="flex items-baseline justify-between gap-3 text-xs">
-              <span className="truncate text-foreground">{stage.label}</span>
-              <span className="shrink-0 font-mono text-muted-foreground">{formatNumber(stage.count)}</span>
-            </div>
-            <svg
-              viewBox={`0 0 ${VIEW_WIDTH} ${BAR_HEIGHT}`}
-              width="100%"
-              height={BAR_HEIGHT}
-              preserveAspectRatio="none"
-              aria-hidden="true"
-            >
-              <rect x={0} y={0} width={VIEW_WIDTH} height={BAR_HEIGHT} rx={RADIUS} className="fill-secondary" />
-              <rect x={barX} y={0} width={barWidth} height={BAR_HEIGHT} rx={RADIUS} className={ramp.fillClass} />
-            </svg>
-          </div>
-        )
-      })}
+    <div ref={wrapRef}>
+      <ChartContainer
+        config={chartConfig}
+        className="aspect-auto w-full"
+        style={{ height: horizontalChartHeight(data.length, 8) }}
+        role="img"
+        aria-label={`Pipeline funnel — ${data
+          .map(
+            (d) =>
+              `${d.label}: ${formatNumber(d.count)}${
+                d.dropOffPct != null && d.dropOffPct > 0.05 ? ` (${d.dropOffPct.toFixed(0)}% drop-off)` : ''
+              }`
+          )
+          .join(', ')}.`}
+      >
+        <BarChart
+          data={data}
+          layout="vertical"
+          margin={{ top: 4, right: compact ? 112 : 148, bottom: 4, left: 0 }}
+          barSize={22}
+        >
+          <XAxis type="number" hide domain={[0, Math.max(base, ...data.map((d) => d.count))]} />
+          <YAxis
+            type="category"
+            dataKey="key"
+            width={compact ? 104 : 150}
+            tickLine={false}
+            axisLine={false}
+            interval={0}
+            tick={
+              <CategoryTick
+                maxChars={compact ? 14 : 22}
+                lookup={(k) => {
+                  const s = byKey.get(k)
+                  return s ? { label: s.label } : undefined
+                }}
+              />
+            }
+          />
+          <ChartTooltip
+            cursor={false}
+            content={
+              <ChartTooltipContent
+                hideIndicator
+                labelFormatter={(_, payload) => String(payload[0]?.payload?.label ?? '')}
+                formatter={(_v, _n, item) => {
+                  const d = item.payload as (typeof data)[number] | undefined
+                  if (!d) return null
+                  return (
+                    <div className="grid w-full gap-1.5">
+                      <TooltipRow color={`var(--color-${d.fillKey})`} name="Count" value={formatNumber(d.count)} />
+                      <TooltipRow name="Share of first stage" value={formatPercent(d.shareOfTop)} />
+                      {d.dropOffPct != null && (
+                        <TooltipRow name="Drop-off from previous" value={formatPercent(d.dropOffPct)} />
+                      )}
+                    </div>
+                  )
+                }}
+              />
+            }
+          />
+          <Bar dataKey="count" name="count" radius={[0, 4, 4, 0]} minPointSize={2} {...anim}>
+            {data.map((d) => (
+              <Cell key={d.key} fill={`var(--color-${d.fillKey})`} />
+            ))}
+            <LabelList dataKey="count" content={EndLabel} />
+          </Bar>
+        </BarChart>
+      </ChartContainer>
     </div>
   )
 }

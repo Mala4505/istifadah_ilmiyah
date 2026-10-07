@@ -168,7 +168,7 @@ export function AmountAtRiskWaterfallSection({
             deltaTone="neutral"
           />
           <p className="text-sm text-muted-foreground">{insight ?? amountAtRiskWaterfallSentence(stages)}</p>
-          <WaterfallChart stages={stages} />
+          <WaterfallChart stages={stages} tableTwin={false} />
           <DataTable columns={tableColumns} rows={tableRows} getRowKey={(s) => s.key} />
         </>
       )}

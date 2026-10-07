@@ -3,9 +3,10 @@
 import { useState, type PointerEvent, type KeyboardEvent } from 'react'
 import { cn } from '@/lib/utils'
 import { formatINR, formatNumber } from '@/lib/reports/format'
-import { barLeftClass } from '@/lib/reports/bar-scale'
 import { DataTable, type DataTableColumn } from '@/components/reports/data-table'
 import { Button } from '@/components/ui/button'
+import { useChartWidth } from '@/components/reports/charts/use-chart-width'
+import { ChartTooltipPanel, ChartTooltipRow } from '@/components/reports/charts/chart-tooltip-panel'
 
 // reporting-blueprint.md C-04 (flagship) §4: "Strip plot — one dot per purchase
 // on a rate axis, one row per item family, our own median as a vertical rule,
@@ -16,12 +17,13 @@ import { Button } from '@/components/ui/button'
 // rule and each dot's raw position carry it. One accent hue for every dot,
 // never recoloured by over/under (dataviz skill).
 //
-// Structurally mirrors attention-map-chart.tsx: inline SVG with real numeric
-// attributes for every data-driven mark (exempt from this app's style-src CSP
-// constraint — see lib/reports/bar-scale.ts), a pointer-move nearest-dot hover
-// lookup, keyboard nav across dots, role="img" + aria-label, and a required
-// "View as table" twin so every value the chart conveys is also plain text
-// (dataviz skill: tooltips enhance, never gate).
+// Stays hand-drawn SVG (a jittered strip plot isn't a Recharts form): laid out
+// at the card's measured width (useChartWidth, scale 1) so 11px labels stay
+// 11px on a phone; real numeric attributes for every data-driven mark, a
+// pointer-move nearest-dot hover lookup with a shadcn-styled tooltip
+// (chart-tooltip-panel.tsx), keyboard nav across dots, role="img" +
+// aria-label, and a required "View as table" twin so every value the chart
+// conveys is also plain text (dataviz skill: tooltips enhance, never gate).
 
 export type StripPlotDot = {
   key: number
@@ -38,11 +40,11 @@ export type StripPlotDot = {
   entryId: number | null
 }
 
-const VIEW_WIDTH = 600
+const FALLBACK_WIDTH = 600
 const ROW_HEIGHT = 34
 const MAX_ROWS = 12
 const DOT_JITTER = 8 // max ± vertical px from a row's centre line
-const PAD = { left: 148, right: 20, top: 22, bottom: 40 }
+const PAD = { right: 20, top: 26, bottom: 44 }
 const RATIO_CAP = 3 // clamp the x domain; dots beyond are drawn at the edge and counted
 const HOVER_RADIUS_SQ = 22 * 22
 
@@ -79,6 +81,7 @@ function jitterFor(key: number): number {
 export function StripPlotChart({ dots, excludedCount = 0 }: { dots: StripPlotDot[]; excludedCount?: number }) {
   const [hoverKey, setHoverKey] = useState<number | null>(null)
   const [showTable, setShowTable] = useState(false)
+  const [wrapRef, viewWidth] = useChartWidth(FALLBACK_WIDTH)
 
   if (dots.length === 0) return null
 
@@ -102,11 +105,15 @@ export function StripPlotChart({ dots, excludedCount = 0 }: { dots: StripPlotDot
   const xTicks = niceTicks(0, Math.min(RATIO_CAP, Math.max(1.5, maxRatio)), 4).filter((t) => t >= 0)
   const domainMax = Math.max(1.5, xTicks[xTicks.length - 1] ?? RATIO_CAP)
 
-  const innerWidth = VIEW_WIDTH - PAD.left - PAD.right
+  // Width-derived layout: narrower row-label gutter on a phone.
+  const narrow = viewWidth < 480
+  const padLeft = narrow ? 112 : 160
+  const labelChars = narrow ? 14 : 22
+  const innerWidth = viewWidth - padLeft - PAD.right
   const plotHeight = rows.length * ROW_HEIGHT
   const viewHeight = PAD.top + plotHeight + PAD.bottom
 
-  const xFor = (ratio: number) => PAD.left + (Math.min(ratio, domainMax) / domainMax) * innerWidth
+  const xFor = (ratio: number) => padLeft + (Math.min(ratio, domainMax) / domainMax) * innerWidth
   const rowCentre = (rowIndex: number) => PAD.top + rowIndex * ROW_HEIGHT + ROW_HEIGHT / 2
 
   const clippedCount = dots.filter((d) => d.ratio > domainMax).length
@@ -135,8 +142,9 @@ export function StripPlotChart({ dots, excludedCount = 0 }: { dots: StripPlotDot
 
   function handlePointerMove(e: PointerEvent<SVGSVGElement>) {
     const rect = e.currentTarget.getBoundingClientRect()
-    const relX = ((e.clientX - rect.left) / rect.width) * VIEW_WIDTH
-    const relY = ((e.clientY - rect.top) / rect.height) * viewHeight
+    // Scale 1: one viewBox unit per CSS pixel.
+    const relX = e.clientX - rect.left
+    const relY = e.clientY - rect.top
     setHoverKey(nearestKey(relX, relY))
   }
   function handleKeyDown(e: KeyboardEvent<SVGSVGElement>) {
@@ -155,7 +163,7 @@ export function StripPlotChart({ dots, excludedCount = 0 }: { dots: StripPlotDot
 
   const hoverPlaced = hoverKey != null ? (placed.find((p) => p.dot.key === hoverKey) ?? null) : null
   const hoverDot = hoverPlaced?.dot ?? null
-  const tooltipPct = hoverPlaced ? (hoverPlaced.cx / VIEW_WIDTH) * 100 : 50
+  const tooltipPct = hoverPlaced ? (hoverPlaced.cx / viewWidth) * 100 : 50
 
   const medianX = xFor(1)
   const shadeWidth = Math.max(0, xFor(domainMax) - medianX)
@@ -177,11 +185,11 @@ export function StripPlotChart({ dots, excludedCount = 0 }: { dots: StripPlotDot
   ]
 
   return (
-    <div className="flex flex-col gap-3">
-      <div className="relative w-full">
+    <div className="flex flex-col gap-3 motion-safe:animate-chart-in">
+      <div ref={wrapRef} className="relative w-full">
         <svg
-          viewBox={`0 0 ${VIEW_WIDTH} ${viewHeight}`}
-          width="100%"
+          viewBox={`0 0 ${viewWidth} ${viewHeight}`}
+          width={viewWidth}
           height={viewHeight}
           className="overflow-visible"
           role="img"
@@ -199,18 +207,18 @@ export function StripPlotChart({ dots, excludedCount = 0 }: { dots: StripPlotDot
           {xTicks.map((t) => (
             <g key={`x-${t}`}>
               <line x1={xFor(t)} x2={xFor(t)} y1={PAD.top} y2={PAD.top + plotHeight} className="stroke-border" strokeWidth={1} />
-              <text x={xFor(t)} y={PAD.top + plotHeight + 16} textAnchor="middle" className="fill-muted-foreground text-[9px]">
+              <text x={xFor(t)} y={PAD.top + plotHeight + 17} textAnchor="middle" className="fill-muted-foreground text-[11px]">
                 {t % 1 === 0 ? t.toFixed(0) : t.toFixed(1)}×
               </text>
             </g>
           ))}
-          <text x={PAD.left + innerWidth / 2} y={viewHeight - 8} textAnchor="middle" className="fill-muted-foreground text-[9px]">
-            Rate vs our own median for the same item and unit (1.0× = median)
+          <text x={padLeft + innerWidth / 2} y={viewHeight - 8} textAnchor="middle" className="fill-muted-foreground text-[11px]">
+            {narrow ? 'Rate ÷ our median (1.0× = median)' : 'Rate vs our own median for the same item and unit (1.0× = median)'}
           </text>
 
           {/* Our-median rule. */}
           <line x1={medianX} x2={medianX} y1={PAD.top - 8} y2={PAD.top + plotHeight} className="stroke-foreground/60" strokeWidth={1.5} />
-          <text x={medianX} y={PAD.top - 12} textAnchor="middle" className="fill-foreground text-[9px] font-medium">
+          <text x={medianX} y={PAD.top - 12} textAnchor="middle" className="fill-foreground text-[11px] font-medium">
             our median
           </text>
 
@@ -219,16 +227,16 @@ export function StripPlotChart({ dots, excludedCount = 0 }: { dots: StripPlotDot
             <g key={row.k}>
               {i > 0 && (
                 <line
-                  x1={PAD.left}
-                  x2={VIEW_WIDTH - PAD.right}
+                  x1={padLeft}
+                  x2={viewWidth - PAD.right}
                   y1={PAD.top + i * ROW_HEIGHT}
                   y2={PAD.top + i * ROW_HEIGHT}
                   className="stroke-border/60"
                   strokeWidth={1}
                 />
               )}
-              <text x={PAD.left - 10} y={rowCentre(i)} textAnchor="end" dominantBaseline="middle" className="fill-foreground text-[10px]">
-                <tspan>{row.label.length > 22 ? `${row.label.slice(0, 21)}…` : row.label}</tspan>
+              <text x={padLeft - 10} y={rowCentre(i)} textAnchor="end" dominantBaseline="middle" className="fill-foreground text-[11px]">
+                <tspan>{row.label.length > labelChars ? `${row.label.slice(0, labelChars - 1)}…` : row.label}</tspan>
                 {row.unit ? <tspan className="fill-muted-foreground"> · {row.unit}</tspan> : null}
               </text>
             </g>
@@ -256,32 +264,17 @@ export function StripPlotChart({ dots, excludedCount = 0 }: { dots: StripPlotDot
         </svg>
 
         {hoverDot && (
-          <div
-            className={cn(
-              'pointer-events-none absolute top-1 z-10 min-w-[12rem] -translate-x-1/2 rounded-md border border-border bg-popover px-2.5 py-1.5 text-xs text-popover-foreground shadow-md',
-              barLeftClass(tooltipPct)
-            )}
+          <ChartTooltipPanel
+            leftPct={tooltipPct}
+            className="min-w-[12rem]"
+            title={hoverDot.vendorName}
+            subtitle={`${hoverDot.family}${hoverDot.unit ? ` · ${hoverDot.unit}` : ''}`}
           >
-            <p className="font-medium text-foreground">{hoverDot.vendorName}</p>
-            <p className="mb-1 text-[11px] text-muted-foreground">
-              {hoverDot.family}
-              {hoverDot.unit ? ` · ${hoverDot.unit}` : ''}
-            </p>
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-muted-foreground">Rate</span>
-              <span className="font-mono font-semibold text-foreground">{formatINR(hoverDot.netRate)}</span>
-            </div>
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-muted-foreground">Our median</span>
-              <span className="font-mono font-semibold text-foreground">{formatINR(hoverDot.medianRate)}</span>
-            </div>
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-muted-foreground">Above median</span>
-              <span className="font-mono font-semibold text-foreground">
-                {hoverDot.overpayment > 0 ? formatINR(hoverDot.overpayment) : '—'}
-              </span>
-            </div>
-          </div>
+            <ChartTooltipRow label="Rate" value={formatINR(hoverDot.netRate)} indicatorClass="bg-[#2a78d6] dark:bg-[#3987e5]" />
+            <ChartTooltipRow label="Our median" value={formatINR(hoverDot.medianRate)} />
+            <ChartTooltipRow label="vs median" value={`${hoverDot.ratio.toFixed(2)}×`} />
+            <ChartTooltipRow label="Above median" value={hoverDot.overpayment > 0 ? formatINR(hoverDot.overpayment) : '—'} />
+          </ChartTooltipPanel>
         )}
       </div>
 

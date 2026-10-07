@@ -8,5 +8,6 @@ import { Skeleton } from '@/components/ui/skeleton'
 // pattern, applied to this chart.
 export const BenfordChart = dynamic(() => import('./benford-chart').then((mod) => mod.BenfordChart), {
   ssr: false,
-  loading: () => <Skeleton className="h-64 w-full" />,
+  // Matches the chart's own 240px plot height so the swap-in doesn't jump.
+  loading: () => <Skeleton className="h-[240px] w-full" />,
 })

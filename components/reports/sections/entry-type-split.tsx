@@ -5,6 +5,8 @@ import { DataTable, type DataTableColumn } from '@/components/reports/data-table
 import { ExportCsvButton } from '@/components/reports/export-csv-button'
 import { KpiTile } from '@/components/reports/charts/kpi-tile'
 import { EntryTypeSplitChart, type EntryTypeSplitDept } from '@/components/reports/charts/entry-type-split-chart'
+import { DonutChart, type DonutSegment } from '@/components/reports/charts/donut-chart'
+import { OTHER_STEP } from '@/components/reports/charts/categorical-palette'
 import { toCsv } from '@/lib/reports/csv'
 import { formatINR, formatINRCompact, formatNumber, formatPercent } from '@/lib/reports/format'
 import type { CompareBasis } from '@/lib/reports/compare-basis'
@@ -47,6 +49,38 @@ export function entryTypeSplitSentence(rows: EntryTypeByDepartmentRow[]): string
   )} total spend this event; ${top.departmentName} leans on them most at ${formatPercent(
     top.sharePct
   )} of its own spend (${formatINRCompact(top.reimbursementSpend)}).`
+}
+
+// Event-wide headline donut (visual-optimisation plan Phase 3.1): "what share
+// of the whole event is each type" is a part-to-whole question, answered once
+// here before the per-department 100% bars. Keys, labels and colours mirror
+// entry-type-split-chart.tsx's SPLIT_META exactly (stroke-* twins of its bg-*
+// hexes) so a type reads the same colour in the donut legend and the bars --
+// reimbursement keeps the reserved amber as the control signal. Duplicated
+// rather than imported: that chart is a 'use client' module and this section
+// is a Server Component, so no runtime value may cross. Keep the two in sync.
+const DONUT_TYPES: { code: string; label: string; strokeClass: string }[] = [
+  { code: 'invoice', label: 'Invoice', strokeClass: 'stroke-[#184f95] dark:stroke-[#184f95]' },
+  { code: 'invoice_against_uplaq', label: 'Invoice against uplaq', strokeClass: 'stroke-[#2a78d6] dark:stroke-[#256abf]' },
+  { code: 'advance_payment', label: 'Advance', strokeClass: 'stroke-[#86b6ef] dark:stroke-[#6da7ec]' },
+  { code: 'reimbursement', label: 'Reimbursement (control signal)', strokeClass: 'stroke-amber-500 dark:stroke-amber-400' },
+]
+
+function eventWideSegments(rows: EntryTypeByDepartmentRow[]): DonutSegment[] {
+  const byType = new Map<string, number>()
+  for (const r of rows) byType.set(r.type, (byType.get(r.type) ?? 0) + (r.total_amount ?? 0))
+  const segments: DonutSegment[] = DONUT_TYPES.filter((t) => (byType.get(t.code) ?? 0) > 0).map((t) => ({
+    key: t.code,
+    label: t.label,
+    value: byType.get(t.code)!,
+    colorClass: t.strokeClass,
+  }))
+  // Any code outside the four entries_type_check values (shouldn't happen)
+  // folds into a neutral bucket instead of silently vanishing from the total.
+  const known = new Set(DONUT_TYPES.map((t) => t.code))
+  const unknown = [...byType].filter(([code, v]) => !known.has(code) && v > 0).reduce((s, [, v]) => s + v, 0)
+  if (unknown > 0) segments.push({ key: '__other__', label: 'Other', value: unknown, colorClass: OTHER_STEP.strokeClass })
+  return segments
 }
 
 function buildDepartments(rows: EntryTypeByDepartmentRow[]): EntryTypeSplitDept[] {
@@ -96,6 +130,7 @@ export function EntryTypeSplitSection({
   }
 
   const departments = buildDepartments(rows)
+  const donutSegments = eventWideSegments(rows)
 
   const deptTotals = new Map<string, number>()
   for (const d of departments) deptTotals.set(String(d.key), d.total)
@@ -174,6 +209,14 @@ export function EntryTypeSplitSection({
             deltaTone={isHigh ? 'bad' : 'neutral'}
           />
           <p className="text-sm text-muted-foreground">{insight ?? entryTypeSplitSentence(rows)}</p>
+          {donutSegments.length > 0 && (
+            <DonutChart
+              segments={donutSegments}
+              centerLabel={formatINRCompact(share.totalSpend)}
+              valueFormat="inr-compact"
+            />
+          )}
+          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">By department</p>
           <EntryTypeSplitChart departments={departments} />
           <DataTable columns={columns} rows={tableRows} getRowKey={(r) => r.rowKey} />
         </>

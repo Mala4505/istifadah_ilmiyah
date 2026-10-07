@@ -1,35 +1,45 @@
 'use client'
 
-import { useMemo, useState, type KeyboardEvent, type PointerEvent } from 'react'
-import { cn } from '@/lib/utils'
+import { useMemo, useState } from 'react'
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  LabelList,
+  Line,
+  LineChart,
+  ReferenceLine,
+  XAxis,
+  YAxis,
+  usePlotArea,
+  useXAxisScale,
+  useYAxisScale,
+} from 'recharts'
 import { formatINR, formatNumber } from '@/lib/reports/format'
-import { barLeftClass } from '@/lib/reports/bar-scale'
 import { DataTable, type DataTableColumn } from '@/components/reports/data-table'
 import { Button } from '@/components/ui/button'
+import { ChartContainer, ChartTooltip, ChartTooltipContent, useChartAnimation, type ChartConfig } from '@/components/ui/chart'
+import { CATEGORICAL_PALETTE } from '@/components/reports/charts/categorical-palette'
+import { TooltipValueRow } from '@/components/reports/charts/tooltip-value-row'
+import { useChartWidth } from '@/components/reports/charts/use-chart-width'
 
 // reporting-blueprint.md C-05: "Same vendor, same item, price movement week
-// by week." One line per vendor×item-family series, x = ISO week, y = that
-// week's median net_rate. A CATEGORICAL palette (each line is a distinct
-// identity, not a position in a sequence), unlike ordinal-ramp.ts's one-hue
-// ramp used elsewhere for ordered stages — muted so no single line reads as
-// the screen's brand/status color. Capped at MAX_SERIES lines (sorted by
-// |drift %|) so the chart stays legible; the rest are still in the "View as
-// table" twin and counted in a caption.
+// by week." Two views of the same question (plan Phase 4):
 //
-// "NO second scale" (dataviz skill / blueprint §6 fix #8): when the shown
-// series span very different rate magnitudes (e.g. ₹40/unit cement vs
-// ₹4,000/unit pipe), a shared rupee axis makes the cheaper series flatline.
-// The fix here is a toggle, not a second axis — "common index (first week =
-// 100)" re-expresses every series as a fraction of its OWN first-week
-// median, so every line shares one 100-based scale regardless of its rupee
-// magnitude. Off by default (raw rupees is the more literal, more trusted
-// reading); the caller can default it on for a specific case if needed.
+// 1. SLOPE CHART — one line per shown vendor×item-family series, from its
+//    first-week median to its latest-week median, on a common index (first
+//    week = 100). Different ₹ magnitudes (₹40 cement vs ₹4,000 pipe) share one
+//    axis honestly without a second scale (dataviz skill: never dual-axis);
+//    the old multi-week spaghetti + ₹/index toggle is gone. Capped at
+//    MAX_SERIES lines by |drift|; colours come from CATEGORICAL_PALETTE in
+//    fixed order (never cycled). Right-end direct labels with leader lines,
+//    nudged apart vertically so they never overlap; under ~480px they shrink
+//    to the drift % and the legend carries identity.
+// 2. RANKED DRIFT LIST — every series as a horizontal bar diverging around
+//    0%, neutral ink, the direction carried by ↑/↓ and the sign (never colour
+//    alone).
 //
-// Structurally mirrors trend-chart.tsx: inline SVG with real numeric
-// attributes for every data-driven mark (exempt from this app's style-src
-// CSP constraint — see lib/reports/bar-scale.ts), a pointer-move nearest-week
-// crosshair, keyboard week nav, role="img" + aria-label, and a required
-// "View as table" twin so every value the chart conveys is also plain text.
+// The "View as table" twin keeps the raw ₹ median for every week.
 
 export type RateDriftChartSeries = {
   key: string
@@ -40,55 +50,10 @@ export type RateDriftChartSeries = {
 }
 
 const MAX_SERIES = 6
-
-// Muted categorical hues, distinct from the single-hue ordinal ramp used for
-// ordered sequences elsewhere in this app — series identity here has no
-// inherent order, so a monotone-lightness ramp would falsely imply one.
-const SERIES_COLOR_CLASSES = [
-  'stroke-[#2a78d6] dark:stroke-[#5b9be8]',
-  'stroke-[#c0742d] dark:stroke-[#e0975a]',
-  'stroke-[#3f8f7a] dark:stroke-[#5cae98]',
-  'stroke-[#9553a6] dark:stroke-[#b57bc4]',
-  'stroke-[#767b3f] dark:stroke-[#9ba35a]',
-  'stroke-[#6b6f76] dark:stroke-[#9aa0a8]',
-] as const
-const SERIES_DOT_FILL_CLASSES = [
-  'fill-[#2a78d6] dark:fill-[#5b9be8]',
-  'fill-[#c0742d] dark:fill-[#e0975a]',
-  'fill-[#3f8f7a] dark:fill-[#5cae98]',
-  'fill-[#9553a6] dark:fill-[#b57bc4]',
-  'fill-[#767b3f] dark:fill-[#9ba35a]',
-  'fill-[#6b6f76] dark:fill-[#9aa0a8]',
-] as const
-
-const VIEW_WIDTH = 640
-const VIEW_HEIGHT = 260
-const PAD = { left: 52, right: 16, top: 16, bottom: 28 }
-const INNER_WIDTH = VIEW_WIDTH - PAD.left - PAD.right
-const INNER_HEIGHT = VIEW_HEIGHT - PAD.top - PAD.bottom
-
-function niceNum(range: number, round: boolean): number {
-  const safeRange = range || 1
-  const exponent = Math.floor(Math.log10(safeRange))
-  const fraction = safeRange / 10 ** exponent
-  let niceFraction: number
-  if (round) {
-    niceFraction = fraction < 1.5 ? 1 : fraction < 3 ? 2 : fraction < 7 ? 5 : 10
-  } else {
-    niceFraction = fraction <= 1 ? 1 : fraction <= 2 ? 2 : fraction <= 5 ? 5 : 10
-  }
-  return niceFraction * 10 ** exponent
-}
-
-function niceTicks(min: number, max: number, tickCount = 4): number[] {
-  if (min === max) return [min - 1, min, min + 1]
-  const step = niceNum((max - min) / (tickCount - 1), true)
-  const niceMin = Math.floor(min / step) * step
-  const niceMax = Math.ceil(max / step) * step
-  const ticks: number[] = []
-  for (let v = niceMin; v <= niceMax + step / 2; v += step) ticks.push(Math.round(v * 1e6) / 1e6)
-  return ticks
-}
+const FIRST = 'First week'
+const LATEST = 'Latest week'
+const LABEL_GAP = 14
+const COMPACT_BELOW = 480
 
 function weekLabel(weekStart: string): string {
   const d = new Date(weekStart)
@@ -96,89 +61,172 @@ function weekLabel(weekStart: string): string {
   return d.toLocaleDateString('en-IN', { month: 'short', day: 'numeric' })
 }
 
+function truncate(s: string, max: number): string {
+  return s.length > max ? `${s.slice(0, max - 1)}…` : s
+}
+
+function signedPct(v: number): string {
+  return `${v > 0 ? '+' : v < 0 ? '−' : '±'}${Math.abs(v).toFixed(1)}%`
+}
+
+/** Round-number ticks (step 1/2/5 × 10^k, ~`target` of them) inside
+ *  [lo, hi] — so a padded domain doesn't produce ticks like −29% / +11%. */
+function roundTicks(lo: number, hi: number, target = 5): number[] {
+  const raw = (hi - lo) / Math.max(1, target - 1)
+  if (!(raw > 0)) return [lo]
+  const mag = 10 ** Math.floor(Math.log10(raw))
+  const steps = [0.5, 1, 2, 5, 10].map((m) => m * mag)
+  let si = steps.findIndex((st) => st >= raw)
+  if (si === -1) si = steps.length - 1
+  const build = (step: number) => {
+    const ticks: number[] = []
+    for (let v = Math.ceil(lo / step) * step; v <= hi + 1e-9; v += step) ticks.push(Math.round(v * 1e6) / 1e6)
+    return ticks
+  }
+  // A padded domain can leave a rounded step with a single tick: step down.
+  let ticks = build(steps[si]!)
+  while (ticks.length < 3 && si > 0) ticks = build(steps[--si]!)
+  return ticks
+}
+
+function arrowPct(v: number): string {
+  return `${v > 0 ? '↑' : v < 0 ? '↓' : '→'} ${signedPct(v)}`
+}
+
+type Prepared = {
+  slot: string
+  series: RateDriftChartSeries
+  first: { weekStart: string; medianRate: number }
+  last: { weekStart: string; medianRate: number }
+  latestIndex: number
+  drift: number
+}
+
+function prepare(s: RateDriftChartSeries, slot: string): Prepared | null {
+  const pts = [...s.points].sort((a, b) => a.weekStart.localeCompare(b.weekStart))
+  const first = pts[0]
+  const last = pts[pts.length - 1]
+  if (!first || !last || !(first.medianRate > 0)) return null
+  const latestIndex = (last.medianRate / first.medianRate) * 100
+  return { slot, series: s, first, last, latestIndex, drift: s.driftPct ?? latestIndex - 100 }
+}
+
+/**
+ * Right-end labels for the slope chart. Reads the chart's own scales (Recharts
+ * 3 hooks), places each label at its line's end, then nudges overlapping
+ * labels apart (min LABEL_GAP px) and clamps them into the plot area. A short
+ * leader line ties a nudged label back to its line end (dataviz skill: never
+ * detach a nudged label from its mark).
+ */
+function SlopeEndLabels({ items, compact }: { items: Prepared[]; compact: boolean }) {
+  const xScale = useXAxisScale()
+  const yScale = useYAxisScale()
+  const plot = usePlotArea()
+  if (!xScale || !yScale || !plot) return null
+  const x = xScale(LATEST, { position: 'middle' })
+  if (x == null) return null
+
+  const placed = items
+    .map((it) => {
+      const y = yScale(it.latestIndex) ?? 0
+      return { it, y, labelY: y }
+    })
+    .sort((a, b) => a.y - b.y)
+  // Forward pass pushes labels down; backward pass pulls them back inside.
+  const top = plot.y + 6
+  const bottom = plot.y + plot.height - 6
+  for (let i = 0; i < placed.length; i += 1) {
+    const prev = placed[i - 1]
+    placed[i]!.labelY = Math.max(placed[i]!.labelY, top, prev ? prev.labelY + LABEL_GAP : -Infinity)
+  }
+  for (let i = placed.length - 1; i >= 0; i -= 1) {
+    const next = placed[i + 1]
+    placed[i]!.labelY = Math.min(placed[i]!.labelY, bottom, next ? next.labelY - LABEL_GAP : Infinity)
+  }
+
+  return (
+    <g>
+      {placed.map(({ it, y, labelY }) => (
+        <g key={it.slot}>
+          <polyline
+            points={`${x + 5},${y} ${x + 11},${labelY} ${x + 14},${labelY}`}
+            fill="none"
+            className="stroke-muted-foreground/60"
+            strokeWidth={1}
+          />
+          <text x={x + 17} y={labelY} dominantBaseline="middle" fontSize={11} className="fill-foreground">
+            {compact ? null : (
+              <tspan className="fill-muted-foreground">
+                {truncate(`${it.series.vendorName} · ${it.series.familyLabel}`, 24)}{' '}
+              </tspan>
+            )}
+            <tspan className="font-medium">{signedPct(it.drift)}</tspan>
+          </text>
+        </g>
+      ))}
+    </g>
+  )
+}
+
+type RankedRow = Prepared & { label: string }
+
 export function RateDriftChart({ series }: { series: RateDriftChartSeries[] }) {
-  const [hoverWeekIndex, setHoverWeekIndex] = useState<number | null>(null)
   const [showTable, setShowTable] = useState(false)
-  const [indexed, setIndexed] = useState(false)
+  const anim = useChartAnimation()
+  const [wrapRef, width] = useChartWidth(640)
+  const compact = width < COMPACT_BELOW
 
   const shown = useMemo(
     () =>
       [...series]
         .sort((a, b) => Math.abs(b.driftPct ?? 0) - Math.abs(a.driftPct ?? 0))
-        .slice(0, MAX_SERIES),
+        .slice(0, MAX_SERIES)
+        .map((s, i) => prepare(s, `s${i}`))
+        .filter((p): p is Prepared => p != null),
     [series]
   )
+  const ranked = useMemo<RankedRow[]>(
+    () =>
+      series
+        .map((s, i) => prepare(s, `r${i}`))
+        .filter((p): p is Prepared => p != null)
+        .sort((a, b) => b.drift - a.drift)
+        .map((p) => ({ ...p, label: `${p.series.vendorName} · ${p.series.familyLabel}` })),
+    [series]
+  )
+
+  if (series.length === 0 || shown.length === 0) return null
   const hiddenCount = series.length - shown.length
 
-  const weekStarts = useMemo(() => {
-    const set = new Set<string>()
-    for (const s of shown) for (const p of s.points) set.add(p.weekStart)
-    return [...set].sort()
-  }, [shown])
-  const weekIndexByStart = useMemo(() => new Map(weekStarts.map((w, i) => [w, i])), [weekStarts])
-  const n = weekStarts.length
-
-  if (series.length === 0 || n === 0) return null
-
-  // Plotted value per series per week — raw ₹, or (value / that series' own
-  // first-week value) × 100 when the index toggle is on.
-  const plotted = shown.map((s) => {
-    const firstValue = s.points[0]?.medianRate ?? null
-    const values = s.points.map((p) => ({
-      index: weekIndexByStart.get(p.weekStart)!,
-      raw: p.medianRate,
-      value: indexed && firstValue ? (p.medianRate / firstValue) * 100 : p.medianRate,
-    }))
-    return { series: s, values: values.sort((a, b) => a.index - b.index) }
-  })
-
-  const allValues = plotted.flatMap((p) => p.values.map((v) => v.value))
-  const ticks = niceTicks(Math.min(...allValues), Math.max(...allValues), 4)
-  const domainMin = ticks[0]!
-  const domainMax = ticks[ticks.length - 1]!
-  const domainRange = domainMax - domainMin || 1
-
-  const xStep = n > 1 ? INNER_WIDTH / (n - 1) : 0
-  const xFor = (i: number) => (n > 1 ? PAD.left + i * xStep : PAD.left + INNER_WIDTH / 2)
-  const yFor = (v: number) => PAD.top + (1 - (v - domainMin) / domainRange) * INNER_HEIGHT
-
-  // Break each series' path into contiguous M/L segments across any missing
-  // week, rather than interpolating straight through a gap (same approach as
-  // trend-chart.tsx's target line).
-  function pathFor(values: { index: number; value: number }[]): string {
-    return values
-      .map((v, order) => {
-        const isContiguous = order > 0 && values[order - 1]!.index === v.index - 1
-        return `${isContiguous ? 'L' : 'M'}${xFor(v.index).toFixed(2)},${yFor(v.value).toFixed(2)}`
-      })
-      .join(' ')
+  const slopeConfig: ChartConfig = Object.fromEntries(
+    shown.map((p, i) => [p.slot, { label: `${p.series.vendorName} · ${p.series.familyLabel}`, theme: CATEGORICAL_PALETTE[i]!.hex }])
+  )
+  // Two rows (first week, latest week); per series: its index value plus the
+  // raw ₹ median under `<slot>_raw` for the tooltip.
+  const firstRow: Record<string, string | number> = { x: FIRST }
+  const latestRow: Record<string, string | number> = { x: LATEST }
+  for (const p of shown) {
+    firstRow[p.slot] = 100
+    firstRow[`${p.slot}_raw`] = p.first.medianRate
+    latestRow[p.slot] = p.latestIndex
+    latestRow[`${p.slot}_raw`] = p.last.medianRate
   }
+  const slopeData = [firstRow, latestRow]
 
-  function handlePointerMove(e: PointerEvent<SVGSVGElement>) {
-    const rect = e.currentTarget.getBoundingClientRect()
-    const relX = ((e.clientX - rect.left) / rect.width) * VIEW_WIDTH
-    const idx = n > 1 ? Math.round(((relX - PAD.left) / INNER_WIDTH) * (n - 1)) : 0
-    setHoverWeekIndex(Math.max(0, Math.min(n - 1, idx)))
-  }
-  function handleKeyDown(e: KeyboardEvent<SVGSVGElement>) {
-    if (e.key === 'ArrowRight') {
-      e.preventDefault()
-      setHoverWeekIndex((i) => Math.min(n - 1, (i ?? -1) + 1))
-    } else if (e.key === 'ArrowLeft') {
-      e.preventDefault()
-      setHoverWeekIndex((i) => Math.max(0, (i ?? n) - 1))
-    } else if (e.key === 'Escape') {
-      setHoverWeekIndex(null)
-    }
-  }
+  const indices = [100, ...shown.map((p) => p.latestIndex)]
+  const yMin = Math.floor(Math.min(...indices) / 10) * 10
+  const yMax = Math.max(yMin + 10, Math.ceil(Math.max(...indices) / 10) * 10)
+  const yTicks = roundTicks(yMin, yMax)
 
-  const tooltipPct = hoverWeekIndex != null && n > 1 ? (hoverWeekIndex / (n - 1)) * 100 : 50
-  const hoverRows =
-    hoverWeekIndex != null
-      ? plotted
-          .map((p) => ({ s: p.series, point: p.values.find((v) => v.index === hoverWeekIndex) ?? null }))
-          .filter((r) => r.point != null)
-      : []
+  // Diverging around 0, only as wide as the data needs on each side, plus
+  // headroom so the "↑ +x%" end labels stay inside the plot.
+  const lo = Math.min(0, ...ranked.map((r) => r.drift))
+  const hi = Math.max(0, ...ranked.map((r) => r.drift))
+  const span = hi - lo || 5
+  // More headroom on a phone, where the end label is wide relative to the plot.
+  const pad = span * (compact ? 1.3 : 0.35)
+  const xDomain: [number, number] = [lo < 0 ? lo - pad : 0, hi > 0 ? hi + pad : 0]
+  const rankedConfig = { drift: { label: 'Drift', theme: { light: '#898781', dark: '#a3a29d' } } } satisfies ChartConfig
 
   const tableColumns: DataTableColumn<{ vendor: string; family: string; week: string; medianRate: number }>[] = [
     { key: 'vendor', header: 'Vendor', render: (r) => r.vendor },
@@ -191,108 +239,66 @@ export function RateDriftChart({ series }: { series: RateDriftChartSeries[] }) {
   )
 
   return (
-    <div className="flex flex-col gap-3">
-      <div className="relative w-full">
-        <svg
-          viewBox={`0 0 ${VIEW_WIDTH} ${VIEW_HEIGHT}`}
-          width="100%"
-          height={VIEW_HEIGHT}
-          className="overflow-visible"
-          role="img"
-          aria-label={`Rate drift by week — ${formatNumber(shown.length)} vendor-item series, each a line of that week's median rate${
-            indexed ? ', indexed to its own first week = 100' : ' in rupees'
-          }. See the table view below for exact values.`}
-          tabIndex={0}
-          onPointerMove={handlePointerMove}
-          onPointerLeave={() => setHoverWeekIndex(null)}
-          onKeyDown={handleKeyDown}
-        >
-          {ticks.map((t) => (
-            <g key={t}>
-              <line x1={PAD.left} x2={VIEW_WIDTH - PAD.right} y1={yFor(t)} y2={yFor(t)} className="stroke-border" strokeWidth={1} />
-              <text x={PAD.left - 6} y={yFor(t)} textAnchor="end" dominantBaseline="middle" className="fill-muted-foreground text-[9px]">
-                {indexed ? t.toFixed(0) : formatINR(t)}
-              </text>
-            </g>
-          ))}
-
-          {plotted.map((p, i) => (
-            <path
-              key={p.series.key}
-              d={pathFor(p.values)}
-              className={cn('fill-none', SERIES_COLOR_CLASSES[i % SERIES_COLOR_CLASSES.length])}
-              strokeWidth={2}
-              strokeLinecap="round"
-              strokeLinejoin="round"
+    <div ref={wrapRef} className="flex flex-col gap-4">
+      <div
+        role="img"
+        aria-label={`Rate drift slope chart — ${formatNumber(shown.length)} vendor-item series with the largest movement, each a line from its first-week median to its latest-week median, indexed so the first week = 100. ${shown
+          .map((p) => `${p.series.vendorName} · ${p.series.familyLabel} ${signedPct(p.drift)}`)
+          .join('; ')}. See the table view below for exact values.`}
+      >
+        <ChartContainer config={slopeConfig} className="aspect-auto h-[260px] w-full">
+          <LineChart data={slopeData} margin={{ top: 12, right: compact ? 64 : 200, bottom: 0, left: 0 }}>
+            <CartesianGrid vertical={false} />
+            <XAxis dataKey="x" tickLine={false} axisLine={false} tickMargin={8} fontSize={11} padding={{ left: 24, right: 8 }} />
+            <YAxis
+              domain={[yMin, yMax]}
+              ticks={yTicks}
+              tickLine={false}
+              axisLine={false}
+              width={40}
+              fontSize={11}
+              allowDecimals={false}
             />
-          ))}
-
-          {/* Selective x-axis labels: first, last, hovered. */}
-          {[...new Set([0, n - 1, hoverWeekIndex].filter((i): i is number => i != null))].map((i) => (
-            <text key={i} x={xFor(i)} y={VIEW_HEIGHT - PAD.bottom + 16} textAnchor="middle" className="fill-muted-foreground text-[9px]">
-              {weekLabel(weekStarts[i]!)}
-            </text>
-          ))}
-
-          {hoverWeekIndex != null && (
-            <g>
-              <line
-                x1={xFor(hoverWeekIndex)}
-                x2={xFor(hoverWeekIndex)}
-                y1={PAD.top}
-                y2={VIEW_HEIGHT - PAD.bottom}
-                className="stroke-foreground/30"
-                strokeWidth={1}
+            <ReferenceLine y={100} stroke="hsl(var(--muted-foreground))" strokeOpacity={0.5} strokeWidth={1} />
+            <ChartTooltip
+              content={
+                <ChartTooltipContent
+                  labelFormatter={(label) => `${String(label)} · index (first week = 100)`}
+                  formatter={(value, name, item) => {
+                    const row = item.payload as Record<string, string | number> | undefined
+                    return (
+                      <TooltipValueRow
+                        color={item.color}
+                        label={slopeConfig[name]?.label ?? name}
+                        value={`${formatINR(Number(row?.[`${name}_raw`]))} · ${(value as number).toFixed(0)}`}
+                      />
+                    )
+                  }}
+                />
+              }
+            />
+            {shown.map((p) => (
+              <Line
+                key={p.slot}
+                dataKey={p.slot}
+                type="linear"
+                stroke={`var(--color-${p.slot})`}
+                strokeWidth={2}
+                dot={{ r: 4, strokeWidth: 2, fill: `var(--color-${p.slot})`, stroke: 'hsl(var(--card))' }}
+                activeDot={{ r: 5, strokeWidth: 2 }}
+                {...anim}
               />
-              {plotted.map((p, i) => {
-                const pt = p.values.find((v) => v.index === hoverWeekIndex)
-                if (!pt) return null
-                return (
-                  <circle
-                    key={p.series.key}
-                    cx={xFor(hoverWeekIndex)}
-                    cy={yFor(pt.value)}
-                    r={4}
-                    strokeWidth={2}
-                    className={cn(SERIES_DOT_FILL_CLASSES[i % SERIES_DOT_FILL_CLASSES.length], 'stroke-card')}
-                  />
-                )
-              })}
-            </g>
-          )}
-        </svg>
-
-        {hoverRows.length > 0 && (
-          <div
-            className={cn(
-              'pointer-events-none absolute top-2 z-10 min-w-[11rem] -translate-x-1/2 rounded-md border border-border bg-popover px-2.5 py-1.5 text-xs text-popover-foreground shadow-md',
-              barLeftClass(tooltipPct)
-            )}
-          >
-            <p className="mb-1 font-medium text-foreground">Week of {weekLabel(weekStarts[hoverWeekIndex!]!)}</p>
-            {hoverRows.map((r, i) => (
-              <div key={r.s.key} className="flex items-center justify-between gap-3">
-                <span className="flex min-w-0 items-center gap-1.5 text-muted-foreground">
-                  <svg width={10} height={4} aria-hidden="true" className="shrink-0">
-                    <line x1={0} y1={2} x2={10} y2={2} className={SERIES_COLOR_CLASSES[i % SERIES_COLOR_CLASSES.length]} strokeWidth={2} />
-                  </svg>
-                  <span className="truncate">{r.s.vendorName}</span>
-                </span>
-                <span className="font-mono font-semibold text-foreground">
-                  {indexed ? `${r.point!.value.toFixed(0)}` : formatINR(r.point!.raw)}
-                </span>
-              </div>
             ))}
-          </div>
-        )}
+            <SlopeEndLabels items={shown} compact={compact} />
+          </LineChart>
+        </ChartContainer>
       </div>
 
+      {/* Legend: always present for ≥2 series (identity never colour alone). */}
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-muted-foreground">
-        {plotted.map((p, i) => (
-          <span key={p.series.key} className="flex items-center gap-1.5">
-            <svg width={12} height={4} aria-hidden="true">
-              <line x1={0} y1={2} x2={12} y2={2} className={SERIES_COLOR_CLASSES[i % SERIES_COLOR_CLASSES.length]} strokeWidth={2} />
-            </svg>
+        {shown.map((p, i) => (
+          <span key={p.slot} className="flex items-center gap-1.5">
+            <span aria-hidden="true" className={`h-2.5 w-2.5 shrink-0 rounded-[2px] ${CATEGORICAL_PALETTE[i]!.bgClass}`} />
             {p.series.vendorName} · {p.series.familyLabel}
           </span>
         ))}
@@ -300,15 +306,91 @@ export function RateDriftChart({ series }: { series: RateDriftChartSeries[] }) {
 
       {hiddenCount > 0 && (
         <p className="text-xs text-muted-foreground">
-          Showing the {formatNumber(shown.length)} series with the largest week-over-week movement; {formatNumber(hiddenCount)} more{' '}
-          {hiddenCount === 1 ? 'is' : 'are'} in the table.
+          Showing the {formatNumber(shown.length)} series with the largest movement; {formatNumber(hiddenCount)} more{' '}
+          {hiddenCount === 1 ? 'is' : 'are'} in the ranked list below and the table.
         </p>
       )}
 
-      <div className="flex items-center gap-2">
-        <Button variant="outline" size="sm" onClick={() => setIndexed((v) => !v)}>
-          {indexed ? 'Show ₹' : 'Common index (first week = 100)'}
-        </Button>
+      {ranked.length > 0 && (
+        <div className="flex flex-col gap-1.5">
+          <p className="text-xs font-medium text-muted-foreground">Every pair, ranked by drift since its first week</p>
+          <div role="img" aria-label={`Drift ranking — ${ranked.map((r) => `${r.label} ${signedPct(r.drift)}`).join('; ')}.`}>
+            <ChartContainer config={rankedConfig} className="aspect-auto w-full" style={{ height: ranked.length * 28 + 32 }}>
+              <BarChart data={ranked} layout="vertical" margin={{ top: 4, right: 64, bottom: 0, left: 0 }}>
+                <CartesianGrid horizontal={false} />
+                <XAxis
+                  type="number"
+                  domain={xDomain}
+                  ticks={roundTicks(xDomain[0], xDomain[1])}
+                  tickLine={false}
+                  axisLine={false}
+                  fontSize={11}
+                  tickFormatter={(v: number) => `${v > 0 ? '+' : ''}${Math.round(v)}%`}
+                />
+                <YAxis
+                  type="category"
+                  dataKey="label"
+                  tickLine={false}
+                  axisLine={false}
+                  width={compact ? 110 : 190}
+                  fontSize={11}
+                  tickFormatter={(v: string) => truncate(v, compact ? 16 : 30)}
+                />
+                <ReferenceLine x={0} stroke="hsl(var(--foreground))" strokeOpacity={0.4} strokeWidth={1} />
+                <ChartTooltip
+                  cursor={{ fillOpacity: 0.5 }}
+                  content={
+                    <ChartTooltipContent
+                      hideIndicator
+                      labelFormatter={(_, payload) => (payload?.[0]?.payload as RankedRow | undefined)?.label ?? null}
+                      formatter={(_value, _name, item) => {
+                        const r = item.payload as unknown as RankedRow
+                        return (
+                          <div className="grid w-full gap-1">
+                            <TooltipValueRow color="var(--color-drift)" label="Drift" value={arrowPct(r.drift)} />
+                            <TooltipValueRow
+                              color="transparent"
+                              label={`${weekLabel(r.first.weekStart)} → ${weekLabel(r.last.weekStart)}`}
+                              value={`${formatINR(r.first.medianRate)} → ${formatINR(r.last.medianRate)}`}
+                            />
+                          </div>
+                        )
+                      }}
+                    />
+                  }
+                />
+                <Bar dataKey="drift" fill="var(--color-drift)" radius={4} maxBarSize={16} {...anim}>
+                  <LabelList
+                    dataKey="drift"
+                    content={(props) => {
+                      const v = Number(props.value)
+                      const x = Number(props.x)
+                      const w = Number(props.width)
+                      const left = Math.min(x, x + w)
+                      const right = Math.max(x, x + w)
+                      const y = Number(props.y) + Number(props.height) / 2
+                      return (
+                        <text
+                          x={v >= 0 ? right + 4 : left - 4}
+                          y={y}
+                          textAnchor={v >= 0 ? 'start' : 'end'}
+                          dominantBaseline="middle"
+                          fontSize={11}
+                          className="fill-foreground"
+                        >
+                          {arrowPct(v)}
+                        </text>
+                      )
+                    }}
+                  />
+                </Bar>
+              </BarChart>
+            </ChartContainer>
+          </div>
+        </div>
+      )}
+
+      <div>
         <Button variant="outline" size="sm" onClick={() => setShowTable((v) => !v)}>
           {showTable ? 'Hide table' : 'View as table'}
         </Button>

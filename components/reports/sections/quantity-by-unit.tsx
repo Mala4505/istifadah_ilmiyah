@@ -112,7 +112,7 @@ export function QuantityByUnitSection({
             deltaTone={deltaToneHigherIsGood(rows.length, previous)}
           />
           <p className="text-sm text-muted-foreground">{insight ?? quantityByUnitSentence(rows)}</p>
-          <QuantityByUnitChart bars={bars} />
+          <QuantityByUnitChart bars={bars} tableTwin={false} />
           <DataTable
             columns={columns}
             rows={rows}

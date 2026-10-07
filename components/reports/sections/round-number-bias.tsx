@@ -148,7 +148,7 @@ export function RoundNumberBiasSection({
           <KpiTile
             label="Round-number share (all amounts)"
             value={formatPercent(overallSharePct)}
-            delta={formatDeltaVs(compareBasis, overallSharePct, previous, 'count')}
+            delta={formatDeltaVs(compareBasis, overallSharePct, previous, 'pp')}
             deltaTone={deltaToneHigherIsBad(overallSharePct, previous)}
           />
           <p className="text-sm text-muted-foreground">
