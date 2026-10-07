@@ -6,8 +6,8 @@ import { ChevronLeft } from 'lucide-react'
 import { ReportSection } from '@/components/reports/report-section'
 import { EmptyState } from '@/components/reports/empty-state'
 import { DataTable, type DataTableColumn } from '@/components/reports/data-table'
-import { BarList, type BarListItem } from '@/components/reports/bar-list'
-import { DonutChart } from '@/components/reports/charts/donut-chart'
+import { DonutChart } from '@/components/reports/charts/lazy'
+import { BudgetVsActualChart, type BudgetVsActualBar } from '@/components/reports/charts/lazy'
 import { KpiTile } from '@/components/reports/charts/kpi-tile'
 import { shareSegments } from '@/components/reports/charts/share-segments'
 import { ExportCsvButton } from '@/components/reports/export-csv-button'
@@ -18,8 +18,6 @@ import { toCsv } from '@/lib/reports/csv'
 import { formatINR, formatINRCompact, formatNumber, formatPercent } from '@/lib/reports/format'
 import type { CompareBasis } from '@/lib/reports/compare-basis'
 import {
-  BudgetStatusLegend,
-  budgetStatusColorClass,
   formatDeltaVs,
   type DepartmentBudgetVsActualRow,
   type SubDepartmentBudgetVsActualRow,
@@ -94,7 +92,11 @@ export function DepartmentBudgetExplorerClient({
   budgetUtilizationFilename: string
 }) {
   const [selectedDeptId, setSelectedDeptId] = useState<number | null>(null)
-  const [chartStyle, setChartStyle] = useState<ChartStyle>('donut')
+  // Budget vs actual is the question this section answers (departments and
+  // sub-departments are the only levels with approved budgets), so the
+  // budget-bar view is the default; the donut is the optional share-of-spend
+  // view and carries no budget.
+  const [chartStyle, setChartStyle] = useState<ChartStyle>('bars')
 
   const deptItems = useMemo(() => deptRows.map(fromDept).sort((a, b) => (b.actual ?? 0) - (a.actual ?? 0)), [deptRows])
   const selectedDept = selectedDeptId != null ? deptRows.find((d) => d.department_id === selectedDeptId) ?? null : null
@@ -129,16 +131,16 @@ export function DepartmentBudgetExplorerClient({
     { otherNoun: selectedDept ? 'divisions' : 'departments' }
   )
 
-  const barItems: BarListItem[] = items
-    .filter((x) => (x.actual ?? 0) > 0)
+  // Rows with a budget OR spend — a budgeted department with nothing spent
+  // yet still shows its (empty) budget track.
+  const budgetBars: BudgetVsActualBar[] = items
+    .filter((x) => (x.actual ?? 0) > 0 || (x.budget ?? 0) > 0)
     .map((x) => ({
-      key: x.id,
+      key: String(x.id),
       label: x.name,
-      value: x.actual ?? 0,
-      marker: x.budget && x.budget > 0 ? x.budget : null,
-      markerLabel: x.budget ? `Budget: ${formatINR(x.budget)}` : undefined,
-      note: x.statusNote ?? undefined,
-      colorClass: budgetStatusColorClass(x.budget, x.actual),
+      budget: x.budget,
+      actual: x.actual ?? 0,
+      href: selectedDept ? `/entries?department_id=${selectedDept.department_id}` : null,
     }))
 
   const columns: DataTableColumn<ScopedItem>[] = [
@@ -200,18 +202,20 @@ export function DepartmentBudgetExplorerClient({
   return (
     <ReportSection
       id="department-budget-explorer"
-      title={selectedDept ? `${selectedDept.department_name} — divisions` : 'Budget vs actual — department explorer'}
+      title={selectedDept ? `${selectedDept.department_name} — budget vs actual by division` : 'Budget vs actual'}
       description={
         selectedDept
-          ? `Every division under ${selectedDept.department_name}, budget vs actual, for the same event.`
-          : 'Pick a department -- by wedge, bar, or the dropdown -- to see its own divisions and the figures behind them.'
+          ? `Every division under ${selectedDept.department_name}: its approved budget against actual spend, for the same event.`
+          : 'Approved budget against actual spend per department (a department’s budget is the sum of its sub-departments’). Click a bar or use the dropdown to see its divisions.'
       }
       action={
         <div className="flex flex-wrap items-center gap-2">
           <Tabs value={chartStyle} onValueChange={(v) => setChartStyle(v as ChartStyle)}>
             <TabsList>
-              <TabsTrigger value="donut">Donut</TabsTrigger>
-              <TabsTrigger value="bars">Bars</TabsTrigger>
+              {/* Short labels: this row shares the header with the export
+                  buttons and must fit a 375px phone. */}
+              <TabsTrigger value="bars">vs Budget</TabsTrigger>
+              <TabsTrigger value="donut">Share</TabsTrigger>
             </TabsList>
           </Tabs>
           <ExportPdfButton
@@ -305,10 +309,9 @@ export function DepartmentBudgetExplorerClient({
               valueFormat="inr-compact"
             />
           ) : (
-            <BarList items={barItems} valueFormatter={formatINRCompact} />
+            <BudgetVsActualChart bars={budgetBars} onSelect={selectedDept ? undefined : onSelectFromChart} />
           )}
 
-          <BudgetStatusLegend />
           <DataTable columns={columns} rows={items} getRowKey={(r) => r.id} />
         </>
       )}

@@ -56,12 +56,13 @@ const NAV_ITEMS = [
   { label: 'Documents', href: '/documents', icon: FileStack },
   { label: 'Review', href: '/review', icon: ScanLine },
   { label: 'Exceptions', href: '/exceptions', icon: TriangleAlert },
-  // Lands on Budget vs Actual, not Explore (/reports) — Explore is the
-  // everything-at-once drill workspace and too heavy as the tab's front door.
-  // `activePrefix` keeps the item lit on every /reports/* surface.
+  // Lands on Budget vs Actual (department + sub-department budgets — the only
+  // level that carries approved amounts), not Explore (/reports), the
+  // everything-at-once drill workspace. `activePrefix` keeps the item lit on
+  // every /reports/* surface.
   {
     label: 'Reports',
-    href: '/reports/budget?report=budget-vs-actual',
+    href: '/reports/budget?report=department-budget-explorer',
     activePrefix: '/reports',
     icon: FileBarChart,
   },

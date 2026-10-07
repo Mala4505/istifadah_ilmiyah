@@ -1,6 +1,6 @@
 import { CATEGORICAL_PALETTE, OTHER_STEP } from '@/components/reports/charts/categorical-palette'
 import { formatNumber } from '@/lib/reports/format'
-import type { DonutSegment } from '@/components/reports/charts/donut-chart'
+import type { DonutSegment } from '@/components/reports/charts/lazy'
 
 // Plain (non-'use client') helper so Server Component sections can build
 // DonutChart segments locally and pass only plain data across the boundary.

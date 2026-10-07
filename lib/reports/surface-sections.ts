@@ -29,9 +29,13 @@ export interface ReportSectionRef {
  */
 export const OVERVIEW_SECTION: ReportSectionRef = { id: 'overview', label: 'Overview' }
 
+// Approved budgets live on departments / sub-departments only, so the
+// department explorer IS "Budget vs Actual"; the by-head section is spend by
+// head (heads carry no approved amounts). Ids are unchanged so existing
+// ?report= links and pins keep working.
 const BUDGET_SECTIONS: ReportSectionRef[] = [
-  { id: 'budget-vs-actual', label: 'Budget vs Actual' },
-  { id: 'department-budget-explorer', label: 'Department Budget Explorer' },
+  { id: 'department-budget-explorer', label: 'Budget vs Actual' },
+  { id: 'budget-vs-actual', label: 'Spend by Budget Head' },
   { id: 'budget-revision-history', label: 'Budget Revision History' },
   { id: 'admin-head-accountability', label: 'Admin-head Accountability' },
   { id: 'zone-spend', label: 'Spend by Zone' },
@@ -90,8 +94,8 @@ const INTEGRITY_SECTIONS: ReportSectionRef[] = [
  * prepended by the page itself (via `OVERVIEW_SECTION`), not stored here.
  */
 const EXPLORE_SECTIONS: ReportSectionRef[] = [
-  { id: 'budget-vs-actual', label: 'Budget vs Actual' },
-  { id: 'department-budget-explorer', label: 'Department Budget Explorer' },
+  { id: 'budget-vs-actual', label: 'Spend by Budget Head' },
+  { id: 'department-budget-explorer', label: 'Budget vs Actual' },
   { id: 'vendor-spend', label: 'Vendor Spend' },
   { id: 'zone-spend', label: 'Spend by Zone' },
   { id: 'open-issues', label: 'Open Issues' },

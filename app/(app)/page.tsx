@@ -10,7 +10,7 @@ import { StatusCountCard, dashboardStatusBadgeVariant, type StatusCount } from '
 import { ImportWorkspace } from '@/components/import/import-workspace'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { formatINRCompact, formatNumber } from '@/lib/reports/format'
+import { formatINRCompact, formatNumber, formatPercent } from '@/lib/reports/format'
 import { isAdminOrAbove } from '@/lib/auth/roles'
 
 // Screen 2 — Dashboard (MASTER-PLAN §5, day 6). Reads from the §10.2
@@ -19,11 +19,12 @@ import { isAdminOrAbove } from '@/lib/auth/roles'
 export const dynamic = 'force-dynamic'
 
 type OpenIssueRow = { amount_at_risk: number | null; event_id: number | null }
-type BudgetVsActualRow = {
-  budget_head_id: number
+// Approved budgets live on departments / sub-departments only (budget heads
+// and zones carry no amounts); v_department_budget_vs_actual's budget_amount
+// is the sum of each department's latest sub-department allocations.
+type DepartmentBudgetRow = {
+  budget_amount: number | null
   actual_amount: number | null
-  approved_amount: number | null
-  budget_status_note: string | null
 }
 type ImportBatchRow = { id: number; row_count: number | null; mode: string; status: string }
 type EntryStatusCountRow = {
@@ -84,10 +85,10 @@ async function loadDashboardData() {
             .or(`event_id.eq.${selectedEventId},event_id.is.null`)
             .returns<OpenIssueRow[]>(),
       supabase
-        .from('v_budget_vs_actual')
-        .select('budget_head_id, actual_amount, approved_amount, budget_status_note')
+        .from('v_department_budget_vs_actual')
+        .select('budget_amount, actual_amount')
         .eq('event_id', eventIdFilter)
-        .returns<BudgetVsActualRow[]>(),
+        .returns<DepartmentBudgetRow[]>(),
       supabase
         .from('import_batch')
         .select('id, row_count, mode, status')
@@ -138,9 +139,10 @@ async function loadDashboardData() {
     openIssuesError: friendlyDataError(openIssuesRes.error, 'dashboard:openIssuesRes'),
 
     totalActualSpend: budgetRows.reduce((sum, r) => sum + (r.actual_amount ?? 0), 0),
-    headsWithoutApprovedBudget: budgetRows.filter((r) => r.budget_status_note === 'no approved budget')
+    totalBudget: budgetRows.reduce((sum, r) => sum + (r.budget_amount ?? 0), 0),
+    deptsWithBudget: budgetRows.filter((r) => (r.budget_amount ?? 0) > 0).length,
+    deptsOverBudget: budgetRows.filter((r) => (r.budget_amount ?? 0) > 0 && (r.actual_amount ?? 0) > (r.budget_amount ?? 0))
       .length,
-    totalHeads: budgetRows.length,
     budgetError: friendlyDataError(budgetRes.error, 'dashboard:budgetRes'),
 
     importBatchCount: importBatches.length,
@@ -160,14 +162,12 @@ async function loadDashboardData() {
 export default async function DashboardPage() {
   const data = await loadDashboardData()
 
-  // §7.5 (docs/pre-deploy-findings-and-plan.md): "The tile reads ₹2.32 Cr
-  // with the subtitle '10 of 10 heads have no approved budget'. If nothing
-  // has a budget, nothing can be burning -- that figure is just spend to
-  // date." When every head is missing an approved amount, the denominator
-  // for "burn" doesn't exist at all -- rename the tile rather than keep
-  // labelling a plain spend total as a burn rate against a budget that isn't
-  // there.
-  const allHeadsLackApprovedBudget = data.totalHeads > 0 && data.headsWithoutApprovedBudget === data.totalHeads
+  // §7.5 (docs/pre-deploy-findings-and-plan.md): with no budget on record,
+  // nothing can be "burning" -- show plain spend to date instead. The budget
+  // is the department + sub-department total; heads carry no amounts, which
+  // is why the old head-based tile always read "no approved budget".
+  const hasBudget = data.totalBudget > 0
+  const pctUsed = hasBudget ? (data.totalActualSpend / data.totalBudget) * 100 : null
 
   return (
     <div className="flex flex-col gap-6">
@@ -232,24 +232,25 @@ export default async function DashboardPage() {
       <DashboardSection
         icon={Wallet}
         title="Budget"
-        description="Spend against this event's approved budget."
+        description="Spend against this event's department and sub-department budgets."
       >
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <StatTile
-            label={allHeadsLackApprovedBudget ? 'Spend to date' : 'Budget burn'}
+            label={hasBudget ? 'Budget used' : 'Spend to date'}
             value={formatINRCompact(data.totalActualSpend)}
             hint={
-              data.totalHeads === 0
-                ? 'No budget heads allocated yet'
-                : allHeadsLackApprovedBudget
-                  ? `No approved budget on any of ${data.totalHeads} heads yet — spend so far, not a burn rate`
-                  : data.headsWithoutApprovedBudget > 0
-                    ? `${data.headsWithoutApprovedBudget} of ${data.totalHeads} heads have no approved budget`
-                    : `Across ${data.totalHeads} budget heads`
+              !hasBudget
+                ? 'No department budgets set yet — spend so far, not a burn rate'
+                : `of ${formatINRCompact(data.totalBudget)} budget · ${formatPercent(pctUsed)} used` +
+                  (data.deptsOverBudget > 0
+                    ? ` · ${formatNumber(data.deptsOverBudget)} of ${formatNumber(data.deptsWithBudget)} departments over`
+                    : '')
             }
-            href="/reports#budget-vs-actual"
+            href="/reports/budget?report=department-budget-explorer"
             icon={Wallet}
-            tone={!allHeadsLackApprovedBudget && data.headsWithoutApprovedBudget > 0 ? 'warning' : 'default'}
+            tone={
+              pctUsed == null ? 'default' : pctUsed > 100 || data.deptsOverBudget > 0 ? 'critical' : pctUsed > 90 ? 'warning' : 'default'
+            }
             error={data.budgetError}
           />
         </div>
