@@ -1,13 +1,16 @@
 'use client'
 
+import { useState } from 'react'
 import { Bar, BarChart, CartesianGrid, Cell, XAxis, YAxis } from 'recharts'
 import { ChartContainer, ChartTooltip, useChartAnimation, type ChartConfig } from '@/components/ui/chart'
 import { formatINR, formatINRCompact, formatPercent } from '@/lib/reports/format'
+import { outlierScale } from '@/lib/reports/outlier-scale'
 import {
   AXIS_TICK,
   BAR_PX,
   CategoryTick,
   GRID_STROKE,
+  cappedBarShape,
   SERIES_BLUE,
   STATUS_CRITICAL,
   STATUS_WARN,
@@ -27,6 +30,13 @@ import {
 // right-hand column reads "₹12.4L of ₹15L · 83%" ("no budget set" when a row
 // has none). That column is a second category axis carrying text, not a
 // second value scale. On a phone it shortens to the % alone.
+//
+// Broken axis: when one or two departments dwarf the rest (Venue Setup's
+// budget is many times any other), a linear scale shrinks every other bar to
+// a sliver. outlierScale() caps the axis just above the next-largest row; the
+// outliers run to the edge with a ⫽ break mark (cappedBarShape) and keep
+// their true figures in the written column and tooltip. A caption names them
+// and a toggle restores the full scale.
 
 export type BudgetVsActualBar = {
   key: string
@@ -77,14 +87,26 @@ export function BudgetVsActualChart({
 }) {
   const anim = useChartAnimation()
   const [ref, compact] = useCompactChart()
+  const [fullScale, setFullScale] = useState(false)
 
   if (bars.length === 0) return null
 
-  const data = bars.map((b) => ({
-    ...b,
-    budgetValue: b.budget && b.budget > 0 ? b.budget : 0,
-    status: statusOf(b.budget, b.actual),
+  const base = bars.map((b) => {
+    const budgetValue = b.budget && b.budget > 0 ? b.budget : 0
+    return { ...b, budgetValue, status: statusOf(b.budget, b.actual), extent: Math.max(budgetValue, b.actual) }
+  })
+  const scale = outlierScale(base.map((d) => d.extent))
+  const cap = fullScale ? null : scale.cap
+  // Plotted values are clamped to the cap; the real ones (budgetValue,
+  // actual) stay on the row for the written column and the tooltip.
+  const data = base.map((d) => ({
+    ...d,
+    budgetPlot: cap != null ? Math.min(d.budgetValue, cap) : d.budgetValue,
+    actualPlot: cap != null ? Math.min(d.actual, cap) : d.actual,
+    budgetClipped: cap != null && d.budgetValue > cap,
+    actualClipped: cap != null && d.actual > cap,
   }))
+  const outliers = base.filter((d) => scale.cap != null && d.extent > scale.cap)
   const byKey = new Map(data.map((d) => [d.key, d]))
   const labelWidth = compact ? 104 : 168
   // Wide enough for "₹10.20 Cr of ₹12.50 Cr · 108.4%" at 11px tabular sans.
@@ -118,7 +140,8 @@ export function BudgetVsActualChart({
             tickLine={false}
             axisLine={false}
             tickFormatter={(v: number) => formatINRCompact(v)}
-            domain={[0, 'dataMax']}
+            domain={cap != null ? [0, cap] : [0, 'dataMax']}
+            allowDataOverflow={cap != null}
           />
           <YAxis
             type="category"
@@ -182,23 +205,21 @@ export function BudgetVsActualChart({
             }}
           />
           <Bar
-            dataKey="budgetValue"
+            dataKey="budgetPlot"
             name="Approved budget"
             fill="var(--color-budget)"
             barSize={BAR_PX + 4}
-            radius={[0, 4, 4, 0]}
+            shape={cappedBarShape((p) => Boolean((p as { budgetClipped?: boolean })?.budgetClipped), Boolean(onSelect))}
             isAnimationActive={false}
             onClick={onSelect ? (d: { payload?: { key?: string } }) => d.payload?.key && onSelect(d.payload.key) : undefined}
-            className={onSelect ? 'cursor-pointer' : undefined}
           />
           <Bar
-            dataKey="actual"
+            dataKey="actualPlot"
             name="Actual"
             barSize={BAR_PX - 6}
-            radius={[0, 4, 4, 0]}
+            shape={cappedBarShape((p) => Boolean((p as { actualClipped?: boolean })?.actualClipped), Boolean(onSelect))}
             {...anim}
             onClick={onSelect ? (d: { payload?: { key?: string } }) => d.payload?.key && onSelect(d.payload.key) : undefined}
-            className={onSelect ? 'cursor-pointer' : undefined}
           >
             {data.map((d) => (
               <Cell key={d.key} fill={STATUS_VAR[d.status]} />
@@ -206,6 +227,32 @@ export function BudgetVsActualChart({
           </Bar>
         </BarChart>
       </ChartContainer>
+
+      {scale.cap != null && (
+        <p className="text-xs text-muted-foreground">
+          {fullScale ? (
+            <>Full scale — smaller departments are compressed by the largest. </>
+          ) : (
+            <>
+              Scale capped at {formatINRCompact(scale.cap)} so every department stays readable —{' '}
+              {outliers.map((o, i) => (
+                <span key={o.key}>
+                  {i > 0 && ', '}
+                  <span className="font-medium text-foreground">{o.label}</span> ({formatINRCompact(o.extent)})
+                </span>
+              ))}{' '}
+              {outliers.length === 1 ? 'runs' : 'run'} past it, marked ⫽. Exact figures are written on each row.{' '}
+            </>
+          )}
+          <button
+            type="button"
+            onClick={() => setFullScale((v) => !v)}
+            className="font-medium text-primary underline-offset-2 hover:underline"
+          >
+            {fullScale ? 'Fit to most departments' : 'Show full scale'}
+          </button>
+        </p>
+      )}
 
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-muted-foreground">
         <span className="flex items-center gap-1.5">
