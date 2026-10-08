@@ -3,6 +3,7 @@
 import { useRouter } from 'next/navigation'
 import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from 'recharts'
 import { formatINRCompact, formatPercent } from '@/lib/reports/format'
+import { outlierScale } from '@/lib/reports/outlier-scale'
 import {
   ChartContainer,
   ChartLegend,
@@ -52,6 +53,8 @@ type Datum = Record<string, number | string | null | undefined> & {
   __label: string
   __total: number
   __last: string
+  /** 'yes' when the row's total runs past the capped axis. */
+  __clipped: string
 }
 
 export function StackedDepartmentBars({
@@ -74,16 +77,29 @@ export function StackedDepartmentBars({
   const config: ChartConfig = Object.fromEntries(series.map((s) => [s.key, { label: s.label, theme: s.theme }]))
   const byKey = new Map(rows.map((r) => [r.rowKey, r]))
 
+  // Absolute mode only: broken axis when one or two departments dwarf the
+  // rest (lib/reports/outlier-scale.ts). Segments are clamped in stack order
+  // so a capped row stops at the edge; its last visible segment carries the ⫽
+  // break mark. Tooltip figures stay the real ones (raw_*).
+  const scale = mode === 'absolute' ? outlierScale(rows.map((r) => r.total)) : { cap: null, outlierCount: 0 }
+  const cap = scale.cap
+
   const data: Datum[] = rows.map((r) => {
-    const d: Datum = { rowKey: r.rowKey, __label: r.label, __total: r.total, __last: '' }
+    const d: Datum = { rowKey: r.rowKey, __label: r.label, __total: r.total, __last: '', __clipped: '' }
+    let used = 0
     for (const s of series) {
       const raw = Math.max(0, r.values[s.key] ?? 0)
       d[`raw_${s.key}`] = raw
-      d[s.key] = mode === 'percent' ? (r.total > 0 ? (raw / r.total) * 100 : 0) : raw
-      if (raw > 0) d.__last = s.key
+      let plotted = mode === 'percent' ? (r.total > 0 ? (raw / r.total) * 100 : 0) : raw
+      if (cap != null) plotted = Math.min(plotted, Math.max(0, cap - used))
+      used += plotted
+      d[s.key] = plotted
+      if (plotted > 0) d.__last = s.key
     }
+    if (cap != null && r.total > cap) d.__clipped = 'yes'
     return d
   })
+  const outliers = cap != null ? rows.filter((r) => r.total > cap) : []
 
   const clickable = segmentHref != null
 
@@ -100,7 +116,8 @@ export function StackedDepartmentBars({
           <CartesianGrid horizontal={false} stroke={GRID_STROKE} />
           <XAxis
             type="number"
-            domain={mode === 'percent' ? [0, 100] : [0, 'auto']}
+            domain={mode === 'percent' ? [0, 100] : cap != null ? [0, cap] : [0, 'auto']}
+            allowDataOverflow={cap != null}
             ticks={mode === 'percent' ? [0, 25, 50, 75, 100] : undefined}
             tickCount={mode === 'percent' ? undefined : compact ? 3 : 5}
             tickFormatter={(v: number) => (mode === 'percent' ? `${v}%` : formatINRCompact(v))}
@@ -160,7 +177,11 @@ export function StackedDepartmentBars({
               name={s.key}
               stackId="dept"
               fill={`var(--color-${s.key})`}
-              shape={stackedSegmentShape((p) => (p as Datum | undefined)?.__last === s.key, clickable)}
+              shape={stackedSegmentShape(
+                (p) => (p as Datum | undefined)?.__last === s.key,
+                clickable,
+                (p) => (p as Datum | undefined)?.__last === s.key && (p as Datum | undefined)?.__clipped === 'yes'
+              )}
               onClick={
                 clickable
                   ? (entry) => {
@@ -176,6 +197,18 @@ export function StackedDepartmentBars({
           ))}
         </BarChart>
       </ChartContainer>
+      {outliers.length > 0 && cap != null && (
+        <p className="mt-1 text-xs text-muted-foreground">
+          Scale capped at {formatINRCompact(cap)} so every department stays readable —{' '}
+          {outliers.map((o, i) => (
+            <span key={o.rowKey}>
+              {i > 0 && ', '}
+              <span className="font-medium text-foreground">{o.label}</span> ({formatINRCompact(o.total)})
+            </span>
+          ))}{' '}
+          {outliers.length === 1 ? 'runs' : 'run'} past it, marked ⫽; hover for exact figures.
+        </p>
+      )}
     </div>
   )
 }

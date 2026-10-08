@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { formatINRCompact } from '@/lib/reports/format'
 import { barWidthClass, barLeftClass } from '@/lib/reports/bar-scale'
 import { cn } from '@/lib/utils'
+import { outlierScale } from '@/lib/reports/outlier-scale'
 
 export type BarListItem = {
   key: string | number
@@ -39,11 +40,19 @@ export function BarList({
   valueFormatter?: (v: number) => string
 }) {
   if (items.length === 0) return null
-  const computedMax = max ?? Math.max(1, ...items.map((i) => Math.max(i.value, i.marker ?? 0)))
+  // Broken axis (lib/reports/outlier-scale.ts): when one or two rows dwarf the
+  // rest, cap the scale just above the next-largest so the others stay
+  // readable; capped rows fill the track and carry a ⫽ break mark. The value
+  // text is always the true figure. Callers passing an explicit `max` (e.g. a
+  // fixed 100% scale) opt out.
+  const extents = items.map((i) => Math.max(i.value, i.marker ?? 0))
+  const scale = max == null ? outlierScale(extents) : { cap: null, outlierCount: 0 }
+  const computedMax = max ?? scale.cap ?? Math.max(1, ...extents)
 
   return (
     <div className="flex flex-col gap-3">
       {items.map((item) => {
+        const clipped = scale.cap != null && item.value > scale.cap
         const pct = Math.max(0, Math.min(100, (item.value / computedMax) * 100))
         const markerPct =
           item.marker != null ? Math.max(0, Math.min(100, (item.marker / computedMax) * 100)) : null
@@ -77,6 +86,13 @@ export function BarList({
                   title={item.markerLabel}
                 />
               )}
+              {clipped && (
+                // ⫽ break mark: two slanted cuts in the card colour near the end.
+                <span aria-hidden="true" className="absolute inset-y-0 right-2.5 flex gap-[3px]">
+                  <span className="h-full w-[2px] skew-x-[-30deg] bg-card" />
+                  <span className="h-full w-[2px] skew-x-[-30deg] bg-card" />
+                </span>
+              )}
             </div>
           </div>
         )
@@ -92,6 +108,12 @@ export function BarList({
           <div key={item.key}>{body}</div>
         )
       })}
+      {scale.cap != null && (
+        <p className="text-xs text-muted-foreground">
+          Scale capped at {valueFormatter(scale.cap)} so smaller rows stay readable; {scale.outlierCount === 1 ? 'the bar' : 'bars'}{' '}
+          marked ⫽ {scale.outlierCount === 1 ? 'runs' : 'run'} past it — {scale.outlierCount === 1 ? 'its' : 'their'} figure{scale.outlierCount === 1 ? ' is' : 's are'} exact.
+        </p>
+      )}
     </div>
   )
 }

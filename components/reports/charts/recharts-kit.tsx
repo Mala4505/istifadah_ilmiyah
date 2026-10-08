@@ -172,20 +172,75 @@ export function barEndLabel(render: (index: number) => React.ReactNode, dx = 6) 
 }
 
 /**
+ * Axis-break mark (⫽) drawn across the end of a bar that runs past a capped
+ * scale (lib/reports/outlier-scale.ts): two slanted cuts in the card surface
+ * colour, so the bar visibly reads as "continues beyond the axis" rather than
+ * as a bar that happens to end at the edge.
+ */
+export function BreakMark({ endX, y, height }: { endX: number; y: number; height: number }) {
+  const top = y - 3
+  const bottom = y + height + 3
+  return (
+    <g aria-hidden="true" pointerEvents="none">
+      {[14, 8].map((dx) => (
+        <line key={dx} x1={endX - dx - 3} y1={bottom} x2={endX - dx + 3} y2={top} stroke={SURFACE} strokeWidth={2.5} />
+      ))}
+    </g>
+  )
+}
+
+/**
+ * Bar shape for a horizontal bar that may be clipped at a capped axis: the
+ * normal rounded data end, or — when `isClipped(payload)` — a square end with
+ * a BreakMark, since the bar's true length is off-scale.
+ */
+export function cappedBarShape(isClipped: (payload: unknown) => boolean, clickable = false) {
+  function CappedBar(props: BarShapeProps) {
+    const clipped = isClipped(props.payload)
+    const x = Number(props.x ?? 0)
+    const width = Number(props.width ?? 0)
+    return (
+      <g className={clickable ? 'cursor-pointer' : undefined}>
+        <Rectangle {...props} radius={clipped ? 0 : [0, 4, 4, 0]} />
+        {clipped && width > 20 && <BreakMark endX={x + width} y={Number(props.y ?? 0)} height={Number(props.height ?? 0)} />}
+      </g>
+    )
+  }
+  return CappedBar
+}
+
+/**
  * Bar shape for stacked horizontal bars: rounds only the data end of the row's
  * LAST non-zero segment (square at the baseline and between segments), and
  * draws the 2px surface gap as a surface-coloured stroke.
  */
-export function stackedSegmentShape(isLast: (payload: unknown) => boolean, clickable: boolean) {
+export function stackedSegmentShape(
+  isLast: (payload: unknown) => boolean,
+  clickable: boolean,
+  /** True for the row's last visible segment when the row runs past a capped axis. */
+  isClippedEnd?: (payload: unknown) => boolean
+) {
   function StackedSegment(props: BarShapeProps) {
-    return (
+    const clipped = isClippedEnd?.(props.payload) ?? false
+    const rect = (
       <Rectangle
         {...props}
-        radius={isLast(props.payload) ? [0, 4, 4, 0] : 0}
+        radius={isLast(props.payload) && !clipped ? [0, 4, 4, 0] : 0}
         stroke={SURFACE}
         strokeWidth={2}
         className={clickable ? 'cursor-pointer' : undefined}
       />
+    )
+    if (!clipped || Number(props.width ?? 0) <= 20) return rect
+    return (
+      <g>
+        {rect}
+        <BreakMark
+          endX={Number(props.x ?? 0) + Number(props.width ?? 0)}
+          y={Number(props.y ?? 0)}
+          height={Number(props.height ?? 0)}
+        />
+      </g>
     )
   }
   return StackedSegment
