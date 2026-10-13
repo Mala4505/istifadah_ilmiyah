@@ -231,7 +231,11 @@ try {
       }
       // sub_department_id is only ever filled in, never overwritten.
       await client.query(
-        'update public.entries set invoice_date = $2, sub_department_id = coalesce(sub_department_id, $3) where id = $1',
+        `update public.entries
+            set invoice_date = $2,
+                sub_department_source = case when sub_department_id is null and $3::bigint is not null then 'export' else sub_department_source end,
+                sub_department_id = coalesce(sub_department_id, $3)
+          where id = $1`,
         [p.entryId, p.invoiceDate, p.fillsSub ? p.entrySub : null]
       )
     }
