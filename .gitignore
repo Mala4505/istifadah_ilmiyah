@@ -53,3 +53,6 @@ skills-lock.json
 
 # generated knowledge-graph output
 graphify-out/
+
+# Real bills must never be tracked (security audit 7.1) - invoices live in Supabase storage
+*.pdf

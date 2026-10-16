@@ -1,8 +1,12 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
+import { z } from 'zod'
 import { createClient, getAuthUser } from '@/lib/supabase/server'
 import { logRawError } from '@/lib/friendly-error'
+import { getStaffContext } from '@/lib/export/auth'
+import { isAdminOrAbove } from '@/lib/auth/roles'
+import { assertEntryVisible } from '@/lib/auth/scope'
 
 /**
  * Resolve a `flags` row (§3.3, docs/pre-deploy-findings-and-plan.md — the
@@ -21,17 +25,60 @@ import { logRawError } from '@/lib/friendly-error'
  */
 export type ResolveFlagOutcome = 'confirmed' | 'dismissed'
 
+// Security audit 2026-10-15 (3.7): runtime validation, since this is a public POST endpoint.
+const resolveFlagSchema = z.object({
+  flagId: z.number().int().positive(),
+  entryId: z.number().int().positive(),
+  outcome: z.enum(['confirmed', 'dismissed']),
+})
+
 export async function resolveFlag(input: {
   flagId: number
   entryId: number
   outcome: ResolveFlagOutcome
 }): Promise<{ ok: true } | { ok: false; error: string }> {
-  const { flagId, entryId, outcome } = input
+  const parsed = resolveFlagSchema.safeParse(input)
+  if (!parsed.success) {
+    return { ok: false, error: 'That flag could not be updated.' }
+  }
+  const { flagId, outcome } = parsed.data
 
   const supabase = await createClient()
   const user = await getAuthUser(supabase)
   if (!user) {
     return { ok: false, error: 'You must be signed in.' }
+  }
+  const staff = await getStaffContext()
+  if (!staff || !staff.isActive || !isAdminOrAbove(staff.role)) {
+    return { ok: false, error: 'Resolving flags is an admin action.' }
+  }
+
+  // Trust the flag's own entry, not the client-sent entryId: the flag must be
+  // visible to the caller, and its entry must be one they may see and, unless
+  // they are a superadmin, one that sits in the current (open) event.
+  const { data: flagRow, error: flagError } = await supabase
+    .from('flags')
+    .select('id, entry_id')
+    .eq('id', flagId)
+    .maybeSingle()
+  if (flagError) {
+    return { ok: false, error: logRawError('flags.resolveFlag:lookup', flagError.message) }
+  }
+  if (!flagRow) {
+    return { ok: false, error: 'That flag could not be found.' }
+  }
+  const entryId = (flagRow.entry_id as number | null) ?? null
+  if (entryId !== null) {
+    const scope = await assertEntryVisible(entryId, { role: staff.role, requireWritable: true })
+    if (!scope.ok) {
+      return {
+        ok: false,
+        error:
+          scope.reason === 'closed_event'
+            ? 'This event is closed. Only a superadmin can change its flags.'
+            : 'That flag could not be found.',
+      }
+    }
   }
 
   const { data, error } = await supabase
@@ -61,6 +108,6 @@ export async function resolveFlag(input: {
   // client-side — revalidatePath here is defense in depth for any other
   // navigation path back to the same entry, and is harmless for any future
   // caller since it only touches this one entry's route.
-  revalidatePath(`/entries/${entryId}`)
+  if (entryId !== null) revalidatePath(`/entries/${entryId}`)
   return { ok: true }
 }

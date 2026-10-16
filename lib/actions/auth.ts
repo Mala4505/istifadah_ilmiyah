@@ -5,6 +5,8 @@ import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { itsNumberSchema, itsNumberToLoginEmail } from '@/lib/auth/its'
+import { clientIpFromHeaders } from '@/lib/http-guards'
+import { logRawError } from '@/lib/friendly-error'
 
 export type LoginResult = { ok: true } | { ok: false; error: string }
 
@@ -12,13 +14,10 @@ const GENERIC_INVALID_CREDENTIALS = 'Incorrect ITS number or password.'
 const RATE_LIMITED_MESSAGE = 'Too many failed attempts. Try again in a few minutes.'
 
 async function requestIp(): Promise<string | null> {
-  const headerList = await headers()
-  // Windows Server deployment sits behind IIS as a reverse proxy (§4.4b);
-  // Vercel sets the same header. Only the first hop is trusted (§13.2 — the
-  // deploy target is never branched on beyond this kind of header lookup).
-  const forwardedFor = headerList.get('x-forwarded-for')
-  if (forwardedFor) return forwardedFor.split(',')[0]!.trim()
-  return headerList.get('x-real-ip')
+  // Vercel only (owner decision D2): x-real-ip is set by the platform; else the
+  // RIGHTMOST x-forwarded-for hop. The leftmost hop is whatever the client
+  // claimed, so trusting it would let anyone dodge the per-IP limiter.
+  return clientIpFromHeaders(await headers())
 }
 
 /** Fire-and-forget audit row — a logging failure must never block login. */
@@ -26,8 +25,10 @@ async function recordAttempt(itsNumber: string, ip: string | null, success: bool
   try {
     const admin = createAdminClient()
     await admin.from('auth_login_attempt').insert({ its_number: itsNumber, ip, success })
-  } catch {
-    // Best-effort only.
+  } catch (error) {
+    // Best-effort: never block a login on the audit write, but say so loudly --
+    // a silent failure here also silently weakens the rate limiter.
+    logRawError('login recordAttempt failed', error instanceof Error ? error.message : String(error))
   }
 }
 
@@ -61,25 +62,29 @@ async function isRateLimited(itsNumber: string, ip: string | null): Promise<bool
   const admin = createAdminClient()
   const since = new Date(Date.now() - RATE_LIMIT_WINDOW_MINUTES * 60_000).toISOString()
 
-  const { count: itsFailures } = await admin
+  const { count: itsFailures, error: itsError } = await admin
     .from('auth_login_attempt')
     .select('id', { count: 'exact', head: true })
     .eq('its_number', itsNumber)
     .eq('success', false)
     .gt('created_at', since)
+  // Surface a failed read as a throw so loginWithIts's fail-open catch logs it
+  // (a swallowed error would read as "0 failures" and quietly disable the limiter).
+  if (itsError) throw new Error(`rate-limit read failed: ${itsError.message}`)
   if ((itsFailures ?? 0) >= MAX_FAILED_ATTEMPTS_PER_ITS) return true
 
   if (ip) {
     // DISTINCT its_number, computed here: PostgREST has no COUNT(DISTINCT),
     // and the app keeps no callable RPC for this by design (see
     // 20260810000002_auth_login_attempt.sql).
-    const { data: ipRows } = await admin
+    const { data: ipRows, error: ipError } = await admin
       .from('auth_login_attempt')
       .select('its_number')
       .eq('ip', ip)
       .eq('success', false)
       .gt('created_at', since)
       .limit(IP_ATTEMPT_SCAN_LIMIT)
+    if (ipError) throw new Error(`rate-limit IP read failed: ${ipError.message}`)
     if (ipRows) {
       const distinctIts = new Set(ipRows.map((row) => row.its_number)).size
       if (distinctIts >= MAX_FAILED_DISTINCT_ITS_PER_IP) return true
@@ -118,8 +123,10 @@ export async function loginWithIts(itsNumber: string, password: string): Promise
     if (await isRateLimited(normalizedIts, ip)) {
       return { ok: false, error: RATE_LIMITED_MESSAGE }
     }
-  } catch {
-    // Proceed to the real sign-in attempt below.
+  } catch (error) {
+    // Fail OPEN on purpose (a DB hiccup must not lock everyone out), but log it
+    // loudly: while this is failing, only Supabase's own limits protect login.
+    logRawError('login rate-limit check failed (failing open)', error instanceof Error ? error.message : String(error))
   }
 
   const supabase = await createClient()

@@ -33,6 +33,26 @@ const nextConfig: NextConfig = {
   async headers() {
     return [
       {
+        // Anti-clickjacking (security-audit-fix-plan.md 4.1 / M7). Works even
+        // while the CSP is still Report-Only; CSP's `frame-ancestors 'none'`
+        // (middleware.ts) says the same thing once enforced. Nothing in the app
+        // iframes itself. Set once here for every path, API included.
+        source: '/:path*',
+        headers: [{ key: 'X-Frame-Options', value: 'DENY' }],
+      },
+      {
+        // Middleware's matcher skips /api (middleware.ts), so API responses get
+        // none of its security headers. Mirror the relevant ones here, plus
+        // no-store so a signed-in response is never cached by a shared proxy.
+        source: '/api/:path*',
+        headers: [
+          { key: 'Strict-Transport-Security', value: 'max-age=63072000; includeSubDomains; preload' },
+          { key: 'X-Content-Type-Options', value: 'nosniff' },
+          { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
+          { key: 'Cache-Control', value: 'no-store' },
+        ],
+      },
+      {
         source: '/pdf.worker.min.mjs',
         headers: [
           { key: 'Cache-Control', value: 'public, max-age=31536000, immutable' },

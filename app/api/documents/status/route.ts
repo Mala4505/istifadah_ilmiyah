@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { withApiLogging } from '@/lib/api-log'
 import { getStaffContext } from '@/lib/export/auth'
 import { createClient } from '@/lib/supabase/server'
+import { logRawError } from '@/lib/friendly-error'
 
 /**
  * `documents-status` (checklist 2.5 / plan §5, D6).
@@ -71,11 +72,9 @@ async function handleGET(request: NextRequest) {
       supabase.from('document_extraction').select('source_document_id').in('source_document_id', ids),
     ])
 
-  if (docsError) {
-    return NextResponse.json({ error: docsError.message }, { status: 500 })
-  }
-  if (extractionsError) {
-    return NextResponse.json({ error: extractionsError.message }, { status: 500 })
+  if (docsError || extractionsError) {
+    logRawError('documents-status', (docsError ?? extractionsError)?.message)
+    return NextResponse.json({ error: 'Could not check upload progress right now.' }, { status: 500 })
   }
 
   const hasExtractionIds = new Set((extractionsData ?? []).map((row) => row.source_document_id as number))

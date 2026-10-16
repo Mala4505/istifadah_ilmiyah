@@ -7,6 +7,8 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { logRawError } from '@/lib/friendly-error'
 import { getSelectedEvent, isEventMutable } from '@/lib/events/current'
 import { normalizeVendorName } from '@/lib/normalize'
+import { requireAdminOrAbove } from '@/lib/export/auth'
+import { assertEntryVisible, filterWritableEntryIds } from '@/lib/auth/scope'
 
 // Phase 6 Step 2 (docs/event-scoping-and-review-fixes-plan.md §1.6): past
 // events are browsable read-only. Every mutation in this file is gated on
@@ -206,6 +208,23 @@ export async function createManualEntry(input: CreateManualEntryInput): Promise<
     return { ok: false, error: 'Choose which department this entry belongs to.' }
   }
 
+  // Security audit 3.8 (L3): the budget head comes from the client and the
+  // foreign key alone accepts any head in the system. It must belong to the
+  // entry's department (a head with no department is org-wide and allowed).
+  if (fields.budgetHeadId !== null) {
+    const { data: head, error: headError } = await supabase
+      .from('budget_head')
+      .select('id, department_id')
+      .eq('id', fields.budgetHeadId)
+      .maybeSingle()
+    if (headError) {
+      return { ok: false, error: logRawError('entries.createManualEntry:budgetHead', headError.message) }
+    }
+    if (!head || (head.department_id !== null && head.department_id !== departmentId)) {
+      return { ok: false, error: 'That budget head does not belong to the chosen department.' }
+    }
+  }
+
   const vendorId = await resolveOrCreateVendor(fields.vendorName)
 
   for (let attempt = 0; attempt < NUMBER_COLLISION_RETRIES; attempt += 1) {
@@ -310,10 +329,30 @@ export async function voidEntries({ entryIds, note }: VoidEntriesInput): Promise
     return { success: false, updatedCount: 0, requestedCount, error: EVENT_READONLY_ERROR }
   }
 
+  // Security audit: admin-or-above, and only entries whose OWN event is open
+  // (superadmin excepted) -- the cookie check above reflects the caller's chosen
+  // event, which a forged cookie can change.
+  const gate = await requireAdminOrAbove()
+  if (!gate.ok) {
+    return { success: false, updatedCount: 0, requestedCount, error: 'Voiding entries is an admin action.' }
+  }
+  const writable = await filterWritableEntryIds(cleanIds, gate.staff.role)
+  if (!writable.ok) {
+    return { success: false, updatedCount: 0, requestedCount, error: writable.error }
+  }
+  if (writable.ids.length === 0) {
+    return {
+      success: false,
+      updatedCount: 0,
+      requestedCount,
+      error: 'No entries were voided. They may belong to a closed event, which only a superadmin can change.',
+    }
+  }
+
   const { data, error } = await supabase
     .from('entries')
     .update({ is_void: true, void_note: cleanNote })
-    .in('id', cleanIds)
+    .in('id', writable.ids)
     .select('id')
 
   if (error) {
@@ -408,6 +447,13 @@ export async function replaceProvisionalUbblNumber(input: {
     return { ok: false, error: parsed.error.issues[0]!.message }
   }
 
+  // Security audit 3.8 (L2): admin-or-above, and the entry's own event must be
+  // open (superadmin excepted) -- not just the caller's cookie-selected event.
+  const gate = await requireAdminOrAbove()
+  if (!gate.ok) return { ok: false, error: 'Changing an entry number is an admin action.' }
+  const entryScope = await assertEntryVisible(input.entryId, { role: gate.staff.role, requireWritable: true })
+  if (!entryScope.ok) return { ok: false, error: entryScope.error }
+
   const supabase = await createClient()
 
   const selectedEvent = await getSelectedEvent()
@@ -415,10 +461,14 @@ export async function replaceProvisionalUbblNumber(input: {
     return { ok: false, error: EVENT_READONLY_ERROR }
   }
 
+  // The UBBL number is the Excel two-way matching key: only a typed entry's
+  // provisional `M-` number may ever be rewritten here, never an imported one.
   const { data, error } = await supabase
     .from('entries')
     .update({ ubbl_number: parsed.data })
     .eq('id', input.entryId)
+    .eq('source', 'manual')
+    .like('ubbl_number', 'M-%')
     .select('id')
 
   if (error) {
@@ -428,7 +478,7 @@ export async function replaceProvisionalUbblNumber(input: {
     return {
       ok: false,
       error:
-        'Nothing was updated. This entry may be outside your department, or your account may be view-only.',
+        'Nothing was updated. Only a typed entry that still has its provisional M- number can be changed here, and your account must be allowed to edit it.',
     }
   }
 

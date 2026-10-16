@@ -36,6 +36,10 @@ on:
     - cron: '0 */3 * * *' # every 3 hours — backstop only; uploads trigger their own run
   workflow_dispatch: {}
 
+# The job only needs to read the repo; everything else goes through secrets.
+permissions:
+  contents: read
+
 # Never run two drains at once (each already claims rows with `for update skip
 # locked`, but overlapping runs just waste minutes). Queue a new trigger behind
 # a run in progress rather than cancelling it mid-extraction.
@@ -48,8 +52,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: 24 # match local dev (package.json engines: node >=20)
           cache: npm
@@ -64,6 +70,8 @@ jobs:
           # Server schema (lib/env.server.ts).
           SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          # Required by serverSchema (lib/env.server.ts), which worker/index.ts
+          # imports (serverEnv.WORKER_ID); startup throws without it. Keep.
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           COMMUNITY_GSTIN: ${{ vars.COMMUNITY_GSTIN }}
           COMMUNITY_NAME: ${{ vars.COMMUNITY_NAME }}

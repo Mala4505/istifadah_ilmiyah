@@ -14,6 +14,7 @@ import {
   UploadCloud,
   Settings,
   Keyboard,
+  KeyRound,
   LogOut,
   ChevronLeft,
   ChevronRight,
@@ -302,6 +303,13 @@ export function NavRail({
                 <ThemeToggle />
               </div>
               <div className="my-1.5 border-t border-border" />
+              <Link
+                href="/account"
+                className="flex w-full items-center gap-2 rounded-md px-1.5 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-foreground"
+              >
+                <KeyRound className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
+                Change password
+              </Link>
               <form action={signOut}>
                 <Button
                   type="submit"

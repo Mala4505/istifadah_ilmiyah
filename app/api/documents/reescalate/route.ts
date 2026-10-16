@@ -4,6 +4,10 @@ import { getStaffContext } from '@/lib/export/auth'
 import { extractAndPersist } from '@/lib/jobs/handlers/extract'
 import { MODELS } from '@/lib/claude-client'
 import { isAdminOrAbove } from '@/lib/auth/roles'
+import { assertDocumentWritable } from '@/lib/auth/scope'
+import { jsonRequestProblem } from '@/lib/http-guards'
+import { publicEnv } from '@/lib/env'
+import { logRawError } from '@/lib/friendly-error'
 
 /**
  * `documents-reescalate` — the manual "re-run with Sonnet" button
@@ -42,6 +46,16 @@ async function handlePOST(request: NextRequest) {
     )
   }
 
+  // Cookie-authenticated JSON route: must be JSON and from our own origin
+  // (security-audit-fix-plan.md 4.3 CSRF).
+  const guardProblem = jsonRequestProblem(request.headers, {
+    siteUrl: publicEnv.NEXT_PUBLIC_SITE_URL,
+    checkOrigin: true,
+  })
+  if (guardProblem) {
+    return NextResponse.json({ error: guardProblem.error }, { status: guardProblem.status })
+  }
+
   let body: unknown
   try {
     body = await request.json()
@@ -52,6 +66,16 @@ async function handlePOST(request: NextRequest) {
   const documentId = (body as { documentId?: unknown })?.documentId
   if (typeof documentId !== 'number' || !Number.isInteger(documentId) || documentId <= 0) {
     return NextResponse.json({ error: 'documentId must be a positive integer.' }, { status: 400 })
+  }
+
+  // Security audit 3.2 (H4): the extraction below runs on the service-role
+  // client, so prove through the session client (RLS) that this document is one
+  // the caller can see, that its event is still open (superadmin excepted, D5)
+  // and that it has no verified bill (superadmin excepted) BEFORE it runs.
+  const scope = await assertDocumentWritable(documentId, staff.role, { refuseVerified: true })
+  if (!scope.ok) {
+    const status = scope.reason === 'not_found' ? 404 : scope.reason === 'error' ? 500 : 403
+    return NextResponse.json({ error: scope.error }, { status })
   }
 
   try {
@@ -76,8 +100,16 @@ async function handlePOST(request: NextRequest) {
     })
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
+    logRawError('reescalate', message)
     const notFound = message.includes('not found')
-    return NextResponse.json({ error: message }, { status: notFound ? 404 : 500 })
+    return NextResponse.json(
+      {
+        error: notFound
+          ? 'That document could not be found.'
+          : 'Re-reading the document didn’t work this time. Please try again in a moment.',
+      },
+      { status: notFound ? 404 : 500 }
+    )
   }
 }
 

@@ -8,6 +8,9 @@ import { logRawError } from '@/lib/friendly-error'
 import { rankCandidates, type MatchableEntry } from '@/lib/matching'
 import { normalizeVendorName } from '@/lib/normalize'
 import { getSelectedEventId } from '@/lib/events/current'
+import { requireAdminOrAbove } from '@/lib/export/auth'
+import { assertDocumentWritable } from '@/lib/auth/scope'
+import { buildIlikeOrFilter } from '@/lib/postgrest-filter'
 import { computeBillPosition } from '@/lib/review/bill-position'
 import type { CandidateEntryView } from '@/components/documents/types'
 
@@ -88,6 +91,15 @@ export async function manualExtractNow(documentId: number): Promise<ActionResult
     return { ok: false, error: 'Invalid document id.' }
   }
 
+  // Security audit 3.8 (L1): this ends in a paid extraction run through the
+  // service-role client that overwrites extracted data, so: admin-or-above, the
+  // document visible to the caller, its event open and no verified bill on it
+  // (the last two waived for a superadmin) -- all checked before anything runs.
+  const gate = await requireAdminOrAbove()
+  if (!gate.ok) return { ok: false, error: 'Running extraction is an admin action.' }
+  const scope = await assertDocumentWritable(documentId, gate.staff.role, { refuseVerified: true })
+  if (!scope.ok) return { ok: false, error: scope.error }
+
   const supabase = await createClient()
   const { data, error } = await supabase
     .from('source_document')
@@ -112,7 +124,8 @@ export async function manualExtractNow(documentId: number): Promise<ActionResult
     // app/api/documents/reescalate/route.ts, which forces Sonnet.
     await extractAndPersist({ sourceDocumentId: documentId, runReason: 'initial' })
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : 'Extraction failed.' }
+    logRawError('documents.manualExtractNow:extract', err instanceof Error ? err.message : String(err))
+    return { ok: false, error: 'Extraction did not finish. Try again in a moment.' }
   }
 
   revalidatePath('/documents')
@@ -400,20 +413,19 @@ export interface EntrySearchResult {
 export async function searchEntriesForAttach(
   query: string
 ): Promise<{ ok: true; results: EntrySearchResult[] } | { ok: false; error: string }> {
-  const trimmed = query.trim().replace(/,/g, ' ')
+  const trimmed = (typeof query === 'string' ? query : '').trim()
   if (trimmed.length < 2) {
     return { ok: true, results: [] }
   }
 
   const supabase = await createClient()
-  const pattern = `%${trimmed}%`
   const { data, error } = await supabase
     .from('entries')
     .select('id, ubbl_number, main_number, vendor_raw, amount, date, department_id, admin_head_id, zone_id')
     .eq('is_void', false)
-    .or(
-      `ubbl_number.ilike.${pattern},main_number.ilike.${pattern},vendor_raw.ilike.${pattern},invoice_number.ilike.${pattern}`
-    )
+    // Security audit 5.3 (L20): the typed term is quoted (lib/postgrest-filter.ts)
+    // so a comma/paren/dot in it cannot add conditions to this .or() filter.
+    .or(buildIlikeOrFilter(['ubbl_number', 'main_number', 'vendor_raw', 'invoice_number'], trimmed))
     .order('date', { ascending: false })
     .limit(10)
 
@@ -487,7 +499,9 @@ export async function getDocumentPreviewUrl(
     const url = await getSignedUrl(data.storage_path)
     return { ok: true, url }
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : 'Could not create a preview link.' }
+    // The raw error can name the storage path; log it, show plain English.
+    logRawError('documents.getDocumentPreviewUrl:signedUrl', err instanceof Error ? err.message : String(err))
+    return { ok: false, error: 'Could not create a preview link. Try again in a moment.' }
   }
 }
 

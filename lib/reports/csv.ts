@@ -3,19 +3,16 @@
 // Dashboard's linked lists. One implementation so escaping rules land in one
 // place — the same reasoning §10.2 gives for the reporting views themselves.
 
+import { csvCell } from '@/lib/csv-safe'
+
 export type CsvColumn<T> = {
   header: string
   /** Cell value for a row. Receives the whole row so it can combine fields. */
   value: (row: T) => string | number | null | undefined
 }
 
-function escapeCsvCell(raw: string | number | null | undefined): string {
-  const s = raw === null || raw === undefined ? '' : String(raw)
-  if (/[",\r\n]/.test(s)) {
-    return `"${s.replace(/"/g, '""')}"`
-  }
-  return s
-}
+// Escaping + spreadsheet formula-injection guard (M8) live in lib/csv-safe.ts.
+const escapeCsvCell = csvCell
 
 export function toCsv<T>(rows: T[], columns: CsvColumn<T>[]): string {
   const header = columns.map((c) => escapeCsvCell(c.header)).join(',')

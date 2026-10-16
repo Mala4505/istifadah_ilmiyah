@@ -36,6 +36,7 @@
  *   supabase/migrations/20260819000003_role_rbac_v2.sql (the superadmin/admin/dept split)
  */
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
+import { Client as PgClient } from 'pg'
 import { afterAll, describe, expect, it } from 'vitest'
 
 // ---------------------------------------------------------------------------
@@ -76,6 +77,18 @@ const LEDGER = {
   jobs: [] as number[],
   users: [] as string[],
   objects: [] as string[],
+  // [security-audit 2026-10-15] additions
+  events: [] as number[],
+  exceptions: [] as number[],
+  flags: [] as number[],
+  scrapeTokens: [] as number[],
+  authAttempts: [] as number[],
+  apiLogs: [] as number[],
+  boardPacks: [] as number[],
+  importBatches: [] as number[],
+  statusBatches: [] as number[],
+  /** Paths inside the `board-packs` bucket (BUCKET above is invoice-documents). */
+  boardPackObjects: [] as string[],
   sourceDocuments: [] as number[],
 }
 
@@ -110,6 +123,18 @@ async function getEventId(): Promise<number> {
 /** Delete by exact primary key only. An empty id list is a no-op, never a bare DELETE. */
 async function del(table: string, ids: Array<number | string>) {
   if (ids.length === 0) return
+  if (table === 'source_document') {
+    // document_extraction_line_item.document_page_id -> document_page is NO ACTION, so a bare
+    // delete of a document that has line items fails (the delete_source_document RPC clears the
+    // line items first for the same reason). Do the same here, by exact page ids.
+    const { data: pages, error: pagesError } = await svc.from('document_page').select('id').in('source_document_id', ids)
+    if (pagesError) throw new Error(`cleanup document_page lookup [${ids.join(',')}]: ${pagesError.message}`)
+    const pageIds = (pages ?? []).map((p) => p.id as number)
+    if (pageIds.length > 0) {
+      const { error: liError } = await svc.from('document_extraction_line_item').delete().in('document_page_id', pageIds)
+      if (liError) throw new Error(`cleanup line items of pages [${pageIds.join(',')}]: ${liError.message}`)
+    }
+  }
   const { error } = await svc.from(table).delete().in('id', ids)
   if (error) throw new Error(`cleanup ${table} [${ids.join(',')}]: ${error.message}`)
 }
@@ -691,90 +716,96 @@ describe('RLS as three users (superadmin / admin / dept)', () => {
   })
 
   // -------------------------------------------------------------------------
-  // 4. Storage bucket policies — §4.3, delete widened to admin-or-above by role_rbac_v2
+  // 4. Storage bucket policies -- security audit H1 (2026-10-15): the bucket is now
+  //    reachable ONLY through the service role (signed upload/read URLs are issued by
+  //    server code). No signed-in role may list, download, upload, replace or delete
+  //    objects directly, and anon never could. Migration:
+  //    20261015100000_security_critical_fixes.sql (drops the four storage.objects policies
+  //    from 20260808000027 and sets the bucket's size + MIME limits).
   // -------------------------------------------------------------------------
-  it('applies invoice-documents bucket policies: staff read/upload/replace, admin-or-above delete', async () => {
+  it('locks invoice-documents to the service role: no direct storage access for any signed-in role', async () => {
     await withFixture({ inactive: true }, async (fx) => {
-      const path = `${TAG}/${fx.suffix}/invoice.txt`
+      const path = `${TAG}/${fx.suffix}/invoice.pdf`
       fx.objects.push(path)
       LEDGER.objects.push(path)
 
+      // The bucket only accepts application/pdf once the H1 migration is live, so the
+      // seed (and every attempted write below) declares that type. Content is a tiny
+      // fake PDF -- storage checks the declared type, not the bytes.
+      const pdf = (label: string) =>
+        new Blob([`%PDF-1.4\n% ${TAG} ${label}`], { type: 'application/pdf' })
       const store = (c: SupabaseClient) => c.storage.from(BUCKET)
 
-      // dept (active staff, lowest role) can upload — is_staff(), not a role check.
-      const up = await store(fx.deptUser.client).upload(path, new Blob([`${TAG} v1`]), {
-        contentType: 'text/plain',
-      })
-      expect(up.error, `dept upload: ${up.error?.message}`).toBeNull()
+      // Seed through the service role -- the only path the app itself uses.
+      const seed = await svc.storage.from(BUCKET).upload(path, pdf('v1'), { contentType: 'application/pdf' })
+      expect(seed.error, `service-role seed: ${seed.error?.message}`).toBeNull()
 
-      // ...and read it back.
-      const down = await store(fx.deptUser.client).download(path)
-      expect(down.error).toBeNull()
-      expect(await down.data?.text()).toBe(`${TAG} v1`)
+      const stillV1 = async () => {
+        const got = await svc.storage.from(BUCKET).download(path)
+        expect(got.error, 'object must still exist').toBeNull()
+        expect(await got.data?.text()).toContain(`${TAG} v1`)
+      }
 
-      // ...and replace it (upsert needs INSERT + SELECT + UPDATE together, §4.3).
-      const replace = await store(fx.deptUser.client).upload(path, new Blob([`${TAG} v2`]), {
-        contentType: 'text/plain',
-        upsert: true,
-      })
-      expect(replace.error, `staff replace: ${replace.error?.message}`).toBeNull()
-      const down2 = await store(fx.adminUser.client).download(path)
-      expect(await down2.data?.text()).toBe(`${TAG} v2`)
+      const roles: Array<[string, SupabaseClient]> = [
+        ['dept', fx.deptUser.client],
+        ['admin', fx.adminUser.client],
+        ['superadmin', fx.superadminUser.client],
+        ['deactivated staff', fx.inactive!.client],
+      ]
 
-      // An unauthenticated caller gets nothing — the bucket is private and every
-      // policy is `to authenticated`.
+      for (const [label, client] of roles) {
+        // select: download is denied and list shows nothing (RLS filters rather than errors).
+        expect((await store(client).download(path)).error, `${label} must not download`).not.toBeNull()
+        const listed = await store(client).list(`${TAG}/${fx.suffix}`)
+        expect(listed.data ?? [], `${label} must not list objects`).toEqual([])
+
+        // insert: a brand-new object is refused.
+        const newPath = `${TAG}/${fx.suffix}/new-${label.replace(/\s+/g, '-')}.pdf`
+        fx.objects.push(newPath)
+        LEDGER.objects.push(newPath)
+        const ins = await store(client).upload(newPath, pdf(`new ${label}`), { contentType: 'application/pdf' })
+        expect(ins.error, `${label} must not upload`).not.toBeNull()
+
+        // update: replacing an existing object (upsert needs INSERT + UPDATE) is refused,
+        // and the original bytes survive.
+        const rep = await store(client).upload(path, pdf(`replace ${label}`), {
+          contentType: 'application/pdf',
+          upsert: true,
+        })
+        expect(rep.error, `${label} must not replace`).not.toBeNull()
+        await stillV1()
+
+        // delete: the storage API answers a blocked remove with an empty result rather
+        // than an error, so the real assertion is that the object survives. Includes
+        // admin and superadmin -- the "admins delete documents" policy is gone too; the
+        // app deletes through the service role (lib/storage.ts deleteDocument).
+        await store(client).remove([path])
+        await stillV1()
+      }
+
+      // An unauthenticated caller gets nothing either.
       const anon = createClient(SUPABASE_URL, PUBLISHABLE_KEY, {
         auth: { autoRefreshToken: false, persistSession: false },
       })
       expect((await anon.storage.from(BUCKET).download(path)).error).not.toBeNull()
+      expect((await anon.storage.from(BUCKET).list(`${TAG}/${fx.suffix}`)).data ?? []).toEqual([])
       const anonUp = await anon.storage
         .from(BUCKET)
-        .upload(`${TAG}/${fx.suffix}/anon.txt`, new Blob(['nope']))
+        .upload(`${TAG}/${fx.suffix}/anon.pdf`, pdf('anon'), { contentType: 'application/pdf' })
       expect(anonUp.error).not.toBeNull()
+      await anon.storage.from(BUCKET).remove([path])
+      await stillV1()
 
-      // Deactivated staff: authenticated, but is_staff() is false.
-      const dead = fx.inactive!.client
-      expect((await dead.storage.from(BUCKET).download(path)).error).not.toBeNull()
-      const deadUp = await dead.storage
-        .from(BUCKET)
-        .upload(`${TAG}/${fx.suffix}/inactive.txt`, new Blob(['nope']))
-      expect(deadUp.error).not.toBeNull()
-
-      // Delete is admin-or-above (the "admins delete documents" policy calls the now-
-      // widened is_admin() alias). The storage API answers a blocked remove with an
-      // empty result rather than an error, so the real assertion is that the object
-      // survives.
-      await store(fx.deptUser.client).remove([path])
-      expect(
-        (await svc.storage.from(BUCKET).download(path)).error,
-        'dept user must not be able to delete a document'
-      ).toBeNull()
-
-      // admin (not just superadmin) CAN delete — a widened capability vs. the old model,
-      // where only the single top role could.
-      const adminRemove = await store(fx.adminUser.client).remove([path])
-      expect(adminRemove.error).toBeNull()
-      expect((await svc.storage.from(BUCKET).download(path)).error).not.toBeNull()
-
-      // Second document: confirm dept is blocked here too (not a one-off on the first
-      // path) and that superadmin also retains delete.
-      const path2 = `${TAG}/${fx.suffix}/invoice-2.txt`
-      fx.objects.push(path2)
-      LEDGER.objects.push(path2)
-      const up2 = await store(fx.deptUser.client).upload(path2, new Blob([`${TAG} v1`]), {
-        contentType: 'text/plain',
+      // The service role still has full control (this is what signed URLs and
+      // lib/storage.ts rely on): it can replace and delete.
+      const svcReplace = await svc.storage.from(BUCKET).upload(path, pdf('v2'), {
+        contentType: 'application/pdf',
+        upsert: true,
       })
-      expect(up2.error).toBeNull()
-
-      await store(fx.deptUser.client).remove([path2])
-      expect(
-        (await svc.storage.from(BUCKET).download(path2)).error,
-        'dept user must not be able to delete a document (second check)'
-      ).toBeNull()
-
-      const superadminRemove = await store(fx.superadminUser.client).remove([path2])
-      expect(superadminRemove.error).toBeNull()
-      expect((await svc.storage.from(BUCKET).download(path2)).error).not.toBeNull()
+      expect(svcReplace.error, `service-role replace: ${svcReplace.error?.message}`).toBeNull()
+      const svcRemove = await svc.storage.from(BUCKET).remove([path])
+      expect(svcRemove.error).toBeNull()
+      expect((await svc.storage.from(BUCKET).download(path)).error).not.toBeNull()
 
       // Nothing left for cleanup to chase, but the paths stay registered anyway.
       const stray = await svc.storage.from(BUCKET).list(`${TAG}/${fx.suffix}`)
@@ -1465,6 +1496,1706 @@ describe('entry_bill_link (entries <-> bills M:N)', () => {
 })
 
 // ===========================================================================
+// [security-audit 2026-10-15] regression suites (Phase 8 of docs/security-audit-fix-plan.md)
+// ===========================================================================
+// Everything below was written BEFORE the three security migrations were pushed:
+//   20261015100000_security_critical_fixes.sql   (C1 / H1 / H3 / L11)
+//   20261015110000_security_rls_hardening.sql    (M2 / M3 / M4 / M11 / D4 / L17)
+//   20261015120000_login_lockout_hook.sql        (M9 / D8)
+//   20261015130000_pending_upload.sql            (4.3)
+// so these tests FAIL against a database that does not have them yet -- that is the point.
+// Run `npm run test:rls` only after the push.
+//
+// Same safety rules as the rest of this file (see the header): every row is created here,
+// tagged `rls-test-<runId>`, recorded in the LEDGER and deleted by exact primary key. The
+// real `is_current` event is NEVER modified -- "closed event" scenarios use a brand-new
+// fixture event inserted with is_current = false (the partial unique index on is_current
+// only constrains the `true` rows). Pre-existing singleton rows (app_settings) are only
+// ever probed with writes that cannot succeed even if a policy were wrong.
+// ===========================================================================
+
+const AUDIT = '[security-audit 2026-10-15]'
+
+const anonClient = () =>
+  createClient(SUPABASE_URL, PUBLISHABLE_KEY, { auth: { autoRefreshToken: false, persistSession: false } })
+
+const numeric = (a: number, b: number) => a - b
+
+/** Remove ids from a LEDGER list in place (they were deleted by the test itself). */
+function forget(list: Array<number | string>, removed: Array<number | string>) {
+  for (const r of removed) {
+    const i = list.indexOf(r)
+    if (i >= 0) list.splice(i, 1)
+  }
+}
+
+/** Insert one fixture row with the service role and record its id in every given list. */
+async function insertTracked(table: string, row: Record<string, unknown>, ...trackers: number[][]): Promise<number> {
+  const { data, error } = await svc.from(table).insert(row).select('id').single()
+  if (error || !data) throw new Error(`fixture ${table}: ${error?.message ?? 'no row returned'}`)
+  for (const t of trackers) t.push(data.id as number)
+  return data.id as number
+}
+
+/**
+ * "The database refused this write": either an error came back, or it silently affected no
+ * rows. Which of the two a table gives depends on whether the role also holds the table
+ * privilege (Supabase's default privileges differ per table age), so both count -- the
+ * assertions that matter are the ground-truth reads that follow.
+ */
+const refused = (res: { error: unknown; data: unknown }) =>
+  res.error !== null && res.error !== undefined
+    ? true
+    : Array.isArray(res.data)
+      ? res.data.length === 0
+      : !res.data
+
+/** Delete fixture rows by exact id and drop them from the ledger. */
+async function dropTracked(table: string, ledgerList: number[], idList: number[]) {
+  await del(table, idList)
+  forget(ledgerList, idList)
+}
+
+/**
+ * A brand-new event with is_current = FALSE. Never touches the real current event
+ * (the `event_one_current` partial unique index only constrains is_current = true rows,
+ * so inserting a second false row is always legal).
+ */
+async function createClosedEvent(): Promise<number> {
+  const tag = `${TAG}-${RUN_ID}${Math.random().toString(36).slice(2, 6)}`
+  const { data, error } = await svc
+    .from('event')
+    .insert({ name: `${tag} closed fixture`, hijri_year: tag, is_current: false })
+    .select('id,is_current')
+    .single()
+  if (error || !data) throw new Error(`closed-event fixture: ${error?.message ?? 'no row returned'}`)
+  LEDGER.events.push(data.id as number)
+  if (data.is_current) throw new Error('closed-event fixture came back is_current=true -- refusing to continue')
+  return data.id as number
+}
+
+/** Runs `run` with a fixture closed event, and deletes the event afterwards (by id). The
+ *  caller must have removed every entry / document / batch that points at it first --
+ *  nest `withFixture` INSIDE this so its cleanup runs before the event is deleted. */
+async function withClosedEvent(run: (closedEventId: number) => Promise<void>) {
+  const id = await createClosedEvent()
+  try {
+    await run(id)
+  } finally {
+    await dropTracked('event', LEDGER.events, [id])
+  }
+}
+
+/** Like insertEntry, but in an explicit event (and recorded in the ledger). */
+async function insertEntryInEvent(
+  suffix: string,
+  letter: string,
+  departmentId: number,
+  eventId: number
+): Promise<number> {
+  return insertTracked(
+    'entries',
+    {
+      ubbl_number: `${TAG}-${suffix}-${letter}`,
+      department_id: departmentId,
+      event_id: eventId,
+      type: 'invoice',
+      source: 'manual',
+      amount: '55.55',
+      vendor_raw: `${TAG} vendor ${letter}`,
+    },
+    LEDGER.entries
+  )
+}
+
+type DocFixture = {
+  sourceDocumentId: number
+  billId: number
+  pageId: number
+  lineItemId: number
+  storagePath: string
+}
+
+/** source_document + one bill + one page + one line item, in an explicit event, optionally
+ *  assigned to staff and/or already verified. Everything cascades from the source_document. */
+async function insertDocumentIn(
+  suffix: string,
+  label: string,
+  eventId: number,
+  tracker: number[],
+  opts: { assignTo?: string[]; verifiedBy?: string } = {}
+): Promise<DocFixture> {
+  const storagePath = `${TAG}/${suffix}/${label}.pdf`
+  const sourceDocumentId = await insertTracked(
+    'source_document',
+    {
+      event_id: eventId,
+      storage_path: storagePath,
+      original_filename: `${TAG}-${suffix}-${label}.pdf`,
+      file_hash_sha256: `${TAG}${suffix}${label}`.replace(/[^a-z0-9]/gi, '').padEnd(64, '0').slice(0, 64),
+      mime_type: 'application/pdf',
+    },
+    LEDGER.sourceDocuments
+  )
+  tracker.push(sourceDocumentId)
+
+  if (opts.assignTo && opts.assignTo.length > 0) {
+    const { error } = await svc
+      .from('source_document_assignee')
+      .insert(opts.assignTo.map((staff_id) => ({ source_document_id: sourceDocumentId, staff_id })))
+    if (error) throw new Error(`fixture source_document_assignee: ${error.message}`)
+  }
+
+  const bill: Record<string, unknown> = {
+    source_document_id: sourceDocumentId,
+    bill_index: 0,
+    total_amount_ocr: '333.33',
+  }
+  if (opts.verifiedBy) {
+    bill.verified_at = new Date().toISOString()
+    bill.verified_by = opts.verifiedBy
+  }
+  const { data: billRow, error: billErr } = await svc.from('document_extraction').insert(bill).select('id').single()
+  if (billErr || !billRow) throw new Error(`fixture document_extraction: ${billErr?.message}`)
+
+  const { data: pageRow, error: pageErr } = await svc
+    .from('document_page')
+    .insert({ source_document_id: sourceDocumentId, page_number: 1 })
+    .select('id')
+    .single()
+  if (pageErr || !pageRow) throw new Error(`fixture document_page: ${pageErr?.message}`)
+
+  const { data: liRow, error: liErr } = await svc
+    .from('document_extraction_line_item')
+    .insert({
+      document_extraction_id: billRow.id,
+      document_page_id: pageRow.id,
+      line_order: 0,
+      description_ocr: `${TAG} line ${label}`,
+    })
+    .select('id')
+    .single()
+  if (liErr || !liRow) throw new Error(`fixture line item: ${liErr?.message}`)
+
+  return {
+    sourceDocumentId,
+    billId: billRow.id as number,
+    pageId: pageRow.id as number,
+    lineItemId: liRow.id as number,
+    storagePath,
+  }
+}
+
+/** One extra signed-in user for a single test (e.g. a second admin), removed afterwards.
+ *  The extra user must not write to rows that outlive `run` (entries.updated_by etc. point
+ *  at auth.users) -- use it for reads, RPCs on documents, and as a document assignee. */
+async function withExtraUser(
+  fx: Fixture,
+  label: string,
+  role: 'superadmin' | 'admin' | 'dept',
+  departmentIds: number[],
+  run: (u: FixtureUser) => Promise<void>
+) {
+  const u = await makeUser(fx.suffix, label, role, departmentIds, true)
+  try {
+    await run(u)
+  } finally {
+    await u.client.auth.signOut().catch(() => {})
+    await svc.from('staff_profile').delete().eq('id', u.id)
+    await withAuthRetry(`deleteUser(${u.id})`, () => svc.auth.admin.deleteUser(u.id))
+    forget(LEDGER.users, [u.id])
+  }
+}
+
+async function docExists(id: number): Promise<boolean> {
+  const { data, error } = await svc.from('source_document').select('id').eq('id', id).maybeSingle()
+  if (error) throw new Error(`docExists(${id}): ${error.message}`)
+  return !!data
+}
+
+/** Which of `idList` does `client` see in `table`, matched on column `col`? (numeric ascending) */
+async function seenIds(client: SupabaseClient, table: string, col: string, idList: number[]): Promise<number[]> {
+  const { data, error } = await client.from(table).select(col).in(col, idList)
+  expect(error, `${table} select`).toBeNull()
+  return ((data ?? []) as unknown as Array<Record<string, number>>).map((r) => r[col]!).sort(numeric)
+}
+
+/** Direct database connection (DATABASE_URL), used ONLY for read-only catalog queries and
+ *  for transactions that are always rolled back. Never issues a committing write. */
+async function withPg<T>(run: (c: PgClient) => Promise<T>): Promise<T> {
+  const c = new PgClient({ connectionString: process.env.DATABASE_URL })
+  await c.connect()
+  try {
+    return await run(c)
+  } finally {
+    await c.end()
+  }
+}
+const itPg = process.env.DATABASE_URL ? it : it.skip
+
+// ===========================================================================
+describe(`${AUDIT} C1: a caller can never choose their own role`, () => {
+  const newEmail = (label: string, suffix: string) => `${TAG}-${label}-${suffix}@rls-test.example.com`
+  const newPassword = () => `Rls!${RUN_ID}${Math.random().toString(36).slice(2, 10)}`
+  const freshSuffix = () => `${RUN_ID}${Math.random().toString(36).slice(2, 6)}`
+
+  async function dropUser(id: string) {
+    await svc.from('staff_profile').delete().eq('id', id)
+    await withAuthRetry(`deleteUser(${id})`, () => svc.auth.admin.deleteUser(id))
+    forget(LEDGER.users, [id])
+  }
+
+  it('ignores role / is_active / department_ids / its_number / contact_email supplied in user_metadata', async () => {
+    const suffix = freshSuffix()
+    const deptId = await insertDepartment(suffix, 'c1')
+    let userId: string | undefined
+    try {
+      // user_metadata is exactly what a public signUp() lets the caller choose.
+      const { data, error } = await withAuthRetry('createUser(c1-meta)', () =>
+        svc.auth.admin.createUser({
+          email: newEmail('c1-meta', suffix),
+          password: newPassword(),
+          email_confirm: true,
+          user_metadata: {
+            full_name: `${TAG} c1 meta ${suffix}`,
+            role: 'superadmin',
+            is_active: true,
+            department_ids: [deptId],
+            its_number: '00000001',
+            contact_email: `${TAG}-forged@rls-test.example.com`,
+          },
+        })
+      )
+      if (error || !data.user) throw new Error(`createUser: ${error?.message}`)
+      userId = data.user.id
+      LEDGER.users.push(userId)
+
+      const { data: profile, error: pErr } = await svc
+        .from('staff_profile')
+        .select('role,is_active,its_number,contact_email')
+        .eq('id', userId)
+        .single()
+      expect(pErr).toBeNull()
+      expect(profile).toEqual({ role: 'dept', is_active: false, its_number: null, contact_email: null })
+
+      const { data: depts } = await svc.from('staff_department').select('department_id').eq('staff_id', userId)
+      expect(depts, 'no department may be granted from user_metadata').toEqual([])
+    } finally {
+      if (userId) await dropUser(userId)
+      await dropTracked('department', LEDGER.departments, [deptId])
+    }
+  })
+
+  it('an anonymous signUp() with escalated metadata cannot produce a privileged account', async () => {
+    const suffix = freshSuffix()
+    const anon = anonClient()
+    const res = await anon.auth.signUp({
+      email: newEmail('c1-signup', suffix),
+      password: newPassword(),
+      options: { data: { full_name: `${TAG} c1 signup`, role: 'superadmin', is_active: true } },
+    })
+    const createdId = res.data.user?.id
+    if (createdId) LEDGER.users.push(createdId)
+    try {
+      if (createdId) {
+        // Public signup is OFF in production (owner decision D1), so this branch only runs if
+        // someone turns it back on -- in which case the trigger itself must still hold.
+        const { data: profile } = await svc
+          .from('staff_profile')
+          .select('role,is_active')
+          .eq('id', createdId)
+          .maybeSingle()
+        expect(profile, 'a self-registered account must land as inactive dept').toMatchObject({
+          role: 'dept',
+          is_active: false,
+        })
+      } else {
+        expect(res.error, 'signup should be refused outright while it is disabled').not.toBeNull()
+      }
+    } finally {
+      if (createdId) await dropUser(createdId)
+    }
+  })
+
+  it('createUser with app_metadata still lands as an inactive dept: GoTrue stores app_metadata after the insert, so createStaffUser promotes the profile itself', async () => {
+    const suffix = freshSuffix()
+    const deptId = await insertDepartment(suffix, 'c1b')
+    let userId: string | undefined
+    try {
+      const { data, error } = await withAuthRetry('createUser(c1-app)', () =>
+        svc.auth.admin.createUser({
+          email: newEmail('c1-app', suffix),
+          password: newPassword(),
+          email_confirm: true,
+          user_metadata: { full_name: `${TAG} c1 app ${suffix}` },
+          app_metadata: { role: 'admin', is_active: true, department_ids: [deptId] },
+        })
+      )
+      if (error || !data.user) throw new Error(`createUser: ${error?.message}`)
+      userId = data.user.id
+      LEDGER.users.push(userId)
+
+      const { data: profile } = await svc.from('staff_profile').select('role,is_active').eq('id', userId).single()
+      // The trigger can never grant access, whichever metadata field it is offered; the
+      // privileged promotion happens in createStaffUser (lib/actions/admin.ts) with the service key.
+      expect(profile).toEqual({ role: 'dept', is_active: false })
+      const { data: depts } = await svc.from('staff_department').select('department_id').eq('staff_id', userId)
+      expect(depts).toEqual([])
+    } finally {
+      if (userId) await dropUser(userId)
+      await dropTracked('department', LEDGER.departments, [deptId])
+    }
+  })
+})
+
+// ===========================================================================
+describe(`${AUDIT} H1: invoice-documents bucket configuration`, () => {
+  // The direct-access denial matrix (dept / admin / superadmin / deactivated / anon) lives in
+  // section 4 above ("locks invoice-documents to the service role"). This only adds what that
+  // test does not look at: the bucket's own limits.
+  it('is private, capped at 32 MiB and accepts application/pdf only', async () => {
+    const { data, error } = await svc.storage.getBucket(BUCKET)
+    expect(error).toBeNull()
+    expect(data?.public).toBe(false)
+    expect(data?.file_size_limit).toBe(33554432)
+    expect(data?.allowed_mime_types).toEqual(['application/pdf'])
+  })
+})
+
+// ===========================================================================
+describe(`${AUDIT} H3 / D5: delete_source_document and cancel_source_document_jobs`, () => {
+  it('refuse a document the caller cannot see, and any closed-event document unless superadmin', async () => {
+    await withClosedEvent(async (closedEventId) => {
+      await withFixture({}, async (fx) => {
+        const currentEventId = await getEventId()
+
+        await withExtraUser(fx, 'adminB', 'admin', [], async (adminB) => {
+          // --- (a) cross-assignee: a document assigned ONLY to admin B -------------------
+          const docB = await insertDocumentIn(fx.suffix, 'assigned-b', currentEventId, fx.sourceDocuments, {
+            assignTo: [adminB.id],
+          })
+          const hidden = await fx.adminUser.client.from('source_document').select('id').eq('id', docB.sourceDocumentId)
+          expect(hidden.data, 'admin A must not even see admin B\'s document').toEqual([])
+
+          const delA = await fx.adminUser.client.rpc('delete_source_document', { p_id: docB.sourceDocumentId })
+          expect(delA.error?.code, 'admin A deleting B\'s document').toBe('42501')
+          expect(await docExists(docB.sourceDocumentId), 'document must survive').toBe(true)
+
+          const cancelA = await fx.adminUser.client.rpc('cancel_source_document_jobs', { p_id: docB.sourceDocumentId })
+          expect(cancelA.error?.code, 'admin A cancelling B\'s document work').toBe('42501')
+
+          // dept has no delete power at all (role check in the public wrapper).
+          const delDept = await fx.deptUser.client.rpc('delete_source_document', { p_id: docB.sourceDocumentId })
+          expect(delDept.error).not.toBeNull()
+          // anon cannot even call it (EXECUTE revoked, 1.4); any error is a pass, survival is the point.
+          const delAnon = await anonClient().rpc('delete_source_document', { p_id: docB.sourceDocumentId })
+          expect(delAnon.error).not.toBeNull()
+          expect(await docExists(docB.sourceDocumentId), 'document must survive dept + anon attempts').toBe(true)
+
+          // The assignee CAN delete it (current event, visible, unverified).
+          const delB = await adminB.client.rpc('delete_source_document', { p_id: docB.sourceDocumentId })
+          expect(delB.error).toBeNull()
+          expect(delB.data, 'returns the storage path for the caller to remove').toBe(docB.storagePath)
+          expect(await docExists(docB.sourceDocumentId)).toBe(false)
+        })
+
+        // --- (b) closed event: visible to the admin, still refused -----------------------
+        const docClosed = await insertDocumentIn(fx.suffix, 'closed', closedEventId, fx.sourceDocuments, {
+          assignTo: [fx.adminUser.id],
+        })
+        const visible = await fx.adminUser.client.from('source_document').select('id').eq('id', docClosed.sourceDocumentId)
+        expect(ids(visible.data), 'assigned admin sees the document (so the refusal below is about the event)').toEqual([
+          docClosed.sourceDocumentId,
+        ])
+
+        const delClosed = await fx.adminUser.client.rpc('delete_source_document', { p_id: docClosed.sourceDocumentId })
+        expect(delClosed.error?.code).toBe('42501')
+        expect(delClosed.error?.message ?? '').toMatch(/closed/i)
+        expect(await docExists(docClosed.sourceDocumentId)).toBe(true)
+
+        const cancelClosed = await fx.adminUser.client.rpc('cancel_source_document_jobs', {
+          p_id: docClosed.sourceDocumentId,
+        })
+        expect(cancelClosed.error?.code).toBe('42501')
+
+        // superadmin may act in a closed event: cancel reports 0 queued jobs, delete succeeds.
+        const cancelSuper = await fx.superadminUser.client.rpc('cancel_source_document_jobs', {
+          p_id: docClosed.sourceDocumentId,
+        })
+        expect(cancelSuper.error).toBeNull()
+        expect(cancelSuper.data).toBe(0)
+
+        const delSuper = await fx.superadminUser.client.rpc('delete_source_document', {
+          p_id: docClosed.sourceDocumentId,
+        })
+        expect(delSuper.error).toBeNull()
+        expect(delSuper.data).toBe(docClosed.storagePath)
+        expect(await docExists(docClosed.sourceDocumentId)).toBe(false)
+
+        // --- (c) a document that no longer exists is still an idempotent no-op ----------
+        const gone = await fx.adminUser.client.rpc('delete_source_document', { p_id: docClosed.sourceDocumentId })
+        expect(gone.error).toBeNull()
+        expect(gone.data).toBeNull()
+      })
+    })
+  })
+})
+
+// ===========================================================================
+describe(`${AUDIT} document visibility: department + assignee scoping`, () => {
+  it('scopes source_document / document_page / document_extraction / line items identically per caller', async () => {
+    await withFixture({}, async (fx) => {
+      const eventId = await getEventId()
+      await withExtraUser(fx, 'adminB', 'admin', [], async (adminB) => {
+        const sfx = fx.suffix
+        const docs = {
+          // unassigned + unlinked: the "triage pool" -- dept sees it, admins do not.
+          pool: await insertDocumentIn(sfx, 'pool', eventId, fx.sourceDocuments),
+          // unassigned, linked to a dept-A entry / a dept-B entry.
+          linkedA: await insertDocumentIn(sfx, 'linked-a', eventId, fx.sourceDocuments),
+          linkedB: await insertDocumentIn(sfx, 'linked-b', eventId, fx.sourceDocuments),
+          // assigned to admin A only.
+          assigned: await insertDocumentIn(sfx, 'assigned', eventId, fx.sourceDocuments, {
+            assignTo: [fx.adminUser.id],
+          }),
+        }
+        const { error: linkErr } = await svc.from('entry_bill_link').insert([
+          {
+            entry_id: fx.entryA,
+            source_document_id: docs.linkedA.sourceDocumentId,
+            document_extraction_id: docs.linkedA.billId,
+          },
+          {
+            entry_id: fx.entryB,
+            source_document_id: docs.linkedB.sourceDocumentId,
+            document_extraction_id: docs.linkedB.billId,
+          },
+        ])
+        if (linkErr) throw new Error(`fixture entry_bill_link: ${linkErr.message}`)
+
+        type Name = keyof typeof docs
+        const expected: Record<string, Name[]> = {
+          dept: ['pool', 'linkedA'],
+          admin: ['linkedA', 'linkedB', 'assigned'],
+          adminB: ['linkedA', 'linkedB'],
+          superadmin: ['pool', 'linkedA', 'linkedB', 'assigned'],
+        }
+        const callers: Array<[string, SupabaseClient]> = [
+          ['dept', fx.deptUser.client],
+          ['admin', fx.adminUser.client],
+          ['adminB', adminB.client],
+          ['superadmin', fx.superadminUser.client],
+        ]
+        const pick = (names: Name[], f: (d: DocFixture) => number) => names.map((n) => f(docs[n])).sort(numeric)
+        const all = Object.keys(docs) as Name[]
+
+        for (const [label, client] of callers) {
+          const want = expected[label]!
+          expect(
+            await seenIds(client, 'source_document', 'id', all.map((n) => docs[n].sourceDocumentId)),
+            `${label}: source_document`
+          ).toEqual(pick(want, (d) => d.sourceDocumentId))
+          expect(
+            await seenIds(client, 'document_page', 'id', all.map((n) => docs[n].pageId)),
+            `${label}: document_page`
+          ).toEqual(pick(want, (d) => d.pageId))
+          expect(
+            await seenIds(client, 'document_extraction', 'id', all.map((n) => docs[n].billId)),
+            `${label}: document_extraction`
+          ).toEqual(pick(want, (d) => d.billId))
+          expect(
+            await seenIds(
+              client,
+              'document_extraction_line_item',
+              'id',
+              all.map((n) => docs[n].lineItemId)
+            ),
+            `${label}: document_extraction_line_item`
+          ).toEqual(pick(want, (d) => d.lineItemId))
+        }
+
+        // Writes follow visibility: admin B cannot touch admin A's assigned bill or its lines;
+        // dept cannot write at all, even to a bill it can see.
+        const patchBill = (c: SupabaseClient, id: number) =>
+          c.from('document_extraction').update({ notes_verified: `${TAG}-should-not-land` }).eq('id', id).select('id')
+        const bForeign = await patchBill(adminB.client, docs.assigned.billId)
+        expect(bForeign.error).toBeNull()
+        expect(bForeign.data).toEqual([])
+        const dSeen = await patchBill(fx.deptUser.client, docs.linkedA.billId)
+        expect(dSeen.error).toBeNull()
+        expect(dSeen.data).toEqual([])
+        const liForeign = await adminB.client
+          .from('document_extraction_line_item')
+          .update({ description_verified: `${TAG}-should-not-land` })
+          .eq('id', docs.assigned.lineItemId)
+          .select('id')
+        expect(liForeign.error).toBeNull()
+        expect(liForeign.data).toEqual([])
+        const { data: truth } = await svc
+          .from('document_extraction')
+          .select('id,notes_verified')
+          .in('id', [docs.assigned.billId, docs.linkedA.billId])
+        expect((truth ?? []).every((r) => r.notes_verified === null)).toBe(true)
+      })
+    })
+  })
+})
+
+// ===========================================================================
+describe(`${AUDIT} M2 / M3 / D5: closed events are read-only in the database`, () => {
+  it('sanity: there is exactly one current event and the fixtures borrow it', async () => {
+    const { data, error } = await svc.from('event').select('id').eq('is_current', true)
+    expect(error).toBeNull()
+    expect(data ?? [], 'the suite needs a current event; non-superadmin writes are impossible without one').toHaveLength(1)
+    expect(data![0]!.id).toBe(await getEventId())
+  })
+
+  it('entries: admin and dept cannot write into or move rows to a closed event; superadmin can', async () => {
+    await withClosedEvent(async (closedEventId) => {
+      await withFixture({}, async (fx) => {
+        const extraEntries: number[] = []
+        try {
+          const entryClosed = await insertEntryInEvent(fx.suffix, 'closed', fx.deptA, closedEventId)
+          extraEntries.push(entryClosed)
+          const remarkOf = async (id: number) => (await readEntry(id))?.remark ?? null
+
+          // UPDATE in a closed event: zero rows for admin and dept (USING filters them out).
+          for (const [label, user] of [
+            ['admin', fx.adminUser],
+            ['dept', fx.deptUser],
+          ] as const) {
+            const upd = await user.client
+              .from('entries')
+              .update({ remark: `${TAG}-${label}-closed-should-not-land` })
+              .eq('id', entryClosed)
+              .select('id')
+            expect(upd.error, `${label} closed-event update`).toBeNull()
+            expect(upd.data, `${label} closed-event update must match no rows`).toEqual([])
+          }
+          expect(await remarkOf(entryClosed)).toBeNull()
+
+          // ...but a superadmin may edit a closed event (D5).
+          const superUpd = await fx.superadminUser.client
+            .from('entries')
+            .update({ remark: `${TAG}-superadmin-closed` })
+            .eq('id', entryClosed)
+            .select('id')
+          expect(superUpd.error).toBeNull()
+          expect(ids(superUpd.data)).toEqual([entryClosed])
+          expect(await remarkOf(entryClosed)).toBe(`${TAG}-superadmin-closed`)
+
+          // Current-event writes are unaffected (the positive control).
+          const adminCurrent = await fx.adminUser.client
+            .from('entries')
+            .update({ remark: `${TAG}-admin-current` })
+            .eq('id', fx.entryA)
+            .select('id')
+          expect(adminCurrent.error).toBeNull()
+          expect(ids(adminCurrent.data)).toEqual([fx.entryA])
+
+          // INSERT into a closed event: refused for admin and for dept (in its own department).
+          for (const [label, user, dept] of [
+            ['admin', fx.adminUser, fx.deptA],
+            ['dept', fx.deptUser, fx.deptA],
+          ] as const) {
+            const ins = await user.client
+              .from('entries')
+              .insert({
+                ubbl_number: `${TAG}-${fx.suffix}-closed-ins-${label}`,
+                event_id: closedEventId,
+                department_id: dept,
+                source: 'manual',
+                amount: '1.00',
+              })
+              .select('id')
+            expect(ins.error, `${label} insert into closed event`).not.toBeNull()
+            expect(ins.error?.code).toBe('42501')
+          }
+          const { data: leaked } = await svc
+            .from('entries')
+            .select('id')
+            .like('ubbl_number', `${TAG}-${fx.suffix}-closed-ins-%`)
+          expect(leaked, 'no row may have landed').toEqual([])
+
+          // superadmin may insert into a closed event.
+          const superIns = await fx.superadminUser.client
+            .from('entries')
+            .insert({
+              ubbl_number: `${TAG}-${fx.suffix}-closed-ins-super`,
+              event_id: closedEventId,
+              department_id: fx.deptA,
+              source: 'manual',
+              amount: '1.00',
+            })
+            .select('id')
+          expect(superIns.error).toBeNull()
+          expect((superIns.data ?? []).length).toBe(1)
+          if (superIns.data?.[0]) {
+            extraEntries.push(superIns.data[0].id as number)
+            LEDGER.entries.push(superIns.data[0].id as number)
+          }
+
+          // An admin cannot MOVE a current-event entry into the closed event (with check).
+          const moveIn = await fx.adminUser.client
+            .from('entries')
+            .update({ event_id: closedEventId })
+            .eq('id', fx.entryA)
+            .select('id')
+          expect(moveIn.error).not.toBeNull()
+          expect(moveIn.error?.code).toBe('42501')
+          const { data: stillThere } = await svc.from('entries').select('event_id').eq('id', fx.entryA).single()
+          expect(stillThere?.event_id).toBe(await getEventId())
+        } finally {
+          await dropTracked('entries', LEDGER.entries, extraEntries)
+        }
+      })
+    })
+  })
+
+  it('document_extraction, line items and the verify RPC: closed event denied for admin, allowed for superadmin; verified bills survive an admin delete', async () => {
+    await withClosedEvent(async (closedEventId) => {
+      await withFixture({}, async (fx) => {
+        const currentEventId = await getEventId()
+        const sfx = fx.suffix
+        const mine = [fx.adminUser.id]
+        const closed = await insertDocumentIn(sfx, 'm2-closed', closedEventId, fx.sourceDocuments, { assignTo: mine })
+        const open = await insertDocumentIn(sfx, 'm2-open', currentEventId, fx.sourceDocuments, { assignTo: mine })
+        const verified = await insertDocumentIn(sfx, 'm3-verified', currentEventId, fx.sourceDocuments, {
+          assignTo: mine,
+          verifiedBy: fx.superadminUser.id,
+        })
+        const verifiedClosed = await insertDocumentIn(sfx, 'm3-verified-closed', closedEventId, fx.sourceDocuments, {
+          assignTo: mine,
+          verifiedBy: fx.superadminUser.id,
+        })
+        const unverifiedToDelete = await insertDocumentIn(sfx, 'm3-unverified', currentEventId, fx.sourceDocuments, {
+          assignTo: mine,
+        })
+        const unverifiedClosedToDelete = await insertDocumentIn(sfx, 'm3-unverified-closed', closedEventId, fx.sourceDocuments, {
+          assignTo: mine,
+        })
+        const billExists = async (id: number) =>
+          !!(await svc.from('document_extraction').select('id').eq('id', id).maybeSingle()).data
+
+        // --- document_extraction UPDATE ---------------------------------------------------
+        const patch = (c: SupabaseClient, id: number, note: string) =>
+          c.from('document_extraction').update({ notes_verified: note }).eq('id', id).select('id')
+
+        const adminClosed = await patch(fx.adminUser.client, closed.billId, `${TAG}-admin-closed`)
+        expect(adminClosed.error).toBeNull()
+        expect(adminClosed.data, 'admin update of a closed-event bill matches no rows').toEqual([])
+        const adminOpen = await patch(fx.adminUser.client, open.billId, `${TAG}-admin-open`)
+        expect(adminOpen.error).toBeNull()
+        expect(ids(adminOpen.data), 'current-event write is unaffected').toEqual([open.billId])
+        const superClosed = await patch(fx.superadminUser.client, closed.billId, `${TAG}-super-closed`)
+        expect(superClosed.error).toBeNull()
+        expect(ids(superClosed.data), 'superadmin may edit a closed event').toEqual([closed.billId])
+
+        // --- line items: insert / update / delete -----------------------------------------
+        const insLine = await fx.adminUser.client
+          .from('document_extraction_line_item')
+          .insert({ document_extraction_id: closed.billId, line_order: 9, description_ocr: `${TAG} extra` })
+          .select('id')
+        expect(insLine.error, 'admin line-item insert into a closed-event bill').not.toBeNull()
+        expect(insLine.error?.code).toBe('42501')
+
+        const updLine = await fx.adminUser.client
+          .from('document_extraction_line_item')
+          .update({ description_verified: `${TAG}-admin-closed` })
+          .eq('id', closed.lineItemId)
+          .select('id')
+        expect(updLine.error).toBeNull()
+        expect(updLine.data).toEqual([])
+
+        const delLine = await fx.adminUser.client
+          .from('document_extraction_line_item')
+          .delete()
+          .eq('id', closed.lineItemId)
+          .select('id')
+        expect(delLine.error).toBeNull()
+        expect(delLine.data).toEqual([])
+        const { data: lineTruth } = await svc
+          .from('document_extraction_line_item')
+          .select('id,description_verified')
+          .eq('id', closed.lineItemId)
+          .single()
+        expect(lineTruth?.description_verified).toBeNull()
+
+        const adminOpenLine = await fx.adminUser.client
+          .from('document_extraction_line_item')
+          .update({ description_verified: `${TAG}-admin-open` })
+          .eq('id', open.lineItemId)
+          .select('id')
+        expect(adminOpenLine.error).toBeNull()
+        expect(ids(adminOpenLine.data), 'current-event line write is unaffected').toEqual([open.lineItemId])
+
+        const superLine = await fx.superadminUser.client
+          .from('document_extraction_line_item')
+          .update({ description_verified: `${TAG}-super-closed` })
+          .eq('id', closed.lineItemId)
+          .select('id')
+        expect(superLine.error).toBeNull()
+        expect(ids(superLine.data)).toEqual([closed.lineItemId])
+
+        // --- verify RPC ---------------------------------------------------------------------
+        const verifyArgs = (billId: number) => ({
+          p_document_extraction_id: billId,
+          p_header: {},
+          p_line_items: [],
+        })
+        const adminVerify = await fx.adminUser.client.rpc('verify_document_extraction', verifyArgs(closed.billId))
+        expect(adminVerify.error, 'admin verify of a closed-event bill').not.toBeNull()
+        expect(adminVerify.error?.code).toBe('42501')
+        expect(adminVerify.error?.message ?? '').toMatch(/closed event/i)
+        // The superadmin is let through the event guard. What the private function then does with
+        // an empty header is its own business; the only claim here is "not the closed-event refusal".
+        const superVerify = await fx.superadminUser.client.rpc('verify_document_extraction', verifyArgs(closed.billId))
+        expect(superVerify.error?.message ?? '').not.toMatch(/closed event/i)
+
+        // --- M3: only a superadmin can delete a VERIFIED bill -------------------------------
+        const delVerified = await fx.adminUser.client
+          .from('document_extraction')
+          .delete()
+          .eq('id', verified.billId)
+          .select('id')
+        expect(delVerified.error).toBeNull()
+        expect(delVerified.data, 'admin delete of a verified bill matches no rows').toEqual([])
+        expect(await billExists(verified.billId), 'verified bill must survive').toBe(true)
+
+        const delVerifiedClosed = await fx.adminUser.client
+          .from('document_extraction')
+          .delete()
+          .eq('id', verifiedClosed.billId)
+          .select('id')
+        expect(delVerifiedClosed.data).toEqual([])
+        const delUnverifiedClosed = await fx.adminUser.client
+          .from('document_extraction')
+          .delete()
+          .eq('id', unverifiedClosedToDelete.billId)
+          .select('id')
+        expect(delUnverifiedClosed.data, 'closed-event bill is protected even when unverified').toEqual([])
+        expect(await billExists(unverifiedClosedToDelete.billId)).toBe(true)
+
+        // clear_bill_rate_reference_links (the skip-page helper) carries the same two guards.
+        const clearVerified = await fx.adminUser.client.rpc('clear_bill_rate_reference_links', {
+          p_document_extraction_id: verified.billId,
+        })
+        expect(clearVerified.error?.code).toBe('42501')
+        expect(clearVerified.error?.message ?? '').toMatch(/verified/i)
+        const clearClosed = await fx.adminUser.client.rpc('clear_bill_rate_reference_links', {
+          p_document_extraction_id: unverifiedClosedToDelete.billId,
+        })
+        expect(clearClosed.error?.code).toBe('42501')
+        expect(clearClosed.error?.message ?? '').toMatch(/closed event/i)
+
+        // Positive controls: an admin CAN delete an unverified current-event bill (skip page)...
+        const delOk = await fx.adminUser.client
+          .from('document_extraction')
+          .delete()
+          .eq('id', unverifiedToDelete.billId)
+          .select('id')
+        expect(delOk.error).toBeNull()
+        expect(ids(delOk.data)).toEqual([unverifiedToDelete.billId])
+        // ...and a superadmin can delete a verified one, even in a closed event.
+        const delSuper = await fx.superadminUser.client
+          .from('document_extraction')
+          .delete()
+          .eq('id', verifiedClosed.billId)
+          .select('id')
+        expect(delSuper.error).toBeNull()
+        expect(ids(delSuper.data)).toEqual([verifiedClosed.billId])
+        expect(await billExists(verifiedClosed.billId)).toBe(false)
+      })
+    })
+  })
+})
+
+// ===========================================================================
+describe(`${AUDIT} M4 / D4: reconciliation_exception and flags`, () => {
+  it('reconciliation_exception: no delete, resolver cannot be forged, targets are scoped, dept sees its own only', async () => {
+    await withClosedEvent(async (closedEventId) => {
+      await withFixture({}, async (fx) => {
+        const exceptionIds: number[] = []
+        const extraEntries: number[] = []
+        try {
+          await withExtraUser(fx, 'adminB', 'admin', [], async (adminB) => {
+            const eventId = await getEventId()
+            const entryClosed = await insertEntryInEvent(fx.suffix, 'exc-closed', fx.deptB, closedEventId)
+            extraEntries.push(entryClosed)
+            const docOther = await insertDocumentIn(fx.suffix, 'exc-other', eventId, fx.sourceDocuments, {
+              assignTo: [adminB.id],
+            })
+
+            const mk = (label: string, target: Record<string, unknown>) =>
+              insertTracked(
+                'reconciliation_exception',
+                { exception_type: 'other', description: `${TAG} ${label}`, dedup_key: `${TAG}-${fx.suffix}-${label}`, ...target },
+                exceptionIds,
+                LEDGER.exceptions
+              )
+            const exA = await mk('a', { entry_id: fx.entryA })
+            const exB = await mk('b', { entry_id: fx.entryB })
+            const exClosed = await mk('closed', { entry_id: entryClosed })
+            const exDocB = await mk('docb', { document_extraction_id: docOther.billId })
+            const probe = [exA, exB, exClosed, exDocB]
+
+            // --- select scoping (D4) ------------------------------------------------------
+            const sel = (c: SupabaseClient) => c.from('reconciliation_exception').select('id').in('id', probe)
+            const asDept = await sel(fx.deptUser.client)
+            expect(asDept.error).toBeNull()
+            expect(ids(asDept.data), 'dept sees only exceptions on its own department\'s entries').toEqual([exA])
+            for (const [label, user] of [
+              ['admin', fx.adminUser],
+              ['superadmin', fx.superadminUser],
+            ] as const) {
+              const r = await sel(user.client)
+              expect(r.error).toBeNull()
+              expect((r.data ?? []).map((x) => x.id).sort(numeric), `${label} sees everything`).toEqual(
+                [...probe].sort(numeric)
+              )
+            }
+
+            // --- delete is denied for every role ---------------------------------------------
+            for (const [label, user] of [
+              ['dept', fx.deptUser],
+              ['admin', fx.adminUser],
+              ['superadmin', fx.superadminUser],
+            ] as const) {
+              const del1 = await user.client.from('reconciliation_exception').delete().eq('id', exA).select('id')
+              expect(del1.error, `${label} delete must be refused`).not.toBeNull()
+              expect(del1.error?.code).toBe('42501')
+            }
+            const { data: stillA } = await svc.from('reconciliation_exception').select('id').eq('id', exA)
+            expect(stillA).toHaveLength(1)
+
+            // --- a forged resolver is overwritten ------------------------------------------
+            const resolved = await fx.adminUser.client
+              .from('reconciliation_exception')
+              .update({
+                status: 'resolved',
+                resolved_by: fx.deptUser.id,
+                resolved_at: '2000-01-01T00:00:00Z',
+                resolution_note: `${TAG} resolved`,
+              })
+              .eq('id', exA)
+              .select('id,resolved_by,resolved_at,status')
+            expect(resolved.error).toBeNull()
+            expect(resolved.data).toHaveLength(1)
+            expect(resolved.data![0]!.status).toBe('resolved')
+            expect(resolved.data![0]!.resolved_by, 'resolver is the real caller').toBe(fx.adminUser.id)
+            expect(new Date(resolved.data![0]!.resolved_at as string).getTime()).toBeGreaterThan(Date.now() - 10 * 60_000)
+
+            // Without a status change the resolver columns are pinned.
+            const pinned = await fx.adminUser.client
+              .from('reconciliation_exception')
+              .update({ resolved_by: fx.deptUser.id, resolved_at: '2001-01-01T00:00:00Z', resolution_note: `${TAG} again` })
+              .eq('id', exA)
+              .select('resolved_by')
+            expect(pinned.error).toBeNull()
+            expect(pinned.data![0]!.resolved_by).toBe(fx.adminUser.id)
+
+            // The type and the target cannot be rewritten.
+            for (const patch of [
+              { exception_type: 'new_vendor' },
+              { entry_id: fx.entryB },
+              { document_extraction_id: docOther.billId },
+            ]) {
+              const bad = await fx.adminUser.client
+                .from('reconciliation_exception')
+                .update(patch)
+                .eq('id', exA)
+                .select('id')
+              expect(bad.error, `rewriting ${JSON.stringify(patch)} must fail`).not.toBeNull()
+              expect(bad.error?.code).toBe('42501')
+            }
+            const { data: truthA } = await svc
+              .from('reconciliation_exception')
+              .select('exception_type,entry_id,document_extraction_id')
+              .eq('id', exA)
+              .single()
+            expect(truthA).toEqual({ exception_type: 'other', entry_id: fx.entryA, document_extraction_id: null })
+
+            // --- insert: invisible target / closed event / dept ---------------------------------
+            const tryInsert = async (c: SupabaseClient, label: string, target: Record<string, unknown>) => {
+              const res = await c
+                .from('reconciliation_exception')
+                .insert({
+                  exception_type: 'other',
+                  description: `${TAG} insert ${label}`,
+                  dedup_key: `${TAG}-${fx.suffix}-ins-${label}`,
+                  ...target,
+                })
+                .select('id')
+              if (res.data?.[0]) {
+                exceptionIds.push(res.data[0].id as number)
+                LEDGER.exceptions.push(res.data[0].id as number)
+              }
+              return res
+            }
+            const invisible = await tryInsert(fx.adminUser.client, 'invisible', {
+              document_extraction_id: docOther.billId,
+            })
+            expect(invisible.error, 'insert on a bill the admin cannot see').not.toBeNull()
+            expect(invisible.error?.code).toBe('42501')
+            const closedIns = await tryInsert(fx.adminUser.client, 'closed', { entry_id: entryClosed })
+            expect(closedIns.error, 'admin insert on a closed-event entry').not.toBeNull()
+            expect(closedIns.error?.code).toBe('42501')
+            const deptIns = await tryInsert(fx.deptUser.client, 'dept', { entry_id: fx.entryA })
+            expect(deptIns.error, 'dept may not raise exceptions').not.toBeNull()
+            expect(deptIns.error?.code).toBe('42501')
+            const { data: nothing } = await svc
+              .from('reconciliation_exception')
+              .select('id')
+              .like('dedup_key', `${TAG}-${fx.suffix}-ins-%`)
+            expect(nothing, 'none of the refused inserts may have landed').toEqual([])
+
+            const okAdmin = await tryInsert(fx.adminUser.client, 'ok-admin', { entry_id: fx.entryA })
+            expect(okAdmin.error, 'admin may raise an exception on a visible current-event entry').toBeNull()
+            const okSuper = await tryInsert(fx.superadminUser.client, 'ok-super', { entry_id: entryClosed })
+            expect(okSuper.error, 'superadmin may raise one in a closed event').toBeNull()
+
+            // --- closed-event update ----------------------------------------------------------
+            const adminCl = await fx.adminUser.client
+              .from('reconciliation_exception')
+              .update({ resolution_note: `${TAG}-admin-closed` })
+              .eq('id', exClosed)
+              .select('id')
+            expect(adminCl.error).toBeNull()
+            expect(adminCl.data).toEqual([])
+            const superCl = await fx.superadminUser.client
+              .from('reconciliation_exception')
+              .update({ resolution_note: `${TAG}-super-closed` })
+              .eq('id', exClosed)
+              .select('id')
+            expect(superCl.error).toBeNull()
+            expect(ids(superCl.data)).toEqual([exClosed])
+          })
+        } finally {
+          await dropTracked('reconciliation_exception', LEDGER.exceptions, exceptionIds)
+          await dropTracked('entries', LEDGER.entries, extraEntries)
+        }
+      })
+    })
+  })
+
+  it('flags: no delete / insert, resolver cannot be forged, closed events are superadmin-only, dept sees its own only', async () => {
+    await withClosedEvent(async (closedEventId) => {
+      await withFixture({}, async (fx) => {
+        const flagIds: number[] = []
+        const extraEntries: number[] = []
+        try {
+          const entryClosed = await insertEntryInEvent(fx.suffix, 'flag-closed', fx.deptB, closedEventId)
+          extraEntries.push(entryClosed)
+          const mk = (label: string, entryId: number | null) =>
+            insertTracked(
+              'flags',
+              {
+                flag_type: 'duplicate_payment',
+                entry_id: entryId,
+                description: `${TAG} ${label}`,
+                dedup_key: `${TAG}-${fx.suffix}-flag-${label}`,
+              },
+              flagIds,
+              LEDGER.flags
+            )
+          const flA = await mk('a', fx.entryA)
+          const flB = await mk('b', fx.entryB)
+          const flVendor = await mk('vendor', null)
+          const flClosed = await mk('closed', entryClosed)
+          const probe = [flA, flB, flVendor, flClosed]
+
+          const sel = (c: SupabaseClient) => c.from('flags').select('id').in('id', probe)
+          const asDept = await sel(fx.deptUser.client)
+          expect(asDept.error).toBeNull()
+          expect(ids(asDept.data), 'dept sees only flags on its own department\'s entries').toEqual([flA])
+          for (const [label, user] of [
+            ['admin', fx.adminUser],
+            ['superadmin', fx.superadminUser],
+          ] as const) {
+            const r = await sel(user.client)
+            expect((r.data ?? []).map((x) => x.id).sort(numeric), `${label} sees everything`).toEqual(
+              [...probe].sort(numeric)
+            )
+          }
+
+          // delete + insert are not available to any signed-in role
+          for (const [label, user] of [
+            ['dept', fx.deptUser],
+            ['admin', fx.adminUser],
+            ['superadmin', fx.superadminUser],
+          ] as const) {
+            const d = await user.client.from('flags').delete().eq('id', flA).select('id')
+            expect(d.error, `${label} flag delete`).not.toBeNull()
+            expect(d.error?.code).toBe('42501')
+            const i = await user.client
+              .from('flags')
+              .insert({
+                flag_type: 'rate_drift',
+                entry_id: fx.entryA,
+                description: `${TAG} forged`,
+                dedup_key: `${TAG}-${fx.suffix}-flag-forged-${label}`,
+              })
+              .select('id')
+            if (i.data?.[0]) {
+              flagIds.push(i.data[0].id as number)
+              LEDGER.flags.push(i.data[0].id as number)
+            }
+            expect(i.error, `${label} flag insert`).not.toBeNull()
+            expect(i.error?.code).toBe('42501')
+          }
+
+          // dept cannot update (reviewer-or-admin only)
+          const deptUpd = await fx.deptUser.client
+            .from('flags')
+            .update({ status: 'dismissed' })
+            .eq('id', flA)
+            .select('id')
+          expect(deptUpd.error).toBeNull()
+          expect(deptUpd.data).toEqual([])
+
+          // forged resolver is overwritten
+          const dismissed = await fx.adminUser.client
+            .from('flags')
+            .update({ status: 'dismissed', resolved_by: fx.deptUser.id, resolved_at: '2000-01-01T00:00:00Z' })
+            .eq('id', flA)
+            .select('id,resolved_by,resolved_at,status')
+          expect(dismissed.error).toBeNull()
+          expect(dismissed.data![0]!.resolved_by).toBe(fx.adminUser.id)
+          expect(new Date(dismissed.data![0]!.resolved_at as string).getTime()).toBeGreaterThan(Date.now() - 10 * 60_000)
+
+          // type / target are immutable
+          for (const patch of [{ flag_type: 'rate_drift' }, { entry_id: fx.entryB }, { dedup_key: `${TAG}-x-${fx.suffix}` }]) {
+            const bad = await fx.adminUser.client.from('flags').update(patch).eq('id', flA).select('id')
+            expect(bad.error, `rewriting ${JSON.stringify(patch)} must fail`).not.toBeNull()
+            expect(bad.error?.code).toBe('42501')
+          }
+
+          // closed event: admin matches nothing, superadmin may resolve
+          const adminCl = await fx.adminUser.client.from('flags').update({ status: 'confirmed' }).eq('id', flClosed).select('id')
+          expect(adminCl.error).toBeNull()
+          expect(adminCl.data).toEqual([])
+          const superCl = await fx.superadminUser.client.from('flags').update({ status: 'confirmed' }).eq('id', flClosed).select('id')
+          expect(superCl.error).toBeNull()
+          expect(ids(superCl.data)).toEqual([flClosed])
+        } finally {
+          // flags.entry_id has no cascade: they must go before their entries.
+          await dropTracked('flags', LEDGER.flags, flagIds)
+          await dropTracked('entries', LEDGER.entries, extraEntries)
+        }
+      })
+    })
+  })
+})
+
+// ===========================================================================
+describe(`${AUDIT} M11 / D4: board packs and import/export logs are admin-or-above only`, () => {
+  it('board_pack table and the board-packs bucket: dept and anon read nothing, admin does, nobody writes', async () => {
+    await withFixture({}, async (fx) => {
+      const packIds: number[] = []
+      const objectPath = `${TAG}-${fx.suffix}/pack.xlsx`
+      LEDGER.boardPackObjects.push(objectPath)
+      try {
+        const packId = await insertTracked(
+          'board_pack',
+          { xlsx_path: objectPath, kpi_snapshot: { rls_test: RUN_ID } },
+          LEDGER.boardPacks
+        )
+        packIds.push(packId)
+        const up = await svc.storage
+          .from('board-packs')
+          .upload(objectPath, new Blob([`${TAG} board pack ${fx.suffix}`], { type: 'text/plain' }), {
+            contentType: 'text/plain',
+          })
+        expect(up.error, `service-role seed: ${up.error?.message}`).toBeNull()
+
+        const anon = anonClient()
+        // table SELECT
+        for (const [label, client, expectRows] of [
+          ['dept', fx.deptUser.client, false],
+          ['anon', anon, false],
+          ['admin', fx.adminUser.client, true],
+          ['superadmin', fx.superadminUser.client, true],
+        ] as const) {
+          const r = await client.from('board_pack').select('id').eq('id', packId)
+          if (expectRows) {
+            expect(r.error).toBeNull()
+            expect(ids(r.data), `${label} reads board_pack`).toEqual([packId])
+          } else {
+            expect(r.data ?? [], `${label} must not read board_pack`).toEqual([])
+          }
+        }
+        // bucket objects
+        for (const [label, client, allowed] of [
+          ['dept', fx.deptUser.client, false],
+          ['anon', anon, false],
+          ['admin', fx.adminUser.client, true],
+          ['superadmin', fx.superadminUser.client, true],
+        ] as const) {
+          const dl = await client.storage.from('board-packs').download(objectPath)
+          if (allowed) expect(dl.error, `${label} downloads the pack`).toBeNull()
+          else expect(dl.error, `${label} must not download the pack`).not.toBeNull()
+          const listed = await client.storage.from('board-packs').list(`${TAG}-${fx.suffix}`)
+          expect((listed.data ?? []).length > 0, `${label} lists the pack`).toBe(allowed)
+        }
+        // nobody signed in can write the table or the bucket
+        for (const [label, user] of [
+          ['dept', fx.deptUser],
+          ['admin', fx.adminUser],
+          ['superadmin', fx.superadminUser],
+        ] as const) {
+          const ins = await user.client.from('board_pack').insert({ xlsx_path: `${TAG}-forged-${fx.suffix}`, kpi_snapshot: {} }).select('id')
+          if (ins.data?.[0]) {
+            packIds.push(ins.data[0].id as number)
+            LEDGER.boardPacks.push(ins.data[0].id as number)
+          }
+          expect(refused(ins), `${label} board_pack insert`).toBe(true)
+          const upd = await user.client.from('board_pack').update({ pdf_path: 'x' }).eq('id', packId).select('id')
+          expect(refused(upd), `${label} board_pack update`).toBe(true)
+          const del1 = await user.client.from('board_pack').delete().eq('id', packId).select('id')
+          expect(refused(del1), `${label} board_pack delete`).toBe(true)
+          const upload = await user.client.storage
+            .from('board-packs')
+            .upload(`${TAG}-${fx.suffix}/forged-${label}.xlsx`, new Blob(['x'], { type: 'text/plain' }), {
+              contentType: 'text/plain',
+            })
+          LEDGER.boardPackObjects.push(`${TAG}-${fx.suffix}/forged-${label}.xlsx`)
+          expect(upload.error, `${label} board-packs upload`).not.toBeNull()
+        }
+        const { data: truth } = await svc.from('board_pack').select('id,pdf_path').eq('id', packId).single()
+        expect(truth?.pdf_path, 'row must be untouched').toBeNull()
+      } finally {
+        await dropTracked('board_pack', LEDGER.boardPacks, packIds)
+        const gone = await svc.storage.from('board-packs').remove(
+          LEDGER.boardPackObjects.filter((p) => p.startsWith(`${TAG}-${fx.suffix}/`))
+        )
+        if (gone.error) throw new Error(`cleanup board-packs: ${gone.error.message}`)
+        forget(
+          LEDGER.boardPackObjects,
+          LEDGER.boardPackObjects.filter((p) => p.startsWith(`${TAG}-${fx.suffix}/`))
+        )
+      }
+    })
+  })
+
+  it('import_batch, import_row_log, status_export_batch and status_export_row: dept reads nothing, admin does, nobody writes', async () => {
+    await withFixture({}, async (fx) => {
+      const eventId = await getEventId()
+      const batchIds: number[] = []
+      const exportIds: number[] = []
+      try {
+        const batchId = await insertTracked(
+          'import_batch',
+          {
+            source_system: 'departmental',
+            source_filename: `${TAG}-${fx.suffix}.xlsx`,
+            file_hash_sha256: `${TAG}${fx.suffix}`.padEnd(64, '0').slice(0, 64),
+            mode: 'dry_run',
+            event_id: eventId,
+          },
+          LEDGER.importBatches
+        )
+        batchIds.push(batchId)
+        const logId = await insertTracked(
+          'import_row_log',
+          { import_batch_id: batchId, row_number: 1, raw_row_jsonb: { rls_test: RUN_ID }, action: 'skipped_header' },
+          []
+        )
+        const exportId = await insertTracked(
+          'status_export_batch',
+          { target_system: 'departmental', row_count: 1, event_id: eventId },
+          LEDGER.statusBatches
+        )
+        exportIds.push(exportId)
+        const exportRowId = await insertTracked(
+          'status_export_row',
+          {
+            status_export_batch_id: exportId,
+            entry_id: fx.entryA,
+            ubbl_number: `${TAG}-${fx.suffix}-a`,
+            hub_status_code: 'rls_test',
+            changed_at: new Date().toISOString(),
+          },
+          []
+        )
+
+        const probes: Array<[string, number]> = [
+          ['import_batch', batchId],
+          ['import_row_log', logId],
+          ['status_export_batch', exportId],
+          ['status_export_row', exportRowId],
+        ]
+        for (const [table, id] of probes) {
+          const asDept = await fx.deptUser.client.from(table).select('id').eq('id', id)
+          expect(asDept.data ?? [], `dept must not read ${table}`).toEqual([])
+          for (const [label, user] of [
+            ['admin', fx.adminUser],
+            ['superadmin', fx.superadminUser],
+          ] as const) {
+            const r = await user.client.from(table).select('id').eq('id', id)
+            expect(r.error, `${label} ${table}`).toBeNull()
+            expect(ids(r.data), `${label} reads ${table}`).toEqual([id])
+          }
+          const asAnon = await anonClient().from(table).select('id').eq('id', id)
+          expect(asAnon.data ?? [], `anon must not read ${table}`).toEqual([])
+
+          // no signed-in role can write these tables directly
+          for (const [label, user] of [
+            ['dept', fx.deptUser],
+            ['admin', fx.adminUser],
+          ] as const) {
+            const upd = await user.client.from(table).update({ id }).eq('id', id).select('id')
+            expect((upd.data ?? []).length, `${label} update ${table} must change nothing`).toBe(0)
+            const del1 = await user.client.from(table).delete().eq('id', id).select('id')
+            expect((del1.data ?? []).length, `${label} delete ${table} must change nothing`).toBe(0)
+          }
+        }
+        const ins = await fx.adminUser.client
+          .from('import_batch')
+          .insert({
+            source_system: 'departmental',
+            source_filename: `${TAG}-forged.xlsx`,
+            file_hash_sha256: 'f'.repeat(64),
+            event_id: eventId,
+          })
+          .select('id')
+        expect(ins.error, 'admin import_batch insert (imports run over the service role)').not.toBeNull()
+      } finally {
+        // status_export_row (cascades from its batch) references entries -> drop batches first.
+        await dropTracked('status_export_batch', LEDGER.statusBatches, exportIds)
+        await dropTracked('import_batch', LEDGER.importBatches, batchIds)
+      }
+    })
+  })
+})
+
+// ===========================================================================
+describe(`${AUDIT} operational tables: scrape_token, app_settings, auth_login_attempt, api_request_log`, () => {
+  it('are readable by admin-or-above only, never writable by a signed-in role, and invisible to anon', async () => {
+    await withFixture({}, async (fx) => {
+      const tokenIds: number[] = []
+      const attemptIds: number[] = []
+      const logIds: number[] = []
+      try {
+        const tokenId = await insertTracked(
+          'scrape_token',
+          {
+            token_hash: `${TAG}-${fx.suffix}-hash`,
+            token_prefix: 'rlstest0',
+            label: `${TAG} fixture`,
+            source_system: 'departmental',
+            created_by: fx.adminUser.id,
+            expires_at: new Date(Date.now() + 3_600_000).toISOString(),
+          },
+          LEDGER.scrapeTokens
+        )
+        tokenIds.push(tokenId)
+        const attemptId = await insertTracked(
+          'auth_login_attempt',
+          { its_number: `${TAG}-${fx.suffix}`, success: false },
+          LEDGER.authAttempts
+        )
+        attemptIds.push(attemptId)
+        const logId = await insertTracked(
+          'api_request_log',
+          { route: `/${TAG}/${fx.suffix}`, method: 'GET', status_code: 200, latency_ms: 1 },
+          LEDGER.apiLogs
+        )
+        logIds.push(logId)
+
+        const tables: Array<[string, number]> = [
+          ['scrape_token', tokenId],
+          ['auth_login_attempt', attemptId],
+          ['api_request_log', logId],
+        ]
+        for (const [table, id] of tables) {
+          const asDept = await fx.deptUser.client.from(table).select('id').eq('id', id)
+          expect(asDept.data ?? [], `dept must not read ${table}`).toEqual([])
+          const asAnon = await anonClient().from(table).select('id').eq('id', id)
+          expect(asAnon.data ?? [], `anon must not read ${table}`).toEqual([])
+          for (const [label, user] of [
+            ['admin', fx.adminUser],
+            ['superadmin', fx.superadminUser],
+          ] as const) {
+            const r = await user.client.from(table).select('id').eq('id', id)
+            expect(r.error, `${label} ${table}`).toBeNull()
+            expect(ids(r.data), `${label} reads ${table}`).toEqual([id])
+          }
+        }
+
+        // auth_login_attempt / api_request_log are append-only from the service role: no signed-in
+        // role may insert, update or delete (grants are select-only).
+        for (const table of ['auth_login_attempt', 'api_request_log']) {
+          const row: Record<string, unknown> =
+            table === 'auth_login_attempt'
+              ? { its_number: `${TAG}-forged`, success: true }
+              : { route: `/${TAG}/forged`, method: 'GET', status_code: 200, latency_ms: 1 }
+          const id = table === 'auth_login_attempt' ? attemptId : logId
+          for (const [label, user] of [
+            ['dept', fx.deptUser],
+            ['admin', fx.adminUser],
+            ['superadmin', fx.superadminUser],
+          ] as const) {
+            const ins = await user.client.from(table).insert(row).select('id')
+            if (ins.data?.[0]) {
+              const list = table === 'auth_login_attempt' ? LEDGER.authAttempts : LEDGER.apiLogs
+              list.push(ins.data[0].id as number)
+              if (table === 'auth_login_attempt') attemptIds.push(ins.data[0].id as number)
+              else logIds.push(ins.data[0].id as number)
+            }
+            expect(refused(ins), `${label} insert into ${table}`).toBe(true)
+            const upd = await user.client.from(table).update({ id }).eq('id', id).select('id')
+            expect(refused(upd), `${label} update ${table}`).toBe(true)
+            const del1 = await user.client.from(table).delete().eq('id', id).select('id')
+            expect(refused(del1), `${label} delete ${table}`).toBe(true)
+          }
+          const { data: kept } = await svc.from(table).select('id').eq('id', id)
+          expect(kept, `${table} fixture row must survive every attempt`).toHaveLength(1)
+        }
+
+        // scrape_token: admin-or-above may revoke (update); dept may not; nobody inserts or deletes.
+        const deptRevoke = await fx.deptUser.client
+          .from('scrape_token')
+          .update({ revoked_at: new Date().toISOString() })
+          .eq('id', tokenId)
+          .select('id')
+        expect(deptRevoke.error).toBeNull()
+        expect(deptRevoke.data).toEqual([])
+        for (const [label, user] of [
+          ['dept', fx.deptUser],
+          ['admin', fx.adminUser],
+          ['superadmin', fx.superadminUser],
+        ] as const) {
+          const ins = await user.client
+            .from('scrape_token')
+            .insert({
+              token_hash: `${TAG}-${fx.suffix}-forged-${label}`,
+              token_prefix: 'forged00',
+              source_system: 'departmental',
+              created_by: user.id,
+              expires_at: new Date(Date.now() + 3_600_000).toISOString(),
+            })
+            .select('id')
+          if (ins.data?.[0]) {
+            tokenIds.push(ins.data[0].id as number)
+            LEDGER.scrapeTokens.push(ins.data[0].id as number)
+          }
+          expect(refused(ins), `${label} must not mint a scrape token directly`).toBe(true)
+          const del1 = await user.client.from('scrape_token').delete().eq('id', tokenId).select('id')
+          expect(refused(del1), `${label} must not delete a scrape token`).toBe(true)
+        }
+        const { data: tokenKept } = await svc.from('scrape_token').select('id').eq('id', tokenId)
+        expect(tokenKept, 'token row survives').toHaveLength(1)
+        const adminRevoke = await fx.adminUser.client
+          .from('scrape_token')
+          .update({ revoked_at: new Date().toISOString(), revoked_by: fx.adminUser.id })
+          .eq('id', tokenId)
+          .select('id')
+        expect(adminRevoke.error).toBeNull()
+        expect(ids(adminRevoke.data), 'admin can revoke (that is the intended capability)').toEqual([tokenId])
+
+        // app_settings is a PRE-EXISTING singleton, so it is only ever poked with writes that
+        // cannot succeed even if a policy were wrong (a CHECK-violating value, or a filter that
+        // can never match). Staff read it; only admin-or-above passes the update policy.
+        for (const [label, user] of [
+          ['dept', fx.deptUser],
+          ['admin', fx.adminUser],
+          ['superadmin', fx.superadminUser],
+        ] as const) {
+          const r = await user.client.from('app_settings').select('id').eq('id', 1)
+          expect(r.error).toBeNull()
+          expect(ids(r.data), `${label} reads app_settings`).toEqual([1])
+        }
+        const deptUpd = await fx.deptUser.client.from('app_settings').update({ max_upload_pages: -1 }).eq('id', 1).select('id')
+        expect(deptUpd.error, 'dept update is filtered out by RLS before any CHECK could run').toBeNull()
+        expect(deptUpd.data).toEqual([])
+        const adminUpd = await fx.adminUser.client.from('app_settings').update({ max_upload_pages: -1 }).eq('id', 1).select('id')
+        expect(adminUpd.error?.code, 'admin passes the policy and is then stopped by the CHECK (23514) -- nothing written').toBe('23514')
+        const insSettings = await fx.adminUser.client.from('app_settings').insert({ id: 2 }).select('id')
+        expect(refused(insSettings), 'no signed-in role may add a second settings row').toBe(true)
+        const { data: stray } = await svc.from('app_settings').select('id').neq('id', 1)
+        expect(stray, 'no second settings row').toEqual([])
+        const delSettings = await fx.adminUser.client
+          .from('app_settings')
+          .delete()
+          .eq('id', 1)
+          .eq('max_upload_pages', -1) // can never match, so nothing is deleted even if DELETE were granted
+          .select('id')
+        expect(refused(delSettings), 'app_settings delete').toBe(true)
+        const { data: settingsTruth } = await svc.from('app_settings').select('id,max_upload_pages').eq('id', 1).single()
+        expect(settingsTruth?.max_upload_pages).toBeGreaterThan(0)
+      } finally {
+        await dropTracked('scrape_token', LEDGER.scrapeTokens, tokenIds)
+        await dropTracked('auth_login_attempt', LEDGER.authAttempts, attemptIds)
+        await dropTracked('api_request_log', LEDGER.apiLogs, logIds)
+      }
+    })
+  })
+
+  it('service-role-only tables (pending_upload, auth_hook_failed_attempt) cannot be read or written by any signed-in role or anon', async () => {
+    await withFixture({}, async (fx) => {
+      const forgedPath = `${TAG}/${fx.suffix}/forged-pending.pdf`
+      try {
+        const callers: Array<[string, SupabaseClient]> = [
+          ['dept', fx.deptUser.client],
+          ['admin', fx.adminUser.client],
+          ['superadmin', fx.superadminUser.client],
+          ['anon', anonClient()],
+        ]
+        for (const [label, client] of callers) {
+          for (const table of ['pending_upload', 'auth_hook_failed_attempt']) {
+            const r = await client.from(table).select('*').limit(1)
+            expect(r.error, `${label} select ${table}`).not.toBeNull()
+            expect(r.data ?? null).toBeNull()
+          }
+          const ins = await client.from('pending_upload').insert({ path: forgedPath, user_id: fx.deptUser.id })
+          expect(ins.error, `${label} insert pending_upload`).not.toBeNull()
+          const insHook = await client.from('auth_hook_failed_attempt').insert({ user_id: fx.deptUser.id })
+          expect(insHook.error, `${label} insert auth_hook_failed_attempt`).not.toBeNull()
+        }
+      } finally {
+        // Only runs a delete if a forged insert unexpectedly landed -- exact primary key.
+        await svc.from('pending_upload').delete().eq('path', forgedPath)
+        await svc.from('auth_hook_failed_attempt').delete().eq('user_id', fx.deptUser.id)
+      }
+    })
+  })
+})
+
+// ===========================================================================
+describe(`${AUDIT} L17: a user cannot rewrite their own login identity`, () => {
+  it('blocks its_number / contact_email self-edits (dept and admin), still allows a rename and a superadmin edit', async () => {
+    await withFixture({}, async (fx) => {
+      const forged = `${TAG}-${fx.suffix}-forged@rls-test.example.com`
+      for (const [label, user] of [
+        ['dept', fx.deptUser],
+        ['admin', fx.adminUser],
+      ] as const) {
+        for (const patch of [{ its_number: '00000000' }, { contact_email: forged }]) {
+          const res = await user.client.from('staff_profile').update(patch).eq('id', user.id).select('id')
+          expect(res.error, `${label} self-update ${JSON.stringify(patch)}`).not.toBeNull()
+          expect(res.error?.code).toBe('42501')
+        }
+        const { data: stored } = await svc.from('staff_profile').select('its_number,contact_email').eq('id', user.id).single()
+        expect(stored, `${label}: stored identity untouched`).toEqual({ its_number: null, contact_email: null })
+
+        const rename = await user.client
+          .from('staff_profile')
+          .update({ display_name: `${TAG}-${label}-renamed` })
+          .eq('id', user.id)
+          .select('id')
+        expect(rename.error).toBeNull()
+        expect((rename.data ?? []).length).toBe(1)
+      }
+
+      // superadmin keeps the right (it is how contact details get corrected).
+      const superEdit = await fx.superadminUser.client
+        .from('staff_profile')
+        .update({ contact_email: forged })
+        .eq('id', fx.deptUser.id)
+        .select('id')
+      expect(superEdit.error).toBeNull()
+      expect(ids(superEdit.data)).toEqual([fx.deptUser.id])
+    })
+  })
+})
+
+// ===========================================================================
+describe(`${AUDIT} M9 / D8 + L11: hook function and wrapper privileges`, () => {
+  it('hook_password_verification_attempt cannot be called through the API by anon or any signed-in role', async () => {
+    await withFixture({}, async (fx) => {
+      for (const [label, client] of [
+        ['anon', anonClient()],
+        ['dept', fx.deptUser.client],
+        ['admin', fx.adminUser.client],
+        ['superadmin', fx.superadminUser.client],
+      ] as const) {
+        // An empty event is harmless even if it somehow ran (no user_id -> 'continue', no writes).
+        const res = await client.rpc('hook_password_verification_attempt', { event: {} })
+        expect(res.error, `${label} must not execute the hook`).not.toBeNull()
+        expect(res.data ?? null).toBeNull()
+      }
+    })
+  })
+
+  itPg('EXECUTE grants: only supabase_auth_admin runs the hook; anon has none of the four wrappers; authenticated keeps them', async () => {
+    await withPg(async (c) => {
+      const can = async (role: string, sig: string) =>
+        (await c.query('select has_function_privilege($1, $2, $3) as ok', [role, sig, 'EXECUTE'])).rows[0].ok as boolean
+      const hook = 'public.hook_password_verification_attempt(jsonb)'
+      expect(await can('supabase_auth_admin', hook)).toBe(true)
+      for (const role of ['anon', 'authenticated']) expect(await can(role, hook), `${role} on hook`).toBe(false)
+
+      const wrappers = [
+        'public.delete_source_document(bigint)',
+        'public.cancel_source_document_jobs(bigint)',
+        'public.set_source_document_assignees(bigint[], uuid[])',
+        'public.next_manual_ubbl_number()',
+      ]
+      for (const sig of wrappers) {
+        expect(await can('anon', sig), `anon on ${sig}`).toBe(false)
+        expect(await can('authenticated', sig), `authenticated on ${sig}`).toBe(true)
+      }
+    })
+  })
+
+  itPg('the lockout hook rejects the 11th attempt (even with the right password), never extends the lock, and recovers after 15 minutes', async () => {
+    await withFixture({}, async (fx) => {
+      await withPg(async (c) => {
+        // EVERYTHING here happens inside a transaction that is rolled back: no row survives.
+        await c.query('begin')
+        try {
+          const uid = fx.deptUser.id
+          const call = async (valid: boolean, userId: string = uid) =>
+            (
+              await c.query('select public.hook_password_verification_attempt($1::jsonb) as r', [
+                JSON.stringify({ user_id: userId, valid }),
+              ])
+            ).rows[0].r as { decision: string; message?: string; should_logout_user?: boolean }
+          const failures = async () =>
+            (
+              await c.query('select count(*)::int as n from public.auth_hook_failed_attempt where user_id = $1', [uid])
+            ).rows[0].n as number
+
+          for (let i = 0; i < 10; i++) expect((await call(false)).decision, `attempt ${i + 1}`).toBe('continue')
+          const lockedRight = await call(true)
+          expect(lockedRight.decision, 'right password while locked').toBe('reject')
+          expect(lockedRight.message).toMatch(/too many attempts/i)
+          expect((await call(false)).decision).toBe('reject')
+          expect(await failures(), 'rejected-while-locked attempts are not recorded').toBe(10)
+
+          // after the window the account works again, and a success clears the counter
+          await c.query(
+            `update public.auth_hook_failed_attempt set created_at = now() - interval '16 minutes' where user_id = $1`,
+            [uid]
+          )
+          expect((await call(true)).decision).toBe('continue')
+          expect(await failures()).toBe(0)
+
+          for (let i = 0; i < 3; i++) await call(false)
+          expect(await failures()).toBe(3)
+          expect((await call(true)).decision).toBe('continue')
+          expect(await failures(), 'a successful login clears the counter').toBe(0)
+
+          // fail-open: an id with no auth.users row makes the insert fail inside the hook; sign-in continues
+          expect((await call(false, '00000000-0000-4000-8000-00000000dead')).decision).toBe('continue')
+        } finally {
+          await c.query('rollback')
+        }
+      })
+    })
+  })
+
+  // Opt-in because it needs the hook switched on in the Supabase dashboard (Team plan) and it
+  // makes 11 real failed sign-ins: run with RLS_TEST_LOCKOUT_HOOK=1 after docs/login-lockout-hook-setup.md.
+  const itHookLive = process.env.RLS_TEST_LOCKOUT_HOOK === '1' ? it : it.skip
+  itHookLive('LIVE: 11 wrong passwords straight against /auth/v1/token lock a fixture account, even for the right password', async () => {
+    const suffix = `${RUN_ID}${Math.random().toString(36).slice(2, 6)}`
+    const email = `${TAG}-lockout-${suffix}@rls-test.example.com`
+    const password = `Rls!${RUN_ID}${Math.random().toString(36).slice(2, 10)}`
+    const { data, error } = await withAuthRetry('createUser(lockout)', () =>
+      svc.auth.admin.createUser({ email, password, email_confirm: true, user_metadata: { full_name: `${TAG} lockout` } })
+    )
+    if (error || !data.user) throw new Error(`createUser: ${error?.message}`)
+    const userId = data.user.id
+    LEDGER.users.push(userId)
+    try {
+      const anon = anonClient()
+      for (let i = 0; i < 10; i++) {
+        const bad = await anon.auth.signInWithPassword({ email, password: 'definitely-wrong' })
+        expect(bad.error, `wrong password #${i + 1}`).not.toBeNull()
+      }
+      const locked = await anon.auth.signInWithPassword({ email, password })
+      expect(locked.error?.message ?? '', 'right password while locked').toMatch(/too many attempts/i)
+      expect(locked.data.session).toBeNull()
+    } finally {
+      await svc.from('staff_profile').delete().eq('id', userId)
+      await withAuthRetry(`deleteUser(${userId})`, () => svc.auth.admin.deleteUser(userId))
+      forget(LEDGER.users, [userId])
+    }
+  }, 300_000)
+})
+
+// ===========================================================================
+describe(`${AUDIT} anonymous sweeps over everything in the public schema`, () => {
+  itPg('anon has no EXECUTE on any callable public function', async () => {
+    const offenders = await withPg(async (c) => {
+      const res = await c.query(`
+        select p.oid::regprocedure::text as sig
+          from pg_proc p
+          join pg_namespace n on n.oid = p.pronamespace
+         where n.nspname = 'public'
+           and p.prokind in ('f', 'p')
+           and p.prorettype not in ('trigger'::regtype, 'event_trigger'::regtype)
+           and not exists (select 1 from pg_depend d where d.objid = p.oid and d.deptype = 'e')
+           and has_function_privilege('anon', p.oid, 'EXECUTE')
+         order by 1`)
+      return res.rows.map((r) => r.sig as string)
+    })
+    // within_tally_tolerance(a, b) is pure arithmetic (no table access, no data), so anon being
+    // able to call it exposes nothing; the reporting views need it executable.
+    const harmless = new Set(['within_tally_tolerance(numeric,numeric)'])
+    expect(
+      offenders.filter((sig) => !harmless.has(sig)),
+      'public functions callable by the anonymous role'
+    ).toEqual([])
+  })
+
+  itPg('every public table has RLS enabled, and no policy in public/storage applies to anon or PUBLIC', async () => {
+    const { noRls, loosePolicies } = await withPg(async (c) => {
+      const a = await c.query(`
+        select c.relname
+          from pg_class c join pg_namespace n on n.oid = c.relnamespace
+         where n.nspname = 'public' and c.relkind in ('r', 'p') and not c.relrowsecurity
+         order by 1`)
+      const b = await c.query(`
+        select schemaname || '.' || tablename || ' :: ' || policyname as p
+          from pg_policies
+         where schemaname in ('public', 'storage')
+           and ('anon' = any (roles) or 'public' = any (roles))
+         order by 1`)
+      return { noRls: a.rows.map((r) => r.relname as string), loosePolicies: b.rows.map((r) => r.p as string) }
+    })
+    expect(noRls, 'public tables without row level security').toEqual([])
+    expect(loosePolicies, 'policies that apply to anon / PUBLIC').toEqual([])
+  })
+
+  itPg('anon reads zero rows from every public table and view it holds SELECT on', async () => {
+    const names = await withPg(async (c) => {
+      const res = await c.query(`
+        select c.relname
+          from pg_class c join pg_namespace n on n.oid = c.relnamespace
+         where n.nspname = 'public' and c.relkind in ('r', 'p', 'v', 'm', 'f')
+           and has_table_privilege('anon', c.oid, 'SELECT')
+         order by 1`)
+      return res.rows.map((r) => r.relname as string)
+    })
+    const anon = anonClient()
+    const leaks: string[] = []
+    for (let i = 0; i < names.length; i += 8) {
+      await Promise.all(
+        names.slice(i, i + 8).map(async (name) => {
+          const r = await anon.from(name).select('*').limit(1)
+          // An error (permission denied / not exposed) is fine; a returned row is a leak.
+          if ((r.data ?? []).length > 0) leaks.push(name)
+        })
+      )
+    }
+    expect(leaks, `anon-readable tables/views (checked ${names.length})`).toEqual([])
+  }, 300_000)
+
+  it('the private schema is not exposed through the API', async () => {
+    for (const [label, client] of [
+      ['anon', anonClient()],
+      ['service role', svc],
+    ] as const) {
+      const res = await (client as unknown as { schema: (s: string) => SupabaseClient }).schema('private').rpc('is_staff')
+      expect(res.error, `${label}: private.is_staff via the API`).not.toBeNull()
+      expect(res.data ?? null).toBeNull()
+    }
+  })
+})
+
+// ===========================================================================
 // Final safety net: prove nothing this suite created is still in the database.
 // ===========================================================================
 afterAll(async () => {
@@ -1486,6 +3217,15 @@ afterAll(async () => {
     }
   }
 
+  // [security-audit 2026-10-15] rows that point at entries / users go first.
+  await sweep('flags', LEDGER.flags)
+  await sweep('reconciliation_exception', LEDGER.exceptions)
+  await sweep('status_export_batch', LEDGER.statusBatches)
+  await sweep('import_batch', LEDGER.importBatches)
+  await sweep('board_pack', LEDGER.boardPacks)
+  await sweep('scrape_token', LEDGER.scrapeTokens)
+  await sweep('auth_login_attempt', LEDGER.authAttempts)
+  await sweep('api_request_log', LEDGER.apiLogs)
   await sweep('source_document', LEDGER.sourceDocuments)
   await sweep('entries', LEDGER.entries)
   await sweep('zone', LEDGER.zones)
@@ -1507,6 +3247,7 @@ afterAll(async () => {
       if (again?.user) leftovers.push(`auth.users: ${id}`)
     }
   }
+  await sweep('event', LEDGER.events)
   await sweep('department', LEDGER.departments)
 
   if (LEDGER.objects.length > 0) {
@@ -1520,10 +3261,20 @@ afterAll(async () => {
     }
   }
 
+  for (const path of LEDGER.boardPackObjects) {
+    const { error } = await svc.storage.from('board-packs').download(path)
+    if (!error) {
+      await svc.storage.from('board-packs').remove([path])
+      const { error: after } = await svc.storage.from('board-packs').download(path)
+      if (!after) leftovers.push(`storage(board-packs): ${path}`)
+    }
+  }
+
   // Tag sweep — READ ONLY. Catches anything created outside the ledger by a future
   // edit to this file. It reports; it never deletes on a `like` match.
   const tagged = await svc.from('department').select('id,name').like('name', `${TAG}-%`)
   const taggedEntries = await svc.from('entries').select('id,ubbl_number').like('ubbl_number', `${TAG}-%`)
+  const taggedEvents = await svc.from('event').select('id,name').like('name', `${TAG}-%`)
 
   // eslint-disable-next-line no-console
   console.log(
@@ -1550,4 +3301,5 @@ afterAll(async () => {
   expect(leftovers, 'fixture rows left behind in the live database').toEqual([])
   expect(tagged.data ?? [], 'rls-test departments left behind').toEqual([])
   expect(taggedEntries.data ?? [], 'rls-test entries left behind').toEqual([])
+  expect(taggedEvents.data ?? [], 'rls-test events left behind').toEqual([])
 }, 120_000)

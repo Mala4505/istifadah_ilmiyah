@@ -2,6 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { ALL_COLUMNS, type ColumnKey, type EntriesFilters, type EntryEnriched } from './types'
 import { applyEntriesFilters, ENTRIES_SELECT, type EntriesQueryBuilder } from './query'
 import { formatDate } from './format'
+import { csvCell } from '@/lib/csv-safe'
 
 const EXPORT_BATCH_SIZE = 1000
 // Hard cap so a runaway filter (or "no filters at all" on a much bigger
@@ -9,12 +10,10 @@ const EXPORT_BATCH_SIZE = 1000
 // Comfortably above the §0 volume decision (1,000-10,000 entries total).
 const MAX_EXPORT_ROWS = 20000
 
-function csvEscape(value: unknown): string {
-  if (value === null || value === undefined) return ''
-  const s = String(value)
-  if (/[",\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`
-  return s
-}
+// Escaping + formula-injection guard live in a plain shared module (M8). Note
+// the amount column arrives here as a numeric *string* (cellValue below), which
+// csvCell exempts explicitly via its plain-number check.
+const csvEscape = csvCell
 
 function cellValue(row: EntryEnriched, key: ColumnKey): string {
   switch (key) {

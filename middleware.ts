@@ -39,6 +39,24 @@ export async function middleware(request: NextRequest) {
     ? 'Content-Security-Policy-Report-Only'
     : 'Content-Security-Policy'
 
+  // Where the browser sends "this would have been blocked" reports. Nothing
+  // collected these before (no report-uri / report-to anywhere), so a
+  // Report-Only burn-in produced no data outside one's own devtools console
+  // (security-audit-fix-plan.md 4.2 step 1). Derived from the public Sentry DSN
+  // (`https://<key>@<host>/<projectId>`) into Sentry's security-report URL;
+  // omitted when no DSN is configured (local dev). report-uri only ever sends
+  // reports, it cannot block anything, so adding it cannot break a page.
+  const sentryReportUri = (() => {
+    try {
+      const dsn = new URL(publicEnv.NEXT_PUBLIC_SENTRY_DSN)
+      const projectId = dsn.pathname.replace(/^\/+/, '')
+      if (!dsn.username || !projectId) return ''
+      return `report-uri https://${dsn.host}/api/${projectId}/security/?sentry_key=${dsn.username};`
+    } catch {
+      return ''
+    }
+  })()
+
   const csp = `
     default-src 'self';
     script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${isDev ? " 'unsafe-eval'" : ''};
@@ -52,6 +70,7 @@ export async function middleware(request: NextRequest) {
     form-action 'self';
     frame-ancestors 'none';
     ${serverEnv.CSP_REPORT_ONLY ? '' : 'upgrade-insecure-requests;'}
+    ${sentryReportUri}
   `.replace(/\s{2,}/g, ' ').trim()
 
   const requestHeaders = new Headers(request.headers)

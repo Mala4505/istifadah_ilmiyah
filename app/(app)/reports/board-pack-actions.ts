@@ -18,7 +18,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { getStaffContext, requireAdminOrAbove } from '@/lib/export/auth'
+import { requireAdminOrAbove } from '@/lib/export/auth'
 import { triggerRemoteWorker } from '@/lib/jobs/trigger-worker'
 import type { JobStatus } from '@/lib/jobs/queue'
 
@@ -35,15 +35,26 @@ export type BoardPackJobStatusResult =
   | { ok: true; status: JobStatus }
   | { ok: false; error: string }
 
-/** A time-limited download URL for one pack's workbook or PDF. Staff-only
- *  (matches the board_pack SELECT policy). */
+function gateMessage(reason: 'signed_out' | 'inactive' | 'not_admin'): string {
+  return reason === 'signed_out'
+    ? 'You must be signed in.'
+    : reason === 'inactive'
+      ? 'Your account is pending activation.'
+      : 'The board pack is for admins only.'
+}
+
+/** A time-limited download URL for one pack's workbook or PDF. Admin-or-above
+ *  only: the pack holds organisation-wide financials (owner decision D4, security
+ *  audit 3.6). The admin client below bypasses RLS, so this gate is the control. */
 export async function getBoardPackDownloadUrl(
   boardPackId: number,
   kind: 'xlsx' | 'pdf'
 ): Promise<BoardPackActionResult> {
-  const staff = await getStaffContext()
-  if (!staff) return { ok: false, error: 'You must be signed in.' }
-  if (!staff.isActive) return { ok: false, error: 'Your account is pending activation.' }
+  const gate = await requireAdminOrAbove()
+  if (!gate.ok) return { ok: false, error: gateMessage(gate.reason) }
+  if (!Number.isInteger(boardPackId) || boardPackId <= 0 || (kind !== 'xlsx' && kind !== 'pdf')) {
+    return { ok: false, error: 'That board pack could not be found.' }
+  }
 
   const admin = createAdminClient()
   const { data, error } = await admin
@@ -114,18 +125,27 @@ export async function enqueueBoardPack(): Promise<BoardPackActionResult> {
  * Perf remediation Phase 7.9: lets BoardPackGenerateButton poll a single
  * job_queue row after enqueueing it, so it can router.refresh() the instant
  * the drain tick actually runs the job rather than leaving the new pack to
- * turn up only on a manual reload. Staff-gated like getBoardPackDownloadUrl
- * above rather than admin-gated -- this only reads queue metadata, and by the
- * time it's called the caller has already cleared the admin-only enqueue
+ * turn up only on a manual reload. Admin-gated like getBoardPackDownloadUrl
+ * above (security audit 3.6) -- by the time it's called the caller has already
+ * cleared the admin-only enqueue
  * gate once for this job.
+ *
+ * Security audit 3.6: admin-or-above, and only `board_pack` jobs -- without the
+ * job_type filter any signed-in user could read the status of any queued job
+ * (extraction, import ...) by id through the service-role client.
  */
 export async function getBoardPackJobStatus(jobId: number): Promise<BoardPackJobStatusResult> {
-  const staff = await getStaffContext()
-  if (!staff) return { ok: false, error: 'You must be signed in.' }
-  if (!staff.isActive) return { ok: false, error: 'Your account is pending activation.' }
+  const gate = await requireAdminOrAbove()
+  if (!gate.ok) return { ok: false, error: gateMessage(gate.reason) }
+  if (!Number.isInteger(jobId) || jobId <= 0) return { ok: false, error: 'That job could not be found.' }
 
   const admin = createAdminClient()
-  const { data, error } = await admin.from('job_queue').select('status').eq('id', jobId).maybeSingle()
+  const { data, error } = await admin
+    .from('job_queue')
+    .select('status')
+    .eq('id', jobId)
+    .eq('job_type', 'board_pack')
+    .maybeSingle()
   if (error || !data) return { ok: false, error: 'That job could not be found.' }
 
   return { ok: true, status: data.status as JobStatus }

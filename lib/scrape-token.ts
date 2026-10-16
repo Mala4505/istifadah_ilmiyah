@@ -2,6 +2,7 @@ import 'server-only'
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
 import { createAdminClient } from '@/lib/supabase/admin'
 import type { SourceSystem } from '@/lib/import/portal-mapping'
+import { isAdminOrAbove } from '@/lib/auth/roles'
 
 /**
  * Short-lived bearer tokens for the portal-scrape bookmarklet
@@ -121,6 +122,7 @@ export type ScrapeTokenRejection =
   | 'revoked'
   | 'expired'
   | 'wrong_source_system'
+  | 'creator_inactive'
 
 export type VerifyScrapeTokenResult =
   | { ok: true; tokenId: number; createdBy: string; sourceSystem: SourceSystem; useCount: number }
@@ -177,6 +179,20 @@ export async function verifyScrapeToken(
     return { ok: false, reason: 'wrong_source_system' }
   }
 
+  // Security audit 3.5 (M5): a token acts with its creator's authority, so it
+  // must stop working the moment that creator is deactivated or no longer an
+  // admin. (Deactivating / demoting also revokes the tokens outright -- see
+  // revokeAllScrapeTokensFor -- this is the backstop for any path that changes
+  // a profile without going through that action.) Fails closed on a lookup error.
+  const { data: creator, error: creatorError } = await admin
+    .from('staff_profile')
+    .select('is_active, role')
+    .eq('id', String(data.created_by))
+    .maybeSingle()
+  if (creatorError || !creator || !creator.is_active || !isAdminOrAbove(creator.role as string)) {
+    return { ok: false, reason: 'creator_inactive' }
+  }
+
   return {
     ok: true,
     tokenId: data.id as number,
@@ -211,4 +227,24 @@ export async function revokeScrapeToken(tokenId: number, revokedBy: string): Pro
     .is('revoked_at', null)
 
   if (error) throw new Error(`revokeScrapeToken: ${error.message}`)
+}
+
+/**
+ * Revokes every still-live token a staff member created. Called when that
+ * account is deactivated or demoted below admin (security audit 3.5 / M5) so a
+ * bookmarklet token pasted into a browser stops working with the person's
+ * access, not 30 days later. Returns the number revoked. Throws on a database
+ * error so the caller can tell the operator it did not complete.
+ */
+export async function revokeAllScrapeTokensFor(createdBy: string, revokedBy: string): Promise<number> {
+  const admin = createAdminClient()
+  const { data, error } = await admin
+    .from('scrape_token')
+    .update({ revoked_at: new Date().toISOString(), revoked_by: revokedBy })
+    .eq('created_by', createdBy)
+    .is('revoked_at', null)
+    .select('id')
+
+  if (error) throw new Error(`revokeAllScrapeTokensFor: ${error.message}`)
+  return data?.length ?? 0
 }

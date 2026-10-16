@@ -47,6 +47,11 @@ export async function BoardPackList({ selectedEvent }: { selectedEvent: Event | 
   const eventId = selectedEvent?.id ?? null
   const canGenerate = isAdminOrAbove(staff?.role)
 
+  // Security audit 3.6 / owner decision D4: the board pack is organisation-wide
+  // financials, admin-or-above only. Department users do not see the section at
+  // all (the actions and the table's RLS refuse them too).
+  if (!canGenerate) return null
+
   const { data, error } = await supabase
     .from('board_pack')
     .select('id, generated_at, xlsx_path, pdf_path')

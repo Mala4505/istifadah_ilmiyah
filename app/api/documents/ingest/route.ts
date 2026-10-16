@@ -3,13 +3,24 @@ import * as Sentry from '@sentry/nextjs'
 import { withApiLogging } from '@/lib/api-log'
 import { getStaffContext } from '@/lib/export/auth'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { deleteDocument, getDocumentBytes } from '@/lib/storage'
+import {
+  checkPendingUpload,
+  clearPendingUpload,
+  deleteDocument,
+  getDocumentBytes,
+  getDocumentSize,
+} from '@/lib/storage'
+import { jsonRequestProblem } from '@/lib/http-guards'
+import { publicEnv } from '@/lib/env'
+import { logRawError } from '@/lib/friendly-error'
 import { getPdfPageCount, looksLikePdf, sha256Hex } from '@/lib/pdf'
 import { runJobById } from '@/lib/jobs/drain'
 import { triggerRemoteWorker } from '@/lib/jobs/trigger-worker'
 import { serverEnv } from '@/lib/env.server'
 import { getSelectedEvent, isEventMutable } from '@/lib/events/current'
 import { getMaxUploadPages } from '@/lib/upload-limits'
+import { isAdminOrAbove } from '@/lib/auth/roles'
+import { assertEntryVisible } from '@/lib/auth/scope'
 
 /**
  * `documents-ingest` (MASTER-PLAN §8 point 2, §3.8, §11.2 Day 1).
@@ -21,8 +32,8 @@ import { getMaxUploadPages } from '@/lib/upload-limits'
  *                           URL, never routed through this or any other
  *                           Vercel function)
  *   filename    (required)  original filename, for `source_document.original_filename`
- *   pageCount   (optional)  client-declared page count — used only as a
- *                           fallback when the server can't parse the PDF
+ *   pageCount   (optional)  ignored: the server derives the page count itself,
+ *                           and a PDF it cannot parse is rejected (audit 3.3)
  *   entryId     (optional)  attach straight to an entry; normally null,
  *                           because ~18 of the 21 real samples have no
  *                           matching entry (§11.2 Day 3)
@@ -92,6 +103,16 @@ async function handlePOST(request: NextRequest) {
     return NextResponse.json({ error: 'Your account is pending activation.' }, { status: 403 })
   }
 
+  // Cookie-authenticated JSON route: must be JSON and from our own origin
+  // (security-audit-fix-plan.md 4.3 CSRF).
+  const guardProblem = jsonRequestProblem(request.headers, {
+    siteUrl: publicEnv.NEXT_PUBLIC_SITE_URL,
+    checkOrigin: true,
+  })
+  if (guardProblem) {
+    return NextResponse.json({ error: guardProblem.error }, { status: guardProblem.status })
+  }
+
   // Everything below writes source_document/document_page rows stamped with
   // the selected event's id -- so the event is resolved and its mutability
   // asserted FIRST (Phase 6 Step 2 §1.6: "switching to a past event puts the
@@ -147,6 +168,43 @@ async function handlePOST(request: NextRequest) {
     return NextResponse.json({ error: 'This upload has already been finalized.' }, { status: 409 })
   }
 
+  // Only the user a path was issued to may finalise it (upload-url records each
+  // issued path against its user; security-audit-fix-plan.md 4.3). Nothing is
+  // deleted on a mismatch -- the file belongs to someone else. If the ledger
+  // table is not there yet (migration pending) we log and keep the old behaviour
+  // so deploy-before-push does not break uploads.
+  const issuedTo = await checkPendingUpload(storagePath, staff.userId)
+  if (issuedTo === 'other_user') {
+    return NextResponse.json({ error: 'This upload was started by someone else.' }, { status: 403 })
+  }
+  if (issuedTo === 'unknown') {
+    return NextResponse.json(
+      { error: 'This upload was not recognised. Please upload the file again.' },
+      { status: 403 }
+    )
+  }
+  if (issuedTo === 'table_missing') {
+    logRawError('ingest', 'pending_upload table missing; skipping issued-to-user check')
+  } else if (issuedTo === 'error') {
+    return NextResponse.json(
+      { error: 'We couldn’t verify this upload just now. Please try again in a moment.' },
+      { status: 502 }
+    )
+  }
+
+  // Ask storage how big the object is BEFORE pulling it into memory, so an
+  // oversize object is rejected (and removed) without being downloaded. When
+  // storage can't say, the post-download size check below still applies.
+  const declaredSize = await getDocumentSize(storagePath)
+  if (declaredSize !== null && declaredSize > MAX_UPLOAD_BYTES) {
+    await deleteDocument(storagePath).catch(() => {})
+    await clearPendingUpload(storagePath)
+    return NextResponse.json(
+      { error: 'This file is larger than the 32 MB limit. Please upload a smaller file.' },
+      { status: 413 }
+    )
+  }
+
   // The browser already PUT the file straight to storage via the signed URL
   // from /api/documents/upload-url — this downloads it back out so the rest
   // of this route's validation (hash, page count, PDF sniff) runs exactly as
@@ -155,8 +213,9 @@ async function handlePOST(request: NextRequest) {
   try {
     bytes = await getDocumentBytes(storagePath)
   } catch (err) {
+    logRawError('ingest read-back', err instanceof Error ? err.message : String(err))
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Could not read the uploaded file back from storage.' },
+      { error: 'We couldn’t read the uploaded file back. Please try uploading it again.' },
       { status: 502 }
     )
   }
@@ -167,9 +226,7 @@ async function handlePOST(request: NextRequest) {
   if (bytes.byteLength > MAX_UPLOAD_BYTES) {
     await deleteDocument(storagePath).catch(() => {})
     return NextResponse.json(
-      {
-        error: `File is ${bytes.byteLength} bytes, which exceeds the file size limit of ${MAX_UPLOAD_BYTES} bytes.`,
-      },
+      { error: 'This file is larger than the 32 MB limit. Please upload a smaller file.' },
       { status: 413 }
     )
   }
@@ -183,7 +240,6 @@ async function handlePOST(request: NextRequest) {
   // Server-derived page count wins; the client-declared value is only a
   // fallback for a PDF pdf.js refuses to parse.
   let pageCount: number | null = null
-  let pageCountUnresolved = false
   try {
     pageCount = await getPdfPageCount(bytes)
   } catch (err) {
@@ -205,14 +261,15 @@ async function handlePOST(request: NextRequest) {
       tags: { route: 'documents-ingest', phase: 'get_pdf_page_count' },
       extra: { filename, byteLength: bytes.byteLength, fileHash },
     })
-    const declared = Number(bodyRecord.pageCount)
-    pageCount = Number.isInteger(declared) && declared > 0 ? declared : null
-    // Neither the server-side parse nor a client-declared count worked. No
-    // document_page rows get created below, and page_count stays null until
-    // (if ever) extraction succeeds and backfills it from the model's own
-    // pages[] count (lib/jobs/handlers/extract.ts) — silently, unless this is
-    // flagged now (I1).
-    pageCountUnresolved = pageCount === null
+    // Security audit 3.3 (M1): the client-declared `pageCount` is no longer
+    // trusted as a fallback -- it is attacker-controlled and would let a PDF that
+    // cannot be parsed past the page-limit check below. Reject the upload
+    // (and remove the stored file) instead.
+    await deleteDocument(storagePath).catch(() => {})
+    return NextResponse.json(
+      { error: 'This PDF could not be read. It may be damaged or password-protected. Try re-saving it and uploading again.' },
+      { status: 422 }
+    )
   }
 
   // Page-limit validation (docs/ocr-execution-decision.md follow-up): reject
@@ -224,7 +281,7 @@ async function handlePOST(request: NextRequest) {
   // three auto-retries, since each retry restarts from page 1 rather than
   // resuming. Skipped when pageCount is null (server-side parse AND the
   // client-declared fallback both failed) — there is nothing to compare
-  // against, and pageCountUnresolved's own exception already flags that
+  // against, and the unparseable-PDF rejection above already handles that
   // case; this must not invent a second, contradictory failure mode for it.
   if (pageCount !== null) {
     const maxUploadPages = await maxUploadPagesPromise
@@ -252,13 +309,34 @@ async function handlePOST(request: NextRequest) {
       ? Number(entryIdRaw)
       : null
 
+  // Security audit 3.3 (M1): the entry link below is written through the
+  // service-role client, which has no RLS backstop, so the caller must prove --
+  // through the SESSION client -- that they may link to this entry: admin-or-above
+  // (matching private.assert_entry_bill_link_allowed), the entry visible to them
+  // under RLS, and in the SAME event as this document. Done before any row is
+  // written; the already-uploaded file is removed on refusal.
+  if (entryId !== null) {
+    const entryScope = isAdminOrAbove(staff.role)
+      ? await assertEntryVisible(entryId, { eventId })
+      : null
+    if (!entryScope || !entryScope.ok) {
+      await deleteDocument(storagePath).catch(() => {})
+      return NextResponse.json(
+        { error: 'You can\'t attach this upload to that entry. Pick an entry from the current event that you have access to.' },
+        { status: 403 }
+      )
+    }
+  }
+
   // Optional multi-assignee list (document-assignment feature, 2026-08-29): a
   // comma-separated list of staff uuids. Parsed here; validated and written
   // only after the source_document row exists (below), so an absent/empty
   // value is a no-op that leaves current behaviour untouched.
   const assignedToRaw = bodyRecord.assignedTo
+  // Security audit 3.3 (M1): assignment is an admin action (set_source_document_assignees
+  // is admin-gated in the database); for anyone else the field is ignored.
   const assignedToIds =
-    typeof assignedToRaw === 'string'
+    typeof assignedToRaw === 'string' && isAdminOrAbove(staff.role)
       ? Array.from(
           new Set(
             assignedToRaw
@@ -302,13 +380,16 @@ async function handlePOST(request: NextRequest) {
     .single()
 
   if (insertError || !inserted) {
+    logRawError('ingest source_document insert', insertError?.message ?? 'no row returned')
     return NextResponse.json(
-      { error: `source_document insert failed: ${insertError?.message ?? 'no row returned'}` },
+      { error: 'We couldn’t save this upload. Please try again.' },
       { status: 500 }
     )
   }
 
   const documentId = inserted.id as number
+  // The path now belongs to a source_document; the ledger row has done its job.
+  await clearPendingUpload(storagePath)
 
   // entry-bill links (Phase 3): when the upload attaches straight to an entry,
   // extraction has not run yet so there are no bills to link. Write a
@@ -378,8 +459,9 @@ async function handlePOST(request: NextRequest) {
     }))
     const { error: pageError } = await admin.from('document_page').insert(pageRows)
     if (pageError) {
+      logRawError('ingest document_page insert', pageError.message)
       return NextResponse.json(
-        { error: `document_page insert failed: ${pageError.message}` },
+        { error: 'We couldn’t save this upload’s pages. Please try again.' },
         { status: 500 }
       )
     }
@@ -397,24 +479,6 @@ async function handlePOST(request: NextRequest) {
     })
   }
 
-  // I1: page count could not be derived from the PDF or a client-declared
-  // fallback. document_page rows are not created below, so page classification
-  // for this document is absent until (if ever) extraction backfills it — flag
-  // that now instead of leaving it silent.
-  if (pageCountUnresolved) {
-    await admin.from('reconciliation_exception').insert({
-      source_document_id: documentId,
-      exception_type: 'page_count_unresolved',
-      severity: 'low',
-      description:
-        `Could not determine the page count for source_document ${documentId} at ingest ` +
-        '(server-side PDF parse failed and no client-declared count was supplied). No document_page ' +
-        'rows were created; this backfills automatically once extraction succeeds, or needs manual review ' +
-        'if extraction keeps failing.',
-      dedup_key: `page_count_unresolved:${documentId}`,
-    })
-  }
-
   const { data: insertedJob, error: jobError } = await admin
     .from('job_queue')
     .insert({
@@ -424,8 +488,9 @@ async function handlePOST(request: NextRequest) {
     .select('id')
     .single()
   if (jobError || !insertedJob) {
+    logRawError('ingest job_queue insert', jobError?.message ?? 'no row returned')
     return NextResponse.json(
-      { error: `job_queue insert failed: ${jobError?.message ?? 'no row returned'}`, documentId },
+      { error: 'The upload was saved but couldn’t be queued for reading. Please try again.', documentId },
       { status: 500 }
     )
   }

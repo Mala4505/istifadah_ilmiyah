@@ -2,11 +2,12 @@ import 'server-only'
 import type { NextRequest } from 'next/server'
 import { createClient, getAuthUser } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { clientIpFromHeaders } from '@/lib/http-guards'
 
 function requestIp(request: NextRequest): string | null {
-  const forwardedFor = request.headers.get('x-forwarded-for')
-  if (forwardedFor) return forwardedFor.split(',')[0]!.trim()
-  return request.headers.get('x-real-ip')
+  // x-real-ip (set by Vercel), else the rightmost x-forwarded-for hop -- never
+  // the client-controlled leftmost one (lib/http-guards.ts).
+  return clientIpFromHeaders(request.headers)
 }
 
 /**

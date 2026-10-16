@@ -12,7 +12,16 @@ import { COMPARE_BASIS_COOKIE, isCompareBasis, type CompareBasis } from '@/lib/r
 import { REPORTS_PINS_COOKIE, parsePins, togglePin } from '@/lib/reports/pins'
 import { ALL_SECTION_IDS } from '@/lib/reports/surface-sections'
 
-const COOKIE_OPTS = { path: '/', maxAge: 60 * 60 * 24 * 365 } as const
+// httpOnly: only server code reads these cookies (verified: no document.cookie
+// reader for report_compare_basis / reports_pins). `secure` is production-only so
+// plain-http localhost dev still works (Safari drops Secure cookies on http).
+const COOKIE_OPTS = {
+  path: '/',
+  maxAge: 60 * 60 * 24 * 365,
+  httpOnly: true,
+  secure: process.env.NODE_ENV === 'production',
+  sameSite: 'lax',
+} as const
 
 export async function setCompareBasis(basis: CompareBasis): Promise<{ ok: true } | { ok: false; error: string }> {
   if (!isCompareBasis(basis)) return { ok: false, error: 'Unrecognised comparison period.' }

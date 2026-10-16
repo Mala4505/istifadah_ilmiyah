@@ -10,6 +10,10 @@ import { normalizeVendorName } from '@/lib/normalize'
 import { logRawError } from '@/lib/friendly-error'
 import { getSelectedEvent, isEventMutable } from '@/lib/events/current'
 import { REFERENCE_DATA_TAGS } from '@/lib/cache/reference-data'
+import { revokeAllScrapeTokensFor } from '@/lib/scrape-token'
+
+/** Supabase Auth ban length used to sign a deactivated account out everywhere (~100 years). */
+const DEACTIVATED_BAN_DURATION = '876000h'
 
 type ActionResult = { ok: true } | { ok: false; error: string }
 
@@ -65,17 +69,26 @@ export async function createStaffUser(input: {
     return { ok: false, error: `ITS number ${itsNumber} is already registered.` }
   }
 
-  const { error: createError } = await admin.auth.admin.createUser({
+  const { data: created, error: createError } = await admin.auth.admin.createUser({
     email: itsNumberToLoginEmail(itsNumber),
     password,
     email_confirm: true,
-    user_metadata: {
+    // Security audit 1.1 (C1): user_metadata is writable by the signed-in user
+    // themselves (and by anyone calling signUp), so it carries the display name
+    // only. The handle_new_user trigger no longer reads access fields from it.
+    // The access fields are kept in app_metadata (service-role-only) as the
+    // record of intent, but GoTrue writes app_metadata AFTER the auth.users row
+    // is inserted, so the trigger cannot see it -- the profile is therefore
+    // promoted explicitly below, with the service key.
+    app_metadata: {
       its_number: itsNumber,
-      full_name: displayName,
       role,
       department_ids: departmentIds,
       is_active: true,
       contact_email: contactEmail || null,
+    },
+    user_metadata: {
+      full_name: displayName,
     },
   })
 
@@ -83,11 +96,60 @@ export async function createStaffUser(input: {
   // race with the pre-check above: a losing concurrent insert fails the
   // handle_new_user trigger with a unique_violation, which createUser
   // surfaces as an error here rather than silently landing a duplicate.
-  if (createError) return { ok: false, error: logRawError('admin.createStaffUser', createError.message) }
+  if (createError || !created?.user) {
+    return { ok: false, error: logRawError('admin.createStaffUser', createError?.message ?? 'no user returned') }
+  }
+  const newUserId = created.user.id
+
+  // The trigger created an inactive `dept` profile with no departments (the
+  // safe default). Promote it to what the superadmin asked for. If any step
+  // fails, delete the half-made account so nobody is left with an unusable
+  // login and the ITS number can be retried.
+  const rollback = async () => {
+    const { error } = await admin.auth.admin.deleteUser(newUserId)
+    if (error) logRawError('admin.createStaffUser.rollback', error.message)
+  }
+
+  const { error: profileError } = await admin
+    .from('staff_profile')
+    .update({
+      display_name: displayName,
+      role,
+      is_active: true,
+      its_number: itsNumber,
+      contact_email: contactEmail || null,
+    })
+    .eq('id', newUserId)
+  if (profileError) {
+    logRawError('admin.createStaffUser.profile', profileError.message)
+    await rollback()
+    return { ok: false, error: 'Could not finish creating this account. Please try again.' }
+  }
+
+  if (departmentIds.length > 0) {
+    const { error: deptError } = await admin
+      .from('staff_department')
+      .upsert(departmentIds.map((department_id) => ({ staff_id: newUserId, department_id })), {
+        onConflict: 'staff_id,department_id',
+        ignoreDuplicates: true,
+      })
+    if (deptError) {
+      logRawError('admin.createStaffUser.departments', deptError.message)
+      await rollback()
+      return { ok: false, error: 'Could not finish creating this account. Please try again.' }
+    }
+  }
 
   revalidatePath('/admin')
   return { ok: true }
 }
+
+const updateStaffProfileSchema = z.object({
+  id: z.string().uuid(),
+  role: z.enum(['superadmin', 'admin', 'dept']),
+  departmentIds: z.array(z.number().int().positive()).max(200),
+  isActive: z.boolean(),
+})
 
 const resetStaffPasswordSchema = z.object({
   id: z.string().uuid(),
@@ -147,6 +209,13 @@ export async function updateStaffProfile(input: {
     return { ok: false, error: 'Managing staff accounts is a superadmin-only action.' }
   }
 
+  // Security audit 3.8 (L19): runtime validation -- a public POST endpoint.
+  const parsedInput = updateStaffProfileSchema.safeParse(input)
+  if (!parsedInput.success) {
+    return { ok: false, error: 'That account update was not valid. Refresh the page and try again.' }
+  }
+  input = parsedInput.data
+
   // Self-lockout guard: the gate above already proves the acting user is an
   // *active superadmin*, so if they're editing their own row, any move away
   // from that (a role other than superadmin, or deactivating) is a potential
@@ -163,12 +232,63 @@ export async function updateStaffProfile(input: {
 
   const supabase = await createClient()
 
+  // What the account looks like now, so we know whether this save deactivates,
+  // reactivates or demotes it (security audit 3.5).
+  const { data: before, error: beforeError } = await supabase
+    .from('staff_profile')
+    .select('role, is_active')
+    .eq('id', input.id)
+    .maybeSingle()
+  if (beforeError) return { ok: false, error: logRawError('admin.updateStaffProfile:lookup', beforeError.message) }
+  if (!before) return { ok: false, error: 'That account could not be found.' }
+
   const { error } = await supabase
     .from('staff_profile')
     .update({ role: input.role, is_active: input.isActive })
     .eq('id', input.id)
 
   if (error) return { ok: false, error: logRawError('admin.updateStaffProfile:profile', error.message) }
+
+  // Security audit 3.5 (M5 + D9): access that has been taken away must really
+  // stop. (a) Scrape tokens the person minted keep working for up to 30 days
+  // otherwise -> revoke them when the account is deactivated or demoted below
+  // admin. (b) A deactivated account must be signed out on every device ->
+  // supabase-js `auth.admin.signOut(jwt)` needs the user's own JWT, which we
+  // do not have, so the account is banned instead (refresh tokens stop working;
+  // every gated action here also re-reads is_active, so an access token that is
+  // still within its short lifetime is refused too). Reactivation lifts the ban.
+  const deactivating = !input.isActive
+  const demotedBelowAdmin = input.role === 'dept' && before.role !== 'dept'
+  const reactivating = input.isActive && before.is_active === false
+  const authAdmin = createAdminClient()
+  let accessCleanupFailed = false
+
+  if (deactivating || demotedBelowAdmin) {
+    try {
+      await revokeAllScrapeTokensFor(input.id, gate.staff.userId)
+    } catch (err) {
+      accessCleanupFailed = true
+      logRawError('admin.updateStaffProfile:revokeTokens', err instanceof Error ? err.message : String(err))
+    }
+  }
+  if (deactivating) {
+    const { error: banError } = await authAdmin.auth.admin.updateUserById(input.id, {
+      ban_duration: DEACTIVATED_BAN_DURATION,
+    })
+    if (banError) {
+      accessCleanupFailed = true
+      logRawError('admin.updateStaffProfile:ban', banError.message)
+    }
+  } else if (reactivating) {
+    const { error: unbanError } = await authAdmin.auth.admin.updateUserById(input.id, { ban_duration: 'none' })
+    if (unbanError) {
+      logRawError('admin.updateStaffProfile:unban', unbanError.message)
+      return {
+        ok: false,
+        error: 'The account was reactivated, but signing in could not be re-enabled. Save again to retry.',
+      }
+    }
+  }
 
   // Document assignment ("dividing the document inbox", 2026-08-29): a
   // deactivated account can't remain an assignee, so drop its
@@ -209,6 +329,13 @@ export async function updateStaffProfile(input: {
   }
 
   revalidatePath('/admin')
+  if (accessCleanupFailed) {
+    return {
+      ok: false,
+      error:
+        'The changes were saved, but signing this person out everywhere did not fully finish. Save again to retry.',
+    }
+  }
   return { ok: true }
 }
 
@@ -221,6 +348,12 @@ export async function updateBudgetHeadMapping(input: {
   budgetHeadId: number
   headId: number | null
 }): Promise<ActionResult> {
+  const gate = await requireAdminOrAbove()
+  if (!gate.ok) return { ok: false, error: 'Mapping budget heads is an admin-only action.' }
+  const parsed = updateBudgetHeadMappingSchema.safeParse(input)
+  if (!parsed.success) return { ok: false, error: 'That budget head mapping was not valid.' }
+  input = parsed.data
+
   const supabase = await createClient()
 
   const { error } = await supabase
@@ -246,11 +379,35 @@ export async function mergeVendor(input: {
   vendorId: number
   targetVendorId: number
 }): Promise<ActionResult> {
+  const gate = await requireAdminOrAbove()
+  if (!gate.ok) return { ok: false, error: 'Merging vendors is an admin-only action.' }
+  const parsed = mergeVendorSchema.safeParse(input)
+  if (!parsed.success) return { ok: false, error: 'Those vendors were not valid. Refresh the page and try again.' }
+  input = parsed.data
+
   if (input.vendorId === input.targetVendorId) {
     return { ok: false, error: 'A vendor cannot be merged into itself.' }
   }
 
   const supabase = await createClient()
+
+  // Security audit 3.8 (L19): the vendor being merged away must not itself be a
+  // merge root with others already merged into it -- those would be left
+  // pointing at a vendor that is no longer a root (a chain, not the flat
+  // root-plus-aliases shape cluster_group_id is meant to hold).
+  const { data: dependents, error: dependentsError } = await supabase
+    .from('vendor')
+    .select('id')
+    .eq('cluster_group_id', input.vendorId)
+    .limit(1)
+  if (dependentsError) return { ok: false, error: logRawError('admin.mergeVendor:dependents', dependentsError.message) }
+  if ((dependents ?? []).length > 0) {
+    return {
+      ok: false,
+      error:
+        'Other vendors are already merged into this one. Merge into this vendor instead, or unmerge them first.',
+    }
+  }
 
   const { data: target, error: targetError } = await supabase
     .from('vendor')
@@ -278,6 +435,12 @@ export async function mergeVendor(input: {
 
 /** Undoes a vendor merge, restoring it as an independent identity. */
 export async function unmergeVendor(input: { vendorId: number }): Promise<ActionResult> {
+  const gate = await requireAdminOrAbove()
+  if (!gate.ok) return { ok: false, error: 'Unmerging vendors is an admin-only action.' }
+  const parsed = vendorIdOnlySchema.safeParse(input)
+  if (!parsed.success) return { ok: false, error: 'That vendor was not valid. Refresh the page and try again.' }
+  input = parsed.data
+
   const supabase = await createClient()
 
   const { error } = await supabase
@@ -290,6 +453,23 @@ export async function unmergeVendor(input: { vendorId: number }): Promise<Action
   revalidatePath('/settings')
   return { ok: true }
 }
+
+const updateBudgetHeadMappingSchema = z.object({
+  budgetHeadId: z.number().int().positive(),
+  headId: z.number().int().positive().nullable(),
+})
+
+const mergeVendorSchema = z.object({
+  vendorId: z.number().int().positive(),
+  targetVendorId: z.number().int().positive(),
+})
+
+const vendorIdOnlySchema = z.object({ vendorId: z.number().int().positive() })
+
+const setVendorConfirmedSchema = z.object({
+  vendorId: z.number().int().positive(),
+  isConfirmed: z.boolean(),
+})
 
 const renameVendorSchema = z.object({
   vendorId: z.number().int().positive(),
@@ -492,6 +672,12 @@ export async function setVendorConfirmed(input: {
   vendorId: number
   isConfirmed: boolean
 }): Promise<ActionResult> {
+  const gate = await requireAdminOrAbove()
+  if (!gate.ok) return { ok: false, error: 'Confirming a vendor is an admin-only action.' }
+  const parsed = setVendorConfirmedSchema.safeParse(input)
+  if (!parsed.success) return { ok: false, error: 'That vendor was not valid. Refresh the page and try again.' }
+  input = parsed.data
+
   const supabase = await createClient()
 
   const { error } = await supabase

@@ -5,6 +5,9 @@ import { createClient, getAuthUser } from '@/lib/supabase/server'
 import { runDepartmentBudgetImport } from '@/lib/import/run-department-budget-import'
 import { withApiLogging } from '@/lib/api-log'
 import { isAdminOrAbove } from '@/lib/auth/roles'
+import { declaredLengthExceeds, originProblem } from '@/lib/http-guards'
+import { publicEnv } from '@/lib/env'
+import { logRawError } from '@/lib/friendly-error'
 
 export const runtime = 'nodejs'
 // A department-budget sheet is two columns, one row per department (a small,
@@ -12,6 +15,12 @@ export const runtime = 'nodejs'
 // can carry), so this stays well under the ingest route's default budget.
 // Matches app/api/import/route.ts's reasoning at a smaller scale.
 export const maxDuration = 60
+
+/** Largest workbook accepted, checked before the file is read into memory. */
+const MAX_IMPORT_FILE_BYTES = 10 * 1024 * 1024
+const TOO_BIG_MESSAGE = 'That file is too large (the limit is 10 MB). Please split it or remove unused sheets.'
+/** Rows parsed per sheet. Far above any real workbook; stops a crafted sheet from expanding without bound. */
+const MAX_SHEET_ROWS = 20_000
 
 /**
  * Department-budget import endpoint (review-page-redesign plan §11).
@@ -49,6 +58,14 @@ async function handlePOST(request: NextRequest) {
     )
   }
 
+  // Cookie-authenticated: same-origin only (security-audit-fix-plan.md 4.3).
+  const crossSite = originProblem(request.headers, publicEnv.NEXT_PUBLIC_SITE_URL)
+  if (crossSite) return NextResponse.json({ error: crossSite.error }, { status: crossSite.status })
+  // Refuse an oversize body before buffering it (the file itself is re-checked below).
+  if (declaredLengthExceeds(request.headers, MAX_IMPORT_FILE_BYTES + 1024 * 1024)) {
+    return NextResponse.json({ error: TOO_BIG_MESSAGE }, { status: 413 })
+  }
+
   let formData: FormData
   try {
     formData = await request.formData()
@@ -66,13 +83,17 @@ async function handlePOST(request: NextRequest) {
     return NextResponse.json({ error: '"mode" must be "dry_run" or "commit".' }, { status: 400 })
   }
 
+  if (file.size > MAX_IMPORT_FILE_BYTES) {
+    return NextResponse.json({ error: TOO_BIG_MESSAGE }, { status: 413 })
+  }
+
   const arrayBuffer = await file.arrayBuffer()
   const buffer = Buffer.from(arrayBuffer)
   const fileHashSha256 = createHash('sha256').update(buffer).digest('hex')
 
   let workbook: XLSX.WorkBook
   try {
-    workbook = XLSX.read(buffer, { type: 'buffer' })
+    workbook = XLSX.read(buffer, { type: 'buffer', sheetRows: MAX_SHEET_ROWS })
   } catch {
     return NextResponse.json(
       { error: 'Could not parse the uploaded file as an Excel workbook.' },
@@ -92,8 +113,8 @@ async function handlePOST(request: NextRequest) {
     // Always 200 -- see the identical comment in app/api/import/route.ts.
     return NextResponse.json(result, { status: 200 })
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    return NextResponse.json({ error: `Import failed: ${message}` }, { status: 500 })
+    logRawError('department-budget import', error instanceof Error ? error.message : String(error))
+    return NextResponse.json({ error: 'The import didn’t finish. Please try again.' }, { status: 500 })
   }
 }
 

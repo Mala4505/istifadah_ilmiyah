@@ -9,6 +9,9 @@ import {
   revokeScrapeToken,
 } from '@/lib/scrape-token'
 import { isAdminOrAbove } from '@/lib/auth/roles'
+import { jsonRequestProblem, originProblem } from '@/lib/http-guards'
+import { publicEnv } from '@/lib/env'
+import { logRawError } from '@/lib/friendly-error'
 
 export const runtime = 'nodejs'
 
@@ -69,6 +72,16 @@ async function handlePOST(request: NextRequest) {
   const auth = await requireAdmin()
   if (!auth.ok) return auth.response
 
+  // Cookie-authenticated JSON route: must be JSON and from our own origin
+  // (security-audit-fix-plan.md 4.3 CSRF).
+  const guardProblem = jsonRequestProblem(request.headers, {
+    siteUrl: publicEnv.NEXT_PUBLIC_SITE_URL,
+    checkOrigin: true,
+  })
+  if (guardProblem) {
+    return NextResponse.json({ error: guardProblem.error }, { status: guardProblem.status })
+  }
+
   let body: unknown
   try {
     body = await request.json()
@@ -78,11 +91,12 @@ async function handlePOST(request: NextRequest) {
 
   const parsed = mintSchema.safeParse(body)
   if (!parsed.success) {
+    logRawError(
+      'scrape-token mint validation',
+      parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ')
+    )
     return NextResponse.json(
-      {
-        error: 'Invalid request.',
-        issues: parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`),
-      },
+      { error: 'That request wasn’t valid. Pick a source and a lifetime between 1 hour and 30 days.' },
       { status: 400 }
     )
   }
@@ -104,8 +118,11 @@ async function handlePOST(request: NextRequest) {
       headers: { 'Cache-Control': 'no-store' },
     })
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    return NextResponse.json({ error: message }, { status: 500 })
+    logRawError('scrape-token mint', error instanceof Error ? error.message : String(error))
+    return NextResponse.json(
+      { error: 'We couldn’t create the token just now. Please try again.' },
+      { status: 500 }
+    )
   }
 }
 
@@ -134,6 +151,10 @@ async function handleDELETE(request: NextRequest) {
   const auth = await requireAdmin()
   if (!auth.ok) return auth.response
 
+  // Cookie-authenticated, state-changing: same-origin only.
+  const crossSite = originProblem(request.headers, publicEnv.NEXT_PUBLIC_SITE_URL)
+  if (crossSite) return NextResponse.json({ error: crossSite.error }, { status: crossSite.status })
+
   const id = Number(request.nextUrl.searchParams.get('id'))
   if (!Number.isInteger(id) || id <= 0) {
     return NextResponse.json({ error: 'Invalid token id.' }, { status: 400 })
@@ -143,8 +164,11 @@ async function handleDELETE(request: NextRequest) {
     await revokeScrapeToken(id, auth.userId)
     return NextResponse.json({ revoked: id })
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    return NextResponse.json({ error: message }, { status: 500 })
+    logRawError('scrape-token revoke', error instanceof Error ? error.message : String(error))
+    return NextResponse.json(
+      { error: 'We couldn’t revoke the token just now. Please try again.' },
+      { status: 500 }
+    )
   }
 }
 

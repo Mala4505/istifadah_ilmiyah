@@ -17,6 +17,8 @@
 
 import { revalidatePath } from 'next/cache'
 import { cookies } from 'next/headers'
+import { z } from 'zod'
+import { createClient } from '@/lib/supabase/server'
 import { Pool } from 'pg'
 import { serverEnv } from '@/lib/env.server'
 import { logRawError } from '@/lib/friendly-error'
@@ -43,7 +45,28 @@ export async function setActiveEvent(eventId: number): Promise<SimpleActionResul
   const gate = await requireAdminOrAbove()
   if (!gate.ok) return { ok: false, error: adminGateMessage(gate.reason) }
 
-  ;(await cookies()).set(ACTIVE_EVENT_COOKIE, String(eventId), { path: '/', maxAge: 60 * 60 * 24 * 365 })
+  // Security audit 3.8 (L19): a public POST endpoint -- the id must be a real,
+  // visible event before it is ever written into a cookie.
+  const parsed = z.number().int().positive().safeParse(eventId)
+  if (!parsed.success) return { ok: false, error: 'That event could not be found.' }
+  const supabase = await createClient()
+  const { data: eventRow, error: eventError } = await supabase
+    .from('event')
+    .select('id')
+    .eq('id', parsed.data)
+    .maybeSingle()
+  if (eventError) return { ok: false, error: logRawError('events.setActiveEvent', eventError.message) }
+  if (!eventRow) return { ok: false, error: 'That event could not be found.' }
+
+  // httpOnly: only server code reads this cookie (no document.cookie reader).
+  // `secure` is production-only so plain-http localhost dev still works.
+  ;(await cookies()).set(ACTIVE_EVENT_COOKIE, String(parsed.data), {
+    path: '/',
+    maxAge: 60 * 60 * 24 * 365,
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+  })
   return { ok: true }
 }
 

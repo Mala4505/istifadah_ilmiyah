@@ -77,6 +77,9 @@ export function looksLikePdf(bytes: Uint8Array): boolean {
   return Buffer.from(bytes.subarray(0, PDF_MAGIC.length)).toString('latin1') === PDF_MAGIC
 }
 
+/** Upper bound for reading a PDF's page count at upload time. */
+const PDF_PARSE_TIMEOUT_MS = 15_000
+
 /**
  * Reads the page count without rendering anything.
  *
@@ -101,10 +104,26 @@ export function looksLikePdf(bytes: Uint8Array): boolean {
  * does — a page-count call is what that load already knows for free, before
  * any splitting happens.
  */
-export async function getPdfPageCount(bytes: Uint8Array): Promise<number> {
+export async function getPdfPageCount(bytes: Uint8Array, timeoutMs = PDF_PARSE_TIMEOUT_MS): Promise<number> {
   const { PDFDocument } = await import('pdf-lib')
-  const doc = await PDFDocument.load(bytes)
-  return doc.getPageCount()
+  // A crafted PDF (huge object graph, deep nesting) can make the parse run for
+  // a very long time. pdf-lib yields to the event loop every few thousand
+  // objects while parsing, so a timer can win this race; the request is then
+  // answered instead of burning the whole function budget
+  // (security-audit-fix-plan.md 4.3).
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error(`getPdfPageCount: PDF parse exceeded ${timeoutMs}ms`)),
+      timeoutMs
+    )
+  })
+  try {
+    const doc = await Promise.race([PDFDocument.load(bytes), timeout])
+    return doc.getPageCount()
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
 }
 
 /**

@@ -5,6 +5,9 @@ import { withApiLogging } from '@/lib/api-log'
 import { canonicalPayloadHash, runPortalImport, type ScrapePayload } from '@/lib/import/run-portal-import'
 import { recordScrapeTokenUse, verifyScrapeToken } from '@/lib/scrape-token'
 import { isAdminOrAbove } from '@/lib/auth/roles'
+import { declaredLengthExceeds, isJsonContentType, isSameOrigin } from '@/lib/http-guards'
+import { publicEnv } from '@/lib/env'
+import { logRawError } from '@/lib/friendly-error'
 
 export const runtime = 'nodejs'
 // Missing until 2026-09-27 -- this route was falling back to the platform's
@@ -62,6 +65,8 @@ export const maxDuration = 180
 const MAX_ROWS = 20_000
 const MAX_COLUMNS = 100
 const MAX_CELL_LENGTH = 2_000
+/** Largest request body accepted. 20,000 rows x 100 cols is never sent in one request (the Hub chunks), and Vercel caps bodies at 4.5 MB anyway. */
+const MAX_BODY_BYTES = 4 * 1024 * 1024
 
 const payloadSchema = z.object({
   sourceSystem: z.enum(['departmental', 'audit']),
@@ -105,22 +110,103 @@ function bearerToken(request: NextRequest): string | null {
   return match ? match[1]!.trim() : null
 }
 
+/**
+ * Authenticates BEFORE the body is read, so an unauthenticated caller can't make
+ * the server buffer and parse a large payload (security-audit-fix-plan.md 4.3).
+ *
+ * Bearer token: the token is checked against both source systems (a token is
+ * minted for exactly one), and the matching source system is remembered so the
+ * body's own `sourceSystem` can be required to agree once it is parsed.
+ * Session: admin cookie, which additionally requires a same-origin request.
+ */
+type PortalAuth =
+  | { ok: true; importedBy: string; tokenSourceSystem: 'departmental' | 'audit' | null; tokenId: number | null; tokenUseCount: number }
+  | { ok: false; status: number; error: string }
+
+async function authenticate(request: NextRequest): Promise<PortalAuth> {
+  const token = bearerToken(request)
+
+  if (token) {
+    for (const system of ['departmental', 'audit'] as const) {
+      const verified = await verifyScrapeToken(token, system)
+      if (verified.ok) {
+        return {
+          ok: true,
+          importedBy: verified.createdBy,
+          tokenSourceSystem: system,
+          tokenId: verified.tokenId,
+          tokenUseCount: verified.useCount,
+        }
+      }
+    }
+    // Every rejection reason collapses to one message on purpose — see
+    // lib/scrape-token.ts. "Expired" vs "unknown" would confirm which
+    // strings are real tokens.
+    return { ok: false, status: 401, error: 'Invalid or expired scrape token.' }
+  }
+
+  // Session path (cookie): refuse cross-site requests.
+  if (!isSameOrigin(request.headers, publicEnv.NEXT_PUBLIC_SITE_URL)) {
+    return { ok: false, status: 403, error: 'This request did not come from the app.' }
+  }
+  const supabase = await createClient()
+  const user = await getAuthUser(supabase)
+
+  if (!user) {
+    return { ok: false, status: 401, error: 'Not authenticated.' }
+  }
+
+  const { data: profile, error: profileError } = await supabase
+    .from('staff_profile')
+    .select('role, is_active')
+    .eq('id', user.id)
+    .maybeSingle()
+
+  if (profileError) {
+    logRawError('import-portal staff lookup', profileError.message)
+    return { ok: false, status: 500, error: 'Could not verify staff role.' }
+  }
+  if (!profile || !profile.is_active || !isAdminOrAbove(profile.role)) {
+    return { ok: false, status: 403, error: 'Only an active admin may run an import.' }
+  }
+  return { ok: true, importedBy: user.id, tokenSourceSystem: null, tokenId: null, tokenUseCount: 0 }
+}
+
 async function handlePOST(request: NextRequest) {
+  // 1. Cheap, header-only refusals first: nothing is read or parsed yet.
+  if (declaredLengthExceeds(request.headers, MAX_BODY_BYTES)) {
+    return json(request, { error: 'That upload is too large. Send fewer rows at a time.' }, 413)
+  }
+
+  // 2. Authenticate before touching the body.
+  const auth = await authenticate(request)
+  if (!auth.ok) return json(request, { error: auth.error }, auth.status)
+
+  // 3. Only now the body: JSON only (blocks cross-site form posts), size-capped
+  //    even when the client didn't declare a Content-Length.
+  if (!isJsonContentType(request.headers)) {
+    return json(request, { error: 'This request must be sent as JSON.' }, 415)
+  }
   let body: unknown
   try {
-    body = await request.json()
+    const raw = await request.text()
+    if (raw.length > MAX_BODY_BYTES) {
+      return json(request, { error: 'That upload is too large. Send fewer rows at a time.' }, 413)
+    }
+    body = JSON.parse(raw)
   } catch {
     return json(request, { error: 'Expected a JSON body.' }, 400)
   }
 
   const parsed = payloadSchema.safeParse(body)
   if (!parsed.success) {
+    logRawError(
+      'import-portal payload validation',
+      parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ')
+    )
     return json(
       request,
-      {
-        error: 'Invalid scrape payload.',
-        issues: parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`),
-      },
+      { error: 'The scrape data wasn’t in the expected format. Run the bookmarklet again from the portal table.' },
       400
     )
   }
@@ -135,46 +221,14 @@ async function handlePOST(request: NextRequest) {
     scrapedAt: payloadFields.scrapedAt ?? null,
   }
 
-  // ---- authorise: bearer token, else Hub session -------------------------
-  let importedBy: string | null = null
-  const token = bearerToken(request)
-
-  if (token) {
-    const verified = await verifyScrapeToken(token, payload.sourceSystem)
-    if (!verified.ok) {
-      // Every rejection reason collapses to one message on purpose — see
-      // lib/scrape-token.ts. "Expired" vs "unknown" would confirm which
-      // strings are real tokens.
-      return json(request, { error: 'Invalid or expired scrape token.' }, 401)
-    }
-    importedBy = verified.createdBy
-    await recordScrapeTokenUse(verified.tokenId, verified.useCount)
-  } else {
-    const supabase = await createClient()
-    const user = await getAuthUser(supabase)
-
-    if (!user) {
-      return json(request, { error: 'Not authenticated.' }, 401)
-    }
-
-    const { data: profile, error: profileError } = await supabase
-      .from('staff_profile')
-      .select('role, is_active')
-      .eq('id', user.id)
-      .maybeSingle()
-
-    if (profileError) {
-      return json(request, { error: 'Could not verify staff role.' }, 500)
-    }
-    if (!profile || !profile.is_active || !isAdminOrAbove(profile.role)) {
-      return json(
-        request,
-        { error: 'Only an active admin may run an import.' },
-        403
-      )
-    }
-    importedBy = user.id
+  // A token minted for one portal can't submit rows claiming to be the other.
+  if (auth.tokenSourceSystem !== null && auth.tokenSourceSystem !== payload.sourceSystem) {
+    return json(request, { error: 'Invalid or expired scrape token.' }, 401)
   }
+  if (auth.tokenId !== null) {
+    await recordScrapeTokenUse(auth.tokenId, auth.tokenUseCount)
+  }
+  const importedBy: string | null = auth.importedBy
 
   if (payload.rows.length === 0) {
     return json(
@@ -206,8 +260,8 @@ async function handlePOST(request: NextRequest) {
     // message instead of showing the operator what actually happened.
     return json(request, result, 200)
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    return json(request, { error: `Portal import failed: ${message}` }, 500)
+    logRawError('import-portal', error instanceof Error ? error.message : String(error))
+    return json(request, { error: 'The import didn’t finish. Please try again.' }, 500)
   }
 }
 

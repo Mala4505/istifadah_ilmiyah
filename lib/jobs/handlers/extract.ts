@@ -672,8 +672,27 @@ export async function persistExtractionPipelineResult(
         'line_item_tally_mismatch',
         'line_item_row_math_mismatch',
         'ocr_total_vs_amount',
-        'other',
       ])
+
+    // Security audit M12: `other` is NOT in the list above on purpose. A
+    // reviewer's manual "Other" flag (flagReviewException) is also stored as
+    // exception_type 'other', so dismissing every open `other` let a re-run --
+    // or text printed inside a document steering the model -- silently wipe a
+    // human's flag. The pipeline's own `other` rows (the legibility/script
+    // quality warning, runTallyChecks) are the only machine ones and are
+    // identifiable by their `extraction_quality:` dedup_key; human-raised rows
+    // have a null dedup_key. Supersede only the machine-raised ones.
+    await admin
+      .from('reconciliation_exception')
+      .update({
+        status: 'dismissed',
+        resolved_at: new Date().toISOString(),
+        resolution_note: `Superseded by extraction run ${currentRunId}.`,
+      })
+      .eq('document_extraction_id', documentExtractionId)
+      .eq('status', 'open')
+      .eq('exception_type', 'other')
+      .like('dedup_key', 'extraction_quality:%')
 
     // ---- §8 point 5: tally checks, immediately on write, scoped to this bill.
     //

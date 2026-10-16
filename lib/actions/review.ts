@@ -16,8 +16,11 @@ import { logRawError } from '@/lib/friendly-error'
 import { normalizeVendorName } from '@/lib/normalize'
 import { isSameGstin, validateGstin } from '@/lib/analytics/gstin'
 import { serverEnv } from '@/lib/env.server'
+import { z } from 'zod'
 import { getStaffContext } from '@/lib/export/auth'
-import { isAdminOrAbove } from '@/lib/auth/roles'
+import { isAdminOrAbove, isSuperadmin } from '@/lib/auth/roles'
+import { assertDocumentWritable, assertEntryVisible, assertExtractionWritable } from '@/lib/auth/scope'
+import { buildIlikeOrFilter } from '@/lib/postgrest-filter'
 import { reExtractFieldScoped, reExtractPageScoped } from '@/lib/jobs/handlers/rescope-extract'
 import { getSelectedEvent, isEventMutable } from '@/lib/events/current'
 import { computeMatchCandidates } from '@/lib/review/match-candidates'
@@ -26,6 +29,46 @@ import type { MatchCandidate } from '@/lib/review/types'
 import type { ManualFlagReason } from '@/components/exceptions/labels'
 
 const CLAIM_STALE_AFTER_MS = 15 * 60 * 1000 // §7: "Claims expire after 15 minutes of inactivity"
+
+/**
+ * Security audit 2026-10-15 (Phase 3): every export of this 'use server' file is
+ * a public POST endpoint, so each write action starts with this gate -- an
+ * active admin-or-above (the app's "reviewer" tier; RLS's
+ * `is_reviewer_or_admin()` is the same floor). `what` reads as the subject of
+ * the refusal, e.g. "Saving a review" -> "Saving a review is an admin action."
+ */
+type StaffGate =
+  | { ok: true; staff: NonNullable<Awaited<ReturnType<typeof getStaffContext>>> }
+  | { ok: false; error: string }
+
+async function requireActiveAdmin(what: string): Promise<StaffGate> {
+  const staff = await getStaffContext()
+  if (!staff) return { ok: false, error: 'You must be signed in.' }
+  if (!staff.isActive) return { ok: false, error: 'Your account is pending activation.' }
+  if (!isAdminOrAbove(staff.role)) return { ok: false, error: `${what} is an admin action.` }
+  return { ok: true, staff }
+}
+
+const positiveInt = z.number().int().positive()
+
+const confirmVendorAliasSchema = z.object({
+  vendorId: positiveInt,
+  rawName: z.string().max(300),
+})
+
+const saveEntryClassificationSchema = z.object({
+  entryId: positiveInt,
+  adminHeadId: positiveInt.nullable(),
+  zoneId: positiveInt.nullable(),
+  subDepartmentId: positiveInt.nullable(),
+})
+
+const flagReviewExceptionSchema = z.object({
+  documentExtractionId: positiveInt,
+  entryId: positiveInt.nullable(),
+  reason: z.enum(['not_clear', 'not_visible', 'other']),
+  note: z.string().max(2000),
+})
 
 /** Shared between the auto_recheck_note stamp below and the note actually
  *  written when the reviewer confirms from the post-save toast (2026-09-14
@@ -194,6 +237,21 @@ async function resolveOrCreateVendorForVerifiedName(
  * which a sequence of plain `.update()`/`.insert()` calls cannot guarantee.
  */
 export async function saveVerification(input: SaveVerificationInput): Promise<SaveVerificationResult> {
+  // Security audit 3.4 (M6): who is asking, and may they touch THIS bill, are
+  // settled before anything else -- in particular before
+  // resolveOrCreateVendorForVerifiedName below, which writes `vendor` rows
+  // through the service-role client and used to run ahead of any role check.
+  const gate = await requireActiveAdmin('Saving a review')
+  if (!gate.ok) return { ok: false, error: gate.error }
+  if (!positiveInt.safeParse(input.documentExtractionId).success) {
+    return { ok: false, error: 'Invalid document extraction id.' }
+  }
+  if (input.vendorId !== null && !positiveInt.safeParse(input.vendorId).success) {
+    return { ok: false, error: 'Invalid vendor id.' }
+  }
+  const scope = await assertExtractionWritable(input.documentExtractionId, gate.staff.role)
+  if (!scope.ok) return { ok: false, error: scope.error }
+
   const supabase = await createClient()
   const user = await getAuthUser(supabase)
   if (!user) {
@@ -205,7 +263,8 @@ export async function saveVerification(input: SaveVerificationInput): Promise<Sa
   // currently SELECTED event (not this document's own event_id): the queue
   // itself is already filtered to the selected event
   // (app/(app)/review/page.tsx), so a document reachable here belongs to it
-  // by construction.
+  // by construction. (The row's own event is checked above by
+  // assertExtractionWritable, so a forged cookie cannot bypass it.)
   const selectedEvent = await getSelectedEvent()
   if (!isEventMutable(selectedEvent)) {
     return { ok: false, error: 'This event is closed to edits. Switch to the current event to verify documents.' }
@@ -561,7 +620,9 @@ export async function getReviewDocumentUrl(
     const url = await getSignedUrl(doc.storage_path as string, 300)
     return { ok: true, url }
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : String(err) }
+    // The raw error can name the storage path; log it, show plain English.
+    logRawError('review.getReviewDocumentUrl:signedUrl', err instanceof Error ? err.message : String(err))
+    return { ok: false, error: 'Could not open this document right now. Try again in a moment.' }
   }
 }
 
@@ -587,9 +648,26 @@ export async function flagReviewException(input: {
   reason: ManualFlagReason
   note: string
 }): Promise<SimpleActionResult> {
-  const note = input.note.trim()
-  if (input.reason === 'other' && !note) {
+  // Security audit 3.7: `reason` becomes exception_type verbatim, so it is
+  // validated at runtime -- this is a public POST endpoint, the TS type alone
+  // proves nothing.
+  const parsed = flagReviewExceptionSchema.safeParse(input)
+  if (!parsed.success) {
+    return { ok: false, error: 'That flag could not be saved. Check the reason and try again.' }
+  }
+  const { reason, documentExtractionId, entryId } = parsed.data
+  const note = parsed.data.note.trim()
+  if (reason === 'other' && !note) {
     return { ok: false, error: 'A note is required for "Other".' }
+  }
+
+  const gate = await requireActiveAdmin('Flagging a bill')
+  if (!gate.ok) return { ok: false, error: gate.error }
+  const scope = await assertExtractionWritable(documentExtractionId, gate.staff.role)
+  if (!scope.ok) return { ok: false, error: scope.error }
+  if (entryId !== null) {
+    const entryScope = await assertEntryVisible(entryId, { role: gate.staff.role, requireWritable: true })
+    if (!entryScope.ok) return { ok: false, error: entryScope.error }
   }
 
   const supabase = await createClient()
@@ -599,9 +677,9 @@ export async function flagReviewException(input: {
   }
 
   const { error } = await supabase.from('reconciliation_exception').insert({
-    entry_id: input.entryId,
-    document_extraction_id: input.documentExtractionId,
-    exception_type: input.reason,
+    entry_id: entryId,
+    document_extraction_id: documentExtractionId,
+    exception_type: reason,
     severity: 'medium',
     description: note || null,
     status: 'open',
@@ -878,11 +956,33 @@ export async function saveEntryClassification(input: {
   zoneId: number | null
   subDepartmentId: number | null
 }): Promise<SimpleActionResult> {
-  if (!Number.isInteger(input.entryId)) {
+  const parsed = saveEntryClassificationSchema.safeParse(input)
+  if (!parsed.success) {
     return { ok: false, error: 'Invalid entry id.' }
   }
 
+  const gate = await requireActiveAdmin('Classifying an entry')
+  if (!gate.ok) return { ok: false, error: gate.error }
+  const entryScope = await assertEntryVisible(input.entryId, { role: gate.staff.role, requireWritable: true })
+  if (!entryScope.ok) return { ok: false, error: entryScope.error }
+
   const supabase = await createClient()
+
+  // Security audit 3.8 (L3): the sub-department must belong to this entry's own
+  // department -- the id comes from the client and the foreign key alone would
+  // accept any sub-department in the system.
+  if (input.subDepartmentId !== null) {
+    const { data: sub, error: subError } = await supabase
+      .from('sub_department')
+      .select('id, department_id')
+      .eq('id', input.subDepartmentId)
+      .maybeSingle()
+    if (subError) return { ok: false, error: logRawError('review.saveEntryClassification:sub', subError.message) }
+    if (!sub || sub.department_id !== entryScope.entry.departmentId) {
+      return { ok: false, error: 'That sub-department does not belong to this entry\'s department.' }
+    }
+  }
+
   const { data, error } = await supabase
     .from('entries')
     .update({ admin_head_id: input.adminHeadId, zone_id: input.zoneId, sub_department_id: input.subDepartmentId })
@@ -929,6 +1029,11 @@ export async function addLineItem(
   if (!Number.isInteger(documentExtractionId)) {
     return { ok: false, error: 'Invalid document extraction id.' }
   }
+
+  const gate = await requireActiveAdmin('Adding a line item')
+  if (!gate.ok) return { ok: false, error: gate.error }
+  const scope = await assertExtractionWritable(documentExtractionId, gate.staff.role)
+  if (!scope.ok) return { ok: false, error: scope.error }
 
   const supabase = await createClient()
   const user = await getAuthUser(supabase)
@@ -1043,15 +1148,19 @@ export async function refreshMatchCandidates(input: {
  * admin merge list.
  */
 export async function searchReviewVendors(query: string): Promise<VendorSearchResult[]> {
-  const trimmed = query.trim()
+  const trimmed = (typeof query === 'string' ? query : '').trim()
   if (trimmed.length < 2) return []
 
   const supabase = await createClient()
-  const escaped = trimmed.replace(/[%_]/g, '\\$&')
+  // Security audit 5.3 (L20): the term is user-typed and lands inside a
+  // PostgREST .or() filter string -- quote it (lib/postgrest-filter.ts) so a
+  // comma/paren/dot in it cannot add conditions of its own. The two columns are
+  // matched with the original casing and lower-cased terms respectively, so each
+  // gets its own quoted pattern.
   const { data, error } = await supabase
     .from('vendor')
     .select('id, display_name, gstin')
-    .or(`display_name.ilike.%${escaped}%,normalized_name.ilike.%${escaped.toLowerCase()}%`)
+    .or(`${buildIlikeOrFilter(['display_name'], trimmed)},${buildIlikeOrFilter(['normalized_name'], trimmed.toLowerCase())}`)
     .order('display_name')
     .limit(15)
 
@@ -1181,17 +1290,34 @@ export async function confirmVendorAlias(input: {
   vendorId: number
   rawName: string
 }): Promise<SimpleActionResult> {
-  if (!Number.isInteger(input.vendorId)) {
+  // Security audit 3.1 (H2): this used to write through the service-role client
+  // with no check of who was asking. Gate first, validate, and prove the vendor
+  // is visible to the caller through the session client before the admin client
+  // is touched.
+  const gate = await requireActiveAdmin('Recording a vendor spelling')
+  if (!gate.ok) return { ok: false, error: gate.error }
+
+  const parsed = confirmVendorAliasSchema.safeParse(input)
+  if (!parsed.success) {
     return { ok: false, error: 'Invalid vendor id.' }
   }
 
-  const normalized = normalizeVendorName(input.rawName.trim())
+  const normalized = normalizeVendorName(parsed.data.rawName.trim())
   if (!normalized) return { ok: true }
+
+  const supabase = await createClient()
+  const { data: vendorRow, error: vendorError } = await supabase
+    .from('vendor')
+    .select('id')
+    .eq('id', parsed.data.vendorId)
+    .maybeSingle()
+  if (vendorError) return { ok: false, error: logRawError('review.confirmVendorAlias:vendor', vendorError.message) }
+  if (!vendorRow) return { ok: false, error: 'That vendor could not be found.' }
 
   const admin = createAdminClient()
   const { error } = await admin
     .from('vendor_alias')
-    .upsert({ vendor_id: input.vendorId, raw_name: normalized, source: 'manual' }, { onConflict: 'raw_name', ignoreDuplicates: true })
+    .upsert({ vendor_id: parsed.data.vendorId, raw_name: normalized, source: 'manual' }, { onConflict: 'raw_name', ignoreDuplicates: true })
 
   if (error) return { ok: false, error: logRawError('review.confirmVendorAlias', error.message) }
   return { ok: true }
@@ -1205,8 +1331,11 @@ export async function confirmVendorAlias(input: {
  * toggle would silently reset to "pending" on every click. A cookie
  * survives that without touching review-workspace.tsx.
  */
-export async function setReviewQueueScope(scope: 'pending' | 'reviewed' | 'all'): Promise<{ ok: true }> {
-  ;(await cookies()).set('review_queue_scope', scope, { path: '/', maxAge: 60 * 60 * 24 * 365 })
+export async function setReviewQueueScope(scope: 'pending' | 'reviewed' | 'all'): Promise<SimpleActionResult> {
+  // Security audit 3.8 (L19): runtime-validate -- the cookie value is read back by the queue page.
+  const parsed = z.enum(['pending', 'reviewed', 'all']).safeParse(scope)
+  if (!parsed.success) return { ok: false, error: 'That view is not available.' }
+  ;(await cookies()).set('review_queue_scope', parsed.data, { path: '/', maxAge: 60 * 60 * 24 * 365 })
   return { ok: true }
 }
 
@@ -1219,9 +1348,10 @@ export async function setReviewQueueScope(scope: 'pending' | 'reviewed' | 'all')
  * when set, keeps only queue rows whose source_document is assigned to that
  * staff id.
  */
-export async function setReviewQueueAssignee(value: string | null): Promise<{ ok: true }> {
+export async function setReviewQueueAssignee(value: string | null): Promise<SimpleActionResult> {
   const jar = await cookies()
   if (value) {
+    if (!z.string().uuid().safeParse(value).success) return { ok: false, error: 'That reviewer is not valid.' }
     jar.set('review_queue_assignee', value, { path: '/', maxAge: 60 * 60 * 24 * 365 })
   } else {
     jar.delete('review_queue_assignee')
@@ -1281,6 +1411,11 @@ export async function setPageSkipOverride(input: {
     return { ok: false, error: 'Invalid document or page number.' }
   }
 
+  const gate = await requireActiveAdmin('Changing which pages count')
+  if (!gate.ok) return { ok: false, error: gate.error }
+  const scope = await assertDocumentWritable(input.sourceDocumentId, gate.staff.role)
+  if (!scope.ok) return { ok: false, error: scope.error }
+
   const supabase = await createClient()
   const user = await getAuthUser(supabase)
   if (!user) {
@@ -1290,7 +1425,7 @@ export async function setPageSkipOverride(input: {
   if (input.skip) {
     const { data: existingBills, error: existingBillsError } = await supabase
       .from('document_extraction')
-      .select('id, page_number_start, page_number_end')
+      .select('id, page_number_start, page_number_end, verified_at')
       .eq('source_document_id', input.sourceDocumentId)
 
     if (existingBillsError) {
@@ -1305,6 +1440,15 @@ export async function setPageSkipOverride(input: {
     // a multi-page bill's other pages are still real, so this page's own
     // skip toggle is applied (below) without touching that shared bill.
     if (containingBill && containingBill.page_number_start === containingBill.page_number_end) {
+      // Security audit 3.2/M3: removing a bill that has already been verified
+      // and saved destroys reviewed data (and its rate history links), so only
+      // a superadmin may do it -- an admin gets a plain message instead.
+      if (containingBill.verified_at && !isSuperadmin(gate.staff.role)) {
+        return {
+          ok: false,
+          error: 'This page already produced a bill that has been reviewed and saved. Only a superadmin can skip it.',
+        }
+      }
       // entry_bill_link (2026-09-08, entries<->bills many-to-many) has no
       // DELETE policy of its own -- every normal write to it goes through a
       // security-definer RPC (set_bill_entry_links / remove_bill_entry_link)
@@ -1410,6 +1554,36 @@ export async function reExtractPage(input: {
     return { ok: false, error: 'Re-running extraction is an admin action.' }
   }
 
+  // Security audit 3.2 (H4): prove, through the session client (RLS), that this
+  // document is visible to the caller and its event is open (superadmin
+  // excepted), and that it has no verified bill (superadmin excepted), BEFORE the
+  // service-role client runs a paid extraction that overwrites data.
+  // Page-level, not document-level: a verified bill elsewhere in the PDF must not
+  // block OCR of a different (e.g. previously skipped) page.
+  const scope = await assertDocumentWritable(input.sourceDocumentId, staff.role)
+  if (!scope.ok) return { ok: false, error: scope.error }
+  if (!isSuperadmin(staff.role)) {
+    const supabase = await createClient()
+    const { data: verifiedBill, error: verifiedBillError } = await supabase
+      .from('document_extraction')
+      .select('id')
+      .eq('source_document_id', input.sourceDocumentId)
+      .lte('page_number_start', input.pageNumber)
+      .gte('page_number_end', input.pageNumber)
+      .not('verified_at', 'is', null)
+      .limit(1)
+    if (verifiedBillError) {
+      logRawError('review.reExtractPage:verified', verifiedBillError.message)
+      return { ok: false, error: 'Something went wrong while checking this page. Please try again.' }
+    }
+    if ((verifiedBill ?? []).length > 0) {
+      return {
+        ok: false,
+        error: 'This page belongs to a bill that has already been reviewed and saved. Only a superadmin can redo it.',
+      }
+    }
+  }
+
   try {
     const admin = createAdminClient()
     const result = await reExtractPageScoped(admin, {
@@ -1456,6 +1630,9 @@ export async function createManualBillForPage(input: {
   if (!isAdminOrAbove(staff.role)) {
     return { ok: false, error: 'Adding a bill is an admin action.' }
   }
+
+  const scope = await assertDocumentWritable(input.sourceDocumentId, staff.role)
+  if (!scope.ok) return { ok: false, error: scope.error }
 
   const supabase = await createClient()
   const { data: visiblePage, error: visibleError } = await supabase
@@ -1571,6 +1748,10 @@ export async function reExtractField(input: {
   if (!isAdminOrAbove(staff.role)) {
     return { ok: false, error: 'Re-running extraction is an admin action.' }
   }
+
+  // Security audit 3.2 (H4): same pre-flight as reExtractPage, at bill level.
+  const scope = await assertExtractionWritable(input.documentExtractionId, staff.role, { refuseVerified: true })
+  if (!scope.ok) return { ok: false, error: scope.error }
 
   try {
     const admin = createAdminClient()

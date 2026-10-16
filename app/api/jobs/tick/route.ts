@@ -4,6 +4,8 @@ import { serverEnv } from '@/lib/env.server'
 import { drainJobQueue } from '@/lib/jobs/drain'
 import { getStaffContext } from '@/lib/export/auth'
 import { isAdminOrAbove } from '@/lib/auth/roles'
+import { originProblem } from '@/lib/http-guards'
+import { publicEnv } from '@/lib/env'
 
 /**
  * The Vercel-side caller of the shared drain loop (MASTER-PLAN §3.11,
@@ -27,10 +29,15 @@ export const maxDuration = 60
 const DRAIN_BUDGET_MS = 50_000
 
 /**
- * Cron secret when one is configured, otherwise an admin session. Vercel Cron
- * sends `Authorization: Bearer <CRON_SECRET>`; CRON_SECRET is read straight
- * from process.env rather than lib/env.server's schema so that deployments
- * without it keep working (they fall back to the admin check).
+ * Who may drain the queue (security-audit-fix-plan.md 4.3):
+ *  - the cron secret (`Authorization: Bearer <CRON_SECRET>`), on GET or POST --
+ *    Vercel Cron sends GET, curl/other schedulers may send POST;
+ *  - an admin session, on POST ONLY. GET is a "safe" method that a browser
+ *    navigates to, an <img src> can trigger, or a link prefetch can hit with the
+ *    admin's cookies attached, so a cookie must never authorise it. A session
+ *    POST must also come from our own origin (cross-site request forgery).
+ * CRON_SECRET is read straight from process.env rather than lib/env.server's
+ * schema so that deployments without it keep working (they use the admin check).
  */
 async function authorize(request: NextRequest): Promise<{ ok: true } | { ok: false; status: number; error: string }> {
   const cronSecret = process.env.CRON_SECRET
@@ -40,6 +47,13 @@ async function authorize(request: NextRequest): Promise<{ ok: true } | { ok: fal
     const header = request.headers.get('authorization') ?? ''
     if (timingSafeEqual(sha(header), sha(`Bearer ${cronSecret}`))) return { ok: true }
   }
+
+  if (request.method !== 'POST') {
+    return { ok: false, status: 401, error: 'This endpoint needs the scheduler’s secret.' }
+  }
+
+  const problem = originProblem(request.headers, publicEnv.NEXT_PUBLIC_SITE_URL)
+  if (problem) return { ok: false, status: problem.status, error: problem.error }
 
   const staff = await getStaffContext()
   if (!staff) return { ok: false, status: 401, error: 'You must be signed in.' }

@@ -4,6 +4,9 @@ import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 import { logRawError } from '@/lib/friendly-error'
 import { getSelectedEvent, isEventMutable } from '@/lib/events/current'
+import { requireAdminOrAbove } from '@/lib/export/auth'
+import { assertEntryVisible, filterWritableEntryIds } from '@/lib/auth/scope'
+import { buildIlikeOrFilter } from '@/lib/postgrest-filter'
 
 // Phase 6 Step 2 (docs/event-scoping-and-review-fixes-plan.md §1.6): past
 // events are browsable read-only. Every mutation in this file is gated on
@@ -22,6 +25,13 @@ export interface EntryActionResult {
   success: boolean
   error?: string
 }
+
+// Security audit 2026-10-15: every export below is a public POST endpoint. Each
+// write now needs an active admin-or-above (the same floor `entries_update` RLS
+// enforces) and an entry whose OWN event is open for this role -- the cookie-based
+// isEventMutable() check reflects the caller's chosen event, which can be forged.
+const ADMIN_ONLY_MESSAGE = 'Editing entries is an admin action.'
+const nullableId = (v: unknown) => v === null || (typeof v === 'number' && Number.isInteger(v) && v > 0)
 
 /**
  * Saves the Hub-owned enrichment fields on `entries` (MASTER-PLAN §3.4,
@@ -46,6 +56,17 @@ export async function saveEntryEnrichment(
   if (!Number.isInteger(entryId) || entryId <= 0) {
     return { success: false, error: 'Invalid entry.' }
   }
+  if (!nullableId(input.adminHeadId) || !nullableId(input.zoneId)) {
+    return { success: false, error: 'Invalid admin head or zone.' }
+  }
+  if (input.remark !== null && (typeof input.remark !== 'string' || input.remark.length > 5000)) {
+    return { success: false, error: 'That remark is too long.' }
+  }
+
+  const gate = await requireAdminOrAbove()
+  if (!gate.ok) return { success: false, error: ADMIN_ONLY_MESSAGE }
+  const scope = await assertEntryVisible(entryId, { role: gate.staff.role, requireWritable: true })
+  if (!scope.ok) return { success: false, error: scope.error }
 
   const supabase = await createClient()
 
@@ -107,6 +128,14 @@ export async function setEntryClassification(
   if (!Number.isInteger(entryId) || entryId <= 0) {
     return { success: false, error: 'Invalid entry.' }
   }
+  if (!nullableId(input.adminHeadId) || !nullableId(input.zoneId)) {
+    return { success: false, error: 'Invalid admin head or zone.' }
+  }
+
+  const gate = await requireAdminOrAbove()
+  if (!gate.ok) return { success: false, error: ADMIN_ONLY_MESSAGE }
+  const scope = await assertEntryVisible(entryId, { role: gate.staff.role, requireWritable: true })
+  if (!scope.ok) return { success: false, error: scope.error }
 
   const supabase = await createClient()
 
@@ -182,7 +211,9 @@ export interface BulkEntryActionResult {
 export async function bulkSaveEntryEnrichment(
   input: BulkSaveEntryEnrichmentInput
 ): Promise<BulkEntryActionResult> {
-  const cleanIds = Array.from(new Set(input.entryIds)).filter((id) => Number.isInteger(id) && id > 0)
+  const cleanIds = Array.from(new Set(Array.isArray(input.entryIds) ? input.entryIds : [])).filter(
+    (id) => Number.isInteger(id) && id > 0
+  )
   const requestedCount = cleanIds.length
 
   if (requestedCount === 0) {
@@ -193,11 +224,30 @@ export async function bulkSaveEntryEnrichment(
   // per field, see header comment) — `undefined` means "omit", `null` means
   // "clear."
   const patch: Record<string, number | null> = {}
-  if (input.adminHeadId !== undefined) patch.admin_head_id = input.adminHeadId
-  if (input.zoneId !== undefined) patch.zone_id = input.zoneId
+  if (input.adminHeadId !== undefined) {
+    if (!nullableId(input.adminHeadId)) return { success: false, updatedCount: 0, requestedCount, error: 'Invalid admin head.' }
+    patch.admin_head_id = input.adminHeadId
+  }
+  if (input.zoneId !== undefined) {
+    if (!nullableId(input.zoneId)) return { success: false, updatedCount: 0, requestedCount, error: 'Invalid zone.' }
+    patch.zone_id = input.zoneId
+  }
 
   if (Object.keys(patch).length === 0) {
     return { success: false, updatedCount: 0, requestedCount, error: 'Choose at least one field to set or clear.' }
+  }
+
+  const gate = await requireAdminOrAbove()
+  if (!gate.ok) return { success: false, updatedCount: 0, requestedCount, error: ADMIN_ONLY_MESSAGE }
+  const writable = await filterWritableEntryIds(cleanIds, gate.staff.role)
+  if (!writable.ok) return { success: false, updatedCount: 0, requestedCount, error: writable.error }
+  if (writable.ids.length === 0) {
+    return {
+      success: false,
+      updatedCount: 0,
+      requestedCount,
+      error: 'No entries were updated. They may belong to a closed event, which only a superadmin can change.',
+    }
   }
 
   const supabase = await createClient()
@@ -207,7 +257,7 @@ export async function bulkSaveEntryEnrichment(
     return { success: false, updatedCount: 0, requestedCount, error: EVENT_READONLY_ERROR }
   }
 
-  const { data, error } = await supabase.from('entries').update(patch).in('id', cleanIds).select('id')
+  const { data, error } = await supabase.from('entries').update(patch).in('id', writable.ids).select('id')
 
   if (error) {
     return { success: false, updatedCount: 0, requestedCount, error: logRawError('entry-enrichment.bulkSaveEntryEnrichment', error.message) }
@@ -264,6 +314,20 @@ export async function setSettlesEntry(
     return { success: false, error: 'An entry cannot settle itself.' }
   }
 
+  const gate = await requireAdminOrAbove()
+  if (!gate.ok) return { success: false, error: ADMIN_ONLY_MESSAGE }
+  const scope = await assertEntryVisible(entryId, { role: gate.staff.role, requireWritable: true })
+  if (!scope.ok) return { success: false, error: scope.error }
+
+  // Security audit 3.8 (L3): the advance being settled must be a visible
+  // advance_payment entry in the SAME event as this entry.
+  if (settlesEntryId !== null) {
+    const target = await assertEntryVisible(settlesEntryId, { eventId: scope.entry.eventId ?? undefined })
+    if (!target.ok || target.entry.type !== 'advance_payment') {
+      return { success: false, error: 'Pick an advance payment from the same event.' }
+    }
+  }
+
   const supabase = await createClient()
 
   const selectedEvent = await getSelectedEvent()
@@ -313,7 +377,7 @@ export async function searchAdvancePaymentEntries(
   departmentId: number | null
 ): Promise<AdvancePaymentSearchResult[]> {
   const supabase = await createClient()
-  const term = query.trim()
+  const term = (typeof query === 'string' ? query : '').trim()
 
   let request = supabase
     .from('v_entry_enriched')
@@ -328,10 +392,9 @@ export async function searchAdvancePaymentEntries(
   }
 
   if (term) {
-    const escaped = term.replace(/[%_]/g, (m) => `\\${m}`)
-    request = request.or(
-      `ubbl_number.ilike.%${escaped}%,vendor_display_name.ilike.%${escaped}%,vendor_raw.ilike.%${escaped}%`
-    )
+    // Security audit 5.3 (L20): quote the typed term so it cannot add conditions
+    // to the PostgREST .or() filter string (lib/postgrest-filter.ts).
+    request = request.or(buildIlikeOrFilter(['ubbl_number', 'vendor_display_name', 'vendor_raw'], term))
   }
 
   const { data, error } = await request

@@ -14,6 +14,7 @@
  */
 
 import { revalidatePath } from 'next/cache'
+import { z } from 'zod'
 import { createClient, getAuthUser } from '@/lib/supabase/server'
 import { logRawError } from '@/lib/friendly-error'
 import { getStaffContext } from '@/lib/export/auth'
@@ -48,17 +49,40 @@ function hasRequiredModifier(binding: ShortcutBinding): boolean {
   return !!binding.alt
 }
 
+// Security audit 3.8 (L19): shape + size limits for what is stored in staff_profile.keymap_overrides.
+const keymapInputSchema = z.object({
+  overrides: z
+    .record(
+      z.string().max(64),
+      z.object({
+        key: z.string().max(32),
+        alt: z.boolean().optional(),
+        shift: z.boolean().optional(),
+        ctrl: z.boolean().optional(),
+        meta: z.boolean().optional(),
+      })
+    )
+    .refine((o) => Object.keys(o).length <= 100, 'Too many shortcuts.'),
+  shortcutsEnabled: z.boolean(),
+})
+
 export async function saveKeymapPreferences(input: SaveKeymapPreferencesInput): Promise<SimpleActionResult> {
   const supabase = await createClient()
   const user = await getAuthUser(supabase)
   if (!user) return { ok: false, error: 'You need to sign in again to save this.' }
+
+  const parsedInput = keymapInputSchema.safeParse(input)
+  if (!parsedInput.success) {
+    return { ok: false, error: 'Those shortcuts could not be saved. Check them and try again.' }
+  }
+  input = parsedInput.data as SaveKeymapPreferencesInput
 
   const overrides: Partial<Record<ShortcutActionId, ShortcutBinding>> = {}
   for (const [rawActionId, binding] of Object.entries(input.overrides)) {
     if (!binding) continue
     const actionId = rawActionId as ShortcutActionId
     if (!CONFIGURABLE_ACTION_IDS.has(actionId)) {
-      return { ok: false, error: `"${rawActionId}" cannot be rebound.` }
+      return { ok: false, error: 'One of those shortcuts cannot be changed.' }
     }
     if (!hasRequiredModifier(binding)) {
       return {

@@ -3,7 +3,10 @@ import { randomBytes } from 'node:crypto'
 import { withApiLogging } from '@/lib/api-log'
 import { getStaffContext } from '@/lib/export/auth'
 import { getSelectedEvent, isEventMutable } from '@/lib/events/current'
-import { createUploadUrl } from '@/lib/storage'
+import { createUploadUrl, recordPendingUpload } from '@/lib/storage'
+import { jsonRequestProblem } from '@/lib/http-guards'
+import { publicEnv } from '@/lib/env'
+import { logRawError } from '@/lib/friendly-error'
 
 /**
  * Step 1 of the two-step upload (MASTER-PLAN §8, §3.8): hands the browser a
@@ -56,6 +59,14 @@ async function handlePOST(request: NextRequest) {
     return NextResponse.json({ error: 'Your account is pending activation.' }, { status: 403 })
   }
 
+  // Cookie-authenticated JSON route: must be JSON and from our own origin
+  // (security-audit-fix-plan.md 4.3 CSRF).
+  const problem = jsonRequestProblem(request.headers, {
+    siteUrl: publicEnv.NEXT_PUBLIC_SITE_URL,
+    checkOrigin: true,
+  })
+  if (problem) return NextResponse.json({ error: problem.error }, { status: problem.status })
+
   // Same event-mutability gate the old single-request ingest route applied
   // before accepting a file (Phase 6 Step 2 §1.6) — checked again in
   // /api/documents/ingest at finalize time too, since the event can change
@@ -83,10 +94,26 @@ async function handlePOST(request: NextRequest) {
   const path = buildStoragePath(filename)
   try {
     const signedUrl = await createUploadUrl(path)
+
+    // Remember who this path was issued to, so /api/documents/ingest can refuse
+    // to finalise somebody else's upload. A missing ledger table (migration not
+    // pushed yet) is logged and tolerated; any other ledger failure refuses the
+    // upload rather than issuing a URL nobody could later vouch for.
+    const recorded = await recordPendingUpload(path, staff.userId)
+    if (recorded === 'table_missing') {
+      logRawError('upload-url', 'pending_upload table missing; issuing URL without ledger row')
+    } else if (recorded !== 'ok') {
+      return NextResponse.json(
+        { error: 'We couldn’t prepare the upload just now. Please try again in a moment.' },
+        { status: 502 }
+      )
+    }
+
     return NextResponse.json({ path, signedUrl })
   } catch (err) {
+    logRawError('upload-url', err instanceof Error ? err.message : String(err))
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Could not prepare upload.' },
+      { error: 'We couldn’t prepare the upload just now. Please try again in a moment.' },
       { status: 502 }
     )
   }
