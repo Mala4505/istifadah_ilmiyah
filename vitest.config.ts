@@ -7,6 +7,8 @@ export default defineConfig({
       '@': path.resolve(__dirname, '.'),
     },
   },
+  // tsconfig.json keeps JSX as-is for Next; tests need it compiled.
+  oxc: { jsx: { runtime: 'automatic' } },
   test: {
     environment: 'node',
     include: ['test/**/*.test.ts'],
