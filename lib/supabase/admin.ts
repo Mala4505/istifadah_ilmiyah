@@ -1,6 +1,7 @@
 import { createClient as createSupabaseClient } from '@supabase/supabase-js'
 import { publicEnv } from '@/lib/env'
 import { serverEnv } from '@/lib/env.server'
+import { SUPABASE_DB_OPTIONS } from '@/lib/db-schema'
 
 /**
  * Service-role Supabase client — server-only, bypasses Row Level Security
@@ -26,6 +27,7 @@ import { serverEnv } from '@/lib/env.server'
  */
 export function createAdminClient() {
   return createSupabaseClient(publicEnv.NEXT_PUBLIC_SUPABASE_URL, serverEnv.SUPABASE_SECRET_KEY, {
+    db: SUPABASE_DB_OPTIONS,
     auth: {
       autoRefreshToken: false,
       persistSession: false,

@@ -25,6 +25,7 @@ import { NextResponse, type NextRequest } from 'next/server'
 import { createServerClient, type CookieOptions } from '@supabase/ssr'
 import { publicEnv } from '@/lib/env'
 import { serverEnv } from '@/lib/env.server'
+import { SUPABASE_DB_OPTIONS } from '@/lib/db-schema'
 
 export async function middleware(request: NextRequest) {
   const nonce = Buffer.from(crypto.randomUUID()).toString('base64')
@@ -97,6 +98,7 @@ export async function middleware(request: NextRequest) {
     publicEnv.NEXT_PUBLIC_SUPABASE_URL,
     publicEnv.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY,
     {
+      db: SUPABASE_DB_OPTIONS,
       cookies: {
         getAll() {
           return request.cookies.getAll()

@@ -63,6 +63,7 @@ import { checkAllocationSumMismatches, checkNamespaceCollisions, parseBudgetHead
 // the retry orchestration lives there instead of here — it needs
 // parsePortalTable and the ParsedPortalRow shape that module already owns.
 import { retryUnmatchedAuditRows } from '@/lib/import/run-portal-import'
+import { DB_SCHEMA } from '@/lib/db-schema'
 
 // Re-exported so existing callers/imports of these three functions can keep
 // using `@/lib/import/run-import` — the actual implementations and their
@@ -143,14 +144,14 @@ export async function resolveMutableEventId(client: PoolClient | Pool): Promise<
   let row: SelectedEventRow | undefined
   if (Number.isFinite(parsedCookie)) {
     const byCookie = await client.query<SelectedEventRow>(
-      'select id, is_current from public.event where id = $1',
+      `select id, is_current from ${DB_SCHEMA}.event where id = $1`,
       [parsedCookie]
     )
     row = byCookie.rows[0]
   }
   if (!row) {
     const current = await client.query<SelectedEventRow>(
-      'select id, is_current from public.event where is_current = true limit 1'
+      `select id, is_current from ${DB_SCHEMA}.event where is_current = true limit 1`
     )
     row = current.rows[0]
   }
@@ -309,7 +310,7 @@ async function registerEventDepartment(
   departmentId: number
 ): Promise<void> {
   await client.query(
-    `insert into public.event_department (event_id, department_id)
+    `insert into ${DB_SCHEMA}.event_department (event_id, department_id)
      values ($1, $2)
      on conflict do nothing`,
     [eventId, departmentId]
@@ -326,7 +327,7 @@ export async function resolveDepartment(
   if (cached !== undefined) return cached
 
   const existing = await client.query<{ id: number }>(
-    'select id from public.department where name = $1',
+    `select id from ${DB_SCHEMA}.department where name = $1`,
     [name]
   )
   if (existing.rows[0]) {
@@ -344,7 +345,7 @@ export async function resolveDepartment(
   // true rather than aspirational. Judgment call, documented per the task's
   // point 4.
   const created = await client.query<{ id: number }>(
-    'insert into public.department (name) values ($1) returning id',
+    `insert into ${DB_SCHEMA}.department (name) values ($1) returning id`,
     [name]
   )
   const id = created.rows[0]!.id
@@ -378,7 +379,7 @@ async function registerEventBudgetHead(
   budgetHeadId: number
 ): Promise<void> {
   await client.query(
-    `insert into public.event_budget_head (event_id, budget_head_id)
+    `insert into ${DB_SCHEMA}.event_budget_head (event_id, budget_head_id)
      values ($1, $2)
      on conflict do nothing`,
     [eventId, budgetHeadId]
@@ -397,7 +398,7 @@ export async function resolveBudgetHead(
   if (cached !== undefined) return { id: cached.id, created: false }
 
   const existing = await client.query<{ id: number; department_id: number | null }>(
-    'select id, department_id from public.budget_head where raw_label = $1',
+    `select id, department_id from ${DB_SCHEMA}.budget_head where raw_label = $1`,
     [rawLabel]
   )
   if (existing.rows[0]) {
@@ -445,7 +446,7 @@ export async function resolveBudgetHead(
    */
   if (departmentId !== null && shortLabel !== null) {
     const byParts = await client.query<{ id: number; department_id: number | null }>(
-      `select id, department_id from public.budget_head
+      `select id, department_id from ${DB_SCHEMA}.budget_head
         where department_id = $1 and lower(short_label) = lower($2)
         order by id limit 1`,
       [departmentId, shortLabel]
@@ -460,7 +461,7 @@ export async function resolveBudgetHead(
     }
   }
   const created = await client.query<{ id: number }>(
-    `insert into public.budget_head (department_id, raw_label, short_label, first_seen_batch_id)
+    `insert into ${DB_SCHEMA}.budget_head (department_id, raw_label, short_label, first_seen_batch_id)
      values ($1, $2, $3, $4)
      returning id`,
     [departmentId, rawLabel, shortLabel, batchId]
@@ -483,7 +484,7 @@ export async function resolveVendor(
   if (cached !== undefined) return { id: cached, created: false }
 
   const byNormalized = await client.query<{ id: number }>(
-    'select id from public.vendor where normalized_name = $1',
+    `select id from ${DB_SCHEMA}.vendor where normalized_name = $1`,
     [normalized]
   )
   if (byNormalized.rows[0]) {
@@ -492,7 +493,7 @@ export async function resolveVendor(
   }
 
   const byAlias = await client.query<{ vendor_id: number }>(
-    'select vendor_id from public.vendor_alias where raw_name = $1',
+    `select vendor_id from ${DB_SCHEMA}.vendor_alias where raw_name = $1`,
     [rawName]
   )
   if (byAlias.rows[0]) {
@@ -501,14 +502,14 @@ export async function resolveVendor(
   }
 
   const createdVendor = await client.query<{ id: number }>(
-    `insert into public.vendor (display_name, normalized_name, is_confirmed)
+    `insert into ${DB_SCHEMA}.vendor (display_name, normalized_name, is_confirmed)
      values ($1, $2, false)
      returning id`,
     [rawName, normalized]
   )
   const id = createdVendor.rows[0]!.id
   await client.query(
-    `insert into public.vendor_alias (vendor_id, raw_name, source) values ($1, $2, 'import')`,
+    `insert into ${DB_SCHEMA}.vendor_alias (vendor_id, raw_name, source) values ($1, $2, 'import')`,
     [id, rawName]
   )
   caches.vendorByNormalizedName.set(normalized, id)
@@ -560,7 +561,7 @@ export async function resolveStatus(
   if (cached !== undefined) return cached
 
   const existing = await client.query<{ id: number }>(
-    'select id from public.entry_status where code = $1',
+    `select id from ${DB_SCHEMA}.entry_status where code = $1`,
     [rawText]
   )
   if (existing.rows[0]) {
@@ -569,7 +570,7 @@ export async function resolveStatus(
   }
 
   const created = await client.query<{ id: number }>(
-    `insert into public.entry_status (code, label, sort_order, is_terminal)
+    `insert into ${DB_SCHEMA}.entry_status (code, label, sort_order, is_terminal)
      values ($1, $2, 999, false)
      on conflict (code) do update set code = excluded.code
      returning id`,
@@ -590,13 +591,13 @@ export async function resolveStatus(
   // constraint on dedup_key never actually deduped anything; see the
   // matching fix on allocation_sum_mismatch and id_namespace_collision below).
   await client.query(
-    `insert into public.reconciliation_exception
+    `insert into ${DB_SCHEMA}.reconciliation_exception
        (import_batch_id, exception_type, severity, description, dedup_key)
      values ($1, 'unknown_status_code', 'low', $2, $3)
      on conflict (dedup_key) do update
        set import_batch_id = excluded.import_batch_id,
            description = excluded.description
-       where public.reconciliation_exception.status = 'open'`,
+       where ${DB_SCHEMA}.reconciliation_exception.status = 'open'`,
     // Keyed on the code alone, matching the unified vocabulary: the same
     // unseen code met from both portals is one finding to act on, not two.
     [batchId, description, `unknown_status_code:${rawText}`]
@@ -658,7 +659,7 @@ export async function runImport(params: RunImportParams): Promise<ImportResult> 
     // reconciliation_exception) can FK to it while still being rollback-able
     // together for a dry run — see the file-header comment.
     const batchInsert = await client.query<{ id: number }>(
-      `insert into public.import_batch
+      `insert into ${DB_SCHEMA}.import_batch
          (source_system, source_filename, file_hash_sha256, sheet_name, mode, imported_by, event_id, status)
        values ($1, $2, $3, $4, $5, $6, $7, 'processing')
        returning id`,
@@ -706,7 +707,7 @@ export async function runImport(params: RunImportParams): Promise<ImportResult> 
         // ---- allocation write (§3.5) ----
         if (row.allocation && budgetHeadId !== null) {
           await client.query(
-            `insert into public.budget_allocation
+            `insert into ${DB_SCHEMA}.budget_allocation
                (budget_head_id, import_batch_id, event_id, as_of, request_amount, approved_amount, utilised_amount, balance_amount)
              values ($1, $2, $3, current_date, $4, $5, $6, $7)`,
             [
@@ -774,13 +775,13 @@ export async function runImport(params: RunImportParams): Promise<ImportResult> 
           const before = await client.query<Record<string, unknown>>(
             `select main_number, department_id, budget_head_id, invoice_number, vendor_id, vendor_raw,
                     date, amount, status_id, status_raw, type
-             from public.entries where ubbl_number = $1`,
+             from ${DB_SCHEMA}.entries where ubbl_number = $1`,
             [entry.ubblNumber]
           )
           const existing = before.rows[0] ?? null
 
           const upserted = await client.query<{ id: number }>(
-            `insert into public.entries (
+            `insert into ${DB_SCHEMA}.entries (
                type, ubbl_number, main_number, department_id, budget_head_id, invoice_number,
                vendor_id, vendor_raw, date, amount,
                status_id, status_raw,
@@ -895,7 +896,7 @@ export async function runImport(params: RunImportParams): Promise<ImportResult> 
     if (headIds.length > 0) {
       const sums = await client.query<{ budget_head_id: number; total: string }>(
         `select budget_head_id, coalesce(sum(amount), 0) as total
-           from public.entries
+           from ${DB_SCHEMA}.entries
           where budget_head_id = any($1::bigint[])
           group by budget_head_id`,
         [headIds]
@@ -918,13 +919,13 @@ export async function runImport(params: RunImportParams): Promise<ImportResult> 
         // same head is a new fact worth its own open exception rather than
         // silently overwriting a still-open one with a new amount_at_risk.
         await client.query(
-          `insert into public.reconciliation_exception
+          `insert into ${DB_SCHEMA}.reconciliation_exception
              (import_batch_id, exception_type, severity, amount_at_risk, description, dedup_key)
            values ($1, 'allocation_sum_mismatch', 'high', $2, $3, $4)
            on conflict (dedup_key) do update
              set import_batch_id = excluded.import_batch_id,
                  description = excluded.description
-             where public.reconciliation_exception.status = 'open'`,
+             where ${DB_SCHEMA}.reconciliation_exception.status = 'open'`,
           [batchId, Math.abs(m.diff), description, `allocation_sum_mismatch:${m.budgetHeadId}:${m.diff}`]
         )
         exceptions.push({ exceptionType: 'allocation_sum_mismatch', severity: 'high', description })
@@ -937,8 +938,8 @@ export async function runImport(params: RunImportParams): Promise<ImportResult> 
     // inside this transaction).
     const collisionRows = await client.query<{ value: string }>(
       `select distinct e1.ubbl_number as value
-         from public.entries e1
-         join public.entries e2
+         from ${DB_SCHEMA}.entries e1
+         join ${DB_SCHEMA}.entries e2
            on e2.main_number = e1.ubbl_number
           and e2.id <> e1.id`
     )
@@ -948,13 +949,13 @@ export async function runImport(params: RunImportParams): Promise<ImportResult> 
       // above) -- the collision is a property of the value itself, present
       // again on every re-import until a human resolves it.
       await client.query(
-        `insert into public.reconciliation_exception
+        `insert into ${DB_SCHEMA}.reconciliation_exception
            (import_batch_id, exception_type, severity, description, dedup_key)
          values ($1, 'id_namespace_collision', 'high', $2, $3)
          on conflict (dedup_key) do update
            set import_batch_id = excluded.import_batch_id,
                description = excluded.description
-           where public.reconciliation_exception.status = 'open'`,
+           where ${DB_SCHEMA}.reconciliation_exception.status = 'open'`,
         [batchId, description, `id_namespace_collision:${value}`]
       )
       exceptions.push({ exceptionType: 'id_namespace_collision', severity: 'high', description })
@@ -991,7 +992,7 @@ export async function runImport(params: RunImportParams): Promise<ImportResult> 
 
     if (params.mode === 'commit') {
       await client.query(
-        `update public.import_batch
+        `update ${DB_SCHEMA}.import_batch
             set status = $1, row_count = $2, summary_jsonb = $3, completed_at = now()
           where id = $4`,
         [status, rawRows.length, JSON.stringify(summary), batchId]
@@ -1016,7 +1017,7 @@ export async function runImport(params: RunImportParams): Promise<ImportResult> 
     await client.query('ROLLBACK')
 
     const finalBatch = await client.query<{ id: number }>(
-      `insert into public.import_batch
+      `insert into ${DB_SCHEMA}.import_batch
          (source_system, source_filename, file_hash_sha256, sheet_name, mode, imported_by,
           event_id, status, row_count, summary_jsonb, completed_at)
        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, now())
@@ -1051,7 +1052,7 @@ export async function runImport(params: RunImportParams): Promise<ImportResult> 
     const message = fatalError instanceof Error ? fatalError.message : String(fatalError)
 
     const failedBatch = await client.query<{ id: number }>(
-      `insert into public.import_batch
+      `insert into ${DB_SCHEMA}.import_batch
          (source_system, source_filename, file_hash_sha256, mode, imported_by, event_id, status, error_message, completed_at)
        values ($1, $2, $3, $4, $5, $6, 'failed', $7, now())
        returning id`,
@@ -1112,7 +1113,7 @@ export async function writeRowLogBatch(
       return `($${b + 1}, $${b + 2}, $${b + 3}, $${b + 4}, $${b + 5}, $${b + 6})`
     })
     await client.query(
-      `insert into public.import_row_log
+      `insert into ${DB_SCHEMA}.import_row_log
          (import_batch_id, entry_id, row_number, raw_row_jsonb, action, fields_changed)
        values ${tuples.join(', ')}`,
       values
@@ -1122,7 +1123,7 @@ export async function writeRowLogBatch(
 
 export async function writeRowLog(client: PoolClient, batchId: number, entry: ImportRowLogEntry): Promise<void> {
   await client.query(
-    `insert into public.import_row_log (import_batch_id, entry_id, row_number, raw_row_jsonb, action, fields_changed)
+    `insert into ${DB_SCHEMA}.import_row_log (import_batch_id, entry_id, row_number, raw_row_jsonb, action, fields_changed)
      values ($1, $2, $3, $4, $5, $6)`,
     [
       batchId,

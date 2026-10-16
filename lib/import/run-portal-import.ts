@@ -61,6 +61,7 @@ import {
   type ImportRowLogEntry,
   type ResolverCaches,
 } from '@/lib/import/run-import'
+import { DB_SCHEMA } from '@/lib/db-schema'
 import {
   deriveEntryType,
   detectDepartmentalTableKind,
@@ -189,7 +190,7 @@ async function findEntry(
 ): Promise<{ entry: MatchedEntry | null; ambiguous: boolean }> {
   if (row.ubblNumber) {
     const byUbbl = await client.query<MatchedEntry>(
-      `select ${ENTRY_COLUMNS} from public.entries where ubbl_number = $1 and is_void = false`,
+      `select ${ENTRY_COLUMNS} from ${DB_SCHEMA}.entries where ubbl_number = $1 and is_void = false`,
       [row.ubblNumber]
     )
     if (byUbbl.rows[0]) return { entry: byUbbl.rows[0], ambiguous: false }
@@ -197,7 +198,7 @@ async function findEntry(
 
   if (row.mainNumber) {
     const byMain = await client.query<MatchedEntry>(
-      `select ${ENTRY_COLUMNS} from public.entries where main_number = $1 and is_void = false`,
+      `select ${ENTRY_COLUMNS} from ${DB_SCHEMA}.entries where main_number = $1 and is_void = false`,
       [row.mainNumber]
     )
     // main_number carries a unique constraint, so >1 should be impossible —
@@ -288,13 +289,13 @@ async function flushExceptions(
       return `($${b + 1}, $${b + 2}, $${b + 3}, $${b + 4}, $${b + 5}, $${b + 6}, $${b + 7})`
     })
     await client.query(
-      `insert into public.reconciliation_exception
+      `insert into ${DB_SCHEMA}.reconciliation_exception
          (import_batch_id, entry_id, exception_type, severity, amount_at_risk, description, dedup_key)
        values ${tuples.join(', ')}
        on conflict (dedup_key) do update
          set import_batch_id = excluded.import_batch_id,
              description = excluded.description
-         where public.reconciliation_exception.status = 'open'`,
+         where ${DB_SCHEMA}.reconciliation_exception.status = 'open'`,
       values
     )
   }
@@ -321,7 +322,7 @@ async function gatherScrapeSessionRows(
   sourceSystem: SourceSystem
 ): Promise<ParsedPortalRow[]> {
   const stored = await client.query<{ scrape_payload_jsonb: ScrapePayload | null }>(
-    `select scrape_payload_jsonb from public.import_batch
+    `select scrape_payload_jsonb from ${DB_SCHEMA}.import_batch
       where scrape_session_id = $1 and scrape_payload_jsonb is not null`,
     [scrapeSessionId]
   )
@@ -376,7 +377,7 @@ async function detectMissingDepartmentalEntries(
   )
 
   const openEntries = await client.query<{ id: number; ubbl_number: string }>(
-    `select id, ubbl_number from public.entries
+    `select id, ubbl_number from ${DB_SCHEMA}.entries
       where type = $1 and event_id = $2 and is_void = false and ubbl_number is not null`,
     [tableKind, eventId]
   )
@@ -387,7 +388,7 @@ async function detectMissingDepartmentalEntries(
   const voidedIds = toVoid.map((e) => e.id)
 
   await client.query(
-    `update public.entries
+    `update ${DB_SCHEMA}.entries
         set is_void    = true,
             void_note  = 'Auto-voided: no longer appears in the ' || $2 || ' portal scrape (batch ' || $3 || ').',
             updated_at = now()
@@ -403,7 +404,7 @@ async function detectMissingDepartmentalEntries(
   // Mirrors voidEntries' (lib/actions/entries.ts) own auto-resolve-on-void
   // behavior, just triggered from the scan instead of a human click.
   await client.query(
-    `update public.reconciliation_exception
+    `update ${DB_SCHEMA}.reconciliation_exception
         set status = 'resolved',
             resolution_note = 'Auto-voided by a later ' || $2 || ' scrape (batch ' || $3 || ') before this exception was reviewed.',
             resolved_at = now()
@@ -491,7 +492,7 @@ async function prefetchVendorCache(
   const normalizedList = [...normalizedToRaw.keys()]
 
   const byNormalized = await client.query<{ id: number; normalized_name: string }>(
-    'select id, normalized_name from public.vendor where normalized_name = any($1::text[])',
+    `select id, normalized_name from ${DB_SCHEMA}.vendor where normalized_name = any($1::text[])`,
     [normalizedList]
   )
   for (const found of byNormalized.rows) {
@@ -505,7 +506,7 @@ async function prefetchVendorCache(
   // form, so the lookup goes back through the original raw names.
   const rawNamesToCheck = stillMissing.map((n) => normalizedToRaw.get(n)!)
   const byAlias = await client.query<{ vendor_id: number; raw_name: string }>(
-    'select vendor_id, raw_name from public.vendor_alias where raw_name = any($1::text[])',
+    `select vendor_id, raw_name from ${DB_SCHEMA}.vendor_alias where raw_name = any($1::text[])`,
     [rawNamesToCheck]
   )
   for (const found of byAlias.rows) {
@@ -522,7 +523,7 @@ async function prefetchDepartmentCache(
   if (names.length === 0) return
 
   const found = await client.query<{ id: number; name: string }>(
-    'select id, name from public.department where name = any($1::text[])',
+    `select id, name from ${DB_SCHEMA}.department where name = any($1::text[])`,
     [names]
   )
   if (found.rows.length === 0) return
@@ -534,7 +535,7 @@ async function prefetchDepartmentCache(
   // since these rows are about to be served from cache and would otherwise
   // never call it.
   await client.query(
-    `insert into public.event_department (event_id, department_id)
+    `insert into ${DB_SCHEMA}.event_department (event_id, department_id)
      select $1, unnest($2::bigint[])
      on conflict do nothing`,
     [eventId, [...new Set(found.rows.map((r) => r.id))]]
@@ -550,7 +551,7 @@ async function prefetchBudgetHeadCache(
   if (rawLabels.length === 0) return
 
   const found = await client.query<{ id: number; raw_label: string; department_id: number | null }>(
-    'select id, raw_label, department_id from public.budget_head where raw_label = any($1::text[])',
+    `select id, raw_label, department_id from ${DB_SCHEMA}.budget_head where raw_label = any($1::text[])`,
     [rawLabels]
   )
   if (found.rows.length === 0) return
@@ -560,7 +561,7 @@ async function prefetchBudgetHeadCache(
   }
 
   await client.query(
-    `insert into public.event_budget_head (event_id, budget_head_id)
+    `insert into ${DB_SCHEMA}.event_budget_head (event_id, budget_head_id)
      select $1, unnest($2::bigint[])
      on conflict do nothing`,
     [eventId, [...new Set(found.rows.map((r) => r.id))]]
@@ -575,7 +576,7 @@ async function prefetchStatusCache(
   if (codes.length === 0) return
 
   const found = await client.query<{ id: number; code: string }>(
-    'select id, code from public.entry_status where code = any($1::text[])',
+    `select id, code from ${DB_SCHEMA}.entry_status where code = any($1::text[])`,
     [codes]
   )
   for (const row of found.rows) caches.statusByCode.set(row.code, row.id)
@@ -656,7 +657,7 @@ export async function runPortalImport(
     await client.query('BEGIN')
 
     const batchInsert = await client.query<{ id: number }>(
-      `insert into public.import_batch ${batchColumns}
+      `insert into ${DB_SCHEMA}.import_batch ${batchColumns}
        values ($1, $2, $3, $4, $5, 'scrape', $6, $7, $8, 'processing', $9)
        returning id`,
       [
@@ -696,7 +697,7 @@ export async function runPortalImport(
         .map((r) => r.ubblNumber as string)
       if (ubblNumbers.length > 0) {
         const existingRows = await client.query<MatchedEntry>(
-          `select ${ENTRY_COLUMNS} from public.entries where ubbl_number = any($1::text[])`,
+          `select ${ENTRY_COLUMNS} from ${DB_SCHEMA}.entries where ubbl_number = any($1::text[])`,
           [ubblNumbers]
         )
         for (const found of existingRows.rows) prefetchedEntries.set(found.ubbl_number, found)
@@ -825,7 +826,7 @@ export async function runPortalImport(
 
     if (params.mode === 'commit') {
       await client.query(
-        `update public.import_batch
+        `update ${DB_SCHEMA}.import_batch
             set status = $1, row_count = $2, summary_jsonb = $3, completed_at = now()
           where id = $4`,
         [status, parsed.rows.length, JSON.stringify(summary), batchId]
@@ -851,7 +852,7 @@ export async function runPortalImport(
     await client.query('ROLLBACK')
 
     const finalBatch = await client.query<{ id: number }>(
-      `insert into public.import_batch
+      `insert into ${DB_SCHEMA}.import_batch
          (source_system, source_filename, file_hash_sha256, mode, imported_by,
           ingest_method, scrape_payload_jsonb, source_url, event_id, status, row_count, summary_jsonb,
           completed_at, scrape_session_id)
@@ -890,7 +891,7 @@ export async function runPortalImport(
     const message = fatalError instanceof Error ? fatalError.message : String(fatalError)
 
     const failedBatch = await client.query<{ id: number }>(
-      `insert into public.import_batch
+      `insert into ${DB_SCHEMA}.import_batch
          (source_system, source_filename, file_hash_sha256, mode, imported_by,
           ingest_method, source_url, event_id, status, error_message, completed_at, scrape_session_id)
        values ($1, $2, $3, $4, $5, 'scrape', $6, $7, 'failed', $8, now(), $9)
@@ -1039,7 +1040,7 @@ async function attemptAuditRowMatch(
   // shared. status_changed_at is only bumped on an actual change, same
   // conditional the audit-specific column used to carry.
   await client.query(
-    `update public.entries
+    `update ${DB_SCHEMA}.entries
         set main_number      = $1,
             status_id        = coalesce($2, status_id),
             status_raw       = coalesce($3, status_raw),
@@ -1192,7 +1193,7 @@ export async function retryUnmatchedAuditRows(
     import_batch_id: number | null
   }>(
     `select id, dedup_key, import_batch_id
-       from public.reconciliation_exception
+       from ${DB_SCHEMA}.reconciliation_exception
       where status = 'open' and exception_type = 'audit_row_unmatched'`
   )
 
@@ -1203,7 +1204,7 @@ export async function retryUnmatchedAuditRows(
     if (!identifier || exception.import_batch_id === null) continue
 
     const batchRow = await client.query<{ scrape_payload_jsonb: ScrapePayload | null }>(
-      `select scrape_payload_jsonb from public.import_batch where id = $1`,
+      `select scrape_payload_jsonb from ${DB_SCHEMA}.import_batch where id = $1`,
       [exception.import_batch_id]
     )
     const payload = batchRow.rows[0]?.scrape_payload_jsonb ?? null
@@ -1236,7 +1237,7 @@ export async function retryUnmatchedAuditRows(
     // `resolved_by uuid references auth.users(id)` with no NOT NULL): no
     // human resolved this.
     await client.query(
-      `update public.reconciliation_exception
+      `update ${DB_SCHEMA}.reconciliation_exception
           set status = 'resolved',
               entry_id = coalesce(entry_id, $2),
               resolved_at = now(),
@@ -1403,7 +1404,7 @@ async function importDepartmentalRow(
   let existing = prefetchedEntries.get(row.ubblNumber) ?? null
   if (!existing && !prefetchedEntries.has(row.ubblNumber)) {
     const before = await client.query<MatchedEntry>(
-      `select ${ENTRY_COLUMNS} from public.entries where ubbl_number = $1`,
+      `select ${ENTRY_COLUMNS} from ${DB_SCHEMA}.entries where ubbl_number = $1`,
       [row.ubblNumber]
     )
     existing = before.rows[0] ?? null
@@ -1434,7 +1435,7 @@ async function importDepartmentalRow(
         : row.amount
 
   const upserted = await client.query<{ id: number }>(
-    `insert into public.entries (
+    `insert into ${DB_SCHEMA}.entries (
        type, ubbl_number, main_number, invoice_number, vendor_id, vendor_raw,
        date, amount, status_id, status_raw,
        department_id, budget_head_id,
@@ -1608,7 +1609,7 @@ async function upsertDetailTable(
 ): Promise<void> {
   if (tableKind === 'reimbursement') {
     await client.query(
-      `insert into public.reimbursement_detail
+      `insert into ${DB_SCHEMA}.reimbursement_detail
          (entry_id, sr_no, reimbursement_type, reimburse_to_raw, reimburse_to_vendor_id, import_batch_id, updated_at)
        values ($1, $2, $3, $4, $5, $6, now())
        on conflict (entry_id) do update set
@@ -1630,7 +1631,7 @@ async function upsertDetailTable(
     // effectiveAmount), and confusing the two here would put the same figure
     // in both places.
     await client.query(
-      `insert into public.invoice_against_uplaq_detail
+      `insert into ${DB_SCHEMA}.invoice_against_uplaq_detail
          (entry_id, balance_payable, invoice_amount, import_batch_id, updated_at)
        values ($1, $2, $3, $4, now())
        on conflict (entry_id) do update set
@@ -1649,7 +1650,7 @@ async function upsertDetailTable(
   // effectiveAmount), and confusing the two here would put the same figure
   // in both places.
   await client.query(
-    `insert into public.advance_payment_detail (entry_id, invoice_amount, import_batch_id, updated_at)
+    `insert into ${DB_SCHEMA}.advance_payment_detail (entry_id, invoice_amount, import_batch_id, updated_at)
      values ($1, $2, $3, now())
      on conflict (entry_id) do update set
        invoice_amount  = coalesce(excluded.invoice_amount, advance_payment_detail.invoice_amount),
@@ -1714,18 +1715,18 @@ async function linkIauSettlement(
   if (!vendorRaw || budgetHeadId === null) return
 
   const already = await client.query<{ settles_entry_id: number | null }>(
-    `select settles_entry_id from public.entries where id = $1`,
+    `select settles_entry_id from ${DB_SCHEMA}.entries where id = $1`,
     [iauEntryId]
   )
   if (already.rows[0]?.settles_entry_id != null) return // already linked; never re-decide
 
   const candidateAdvances = await client.query<{ id: number; ubbl_number: string }>(
-    `select a.id, a.ubbl_number from public.entries a
+    `select a.id, a.ubbl_number from ${DB_SCHEMA}.entries a
       where a.type = 'advance_payment'
         and a.is_void = false
         and a.vendor_raw = $1
         and a.budget_head_id = $2
-        and not exists (select 1 from public.entries s where s.settles_entry_id = a.id)
+        and not exists (select 1 from ${DB_SCHEMA}.entries s where s.settles_entry_id = a.id)
       order by a.ubbl_number`,
     [vendorRaw, budgetHeadId]
   )
@@ -1733,7 +1734,7 @@ async function linkIauSettlement(
   if (candidateAdvances.rows.length === 0) return // legitimate: no tracked advance for this vendor+head
 
   const contestingIau = await client.query<{ id: number }>(
-    `select id from public.entries
+    `select id from ${DB_SCHEMA}.entries
       where type = 'invoice_against_uplaq'
         and is_void = false
         and settles_entry_id is null
@@ -1747,14 +1748,14 @@ async function linkIauSettlement(
 
   if (candidateAdvances.rows.length === 1 && contestingIau.rows.length === 1) {
     await client.query(
-      `update public.entries set settles_entry_id = $1, updated_at = now() where id = $2`,
+      `update ${DB_SCHEMA}.entries set settles_entry_id = $1, updated_at = now() where id = $2`,
       [candidateAdvances.rows[0]!.id, iauEntryId]
     )
     return
   }
 
   const budgetHead = await client.query<{ raw_label: string | null }>(
-    `select raw_label from public.budget_head where id = $1`,
+    `select raw_label from ${DB_SCHEMA}.budget_head where id = $1`,
     [budgetHeadId]
   )
   const budgetHeadLabel = budgetHead.rows[0]?.raw_label ?? `id ${budgetHeadId}`

@@ -1,5 +1,6 @@
 import { createBrowserClient } from '@supabase/ssr'
 import { publicEnv } from '@/lib/env'
+import { SUPABASE_DB_OPTIONS } from '@/lib/db-schema'
 
 /**
  * Browser Supabase client — Client Components only. Session lives in
@@ -12,6 +13,7 @@ import { publicEnv } from '@/lib/env'
 export function createClient() {
   return createBrowserClient(
     publicEnv.NEXT_PUBLIC_SUPABASE_URL,
-    publicEnv.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
+    publicEnv.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY,
+    { db: SUPABASE_DB_OPTIONS }
   )
 }

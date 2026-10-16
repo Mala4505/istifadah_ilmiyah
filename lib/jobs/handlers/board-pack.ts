@@ -39,11 +39,12 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { assembleBoardPackData, resolveCurrentEvent } from '@/lib/reports/board-pack/data'
 import { buildBoardPackWorkbook } from '@/lib/reports/board-pack/workbook'
 import { buildBoardPackPdf } from '@/lib/reports/board-pack/pdf'
+import { bucketName } from '@/lib/db-schema'
 
 /** One week between scheduled packs (blueprint §5 "on a schedule"). */
 const RECURRENCE_MINUTES = 7 * 24 * 60
 
-const BUCKET = 'board-packs'
+const BUCKET = bucketName('board-packs')
 const XLSX_CONTENT_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
 
 type AdminClient = ReturnType<typeof createAdminClient>

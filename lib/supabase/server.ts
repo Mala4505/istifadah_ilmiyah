@@ -2,6 +2,7 @@ import { createServerClient, type CookieOptions } from '@supabase/ssr'
 import { cookies } from 'next/headers'
 import { cache } from 'react'
 import { publicEnv } from '@/lib/env'
+import { SUPABASE_DB_OPTIONS } from '@/lib/db-schema'
 
 export type MinimalAuthUser = { id: string; email: string | null }
 
@@ -22,6 +23,7 @@ export async function createClient() {
     publicEnv.NEXT_PUBLIC_SUPABASE_URL,
     publicEnv.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY,
     {
+      db: SUPABASE_DB_OPTIONS,
       cookies: {
         getAll() {
           return cookieStore.getAll()

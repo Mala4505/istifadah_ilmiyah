@@ -35,6 +35,7 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import { publicEnv } from '@/lib/env'
 import { serverEnv } from '@/lib/env.server'
+import { SUPABASE_DB_OPTIONS } from '@/lib/db-schema'
 export { nextPollBackoffMs, POLL_BACKOFF_BASE_MS, POLL_BACKOFF_CAP_MS } from '@/lib/jobs/poll-backoff'
 
 export type JobType =
@@ -69,6 +70,7 @@ let cachedClient: SupabaseClient | null = null
 function getClient(): SupabaseClient {
   if (!cachedClient) {
     cachedClient = createClient(publicEnv.NEXT_PUBLIC_SUPABASE_URL, serverEnv.SUPABASE_SECRET_KEY, {
+      db: SUPABASE_DB_OPTIONS,
       auth: { persistSession: false, autoRefreshToken: false },
     })
   }

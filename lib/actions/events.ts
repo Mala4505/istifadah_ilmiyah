@@ -24,6 +24,7 @@ import { serverEnv } from '@/lib/env.server'
 import { logRawError } from '@/lib/friendly-error'
 import { requireAdminOrAbove } from '@/lib/export/auth'
 import { ACTIVE_EVENT_COOKIE } from '@/lib/events/current'
+import { DB_SCHEMA } from '@/lib/db-schema'
 
 export type SimpleActionResult = { ok: true } | { ok: false; error: string }
 
@@ -127,10 +128,10 @@ export async function createEvent(input: CreateEventInput): Promise<CreateEventR
   try {
     await client.query('begin')
 
-    await client.query('update public.event set is_current = false where is_current')
+    await client.query(`update ${DB_SCHEMA}.event set is_current = false where is_current`)
 
     const inserted = await client.query<{ id: number }>(
-      `insert into public.event (name, hijri_year, starts_on, ends_on, is_current)
+      `insert into ${DB_SCHEMA}.event (name, hijri_year, starts_on, ends_on, is_current)
        values ($1, $2, $3, $4, true)
        returning id`,
       [name, hijriYear, input.startsOn, input.endsOn]
@@ -139,7 +140,7 @@ export async function createEvent(input: CreateEventInput): Promise<CreateEventR
 
     if (input.departmentIds.length > 0) {
       await client.query(
-        `insert into public.event_department (event_id, department_id)
+        `insert into ${DB_SCHEMA}.event_department (event_id, department_id)
          select $1, unnest($2::bigint[])
          on conflict do nothing`,
         [eventId, input.departmentIds]
@@ -147,7 +148,7 @@ export async function createEvent(input: CreateEventInput): Promise<CreateEventR
     }
     if (input.adminHeadIds.length > 0) {
       await client.query(
-        `insert into public.event_admin_head (event_id, admin_head_id)
+        `insert into ${DB_SCHEMA}.event_admin_head (event_id, admin_head_id)
          select $1, unnest($2::bigint[])
          on conflict do nothing`,
         [eventId, input.adminHeadIds]
@@ -155,7 +156,7 @@ export async function createEvent(input: CreateEventInput): Promise<CreateEventR
     }
     if (input.zoneIds.length > 0) {
       await client.query(
-        `insert into public.event_zone (event_id, zone_id)
+        `insert into ${DB_SCHEMA}.event_zone (event_id, zone_id)
          select $1, unnest($2::bigint[])
          on conflict do nothing`,
         [eventId, input.zoneIds]
@@ -163,7 +164,7 @@ export async function createEvent(input: CreateEventInput): Promise<CreateEventR
     }
     if (input.budgetHeadIds.length > 0) {
       await client.query(
-        `insert into public.event_budget_head (event_id, budget_head_id)
+        `insert into ${DB_SCHEMA}.event_budget_head (event_id, budget_head_id)
          select $1, unnest($2::bigint[])
          on conflict do nothing`,
         [eventId, input.budgetHeadIds]
@@ -171,7 +172,7 @@ export async function createEvent(input: CreateEventInput): Promise<CreateEventR
     }
     if (input.subDepartmentIds.length > 0) {
       await client.query(
-        `insert into public.event_sub_department (event_id, sub_department_id)
+        `insert into ${DB_SCHEMA}.event_sub_department (event_id, sub_department_id)
          select $1, unnest($2::bigint[])
          on conflict do nothing`,
         [eventId, input.subDepartmentIds]

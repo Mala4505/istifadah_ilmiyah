@@ -12,6 +12,7 @@ import 'server-only'
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import { publicEnv } from '@/lib/env'
 import { serverEnv } from '@/lib/env.server'
+import { SUPABASE_DB_OPTIONS, bucketName } from '@/lib/db-schema'
 
 if (typeof window !== 'undefined') {
   throw new Error(
@@ -20,7 +21,7 @@ if (typeof window !== 'undefined') {
 }
 
 /** Bucket name per §3.8. */
-const BUCKET = 'invoice-documents'
+const BUCKET = bucketName('invoice-documents')
 
 /** Anything the supabase-js storage `upload()` call accepts as a body. */
 export type StorageFileBody = Blob | Buffer | ArrayBuffer | ArrayBufferView | string
@@ -31,6 +32,7 @@ let cachedClient: SupabaseClient | null = null
 function getStorageClient(): SupabaseClient {
   if (!cachedClient) {
     cachedClient = createClient(publicEnv.NEXT_PUBLIC_SUPABASE_URL, serverEnv.SUPABASE_SECRET_KEY, {
+      db: SUPABASE_DB_OPTIONS,
       auth: { persistSession: false, autoRefreshToken: false },
     })
   }

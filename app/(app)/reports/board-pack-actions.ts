@@ -21,8 +21,9 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { requireAdminOrAbove } from '@/lib/export/auth'
 import { triggerRemoteWorker } from '@/lib/jobs/trigger-worker'
 import type { JobStatus } from '@/lib/jobs/queue'
+import { bucketName } from '@/lib/db-schema'
 
-const BUCKET = 'board-packs'
+const BUCKET = bucketName('board-packs')
 const SIGNED_URL_TTL_SECONDS = 300
 
 export type BoardPackActionResult =
