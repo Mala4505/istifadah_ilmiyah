@@ -38,7 +38,17 @@ const nextConfig: NextConfig = {
         // (middleware.ts) says the same thing once enforced. Nothing in the app
         // iframes itself. Set once here for every path, API included.
         source: '/:path*',
-        headers: [{ key: 'X-Frame-Options', value: 'DENY' }],
+        headers: [
+          { key: 'X-Frame-Options', value: 'DENY' },
+          // Also on redirects and static files, which middleware never sees.
+          { key: 'Strict-Transport-Security', value: 'max-age=63072000; includeSubDomains; preload' },
+          { key: 'X-Content-Type-Options', value: 'nosniff' },
+          { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
+          { key: 'Cross-Origin-Opener-Policy', value: 'same-origin' },
+          { key: 'Cross-Origin-Resource-Policy', value: 'same-origin' },
+          { key: 'X-Permitted-Cross-Domain-Policies', value: 'none' },
+          // No COEP: require-corp would block Supabase storage images and Sentry.
+        ],
       },
       {
         // Middleware's matcher skips /api (middleware.ts), so API responses get
