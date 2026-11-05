@@ -2,6 +2,7 @@
  * Shared shapes between app/(app)/review/page.tsx (server) and
  * components/review/* (client) -- MASTER-PLAN §7, §11.2 Day 4.
  */
+import type { ReviewTagNoticeData } from '@/lib/tags/review-shared'
 
 export type ConfidenceTint = 'green' | 'amber' | 'red' | 'none'
 
@@ -252,4 +253,8 @@ export interface ReviewDocumentDetail {
   uncertainFields: UncertainField[]
   pages: PageStatus[]
   openExceptions: OpenExceptionSummary[]
+  /** Entry tags (docs/entry-tags-plan.md, Phase 4): tags active in the selected event that
+   *  touch the primary linked entry's department. null when there is no entry, no
+   *  department or no selected event -- the notice then never renders. */
+  tagNotice: ReviewTagNoticeData | null
 }

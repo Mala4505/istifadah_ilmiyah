@@ -16,6 +16,7 @@ import type { ColumnKey, EntriesSort, EntryEnriched, SortColumn } from './types'
 import { ALL_COLUMNS, TYPE_LABELS } from './types'
 import { formatDate, formatMoney } from './format'
 import { DESCENDING_FIRST, renderCell } from './entries-table'
+import { AddToTagRowButton } from './add-to-tag-row-button'
 
 type VendorGroup = {
   key: string
@@ -147,6 +148,7 @@ export function EntriesGroupedTable({
   onToggleIds,
   sort,
   onSortChange,
+  onAddToTag,
 }: {
   rows: EntryEnriched[]
   visibleColumns: Set<ColumnKey>
@@ -157,6 +159,8 @@ export function EntriesGroupedTable({
   onToggleIds: (ids: number[], select: boolean) => void
   sort: EntriesSort
   onSortChange: (sort: EntriesSort) => void
+  /** Super-admin only: when given, each entry row gets an "Add to tag" button (entry-tags-plan Phase 3). */
+  onAddToTag?: (entryId: number) => void
 }) {
   const router = useRouter()
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
@@ -212,7 +216,8 @@ export function EntriesGroupedTable({
   }
 
   const allExpanded = pageGroups.length > 0 && pageGroups.every((g) => expanded.has(g.key))
-  const colSpan = columns.length + 2
+  // Leading checkbox + vendor column, plus the optional trailing row-action column.
+  const colSpan = columns.length + 2 + (onAddToTag ? 1 : 0)
 
   return (
     <div className="flex flex-col gap-3">
@@ -252,6 +257,7 @@ export function EntriesGroupedTable({
                   onSort={(column) => onSortChange(nextSort(sort, column, DESCENDING_FIRST))}
                 />
               ))}
+              {onAddToTag && <TableHead className="w-10" />}
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -269,6 +275,7 @@ export function EntriesGroupedTable({
                       <Skeleton className="h-4 w-20" />
                     </TableCell>
                   ))}
+                  {onAddToTag && <TableCell />}
                 </TableRow>
               ))}
 
@@ -326,6 +333,7 @@ export function EntriesGroupedTable({
                           <GroupCell group={g} keyName={col.key} />
                         </TableCell>
                       ))}
+                      {onAddToTag && <TableCell />}
                     </TableRow>
 
                     {open &&
@@ -357,6 +365,11 @@ export function EntriesGroupedTable({
                               {renderCell(row, col.key)}
                             </TableCell>
                           ))}
+                          {onAddToTag && (
+                            <TableCell onClick={(e) => e.stopPropagation()}>
+                              <AddToTagRowButton ubblNumber={row.ubbl_number} onClick={() => onAddToTag(row.id)} />
+                            </TableCell>
+                          )}
                         </TableRow>
                       ))}
                   </Fragment>
@@ -375,6 +388,7 @@ export function EntriesGroupedTable({
                     {col.key === 'amount' ? formatMoney(grandTotal) : col.key === 'document_count' ? grandDocs.toLocaleString('en-IN') : null}
                   </TableCell>
                 ))}
+                {onAddToTag && <TableCell />}
               </TableRow>
             </TableFooter>
           )}

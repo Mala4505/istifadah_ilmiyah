@@ -22,6 +22,7 @@ import { VendorAdvancePositionSection } from '@/components/reports/sections/vend
 import { ReimbursementProfileSection } from '@/components/reports/sections/reimbursement-profile'
 import { SpendCurveSection } from '@/components/reports/sections/spend-curve'
 import { EventComparisonSection } from '@/components/reports/sections/event-comparison'
+import { TagCostGroup } from '@/components/reports/sections/tag-cost-carry'
 import { SectionSkeleton } from '@/components/reports/sections/surface-loading'
 import { parsePositiveIntParam } from '@/lib/reports/search-params'
 import { BudgetOverview } from '@/components/reports/overviews/budget-overview'
@@ -127,6 +128,9 @@ export default async function BudgetSurfacePage({
           </Suspense>
           <Suspense fallback={<SectionSkeleton />}>
             <EventComparisonGroup only={only} />
+          </Suspense>
+          <Suspense fallback={<SectionSkeleton />}>
+            <TagCostGroup only={only} selectedEvent={selectedEvent} />
           </Suspense>
         </>
       )}

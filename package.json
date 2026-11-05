@@ -14,6 +14,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:rls": "vitest run --config vitest.integration.config.ts",
+    "test:tags": "vitest run --config vitest.integration.config.ts test/integration/tags.test.ts",
     "score": "tsx --conditions=react-server test/score.ts",
     "gold:build": "tsx --conditions=react-server test/build-gold-from-corrections.ts",
     "worker": "tsx --env-file=.env --conditions=react-server worker/index.ts",

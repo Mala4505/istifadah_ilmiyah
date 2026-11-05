@@ -9,6 +9,7 @@ import { ChangeHistoryList } from '@/components/entries/detail/change-history-li
 import { EnrichmentForm } from '@/components/entries/detail/enrichment-form'
 import { EntryNotFound } from '@/components/entries/detail/entry-not-found'
 import { VoidEntryControl } from '@/components/entries/detail/void-entry-control'
+import { EntryTagsSection } from '@/components/entries/detail/entry-tags-section'
 import { ImportFieldsPanel } from '@/components/entries/detail/import-fields-panel'
 import { LinkedDocuments, type LinkedDocumentView } from '@/components/entries/detail/linked-documents'
 import { ReimbursementDetailSection } from '@/components/entries/detail/reimbursement-detail-section'
@@ -32,7 +33,8 @@ import {
 } from '@/lib/documents/entry-bill-variance'
 import { getSelectedEventId } from '@/lib/events/current'
 import { getStaffContext } from '@/lib/export/auth'
-import { isAdminOrAbove } from '@/lib/auth/roles'
+import { isAdminOrAbove, isSuperadmin } from '@/lib/auth/roles'
+import { loadEntryTagSection } from '@/lib/tags/entries-queries'
 import { ENTRY_DETAIL_SELECT, type EntriesQueryBuilder } from '@/components/entries/query'
 import { getCachedAdminHeads, getCachedZones } from '@/lib/cache/reference-data'
 
@@ -105,6 +107,16 @@ export default async function EntryDetailPage({
   }
 
   const entry = entryData as EntryEnriched
+
+  // Entry tags (docs/entry-tags-plan.md, Phase 3): started now, awaited just before render, so
+  // these reads overlap with the much longer chain of reads below instead of adding to it.
+  const canTag = staff !== null && isSuperadmin(staff.role)
+  const entryTagsPromise = loadEntryTagSection(supabase, {
+    entryId: id,
+    departmentId: entry.department_id,
+    departmentName: entry.department_name,
+    selectedEventId,
+  })
 
   // §3.4/§3.9 supporting data — fetched in parallel. Every read below is
   // still subject to RLS on the underlying tables (20260808000026), so a
@@ -407,6 +419,8 @@ export default async function EntryDetailPage({
     amountAtRisk: row.amount_at_risk,
   }))
 
+  const entryTags = await entryTagsPromise
+
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center gap-3">
@@ -454,6 +468,8 @@ export default async function EntryDetailPage({
         flags={entryIssueFlags}
         canResolve={canResolveIssues}
       />
+
+      <EntryTagsSection entryId={entry.id} section={entryTags} canTag={canTag} />
 
       {canResolveIssues && !entry.is_void && <VoidEntryControl entryId={entry.id} />}
 

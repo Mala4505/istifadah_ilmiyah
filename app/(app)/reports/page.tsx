@@ -68,6 +68,7 @@ import { VendorAdvancePositionSection } from '@/components/reports/sections/vend
 import { ReimbursementProfileSection } from '@/components/reports/sections/reimbursement-profile'
 import { SpendCurveSection } from '@/components/reports/sections/spend-curve'
 import { EventComparisonSection } from '@/components/reports/sections/event-comparison'
+import { TagCostGroup } from '@/components/reports/sections/tag-cost-carry'
 import { OpenItemAgeingSection } from '@/components/reports/sections/open-item-ageing'
 import { DuplicatePaymentRegisterSection } from '@/components/reports/sections/duplicate-payment-register'
 import { LedgerBillReconciliationSection } from '@/components/reports/sections/ledger-bill-reconciliation'
@@ -324,6 +325,9 @@ export default async function ReportsPage({
       </Suspense>
       <Suspense fallback={<SectionSkeleton />}>
         <EventComparisonGroup only={only} />
+      </Suspense>
+      <Suspense fallback={<SectionSkeleton />}>
+        <TagCostGroup only={only} selectedEvent={selectedEvent} />
       </Suspense>
       <Suspense fallback={<SectionSkeleton />}>
         <SpendCurveGroup2 only={only} compareBasis={compareBasis} />

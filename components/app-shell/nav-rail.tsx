@@ -11,6 +11,7 @@ import {
   ScanLine,
   TriangleAlert,
   FileBarChart,
+  Tags,
   UploadCloud,
   Settings,
   Keyboard,
@@ -57,6 +58,9 @@ const NAV_ITEMS = [
   { label: 'Documents', href: '/documents', icon: FileStack },
   { label: 'Review', href: '/review', icon: ScanLine },
   { label: 'Exceptions', href: '/exceptions', icon: TriangleAlert },
+  // Visible to every signed-in staff member: RLS decides which tags each role sees, and
+  // create/edit controls on the page are super-admin only.
+  { label: 'Tags', href: '/tags', icon: Tags },
   // Lands on Budget vs Actual (department + sub-department budgets — the only
   // level that carries approved amounts), not Explore (/reports), the
   // everything-at-once drill workspace. `activePrefix` keeps the item lit on

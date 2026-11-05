@@ -62,6 +62,7 @@ import { ClaimBanner } from './claim-banner'
 import { ShortcutsOverlay } from './shortcuts-overlay'
 import { ExceptionDialog } from './exception-dialog'
 import { ReviewStatusLine, type StageStatus } from './review-status-line'
+import { ReviewTagNotice } from './review-tag-notice'
 
 // Perf audit 3.1: pdf-viewer.tsx wraps pdf.js (worker/wasm assets) -- eagerly
 // bundling it into /review's first paint costs bytes no reviewer needs until
@@ -285,6 +286,7 @@ export function ReviewWorkspace({
   keymap,
   shortcutsEnabled,
   initialPageOverride,
+  canLinkTags = false,
 }: {
   detail: ReviewDocumentDetail
   // Widened for the Document nav (redesign point 4): QueueEntry
@@ -302,6 +304,9 @@ export function ReviewWorkspace({
   // (handleRequestBillSwitch below), so PdfViewer opens on that exact page
   // instead of this bill's own first page.
   initialPageOverride: number | null
+  // Entry tags (docs/entry-tags-plan.md, Phase 4): super-admins may link the
+  // entry to a tag from the tag notice; everyone else sees it read-only.
+  canLinkTags?: boolean
 }) {
   const router = useRouter()
   const formContainerRef = useRef<HTMLDivElement>(null)
@@ -2147,6 +2152,23 @@ export function ReviewWorkspace({
         onSubDepartmentChange={setSubDepartmentId}
         subDepartmentOptions={detail.subDepartmentOptions}
       />
+
+      {/* Entry tags (docs/entry-tags-plan.md, Phase 4): the ONE tag notice on
+          this screen -- rendered here once, not inside any of the three
+          steps above (no-duplicate-status rule). Covers ALL of the bill's
+          linked entries. Keyed on their ids so a bill switch (which no longer
+          remounts this workspace, 5.7) resets its local "just linked" state.
+          Renders nothing when none of their departments has tags active in
+          the selected event. */}
+      {detail.tagNotice && detail.entryId !== null ? (
+        <ReviewTagNotice
+          key={detail.tagNotice.entries.map((e) => e.entryId).join(',')}
+          notice={detail.tagNotice}
+          primaryEntryId={detail.entryId}
+          subDepartmentId={subDepartmentId === NONE ? null : Number(subDepartmentId)}
+          canLink={canLinkTags}
+        />
+      ) : null}
 
       {/* Phase 4 (§2.6): one small button per flagged header field, re-running
           OCR for just that field (reExtractField) without discarding unsaved

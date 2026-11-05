@@ -63,12 +63,15 @@ export function StackedDepartmentBars({
   mode,
   ariaLabel,
   segmentHref,
+  tooltipValueFormat = formatINRCompact,
 }: {
   rows: StackedRow[]
   series: readonly StackedSeries[]
   mode: 'percent' | 'absolute'
   ariaLabel: string
   segmentHref?: (row: StackedRow, seriesKey: string) => string | null
+  /** Money format for tooltip figures (default compact, e.g. "₹2.32 Cr"). Axis ticks stay compact. */
+  tooltipValueFormat?: (value: number) => string
 }) {
   const router = useRouter()
   const anim = useChartAnimation()
@@ -149,7 +152,7 @@ export function StackedDepartmentBars({
                 hideIndicator
                 labelFormatter={(_, payload) => {
                   const d = payload[0]?.payload as Datum | undefined
-                  return d ? `${d.__label} · ${formatINRCompact(d.__total)}` : null
+                  return d ? `${d.__label} · ${tooltipValueFormat(d.__total)}` : null
                 }}
                 formatter={(_v, name, item) => {
                   const d = item.payload as Datum | undefined
@@ -160,7 +163,7 @@ export function StackedDepartmentBars({
                     <TooltipRow
                       color={`var(--color-${name})`}
                       name={s?.label ?? name}
-                      value={formatINRCompact(raw)}
+                      value={tooltipValueFormat(raw)}
                       sub={d.__total > 0 ? formatPercent((raw / d.__total) * 100) : undefined}
                     />
                   )

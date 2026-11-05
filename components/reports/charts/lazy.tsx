@@ -97,6 +97,10 @@ export const NewVendorFirstBillChart = dynamic(
   () => import('./new-vendor-first-bill-chart').then((m) => m.NewVendorFirstBillChart),
   { ssr: false, loading: block(320) }
 )
+export const TagCarryChart = dynamic(() => import('./tag-carry-chart').then((m) => m.TagCarryChart), {
+  ssr: false,
+  loading: block(280),
+})
 
 export type { TrendPoint } from './trend-chart'
 export type { AttentionMapPoint } from './attention-map-chart'
@@ -114,3 +118,4 @@ export type { RateDriftChartSeries } from './rate-drift-chart'
 export type { QuantityByUnitBar } from './quantity-by-unit-chart'
 export type { AmountHistogramBar, AmountHistogramThreshold } from './amount-histogram-chart'
 export type { NewVendorFirstBillPoint } from './new-vendor-first-bill-chart'
+export type { TagCarryBar } from './tag-carry-chart'

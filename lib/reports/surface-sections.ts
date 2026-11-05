@@ -47,6 +47,7 @@ const BUDGET_SECTIONS: ReportSectionRef[] = [
   { id: 'reimbursement-profile', label: 'Reimbursement Profile' },
   { id: 'spend-curve', label: 'Spend Curve & Peak Weeks' },
   { id: 'event-comparison', label: 'Event-over-event Comparison' },
+  { id: 'tag-cost-carry', label: 'Tags: Built vs Maintained' },
 ]
 
 const VENDORS_SECTIONS: ReportSectionRef[] = [
@@ -130,6 +131,7 @@ const EXPLORE_SECTIONS: ReportSectionRef[] = [
   { id: 'reimbursement-profile', label: 'Reimbursement Profile' },
   { id: 'spend-curve', label: 'Spend Curve & Peak Weeks' },
   { id: 'event-comparison', label: 'Event-over-event Comparison' },
+  { id: 'tag-cost-carry', label: 'Tags: Built vs Maintained' },
   { id: 'open-item-ageing', label: 'Open-item Ageing' },
   { id: 'duplicate-payment-register', label: 'Duplicate Payment Register' },
   { id: 'ledger-bill-reconciliation', label: 'Ledger vs Bill Reconciliation' },

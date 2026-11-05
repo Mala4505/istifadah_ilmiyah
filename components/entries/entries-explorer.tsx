@@ -5,7 +5,7 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { toast } from 'sonner'
 import { toastError } from '@/components/ui/error-toast'
 import { FriendlyError } from '@/components/ui/friendly-error'
-import { Ban, Building2, Download, RotateCcw } from 'lucide-react'
+import { Ban, Building2, Download, RotateCcw, Tag } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -18,12 +18,15 @@ import { EntryBillKpiBar } from './entry-bill-kpi-bar'
 import type { EntryBillKpis } from '@/lib/documents/entry-bill-kpis'
 import { BulkEnrichmentDialog } from './bulk-enrichment-dialog'
 import { BulkVoidDialog } from './bulk-void-dialog'
+import { AddToTagDialog } from '@/components/tags/add-to-tag-dialog'
+import { EarlierTagsNotice } from '@/components/tags/earlier-tags-notice'
+import { buildEarlierTagNotices, type EarlierTagSummary } from '@/lib/tags/entries-shared'
 import { exportEntriesToCsv } from './csv-export'
 import { fetchEntriesPage, fetchAllMatchingIds, fetchAllMatchingRows, type PageCursor } from './query'
 import { ALL_COLUMNS, DEFAULT_FILTERS, DEFAULT_SORT, PAGE_SIZE, parseMultiValue } from './types'
 import type { ColumnKey, EntriesFilters, EntriesSort, EntryEnriched, FilterOptions, SortColumn, SortDirection } from './types'
 import { NewEntryDialog } from './new-entry-dialog'
-import { isAdminOrAbove, type StaffRole } from '@/lib/auth/roles'
+import { isAdminOrAbove, isSuperadmin, type StaffRole } from '@/lib/auth/roles'
 
 function filtersToSearchParams(filters: EntriesFilters): URLSearchParams {
   const sp = new URLSearchParams()
@@ -174,11 +177,14 @@ export function EntriesExplorer({
   initialRole,
   initialOwnDepartmentIds,
   billKpis,
+  earlierTags,
 }: {
   initialOptions: FilterOptions
   initialRole: StaffRole | null
   initialOwnDepartmentIds: number[]
   billKpis: EntryBillKpis
+  /** Tags from earlier events active in the selected event (entry-tags-plan Phase 3). */
+  earlierTags: EarlierTagSummary[]
 }) {
   const supabase = useMemo(() => createClient(), [])
   const router = useRouter()
@@ -207,6 +213,9 @@ export function EntriesExplorer({
   const [visibleColumns, setVisibleColumns] = useState<Set<ColumnKey>>(() => defaultVisibleColumns())
   const [bulkEnrichDialogOpen, setBulkEnrichDialogOpen] = useState(false)
   const [bulkVoidDialogOpen, setBulkVoidDialogOpen] = useState(false)
+  // Add to tag (super-admin): the ids it applies to -- the selection (bulk bar) or one row.
+  // `open` flips off on close while the ids stay, so the closing animation keeps its text. `fromSelection` decides whether finishing also clears the selection.
+  const [tagDialog, setTagDialog] = useState<{ entryIds: number[]; fromSelection: boolean; open: boolean } | null>(null)
   const [exporting, setExporting] = useState(false)
   // 7.8: running row count for the export button's label, fed by
   // exportEntriesToCsv's onProgress callback after each sequential batch.
@@ -546,6 +555,22 @@ export function EntriesExplorer({
   }
 
   const canBulkEdit = isAdminOrAbove(role)
+  const canTag = isSuperadmin(role)
+  // One row's "Add to tag" -- shared by the single-row and grouped-by-vendor tables.
+  function openTagDialogForRow(entryId: number) {
+    setTagDialog({ entryIds: [entryId], fromSelection: false, open: true })
+  }
+  // Earlier-year tags for the departments picked in the Department filter. Nothing is shown
+  // with no department chosen -- the notice is about the department being looked at.
+  const tagNoticeGroups = useMemo(() => {
+    const ids = parseMultiValue(filters.department).map(Number)
+    if (ids.length === 0 || earlierTags.length === 0) return []
+    const departments = ids.flatMap((id) => {
+      const label = options.departments.find((d) => d.id === id)?.label
+      return label ? [{ id, name: label }] : []
+    })
+    return buildEarlierTagNotices(earlierTags, departments)
+  }, [filters.department, earlierTags, options.departments])
   const hasNoDepartments = options.departments.length === 0
   const adminView = isAdminOrAbove(role)
   const activeFilterCount = countActiveFilters(filters)
@@ -612,6 +637,8 @@ export function EntriesExplorer({
 
           <FilterBar filters={filters} options={options} onChange={handleFilterChange} />
 
+          <EarlierTagsNotice groups={tagNoticeGroups} />
+
           {selected.size > 0 && (
             <div className="flex flex-wrap items-center gap-3 rounded-lg border border-border bg-accent/40 px-3 py-2 text-sm">
               <span>
@@ -644,6 +671,17 @@ export function EntriesExplorer({
                     <Ban className="h-3.5 w-3.5" />
                     Void…
                   </Button>
+                  {canTag && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="gap-1.5"
+                      onClick={() => setTagDialog({ entryIds: Array.from(selected), fromSelection: true, open: true })}
+                    >
+                      <Tag className="h-3.5 w-3.5" />
+                      Add to tag…
+                    </Button>
+                  )}
                 </>
               ) : (
                 <span className="text-xs text-muted-foreground">
@@ -689,6 +727,7 @@ export function EntriesExplorer({
                     onToggleIds={toggleIds}
                     sort={sort}
                     onSortChange={setSort}
+                    onAddToTag={canTag ? openTagDialogForRow : undefined}
                   />
                 </div>
               ) : (
@@ -706,6 +745,7 @@ export function EntriesExplorer({
                       onToggleAll={toggleAllOnPage}
                       sort={sort}
                       onSortChange={setSort}
+                      onAddToTag={canTag ? openTagDialogForRow : undefined}
                     />
                   </div>
 
@@ -754,6 +794,23 @@ export function EntriesExplorer({
           reloadAfterChange()
         }}
       />
+
+      {canTag && tagDialog && (
+        <AddToTagDialog
+          open={tagDialog.open}
+          onOpenChange={(next) => {
+            if (!next) setTagDialog((prev) => (prev ? { ...prev, open: false } : prev))
+          }}
+          entryIds={tagDialog.entryIds}
+          onDone={() => {
+            // Tagging does not change the list itself, so there is nothing to reload.
+            if (tagDialog.fromSelection) {
+              clearSelection()
+              restoreTableFocus()
+            }
+          }}
+        />
+      )}
     </div>
   )
 }

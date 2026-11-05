@@ -12,6 +12,7 @@ import { cn } from '@/lib/utils'
 import type { ColumnKey, EntriesSort, EntryEnriched, SortColumn } from './types'
 import { ALL_COLUMNS, TYPE_LABELS } from './types'
 import { formatDate, formatMoney, statusBadgeVariant } from './format'
+import { AddToTagRowButton } from './add-to-tag-row-button'
 
 // Click-to-sort (docs/hub-screen-certification.md §3.2). Every key here is
 // also a valid SortColumn (see types.ts) — the strings are identical on
@@ -49,6 +50,7 @@ export function EntriesTable({
   onToggleAll,
   sort,
   onSortChange,
+  onAddToTag,
 }: {
   rows: EntryEnriched[]
   visibleColumns: Set<ColumnKey>
@@ -63,11 +65,15 @@ export function EntriesTable({
   onToggleAll: () => void
   sort: EntriesSort
   onSortChange: (sort: EntriesSort) => void
+  /** Super-admin only: when given, each row gets an "Add to tag" button (entry-tags-plan Phase 3). */
+  onAddToTag?: (entryId: number) => void
 }) {
   const router = useRouter()
   const columns = ALL_COLUMNS.filter((c) => visibleColumns.has(c.key))
   const allOnPageSelected = rows.length > 0 && rows.every((r) => selected.has(r.id))
   const someOnPageSelected = rows.some((r) => selected.has(r.id))
+  // Leading checkbox column + the optional trailing row-action column.
+  const extraColumns = onAddToTag ? 2 : 1
 
   return (
     // Phase 5 §7.7 (docs/pre-deploy-findings-and-plan.md): contain wide
@@ -105,6 +111,7 @@ export function EntriesTable({
                 </TableHead>
               ),
             )}
+            {onAddToTag && <TableHead className="w-10" />}
           </TableRow>
         </TableHeader>
         <TableBody className={cn(refetching && 'pointer-events-none opacity-60 transition-opacity')}>
@@ -119,12 +126,13 @@ export function EntriesTable({
                     <Skeleton className="h-4 w-20" />
                   </TableCell>
                 ))}
+                {onAddToTag && <TableCell />}
               </TableRow>
             ))}
 
           {!loading && rows.length === 0 && (
             <TableRow>
-              <TableCell colSpan={columns.length + 1} className="h-32 text-center">
+              <TableCell colSpan={columns.length + extraColumns} className="h-32 text-center">
                 {activeFilterCount === 0 ? (
                   <p className="text-sm text-muted-foreground">No entries in this event yet.</p>
                 ) : (
@@ -172,6 +180,11 @@ export function EntriesTable({
                     )}
                   </TableCell>
                 ))}
+                {onAddToTag && (
+                  <TableCell onClick={(e) => e.stopPropagation()}>
+                    <AddToTagRowButton ubblNumber={row.ubbl_number} onClick={() => onAddToTag(row.id)} />
+                  </TableCell>
+                )}
               </TableRow>
             ))}
         </TableBody>

@@ -15,6 +15,8 @@ import { getEntryBillKpis, type EntryBillKpis } from '@/lib/documents/entry-bill
 import { Skeleton } from '@/components/ui/skeleton'
 import type { FilterOptions } from '@/components/entries/types'
 import type { StaffRole } from '@/lib/auth/roles'
+import { loadEarlierTagSummaries } from '@/lib/tags/entries-queries'
+import type { EarlierTagSummary } from '@/lib/tags/entries-shared'
 
 // Screen 3 — Entries list (MASTER-PLAN §5 row 3, §11.1 Day 3). Reads from
 // `v_entry_enriched` (§10.2) rather than assembling joins here. Filter state
@@ -40,6 +42,7 @@ async function loadEntriesPageData(): Promise<{
   role: StaffRole | null
   ownDepartmentIds: number[]
   billKpis: EntryBillKpis
+  earlierTags: EarlierTagSummary[]
 }> {
   const supabase = await createClient()
   const selectedEventId = await getSelectedEventId()
@@ -80,7 +83,7 @@ async function loadEntriesPageData(): Promise<{
   const zoneMemberIds = (zoneMembership.data ?? []).map((r) => r.zone_id)
   const userId = user?.id ?? null
 
-  const [departmentRows, bhRows, adminHeadRows, zoneRows, statusRows, typeRows, billKpis] = await Promise.all([
+  const [departmentRows, bhRows, adminHeadRows, zoneRows, statusRows, typeRows, billKpis, earlierTagsResult] = await Promise.all([
     getCachedDepartments(supabase),
     getCachedBudgetHeads(supabase, userId),
     getCachedAdminHeads(supabase, userId),
@@ -91,6 +94,10 @@ async function loadEntriesPageData(): Promise<{
     // entry-side mirror of the /documents review-progress bar. Event-scoped
     // and RLS-scoped exactly like the list below (same v_entry_enriched).
     getEntryBillKpis(supabase, { selectedEventId }),
+    // Tags from earlier events that are active in this one (entry-tags-plan Phase 3), for the
+    // "Sanitation has 2 tags from earlier years" notice. A failure here only hides the
+    // notice (the loader logs it) -- it must never take the entries list down with it.
+    loadEarlierTagSummaries(supabase, selectedEventId),
   ])
 
   // The cached fetchers return the FULL table (active + inactive, every
@@ -142,11 +149,12 @@ async function loadEntriesPageData(): Promise<{
     role,
     ownDepartmentIds,
     billKpis,
+    earlierTags: earlierTagsResult.tags,
   }
 }
 
 export default async function EntriesPage() {
-  const { options, role, ownDepartmentIds, billKpis } = await loadEntriesPageData()
+  const { options, role, ownDepartmentIds, billKpis, earlierTags } = await loadEntriesPageData()
 
   return (
     <Suspense fallback={<EntriesPageSkeleton />}>
@@ -155,6 +163,7 @@ export default async function EntriesPage() {
         initialRole={role}
         initialOwnDepartmentIds={ownDepartmentIds}
         billKpis={billKpis}
+        earlierTags={earlierTags}
       />
     </Suspense>
   )

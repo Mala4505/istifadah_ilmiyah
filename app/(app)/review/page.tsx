@@ -26,6 +26,8 @@ import { loadStaffKeymapPreferences } from '@/lib/shortcuts/load'
 import { formatBinding } from '@/lib/shortcuts/config'
 import { getSelectedEventId } from '@/lib/events/current'
 import { getCachedDepartments, getCachedAdminHeads, getCachedZones } from '@/lib/cache/reference-data'
+import { loadReviewTagNotice } from '@/lib/tags/review-queries'
+import type { ReviewNoticeEntry } from '@/lib/tags/review-shared'
 
 /**
  * /review -- Screen 7, the throughput screen (MASTER-PLAN §5 row 7, §7,
@@ -390,6 +392,7 @@ export default async function ReviewPage({
           keymap={keymap}
           shortcutsEnabled={shortcutsEnabled}
           initialPageOverride={initialPageOverride}
+          canLinkTags={isSuperadminReviewer}
         />
       </div>
     )
@@ -442,6 +445,7 @@ export default async function ReviewPage({
         keymap={keymap}
         shortcutsEnabled={shortcutsEnabled}
         initialPageOverride={initialPageOverride}
+        canLinkTags={isSuperadminReviewer}
       />
     </div>
   )
@@ -791,8 +795,23 @@ async function loadDocumentDetail(
 
   const entryDepartmentName: string | null = departmentNameById(entry?.department_id ?? null)
 
+  // Entry tags (docs/entry-tags-plan.md, Phase 4): the tag notice covers ALL of
+  // the bill's linked entries (largest amount first), not just the primary one --
+  // entries are the unit people tag. Built from rows already fetched above.
+  const tagNoticeEntries: ReviewNoticeEntry[] = [...linkedEntryRows]
+    .sort((a, b) => (b.amount ?? 0) - (a.amount ?? 0) || a.id - b.id)
+    .map((e) => ({
+      entryId: e.id,
+      ubblNumber: e.ubbl_number,
+      amount: e.amount,
+      departmentId: e.department_id,
+      subDepartmentId: e.sub_department_id,
+    }))
+
   // Tier 2 -- needs Tier 1's resolved `entry` (the primary linked entry).
-  const [exceptionsRes, linkedVendorRes, subDepartmentsRes] = await Promise.all([
+  // The tag notice rides this batch -- loadReviewTagNotice is itself one
+  // parallel round, so it adds no serial hop.
+  const [exceptionsRes, linkedVendorRes, subDepartmentsRes, tagNotice] = await Promise.all([
     supabase
       .from('reconciliation_exception')
       .select('id, exception_type, severity, description, created_at, document_extraction_id, entry_id')
@@ -821,6 +840,11 @@ async function loadDocumentDetail(
           return subDepartmentQuery.order('name')
         })()
       : Promise.resolve({ data: [] }),
+    loadReviewTagNotice(supabase, {
+      eventId: selectedEventId,
+      entries: tagNoticeEntries,
+      departmentName: departmentNameById,
+    }),
   ])
 
   const linkedVendorName: string | null =
@@ -1019,5 +1043,6 @@ async function loadDocumentDetail(
     uncertainFields,
     pages,
     openExceptions,
+    tagNotice,
   }
 }
