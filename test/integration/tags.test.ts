@@ -1134,6 +1134,80 @@ describe('entry tags against staging, through the app code (superadmin / admin /
   })
 
   // -------------------------------------------------------------------------
+  // A tag may be created with no departments (owner decision 2026-11-05)
+  // -------------------------------------------------------------------------
+  it('createTag with no entries and no departments succeeds; linking an entry adds its department; visibility follows scope', async () => {
+    as(W.superadmin)
+    const created = await createTag({
+      name: NAME('empty'),
+      description: null,
+      startEventId: W.evCur.id,
+      endEventId: null,
+      scope: [],
+      entryIds: [],
+    })
+    await ledgerTagsByName('empty')
+    expect(created).toMatchObject({ ok: true, linked: 0 })
+    if (!created.ok) return
+    expect(created.entryError).toBeUndefined()
+    const emptyTag = created.tagId
+    expect(await scopeOf(emptyTag)).toEqual([]) // zero scope rows: the database does not insist on one
+
+    // Superadmin and admin see it; a department user cannot (visibility is built from tag_scope).
+    const visibleTo = async (user: FixtureUser) => {
+      const { data, error } = await user.client.from('tag').select('id').eq('id', emptyTag)
+      expect(error).toBeNull()
+      return (data ?? []).length === 1
+    }
+    expect(await visibleTo(W.superadmin)).toBe(true)
+    expect(await visibleTo(W.admin)).toBe(true)
+    expect(await visibleTo(W.dept)).toBe(false)
+    expect(await loadTagDetail(W.dept.client, emptyTag)).toMatchObject({ tag: null, error: null })
+    expect((await loadTagDetail(W.admin.client, emptyTag)).tag?.id).toBe(emptyTag)
+    const deptList = await loadTagsActiveInEvent(W.dept.client, W.evCur.id)
+    expect(deptList.tags.map((t) => t.id)).not.toContain(emptyTag)
+    const adminList = await loadTagsActiveInEvent(W.admin.client, W.evCur.id)
+    expect(adminList.tags.map((t) => t.id)).toContain(emptyTag)
+
+    // Linking a department-A entry adds department A; now the department user can see the tag.
+    expect(await linkEntriesToTag({ tagId: emptyTag, entryIds: [W.eA_cur] })).toEqual({ ok: true, linked: 1 })
+    expect((await scopeOf(emptyTag)).map((r) => [r.department_id, r.sub_department_id, r.source])).toEqual([
+      [W.deptA, W.subA1, 'entry'],
+    ])
+    expect(await visibleTo(W.dept)).toBe(true)
+
+    // A super-admin can also add a department by hand to a tag that has none.
+    const bare = await createTag({
+      name: NAME('empty2'),
+      description: null,
+      startEventId: W.evCur.id,
+      endEventId: null,
+      scope: [],
+      entryIds: [],
+    })
+    await ledgerTagsByName('empty2')
+    expect(bare.ok).toBe(true)
+    if (!bare.ok) return
+    expect(await addTagScope({ tagId: bare.tagId, departmentId: W.deptB, subDepartmentId: null })).toEqual({ ok: true })
+    expect((await scopeOf(bare.tagId)).map((r) => [r.department_id, r.source])).toEqual([[W.deptB, 'manual']])
+    // ...and the other checks still apply with an empty scope.
+    expect(
+      await createTag({ name: '   ', description: null, startEventId: W.evCur.id, endEventId: null, scope: [], entryIds: [] })
+    ).toEqual({ ok: false, error: 'Give the tag a name.' })
+    expect(
+      await createTag({
+        name: NAME('empty-bad-period'),
+        description: null,
+        startEventId: W.evCur.id,
+        endEventId: W.evOld.id,
+        scope: [],
+        entryIds: [],
+      })
+    ).toEqual({ ok: false, error: 'The end event cannot be before the start event.' })
+    expect(await ledgerTagsByName('empty-bad-period')).toEqual([])
+  })
+
+  // -------------------------------------------------------------------------
   // More than 1,000 links: paging, chunked lookups, batching, plain-English limits
   // -------------------------------------------------------------------------
   it('a tag linked to more than 1,000 entries: batched linking, paged detail, start-event check, honest counts', async () => {

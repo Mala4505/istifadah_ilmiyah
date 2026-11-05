@@ -13,9 +13,12 @@
  * "a tag keeps at least one department" / "end event not before start event" guards. This
  * file only maps those database refusals to friendly sentences.
  *
- * "At least one department" on CREATE is not a database rule, so createTag enforces it: it
- * inserts the tag, then its scope rows, and deletes the just-created tag if the scope
- * insert fails (compensating), so a half-made tag is never left behind.
+ * A tag may be CREATED with no departments (owner decision 2026-11-05): they arrive from the
+ * entries linked to it, or a super-admin adds them on the tag page. The database only blocks
+ * deleting a tag's LAST department row, never creating a tag without one. createTag inserts the
+ * tag, then any scope rows, and deletes the just-created tag if the scope insert fails
+ * (compensating), so a half-made tag is never left behind. Until it has a department only
+ * super-admins and admins can see it (department users see tags through tag_scope).
  */
 
 import { revalidatePath } from 'next/cache'
@@ -187,7 +190,7 @@ const createSchema = z.object({
   description: descriptionField,
   startEventId: id,
   endEventId: nullableId,
-  scope: z.array(scopePickSchema).min(1).max(TAG_SCOPE_PICKS_MAX),
+  scope: z.array(scopePickSchema).max(TAG_SCOPE_PICKS_MAX).default([]),
   entryIds: z.array(id).max(TAG_ENTRIES_PER_CALL).default([]),
 })
 
@@ -196,6 +199,7 @@ export interface CreateTagInput {
   description: string | null
   startEventId: number
   endEventId: number | null
+  /** May be empty: departments then come from the linked entries, or are added by hand later. */
   scope: Array<{ departmentId: number; subDepartmentId: number | null }>
   entryIds: number[]
 }
@@ -234,15 +238,19 @@ export async function createTag(input: CreateTagInput): Promise<CreateTagResult>
   }
   const tagId = created.id as number
 
-  // 2. Its departments. A tag with none must not survive, so a failure here deletes the tag.
-  const { error: scopeInsertError } = await supabase.from('tag_scope').insert(
-    scope.map((pick) => ({
-      tag_id: tagId,
-      department_id: pick.departmentId,
-      sub_department_id: pick.subDepartmentId,
-      source: 'manual' as const,
-    }))
-  )
+  // 2. Its departments, if any were given. A failure here deletes the tag again, so the person
+  //    never ends up with a tag that is missing the departments they asked for.
+  const { error: scopeInsertError } =
+    scope.length === 0
+      ? { error: null }
+      : await supabase.from('tag_scope').insert(
+          scope.map((pick) => ({
+            tag_id: tagId,
+            department_id: pick.departmentId,
+            sub_department_id: pick.subDepartmentId,
+            source: 'manual' as const,
+          }))
+        )
   if (scopeInsertError) {
     const message = mapTagError(scopeInsertError.message, 'tags.create.scope')
     const { error: rollbackError } = await supabase.from('tag').delete().eq('id', tagId)

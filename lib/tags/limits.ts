@@ -13,7 +13,7 @@
 /** Most entry ids one Tags server action call (create, link, add-to-tag options) accepts. */
 export const TAG_ENTRIES_PER_CALL = 1000
 
-/** Most department / sub-department rows a new tag can be created with. */
+/** Most department / sub-department rows a new tag can be created with (none is fine). */
 export const TAG_SCOPE_PICKS_MAX = 200
 
 /** Shown when a request fails validation for a reason the screens cannot normally produce. */
@@ -36,7 +36,11 @@ export function entryCountError(count: number, options: { required?: boolean } =
   return null
 }
 
-/** The checks createTag runs before anything is written. Null = fine. */
+/**
+ * The checks createTag runs before anything is written. Null = fine. A tag may be made with
+ * no departments at all (they arrive from the entries linked to it, or are added by hand on
+ * the tag page), so an empty scope is valid; only too many is refused.
+ */
 export function newTagInputError(input: {
   name: string
   scopeCount: number
@@ -46,7 +50,6 @@ export function newTagInputError(input: {
   const name = input.name.trim()
   if (name === '') return 'Give the tag a name.'
   if (name.length > input.nameMax) return 'The tag name is too long.'
-  if (input.scopeCount === 0) return 'Pick at least one department.'
   if (input.scopeCount > TAG_SCOPE_PICKS_MAX) return TAG_SCOPE_LIMIT_MESSAGE
   return entryCountError(input.entryCount, { required: false })
 }

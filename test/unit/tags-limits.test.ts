@@ -37,10 +37,13 @@ describe('newTagInputError', () => {
     expect(newTagInputError(ok)).toBeNull()
     expect(newTagInputError({ ...ok, entryCount: TAG_ENTRIES_PER_CALL })).toBeNull()
   })
+  it('accepts a tag with no departments (they come from linked entries)', () => {
+    expect(newTagInputError({ ...ok, scopeCount: 0 })).toBeNull()
+    expect(newTagInputError({ ...ok, scopeCount: 0, entryCount: 0 })).toBeNull()
+  })
   it('names the first problem in plain English', () => {
     expect(newTagInputError({ ...ok, name: '   ' })).toBe('Give the tag a name.')
     expect(newTagInputError({ ...ok, name: 'x'.repeat(201) })).toBe('The tag name is too long.')
-    expect(newTagInputError({ ...ok, scopeCount: 0 })).toBe('Pick at least one department.')
     expect(newTagInputError({ ...ok, scopeCount: TAG_SCOPE_PICKS_MAX + 1 })).toBe(TAG_SCOPE_LIMIT_MESSAGE)
     expect(newTagInputError({ ...ok, entryCount: TAG_ENTRIES_PER_CALL + 1 })).toBe(TAG_ENTRY_LIMIT_MESSAGE)
   })

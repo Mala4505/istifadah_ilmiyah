@@ -18,7 +18,6 @@ import {
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { ScopePicksEditor } from '@/components/tags/scope-picks'
 import { TagFields, type TagFieldValues } from '@/components/tags/tag-form-dialog'
 import {
   createTagInBatches,
@@ -30,7 +29,6 @@ import {
   rankTagsForDepartments,
   type AddToTagOptions,
 } from '@/lib/tags/entries-shared'
-import type { ScopePick } from '@/lib/tags/shared'
 
 type Mode = 'existing' | 'new'
 
@@ -38,7 +36,7 @@ type Mode = 'existing' | 'new'
  * "Add to tag" for one or many entries (super-admin only; the buttons that open it are
  * hidden from everyone else and every action behind it is gated again). Pick an existing tag
  * or create one inline. Linking adds each entry's department / sub-department to the tag in
- * the database, so nothing here touches scope except the departments of a brand-new tag.
+ * the database, so nothing here touches scope at all.
  *
  * Follows components/entries/bulk-void-dialog.tsx: open/onOpenChange from the caller, an
  * `onDone` that the caller uses to clear its selection and reload.
@@ -145,7 +143,6 @@ function AddToTagForm({
     startEventId: options.defaultStartEventId,
     endEventId: null,
   })
-  const [scope, setScope] = useState<ScopePick[]>(options.defaultScope)
 
   const departmentName = useMemo(
     () => new Map(options.departments.map((d) => [d.id, d.name])),
@@ -202,10 +199,6 @@ function AddToTagForm({
       toast.error('Pick the start event.')
       return
     }
-    if (scope.length === 0) {
-      toast.error('Add at least one department.')
-      return
-    }
     setPending(true)
     try {
       const created = await createTagInBatches(
@@ -214,7 +207,7 @@ function AddToTagForm({
           description: values.description.trim() || null,
           startEventId: values.startEventId,
           endEventId: values.endEventId,
-          scope,
+          scope: [],
         },
         entryIds
       )
@@ -343,19 +336,10 @@ function AddToTagForm({
         ) : (
           <div className="flex flex-col gap-5">
             <TagFields events={options.events} values={values} onChange={setValues} disabled={pending} />
-            <section className="flex flex-col gap-2">
-              <h3 className="text-sm font-medium">Departments</h3>
-              <p className="text-xs text-muted-foreground">
-                At least one department is required. Filled in from the selected{' '}
-                {entryIds.length === 1 ? 'entry' : 'entries'}; change them if the tag belongs elsewhere.
-              </p>
-              <ScopePicksEditor
-                departments={options.departments}
-                subDepartments={options.subDepartments}
-                picks={scope}
-                onChange={setScope}
-              />
-            </section>
+            <p className="text-xs text-muted-foreground">
+              The tag&apos;s departments are taken from the selected {entryIds.length === 1 ? 'entry' : 'entries'}{' '}
+              automatically.
+            </p>
           </div>
         )}
       </div>

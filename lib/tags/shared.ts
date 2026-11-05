@@ -7,6 +7,10 @@
  * lockstep with supabase/migrations/20261105100000_entry_tags.sql.
  */
 
+/** Shown where a tag with no departments would otherwise show an empty cell or table. */
+export const NO_DEPARTMENTS_HINT =
+  'No departments yet. Link an entry or add a department so department users can see this tag.'
+
 // ---- Row shapes (public.tag, tag_scope, tag_event_note, tag_cost_by_event) --------------
 
 export interface TagRow {

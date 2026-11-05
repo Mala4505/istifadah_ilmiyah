@@ -17,6 +17,7 @@ import {
   eventsInTagPeriod,
   groupEntriesByEvent,
   groupScopeByDepartment,
+  NO_DEPARTMENTS_HINT,
   sortEventsAscending,
   summarizeEntries,
   tagPeriodLabel,
@@ -229,28 +230,24 @@ export default async function TagDetailPage({ params }: { params: Promise<{ id: 
           <CardTitle className="text-base">Departments</CardTitle>
           <CardDescription>
             Any row can be removed with the cross. A row that came from a linked entry may appear again if that entry
-            is linked again or its sub-department is set again. A tag always keeps at least one department.
+            is linked again or its sub-department is set again. The last department on a tag cannot be removed.
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-4 p-0">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Department</TableHead>
-                <TableHead>Sub-department</TableHead>
-                <TableHead>Added</TableHead>
-                {canEdit && <TableHead className="w-10" />}
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {scopeRows.length === 0 ? (
+          {scopeRows.length === 0 ? (
+            <p className="px-6 pt-2 text-sm text-muted-foreground">{NO_DEPARTMENTS_HINT}</p>
+          ) : (
+            <Table>
+              <TableHeader>
                 <TableRow>
-                  <TableCell colSpan={canEdit ? 4 : 3} className="py-6 text-center text-muted-foreground">
-                    No departments on this tag.
-                  </TableCell>
+                  <TableHead>Department</TableHead>
+                  <TableHead>Sub-department</TableHead>
+                  <TableHead>Added</TableHead>
+                  {canEdit && <TableHead className="w-10" />}
                 </TableRow>
-              ) : (
-                scopeRows.map((row) => (
+              </TableHeader>
+              <TableBody>
+                {scopeRows.map((row) => (
                   <TableRow key={row.id}>
                     <TableCell>{departmentName(row.department_id)}</TableCell>
                     <TableCell>
@@ -278,10 +275,10 @@ export default async function TagDetailPage({ params }: { params: Promise<{ id: 
                       </TableCell>
                     )}
                   </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
+                ))}
+              </TableBody>
+            </Table>
+          )}
           {canEdit && (
             <div className="px-4 pb-4">
               <AddScopeControl

@@ -17,10 +17,10 @@ and it shows up in later events. When a similar request or bill comes in, the re
 |---|---|---|
 | 1 | Where tag data lives | Separate tables. **No new column on `entries`**, so the Excel import can never overwrite tags. |
 | 2 | Tag fields | Name, description, start event, optional end event (empty = perpetual). No "kind" field. |
-| 3 | Departments | **Required**, at least one. A tag can span **many** departments. |
+| 3 | Departments | **Not required at creation** (owner decision 2026-11-05). They come from the entries linked to the tag, or a super-admin adds them by hand on the tag page. A tag can span **many** departments. A tag with none is visible only to super-admins and admins (department users see tags through `tag_scope`); the tag page and list say so. Once a tag has a department, the last one cannot be removed. |
 | 4 | Sub-departments | **Optional**. Taken from the entry if it has one. A missing sub-department never causes an error. |
 | 5 | Sub-department set later | If a reviewer later sets a linked entry's sub-department, it is added to the tag automatically. |
-| 6 | Entries | **Optional**. A tag can be just departments + description (e.g. something built before this system existed). |
+| 6 | Entries | **Optional**. A tag can be just a description, with departments added by hand, or even neither yet (e.g. something built before this system existed). |
 | 7 | Linking an entry | Adds that entry's department (and sub-department, if set) to the tag automatically. |
 | 8 | Unlinking an entry | Departments and sub-departments **stay** on the tag. Only a super-admin removes them, by hand. Any scope row (manual or entry-sourced) can be removed, except a tag's last department. |
 | 9 | Which events' entries | The picker opens on the **current event**; the user can switch it to a previous event and tag older entries. If a linked entry's event is before the tag's start event, the start event **moves back** to it. |
@@ -103,7 +103,9 @@ Staging: migrations must also work for the staging schema (`NEXT_PUBLIC_DB_SCHEM
   row shows name, period ("1448 → perpetual"), departments, cost per event, and the current
   event's note.
 - Super-admins can create and edit tags: name, description, start event, end event, departments
-  and sub-departments (manual scope), and an entry picker. The picker defaults to the current
+  and sub-departments (manual scope, on the tag page), and an entry picker. The New tag dialog
+  has two steps: Details (name, description, start/end event; no department choice) then Entries
+  (optional); linked entries add their departments. The picker defaults to the current
   event, can be switched to earlier events, and filters by department.
 - Tag detail: linked entries grouped by event, voided entries marked as voided, a per-event note
   editor, and removal of manual scope.

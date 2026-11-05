@@ -6,6 +6,7 @@ import {
   formatCostSummary,
   groupByKey,
   groupScopeByDepartment,
+  NO_DEPARTMENTS_HINT,
   tagPeriodLabel,
   type DepartmentRef,
   type SubDepartmentRef,
@@ -79,7 +80,7 @@ export function TagListTable({
               </TableCell>
               <TableCell className="max-w-72 whitespace-normal py-3">
                 {groups.length === 0 ? (
-                  <span className="text-muted-foreground">—</span>
+                  <span className="text-xs text-muted-foreground">{NO_DEPARTMENTS_HINT}</span>
                 ) : (
                   groups.map((group) => (
                     <div key={group.departmentId}>
